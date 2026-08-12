@@ -1,0 +1,118 @@
+{
+  "datasets": [
+    {
+      "file": "patients.csv",
+      "name": "patients",
+      "row_count": 240,
+      "sha256": "82f32f1abf1c953d74ca65dfb288c16505127631b8bdac73176285572333d80c"
+    },
+    {
+      "file": "providers.csv",
+      "name": "providers",
+      "row_count": 48,
+      "sha256": "700a58fecd9526fe2f9e15a1d00dc43f540df796101200dd70cf0f74366c0f75"
+    },
+    {
+      "file": "appointments.csv",
+      "name": "appointments",
+      "row_count": 900,
+      "sha256": "3be8fb83f6053c0cc53779e99c4cb6bc9f206f1acc48fe095f513e821479835a"
+    },
+    {
+      "file": "encounters.csv",
+      "name": "encounters",
+      "row_count": 700,
+      "sha256": "8995881602037b8c54af9cd6d30e47a526304fe4894dd90311e76a5affe1af3d"
+    }
+  ],
+  "display_name": "Healthcare",
+  "expected_results": {
+    "business_aggregates": {
+      "encounters.cost_amount.sum": "557597.00"
+    },
+    "lineage": {
+      "expected_rows": 1,
+      "target_table": "lineage_demo"
+    },
+    "quality": {
+      "minimum_quarantined_rows": 1
+    },
+    "source_row_counts": {
+      "appointments": 900,
+      "encounters": 700,
+      "patients": 240,
+      "providers": 48
+    }
+  },
+  "lab_id": "healthcare",
+  "notebooks": [
+    {
+      "depends_on": [],
+      "file": "01_landing_healthcare.ipynb",
+      "sha256": "cfba8f948474491040cf8ca827d39ac457d75cde6533a3fab64617d3f5c089b1",
+      "task_key": "01_landing_healthcare"
+    },
+    {
+      "depends_on": [
+        "01_landing_healthcare"
+      ],
+      "file": "02_bronze_healthcare.ipynb",
+      "sha256": "1e681f6e8d1ba4a3a9f0ff20f94f46693c02d6a9182df45e1dcc2a57c2171349",
+      "task_key": "02_bronze_healthcare"
+    },
+    {
+      "depends_on": [
+        "02_bronze_healthcare"
+      ],
+      "file": "03_silver_healthcare.ipynb",
+      "sha256": "45903984b0567dbec3c34903d77034d21ff8f972beebccbf3050bb75ff4aa09a",
+      "task_key": "03_silver_healthcare"
+    },
+    {
+      "depends_on": [
+        "03_silver_healthcare"
+      ],
+      "file": "04_gold_healthcare.ipynb",
+      "sha256": "d53d5285714d77c4ee9433f919f4ae2c57079a162fa15ab1a3e8c5d0f2bb34d0",
+      "task_key": "04_gold_healthcare"
+    },
+    {
+      "depends_on": [
+        "04_gold_healthcare"
+      ],
+      "file": "05_lineage_healthcare.ipynb",
+      "sha256": "383c60e07310ac7c745b9f5aaa92d7b3583ad77609972427575d15f8287fbcac",
+      "task_key": "05_lineage_healthcare"
+    }
+  ],
+  "pack_sha256": "20cb20d8898fa995e871f0aac23e09ca039dbbf4290a25481eaf2aa8c6e9ebcb",
+  "pack_version": "1.0.0",
+  "schema_version": 1,
+  "status": "available",
+  "tables": {
+    "bronze": [
+      "patients",
+      "providers",
+      "appointments",
+      "encounters"
+    ],
+    "gold": [
+      "healthcare_patient_utilization",
+      "healthcare_provider_daily",
+      "lineage_demo"
+    ],
+    "landing": [
+      "patients",
+      "providers",
+      "appointments",
+      "encounters"
+    ],
+    "silver": [
+      "patients",
+      "providers",
+      "appointments",
+      "encounters",
+      "quality_issues"
+    ]
+  }
+}

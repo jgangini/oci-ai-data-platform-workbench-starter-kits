@@ -13,7 +13,7 @@ EXPECTED_REPOSITORIES = {
     "https://github.com/jgangini/oci-aidp-cloud-migration-lab",
     "https://github.com/jgangini/oci-aidp-cloud-migration-lab.git",
 }
-EXPECTED_REF = "v1.0.0"
+EXPECTED_REFS = frozenset({"v2.0.0-rc.1", "v2.0.0"})
 EXPECTED_REGION = "us-chicago-1"
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -88,8 +88,8 @@ def validate_context(context: dict[str, Any]) -> None:
         raise ValueError(f"release requires project_id {EXPECTED_PROJECT}")
     if str(source.get("repository") or "").rstrip("/") not in EXPECTED_REPOSITORIES:
         raise ValueError("release requires the trusted GitHub repository")
-    if source.get("ref") != EXPECTED_REF:
-        raise ValueError(f"release requires source ref {EXPECTED_REF}")
+    if source.get("ref") not in EXPECTED_REFS:
+        raise ValueError("release requires source ref v2.0.0-rc.1 or v2.0.0")
     if not _SHA.fullmatch(str(source.get("commit_sha") or "")):
         raise ValueError("release requires a full lowercase 40-character source SHA")
     if context.get("region") != EXPECTED_REGION:
@@ -190,7 +190,7 @@ def validate_plan(plan: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate the immutable fresh-only v1.0.0 AIDP lab release contract.")
+    parser = argparse.ArgumentParser(description="Validate the immutable fresh-only v2.0.0 AIDP lab release contract.")
     parser.add_argument("--source-root", type=Path, default=Path(__file__).parent)
     parser.add_argument("--context-json", type=Path)
     parser.add_argument("--plan-json", type=Path)

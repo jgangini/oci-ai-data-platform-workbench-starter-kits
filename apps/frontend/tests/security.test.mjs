@@ -7,9 +7,9 @@ const pollingSource = await readFile(new URL("../src/registrationPoll.ts", impor
 const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 const viteConfig = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
 
-test("browser storage is limited to the non-secret reset operation", () => {
+test("browser storage is limited to the non-secret lab operation", () => {
   assert.doesNotMatch(source, /localStorage\.setItem|sessionStorage/);
-  assert.match(pollingSource, /aidp-lab\.reset\.\$\{userId\}/);
+  assert.match(pollingSource, /aidp-lab\.operation\.\$\{kind\}\.\$\{userId\}\.\$\{labId\}/);
   assert.match(pollingSource, /JSON\.stringify\(operation\)/);
   assert.doesNotMatch(pollingSource, /password|registrationCode|email/i);
 });
@@ -18,8 +18,9 @@ test("registration has no password field while administrator login remains prote
   assert.match(source, /type="password"/);
   assert.match(source, /Registration code/);
   assert.match(source, /function AdminLogin/);
-  assert.match(source, /Industry/);
-  assert.match(source, /value: "banking"/);
+  assert.match(source, /Laboratories/);
+  assert.match(source, /lab_id: "banking"/);
+  assert.match(source, /Coming soon/);
   assert.doesNotMatch(source, /Generate password/);
 });
 
@@ -78,21 +79,18 @@ test("settings can rotate the registration code without exposing or persisting i
   assert.doesNotMatch(source, /(?:localStorage|sessionStorage).*registrationCode/);
 });
 
-test("administrator can reset only a participant AIDP environment", () => {
-  assert.match(source, /<th>Industry<\/th>/);
-  assert.match(source, /industryLabel\(user\.industry\)/);
-  assert.match(source, /Reset AIDP environment for \$\{user\.email\}/);
-  assert.match(source, /\/api\/admin\/users\/\$\{encodeURIComponent\(target\.id\)\}\/reset/);
-  assert.match(source, /resetOperationsRef = useRef\(new Map<string, ResetOperation>\(\)\)/);
-  assert.match(source, /loadResetOperation\(window\.localStorage, target\.id, industryValues\)/);
-  assert.match(source, /persistResetOperation\(window\.localStorage, target\.id, operation\)/);
-  assert.match(source, /persistResetOperation\(window\.localStorage, target\.id\)/);
+test("administrator mutates one participant laboratory at a time", () => {
+  assert.match(source, /<th>Laboratories<\/th>/);
+  assert.match(source, /user\.labs\.map/);
+  assert.match(source, /\/labs\/\$\{encodeURIComponent\(action\.lab\.lab_id\)\}/);
+  assert.match(source, /getOrCreateLabOperation/);
+  assert.match(source, /persistLabOperation/);
   assert.match(source, /operation_id: operation\.operationId/);
-  assert.match(source, /resetOperationsRef\.current\.delete\(target\.id\)/);
-  assert.match(source, /The OCI Identity account is preserved/);
-  assert.match(source, /open=\{Boolean\(pendingReset\) && !resetting\}/);
-  assert.match(source, /aria-busy=\{resetting\} inert=\{resetting\}/);
-  assert.match(source, /resetAbortRef\.current\?\.abort\(\)/);
+  assert.match(source, /Other laboratories and Identity access are preserved/);
+  assert.match(source, /open=\{Boolean\(pendingLabAction\) && !operating\}/);
+  assert.match(source, /aria-busy=\{operating\} inert=\{operating\}/);
+  assert.match(source, /operationAbortRef\.current\?\.abort\(\)/);
+  assert.match(source, /Delete the participant to remove the last lab/);
   assert.match(source, /select:not\(\[disabled\]\)/);
   assert.match(source, /function ProvisioningOverlay/);
   assert.match(styles, /\.table-action \{[^}]*width: 44px;[^}]*min-height: 44px;/);

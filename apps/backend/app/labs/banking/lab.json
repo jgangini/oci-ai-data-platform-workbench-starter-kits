@@ -1,0 +1,118 @@
+{
+  "datasets": [
+    {
+      "file": "branches.csv",
+      "name": "branches",
+      "row_count": 20,
+      "sha256": "82db37c4b377b5bdbc8c7d2b3a75f91b63890550fa999bd921b1d68cb06e2809"
+    },
+    {
+      "file": "customers.csv",
+      "name": "customers",
+      "row_count": 200,
+      "sha256": "6c7757a8be5e7859b58d84031d5fde5242dc8dfd21ff1b13499e2220a3f3fad8"
+    },
+    {
+      "file": "accounts.csv",
+      "name": "accounts",
+      "row_count": 320,
+      "sha256": "59eb8b7057efe2525d9091ebe5234dbea311a2ee28e9ae444a5d600d50f827d6"
+    },
+    {
+      "file": "transactions.csv",
+      "name": "transactions",
+      "row_count": 4000,
+      "sha256": "a35cec80650fcdba532127d87c1144e9d20957e83329e5db6326383d5a90c3a2"
+    }
+  ],
+  "display_name": "Banking",
+  "expected_results": {
+    "business_aggregates": {
+      "transactions.amount.sum": "600066.50"
+    },
+    "lineage": {
+      "expected_rows": 1,
+      "target_table": "lineage_demo"
+    },
+    "quality": {
+      "minimum_quarantined_rows": 1
+    },
+    "source_row_counts": {
+      "accounts": 320,
+      "branches": 20,
+      "customers": 200,
+      "transactions": 4000
+    }
+  },
+  "lab_id": "banking",
+  "notebooks": [
+    {
+      "depends_on": [],
+      "file": "01_landing_banking.ipynb",
+      "sha256": "42b6a8fd184dfe859f6b0afa62c04ae1a283f704cd2666439adaab0c1345df32",
+      "task_key": "01_landing_banking"
+    },
+    {
+      "depends_on": [
+        "01_landing_banking"
+      ],
+      "file": "02_bronze_banking.ipynb",
+      "sha256": "002c9551d09b9b87598af01e720c47bc7df17e55318dec4cf5d4d27be7eec2a4",
+      "task_key": "02_bronze_banking"
+    },
+    {
+      "depends_on": [
+        "02_bronze_banking"
+      ],
+      "file": "03_silver_banking.ipynb",
+      "sha256": "e44334578ed16f323ddeec732154bdcbaf561b99b2e08f62ae3854a03feaecbb",
+      "task_key": "03_silver_banking"
+    },
+    {
+      "depends_on": [
+        "03_silver_banking"
+      ],
+      "file": "04_gold_banking.ipynb",
+      "sha256": "a655f3ee6b7db23d88b5599cf0b58df1674e0e9b844c42856e731e1f4f931b03",
+      "task_key": "04_gold_banking"
+    },
+    {
+      "depends_on": [
+        "04_gold_banking"
+      ],
+      "file": "05_lineage_banking.ipynb",
+      "sha256": "6a1fd22006ff808cf9a43ca80fb930f510dbfe7a9554bca36c3b3134de305165",
+      "task_key": "05_lineage_banking"
+    }
+  ],
+  "pack_sha256": "e50093eb1a79aee3606b365d033d6957f8f2b90cd51e5b6c8c90b9c29861fbaa",
+  "pack_version": "1.0.0",
+  "schema_version": 1,
+  "status": "available",
+  "tables": {
+    "bronze": [
+      "branches",
+      "customers",
+      "accounts",
+      "transactions"
+    ],
+    "gold": [
+      "banking_customer_value",
+      "banking_branch_daily",
+      "lineage_demo"
+    ],
+    "landing": [
+      "branches",
+      "customers",
+      "accounts",
+      "transactions"
+    ],
+    "silver": [
+      "branches",
+      "customers",
+      "accounts",
+      "transactions",
+      "quality_issues"
+    ]
+  }
+}

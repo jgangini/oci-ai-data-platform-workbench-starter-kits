@@ -10,9 +10,7 @@ try {
     }
     if (Get-Command sentrux -ErrorAction SilentlyContinue) {
         sentrux gate --save .
-        if (Test-Path ".\.sentrux\rules.toml") {
-            sentrux check .
-        }
+        sentrux check .
     }
     Write-Host "Architecture preflight complete."
 }

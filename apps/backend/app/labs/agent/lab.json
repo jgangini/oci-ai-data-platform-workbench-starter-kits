@@ -1,0 +1,12 @@
+{
+  "datasets": [],
+  "display_name": "Agent",
+  "expected_results": {},
+  "lab_id": "agent",
+  "notebooks": [],
+  "pack_sha256": "f33b7be7351c0b064bb89dc322164fe5b5e49bd0e6a42d1e6def5ecd16e7af51",
+  "pack_version": "0.0.0",
+  "schema_version": 1,
+  "status": "planned",
+  "tables": {}
+}

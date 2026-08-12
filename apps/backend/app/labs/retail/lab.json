@@ -1,0 +1,118 @@
+{
+  "datasets": [
+    {
+      "file": "customers.csv",
+      "name": "customers",
+      "row_count": 300,
+      "sha256": "6e612d1c35a6d170fd5ba98d4fdc74bc3951d75c2abf5626436776e5ad0f2d79"
+    },
+    {
+      "file": "products.csv",
+      "name": "products",
+      "row_count": 150,
+      "sha256": "8a7faac98018f2779a9542e10909b2d7ff0a11499019951ab1e3d853f6a41f74"
+    },
+    {
+      "file": "orders.csv",
+      "name": "orders",
+      "row_count": 1200,
+      "sha256": "8286189b60c2959c99f2ae21d32a258d6d40553c848793556224efe2a9624e19"
+    },
+    {
+      "file": "order_items.csv",
+      "name": "order_items",
+      "row_count": 3000,
+      "sha256": "170e0c32cc9e9ac246137612ccfca6ebfc9c8999dc3f980cce23ba7652704134"
+    }
+  ],
+  "display_name": "Retail",
+  "expected_results": {
+    "business_aggregates": {
+      "order_items.quantity.sum": "7487"
+    },
+    "lineage": {
+      "expected_rows": 1,
+      "target_table": "lineage_demo"
+    },
+    "quality": {
+      "minimum_quarantined_rows": 1
+    },
+    "source_row_counts": {
+      "customers": 300,
+      "order_items": 3000,
+      "orders": 1200,
+      "products": 150
+    }
+  },
+  "lab_id": "retail",
+  "notebooks": [
+    {
+      "depends_on": [],
+      "file": "01_landing_retail.ipynb",
+      "sha256": "f2d4e739cca0586ca874803d41c5c2c838ce844471aa7a0a8e7c2ee3ecd97c25",
+      "task_key": "01_landing_retail"
+    },
+    {
+      "depends_on": [
+        "01_landing_retail"
+      ],
+      "file": "02_bronze_retail.ipynb",
+      "sha256": "a0d837b89f204fd201f131febbf4b28c06cc566d3ccfa97df83920d0d9811fa2",
+      "task_key": "02_bronze_retail"
+    },
+    {
+      "depends_on": [
+        "02_bronze_retail"
+      ],
+      "file": "03_silver_retail.ipynb",
+      "sha256": "7bc0082849536cb481841ec5fd998105bfa11e41b9aec2b93b627d1716264bc0",
+      "task_key": "03_silver_retail"
+    },
+    {
+      "depends_on": [
+        "03_silver_retail"
+      ],
+      "file": "04_gold_retail.ipynb",
+      "sha256": "ed383109ec79a27beb6338075ab3e3a527cc7b15a0e66b914b072558c2f165f9",
+      "task_key": "04_gold_retail"
+    },
+    {
+      "depends_on": [
+        "04_gold_retail"
+      ],
+      "file": "05_lineage_retail.ipynb",
+      "sha256": "c49d9ee15de4bd533d1ba6662357bc07d5c18d7043601f0c66760bdf23a68386",
+      "task_key": "05_lineage_retail"
+    }
+  ],
+  "pack_sha256": "623fcb2d2c39781894786afeb44d8c068a1a822ac62beb2fead736bda838984c",
+  "pack_version": "1.0.0",
+  "schema_version": 1,
+  "status": "available",
+  "tables": {
+    "bronze": [
+      "customers",
+      "products",
+      "orders",
+      "order_items"
+    ],
+    "gold": [
+      "retail_customer_value",
+      "retail_product_daily",
+      "lineage_demo"
+    ],
+    "landing": [
+      "customers",
+      "products",
+      "orders",
+      "order_items"
+    ],
+    "silver": [
+      "customers",
+      "products",
+      "orders",
+      "order_items",
+      "quality_issues"
+    ]
+  }
+}

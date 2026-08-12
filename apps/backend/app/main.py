@@ -5,7 +5,7 @@ import logging
 import re
 import time
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Callable, Literal
+from typing import Any, AsyncIterator, Callable
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
@@ -22,6 +22,7 @@ from .aidp import (
 )
 from .config import Settings, SettingsStore
 from .identity import IdentityClient, IdentityConflict, IdentityPending, IdentityRejected, LocalIdentityClient
+from .lab_packs import available_lab_ids, public_lab_catalog
 from .security import (
     RateLimiter,
     issue_session,
@@ -41,14 +42,11 @@ HEALTH_SUCCESS_TTL_SECONDS = 30
 HEALTH_FAILURE_TTL_SECONDS = 5
 
 
-Industry = Literal["banking", "telecommunications", "retail", "healthcare"]
-
-
 class UserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=5, max_length=254)
-    industry: Industry
+    lab_ids: list[str] = Field(min_length=1)
 
     @field_validator("name")
     @classmethod
@@ -65,6 +63,16 @@ class UserRequest(BaseModel):
         if not EMAIL_PATTERN.fullmatch(value):
             raise ValueError("Enter a valid email address")
         return value
+
+    @field_validator("lab_ids")
+    @classmethod
+    def validate_lab_ids(cls, values: list[str]) -> list[str]:
+        if len(values) != len(set(values)):
+            raise ValueError("Labs cannot be duplicated")
+        supported = set(available_lab_ids())
+        if any(value not in supported for value in values):
+            raise ValueError("Choose only available labs")
+        return values
 
 
 class RegistrationRequest(UserRequest):
@@ -83,9 +91,20 @@ class AdminUserRequest(UserRequest):
     pass
 
 
-class AdminResetRequest(BaseModel):
+class AdminLabRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    industry: Industry
+    lab_id: str
+
+    @field_validator("lab_id")
+    @classmethod
+    def validate_lab_id(cls, value: str) -> str:
+        if value not in available_lab_ids():
+            raise ValueError("Choose an available lab")
+        return value
+
+
+class LabOperationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     operation_id: UUID
 
 
@@ -111,18 +130,25 @@ class LoginRequest(BaseModel):
 
 
 def _material_payload(
-    material: UserMaterial,
+    materials: UserMaterial | tuple[UserMaterial, ...],
     email: str,
-    industry: str,
     aidp_url: str,
 ) -> dict[str, Any]:
+    values = (materials,) if isinstance(materials, UserMaterial) else materials
     content: dict[str, Any] = {
         "status": "active",
         "email": email,
-        "participant_key": material.participant_key,
-        "industry": industry,
-        "workspace_path": material.workspace_path,
-        "job_name": material.job_name,
+        "participant_key": values[0].participant_key,
+        "labs": [
+            {
+                "lab_id": material.lab_id,
+                "pack_version": material.pack_version,
+                "phase": material.phase,
+                "workspace_path": material.workspace_path,
+                "job_name": material.job_name,
+            }
+            for material in values
+        ],
         "aidp_url": aidp_url,
     }
     if not aidp_url:
@@ -141,7 +167,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if client is not None:
                 await client.close()
 
-    app = FastAPI(title="OCI AIDP Lab", version="1.0.0", docs_url=None, redoc_url=None, lifespan=lifespan)
+    app = FastAPI(title="OCI AIDP Lab", version="2.0.0-rc.1", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.settings = settings
     app.state.settings_store = SettingsStore(settings)
     app.state.session_key = load_or_create_session_key(settings.session_secret_file)
@@ -200,7 +226,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Administrator session required")
         return username
 
-    async def provision_user(name: str, email: str, industry: Industry) -> JSONResponse:
+    async def provision_user(name: str, email: str, lab_ids: list[str]) -> JSONResponse:
         try:
             identity = app.state.identity_factory()
             result = await identity.prepare_registration(name, email)
@@ -217,24 +243,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=202,
                 content={"status": "pending", "phase": "identity", "message": str(exc)},
             )
+        aidp = app.state.aidp_factory()
+
+        async def restore_existing_access() -> None:
+            if not result.was_developer:
+                return
+            try:
+                await identity.activate_registration(result.user_id)
+            except IdentityPending as exc:
+                raise HTTPException(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Prior developer access is still being restored",
+                ) from exc
+
+        if result.status != "created":
+            try:
+                current = await aidp.list_user_labs([result.user_ocid])
+            except (AidpProvisionPending, AidpProvisionError) as exc:
+                await restore_existing_access()
+                raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+            assigned = {material.lab_id for material in current.get(result.user_ocid, [])}
+            requested = set(lab_ids)
+            if (assigned or result.was_developer) and assigned != requested:
+                await restore_existing_access()
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Existing lab assignments can only be changed by an administrator",
+                )
         try:
-            material = await app.state.aidp_factory().provision_user(result.user_ocid, email, industry)
+            material = await aidp.provision_user(result.user_ocid, email, lab_ids)
         except AidpProvisionPending as exc:
+            await restore_existing_access()
             return JSONResponse(
                 status_code=202,
                 content={"status": "pending", "phase": exc.phase, "message": str(exc)},
             )
         except AidpProvisionConflict as exc:
-            if result.was_developer:
-                try:
-                    await identity.activate_registration(result.user_id)
-                except IdentityPending as restore_exc:
-                    raise HTTPException(
-                        status.HTTP_503_SERVICE_UNAVAILABLE,
-                        "The industry is immutable and prior developer access is still being restored",
-                    ) from restore_exc
+            await restore_existing_access()
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
         except AidpProvisionError as exc:
+            await restore_existing_access()
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         try:
             await identity.activate_registration(result.user_id)
@@ -246,7 +294,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         content = _material_payload(
             material,
             result.email,
-            industry,
             app.state.settings_store.get_workbench_url(),
         )
         return JSONResponse(status_code=201 if result.status == "created" else 200, content=content)
@@ -287,12 +334,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
         return {"status": "ok"}
 
+    @app.get("/api/config")
     @app.get("/api/public/config")
     async def public_config() -> dict[str, Any]:
         return {
             "lab_name": "OCI AI Data Platform Lab",
             "registration_code_pattern": "AAAA-0000",
-            "industries": ["banking", "telecommunications", "retail", "healthcare"],
+            "labs": public_lab_catalog(),
         }
 
     @app.post("/api/register")
@@ -323,7 +371,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Registration reconciliation is temporarily rate limited",
                 headers={"Retry-After": str(retry_after)},
             )
-        return await provision_user(payload.name, payload.email, payload.industry)
+        return await provision_user(payload.name, payload.email, payload.lab_ids)
 
     @app.post("/api/admin/login", status_code=204)
     async def admin_login(payload: LoginRequest, request: Request) -> Response:
@@ -376,14 +424,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for user in users
             if user.get("managed") and str(user.get("ocid") or "").startswith("ocid1.user.")
         ]
-        industries: dict[str, str] = {}
+        assigned_labs: dict[str, list[UserMaterial]] = {}
         if settings.aidp_ready() and user_ocids:
             try:
-                industries = await app.state.aidp_factory().list_user_industries(user_ocids)
+                assigned_labs = await app.state.aidp_factory().list_user_labs(user_ocids)
             except (AidpProvisionPending, AidpProvisionError) as exc:
-                logger.warning("AIDP participant industry inventory is unavailable (%s)", type(exc).__name__)
+                logger.warning("AIDP participant lab inventory is unavailable (%s)", type(exc).__name__)
         for user in users:
-            user["industry"] = industries.get(str(user.get("ocid") or ""))
+            user["labs"] = [
+                {
+                    "lab_id": material.lab_id,
+                    "pack_version": material.pack_version,
+                    "phase": material.phase,
+                    "workspace_path": material.workspace_path,
+                    "job_name": material.job_name,
+                }
+                for material in assigned_labs.get(str(user.get("ocid") or ""), [])
+            ]
             user.pop("ocid", None)
         return {"users": users}
 
@@ -392,12 +449,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_identity()
         if not settings.aidp_ready():
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
-        return await provision_user(payload.name, payload.email, payload.industry)
+        return await provision_user(payload.name, payload.email, payload.lab_ids)
 
-    @app.post("/api/admin/users/{user_id}/reset")
-    async def admin_reset_user(
+    @app.post("/api/admin/users/{user_id}/labs")
+    async def admin_add_lab(
         user_id: str,
-        payload: AdminResetRequest,
+        payload: AdminLabRequest,
         _admin: str = Depends(require_admin),
     ) -> JSONResponse:
         require_identity()
@@ -408,13 +465,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             user = await identity.get_lab_user(user_id)
             if user is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Lab user not found")
-            material = await app.state.aidp_factory().reset_user(
-                user["ocid"],
-                user["email"],
-                payload.industry,
-                str(payload.operation_id),
+            material = await app.state.aidp_factory().add_lab(
+                user["ocid"], user["email"], payload.lab_id
             )
-            await identity.activate_registration(user["id"])
         except IdentityConflict as exc:
             raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
         except IdentityPending as exc:
@@ -423,7 +476,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 content={
                     "status": "pending",
                     "phase": "permissions",
-                    "operation_id": str(payload.operation_id),
                     "message": str(exc),
                 },
             )
@@ -433,7 +485,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 content={
                     "status": "pending",
                     "phase": exc.phase,
-                    "operation_id": str(payload.operation_id),
                     "message": str(exc),
                 },
             )
@@ -444,12 +495,75 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         content = _material_payload(
             material,
             user["email"],
-            payload.industry,
             app.state.settings_store.get_workbench_url(),
         )
-        content["operation_id"] = str(payload.operation_id)
-        content["message"] = "The AIDP environment was reset successfully."
+        content["message"] = "The lab was added successfully."
         return JSONResponse(content=content)
+
+    @app.post("/api/admin/users/{user_id}/labs/{lab_id}/redeploy")
+    async def admin_redeploy_lab(
+        user_id: str,
+        lab_id: str,
+        payload: LabOperationRequest,
+        _admin: str = Depends(require_admin),
+    ) -> JSONResponse:
+        require_registration_ready()
+        identity = app.state.identity_factory()
+        try:
+            user = await identity.get_lab_user(user_id)
+            if user is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Lab user not found")
+            material = await app.state.aidp_factory().redeploy_lab(
+                user["ocid"], user["email"], lab_id, str(payload.operation_id)
+            )
+        except IdentityConflict as exc:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+        except AidpProvisionPending as exc:
+            return JSONResponse(status_code=202, content={
+                "status": "pending", "phase": exc.phase,
+                "operation_id": str(payload.operation_id), "message": str(exc),
+            })
+        except AidpProvisionConflict as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        except (AidpProvisionError, ValueError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        content = _material_payload(
+            material, user["email"], app.state.settings_store.get_workbench_url()
+        )
+        content.update(operation_id=str(payload.operation_id), message="The lab was redeployed successfully.")
+        return JSONResponse(content=content)
+
+    @app.delete("/api/admin/users/{user_id}/labs/{lab_id}")
+    async def admin_delete_lab(
+        user_id: str,
+        lab_id: str,
+        operation_id: UUID,
+        _admin: str = Depends(require_admin),
+    ) -> JSONResponse:
+        require_registration_ready()
+        identity = app.state.identity_factory()
+        try:
+            user = await identity.get_lab_user(user_id)
+            if user is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Lab user not found")
+            await app.state.aidp_factory().delete_lab(
+                user["ocid"], lab_id, str(operation_id)
+            )
+        except IdentityConflict as exc:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+        except AidpProvisionPending as exc:
+            return JSONResponse(status_code=202, content={
+                "status": "pending", "phase": exc.phase,
+                "operation_id": str(operation_id), "message": str(exc),
+            })
+        except AidpProvisionConflict as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        except AidpProvisionError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        return JSONResponse(content={
+            "status": "active", "operation_id": str(operation_id),
+            "message": "The lab was removed successfully.",
+        })
 
     @app.delete("/api/admin/users/{user_id}", status_code=204)
     async def admin_delete_user(user_id: str, _admin: str = Depends(require_admin)) -> Response:

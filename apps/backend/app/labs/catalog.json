@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "labs": [
+    "banking",
+    "telecommunications",
+    "retail",
+    "healthcare",
+    "agent"
+  ]
+}
