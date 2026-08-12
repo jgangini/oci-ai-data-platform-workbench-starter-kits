@@ -12,16 +12,15 @@ import { createPortal } from "react-dom";
 
 import {
   ApiRequestError,
-  getOrCreateResetOperation,
-  loadResetOperation,
+  getOrCreateLabOperation,
+  loadLabOperation,
   parseRetryAfter,
-  persistResetOperation,
+  persistLabOperation,
   pollRegistration,
   registrationProgress,
   type RegistrationPhase,
   type RegistrationPhaseValue,
   type RegistrationResponse,
-  type ResetOperation,
 } from "./registrationPoll";
 
 type ApiError = { detail?: string };
@@ -30,23 +29,35 @@ type LabUser = {
   name: string;
   email: string;
   status: "active" | "pending";
-  industry?: string | null;
+  labs: AssignedLab[];
   active: boolean;
   managed?: boolean;
 };
 
-const industryOptions = [
-  { value: "banking", label: "Banking" },
-  { value: "telecommunications", label: "Telecommunications" },
-  { value: "retail", label: "Retail" },
-  { value: "healthcare", label: "Healthcare" },
-] as const;
-const industryValues = industryOptions.map(({ value }) => value);
+type AssignedLab = {
+  lab_id: string;
+  pack_version: string;
+  phase: string;
+  workspace_path: string;
+  job_name: string;
+};
+type CatalogLab = {
+  lab_id: string;
+  display_name: string;
+  pack_version: string;
+  status: "available" | "planned";
+  available: boolean;
+};
+const fallbackCatalog: CatalogLab[] = [
+  { lab_id: "banking", display_name: "Banking", pack_version: "1.0.0", status: "available", available: true },
+  { lab_id: "telecommunications", display_name: "Telecommunications", pack_version: "1.0.0", status: "available", available: true },
+  { lab_id: "retail", display_name: "Retail", pack_version: "1.0.0", status: "available", available: true },
+  { lab_id: "healthcare", display_name: "Healthcare", pack_version: "1.0.0", status: "available", available: true },
+  { lab_id: "agent", display_name: "Agent", pack_version: "0.0.0", status: "planned", available: false },
+];
 
-function industryLabel(industry?: string | null) {
-  return (
-    industryOptions.find(({ value }) => value === industry)?.label ?? "Not set"
-  );
+function labLabel(catalog: CatalogLab[], labId: string) {
+  return catalog.find(({ lab_id }) => lab_id === labId)?.display_name ?? labId;
 }
 
 const registrationPhaseLabels: Record<RegistrationPhase, string> = {
@@ -301,6 +312,16 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     : ((await response.json()) as T);
 }
 
+function useLabCatalog() {
+  const [catalog, setCatalog] = useState<CatalogLab[]>(fallbackCatalog);
+  useEffect(() => {
+    void api<{ labs: CatalogLab[] }>("/api/config")
+      .then(({ labs }) => setCatalog(labs))
+      .catch(() => undefined);
+  }, []);
+  return catalog;
+}
+
 function OracleMark() {
   return (
     <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -548,7 +569,9 @@ function Shell({
 }
 
 function RegisterPage() {
-  const [form, setForm] = useState({ name: "", email: "", industry: "banking" });
+  const catalog = useLabCatalog();
+  const [form, setForm] = useState({ name: "", email: "" });
+  const [labIds, setLabIds] = useState<string[]>(["banking"]);
   const [codeSlots, setCodeSlots] = useState<string[]>(() => Array(8).fill(""));
   const codeInputs = useRef<Array<HTMLInputElement | null>>([]);
   const registrationAbortRef = useRef<AbortController | null>(null);
@@ -625,7 +648,7 @@ function RegisterPage() {
       focusCode(0);
       return;
     }
-    const payload = { ...form, code: registrationCode };
+    const payload = { ...form, lab_ids: labIds, code: registrationCode };
     registrationAbortRef.current?.abort();
     const controller = new AbortController();
     registrationAbortRef.current = controller;
@@ -652,7 +675,8 @@ function RegisterPage() {
               "OCI is reconciling your account. Keep this page open.",
           }),
       });
-      setForm({ name: "", email: "", industry: "banking" });
+      setForm({ name: "", email: "" });
+      setLabIds(["banking"]);
       setCodeSlots(Array(8).fill(""));
       setState({
         status: "ready",
@@ -743,20 +767,27 @@ function RegisterPage() {
               required
             />
           </label>
-          <label>
-            Industry
-            <select
-              value={form.industry}
-              onChange={(event) => update("industry", event.target.value)}
-              required
-            >
-              {industryOptions.map((industry) => (
-                <option key={industry.value} value={industry.value}>
-                  {industry.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <fieldset className="lab-picker">
+            <legend>Laboratories</legend>
+            {catalog.map((lab) => (
+              <label key={lab.lab_id}>
+                <input
+                  type="checkbox"
+                  checked={labIds.includes(lab.lab_id)}
+                  disabled={!lab.available}
+                  onChange={(event) =>
+                    setLabIds((current) =>
+                      event.target.checked
+                        ? [...current, lab.lab_id]
+                        : current.filter((value) => value !== lab.lab_id),
+                    )
+                  }
+                />
+                <span>{lab.display_name}</span>
+                {!lab.available && <small>Coming soon</small>}
+              </label>
+            ))}
+          </fieldset>
           <fieldset className="registration-code">
             <legend>Registration code</legend>
             <span id="registration-code-help" className="sr-only">
@@ -802,7 +833,7 @@ function RegisterPage() {
               {state.message}
             </p>
           )}
-          <button disabled={state.status === "processing"}>
+          <button disabled={state.status === "processing" || !labIds.length}>
             {state.status === "processing"
               ? "Creating account…"
               : "Create account"}
@@ -921,6 +952,7 @@ function AdminLogin() {
 }
 
 function AdminUsers() {
+  const catalog = useLabCatalog();
   const [users, setUsers] = useState<LabUser[]>([]);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
@@ -929,16 +961,18 @@ function AdminUsers() {
   const [message, setMessage] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState({ name: "", email: "", industry: "banking" });
+  const [draft, setDraft] = useState({ name: "", email: "", lab_ids: ["banking"] as string[] });
   const createAbortRef = useRef<AbortController | null>(null);
-  const resetAbortRef = useRef<AbortController | null>(null);
-  const resetOperationsRef = useRef(new Map<string, ResetOperation>());
-  const [pendingReset, setPendingReset] = useState<LabUser | null>(null);
-  const [resetIndustry, setResetIndustry] = useState("banking");
-  const [resetting, setResetting] = useState(false);
-  const [resetProgress, setResetProgress] =
-    useState<RegistrationResponse | null>(null);
-  const [resetError, setResetError] = useState("");
+  const operationAbortRef = useRef<AbortController | null>(null);
+  const [labChoices, setLabChoices] = useState<Record<string, string>>({});
+  const [pendingLabAction, setPendingLabAction] = useState<{
+    kind: "redeploy" | "remove";
+    user: LabUser;
+    lab: AssignedLab;
+  } | null>(null);
+  const [operating, setOperating] = useState(false);
+  const [operationProgress, setOperationProgress] = useState<RegistrationResponse | null>(null);
+  const [operationError, setOperationError] = useState("");
   const [pendingDelete, setPendingDelete] = useState<LabUser | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
@@ -959,7 +993,7 @@ function AdminUsers() {
     void loadUsers();
     return () => {
       createAbortRef.current?.abort();
-      resetAbortRef.current?.abort();
+      operationAbortRef.current?.abort();
     };
   }, []);
   const visible = users.filter((user) =>
@@ -992,7 +1026,7 @@ function AdminUsers() {
               `${registrationPhaseLabel(pending.phase)}. Reconciliation is still running.`,
           ),
       });
-      setDraft({ name: "", email: "", industry: "banking" });
+      setDraft({ name: "", email: "", lab_ids: ["banking"] });
       setCreateOpen(false);
       setMessage(result.message || "User created and added to the lab.");
       await loadUsers();
@@ -1014,8 +1048,6 @@ function AdminUsers() {
       await api(`/api/admin/users/${encodeURIComponent(pendingDelete.id)}`, {
         method: "DELETE",
       });
-      resetOperationsRef.current.delete(pendingDelete.id);
-      persistResetOperation(window.localStorage, pendingDelete.id);
       setPendingDelete(null);
       setMessage("User deleted from the lab.");
       await loadUsers();
@@ -1031,80 +1063,105 @@ function AdminUsers() {
       );
     }
   }
-  async function resetUser() {
-    if (!pendingReset) return;
-    const target = pendingReset;
-    let operation: ResetOperation;
+  function operationId(action: NonNullable<typeof pendingLabAction>) {
+    const operation = getOrCreateLabOperation(
+      loadLabOperation(
+        window.localStorage, action.user.id, action.lab.lab_id, action.kind,
+      ),
+      action.lab.lab_id,
+      action.kind,
+      () => crypto.randomUUID(),
+    );
+    persistLabOperation(
+      window.localStorage, action.user.id, action.lab.lab_id, action.kind, operation,
+    );
+    return operation;
+  }
+
+  async function addLab(user: LabUser) {
+    const labId = labChoices[user.id] || catalog.find(
+      (item) => item.available && !user.labs.some((lab) => lab.lab_id === item.lab_id),
+    )?.lab_id;
+    if (!labId) return;
+    setOperating(true);
+    setOperationError("");
     try {
-      operation = getOrCreateResetOperation(
-        resetOperationsRef.current.get(target.id) ||
-          loadResetOperation(window.localStorage, target.id, industryValues),
-        resetIndustry,
-        () => crypto.randomUUID(),
-      );
-      resetOperationsRef.current.set(target.id, operation);
-      persistResetOperation(window.localStorage, target.id, operation);
+      await pollRegistration({
+        request: (signal) => api<RegistrationResponse>(
+          `/api/admin/users/${encodeURIComponent(user.id)}/labs`,
+          { method: "POST", body: JSON.stringify({ lab_id: labId }), signal },
+        ),
+        onPending: setOperationProgress,
+      });
+      setMessage(`${labLabel(catalog, labId)} was added for ${user.email}.`);
+      setLabChoices((current) => ({ ...current, [user.id]: "" }));
+      await loadUsers();
     } catch (reason) {
-      setResetError(
-        reason instanceof Error && reason.message.includes("pending AIDP reset")
-          ? reason.message
-          : "Browser storage is unavailable; the AIDP reset was not started.",
-      );
+      setOperationError(reason instanceof Error ? reason.message : "Unable to add the lab.");
+    } finally {
+      setOperationProgress(null);
+      setOperating(false);
+    }
+  }
+
+  async function runLabAction() {
+    if (!pendingLabAction) return;
+    const action = pendingLabAction;
+    let operation;
+    try {
+      operation = operationId(action);
+    } catch {
+      setOperationError("Browser storage is unavailable; the lab operation was not started.");
       return;
     }
     const controller = new AbortController();
-    resetAbortRef.current?.abort();
-    resetAbortRef.current = controller;
-    setResetting(true);
-    setResetError("");
+    operationAbortRef.current?.abort();
+    operationAbortRef.current = controller;
+    setOperating(true);
+    setOperationError("");
     setMessage("");
-    setResetProgress({
+    setOperationProgress({
       status: "pending",
       phase: "cleanup",
-      message: "Removing the participant's current AIDP resources.",
+      message: `${action.kind === "redeploy" ? "Reinstalling" : "Removing"} the selected lab resources.`,
     });
     try {
       const result = await pollRegistration({
         signal: controller.signal,
-        request: (signal) =>
-          api<RegistrationResponse>(
-            `/api/admin/users/${encodeURIComponent(target.id)}/reset`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                industry: operation.industry,
-                operation_id: operation.operationId,
-              }),
-              signal,
-            },
-          ),
-        onPending: setResetProgress,
+        request: (signal) => {
+          const base = `/api/admin/users/${encodeURIComponent(action.user.id)}/labs/${encodeURIComponent(action.lab.lab_id)}`;
+          return action.kind === "redeploy"
+            ? api<RegistrationResponse>(`${base}/redeploy`, {
+                method: "POST",
+                body: JSON.stringify({ operation_id: operation.operationId }),
+                signal,
+              })
+            : api<RegistrationResponse>(`${base}?operation_id=${encodeURIComponent(operation.operationId)}`, {
+                method: "DELETE",
+                signal,
+              });
+        },
+        onPending: setOperationProgress,
       });
-      resetOperationsRef.current.delete(target.id);
-      persistResetOperation(window.localStorage, target.id);
-      setPendingReset(null);
-      setMessage(
-        result.message ||
-          `${target.email}'s AIDP environment was reset for ${industryLabel(resetIndustry)}.`,
+      persistLabOperation(
+        window.localStorage, action.user.id, action.lab.lab_id, action.kind,
       );
+      setPendingLabAction(null);
+      setMessage(result.message || "The lab operation completed.");
       await loadUsers();
     } catch (reason) {
       if (controller.signal.aborted) return;
-      setResetError(
-        reason instanceof Error
-          ? reason.message
-          : "Unable to reset the AIDP environment.",
-      );
+      setOperationError(reason instanceof Error ? reason.message : "Unable to update the lab.");
     } finally {
-      if (resetAbortRef.current === controller) resetAbortRef.current = null;
-      setResetProgress(null);
-      setResetting(false);
+      if (operationAbortRef.current === controller) operationAbortRef.current = null;
+      setOperationProgress(null);
+      setOperating(false);
     }
   }
   return (
     <>
       <Shell adminLink={false} onSignOut={() => setLogoutOpen(true)}>
-        <section className="admin" aria-busy={resetting} inert={resetting}>
+        <section className="admin" aria-busy={operating} inert={operating}>
           <div className="admin-panel">
             <div className="admin-panel-heading">
               <h1>Users</h1>
@@ -1190,25 +1247,26 @@ function AdminUsers() {
                     required
                   />
                 </label>
-                <label>
-                  Industry
-                  <select
-                    value={draft.industry}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        industry: event.target.value,
-                      }))
-                    }
-                    required
-                  >
-                    {industryOptions.map((industry) => (
-                      <option key={industry.value} value={industry.value}>
-                        {industry.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <fieldset className="lab-picker">
+                  <legend>Laboratories</legend>
+                  {catalog.map((lab) => (
+                    <label key={lab.lab_id}>
+                      <input
+                        type="checkbox"
+                        checked={draft.lab_ids.includes(lab.lab_id)}
+                        disabled={!lab.available}
+                        onChange={(event) => setDraft((current) => ({
+                          ...current,
+                          lab_ids: event.target.checked
+                            ? [...current.lab_ids, lab.lab_id]
+                            : current.lab_ids.filter((value) => value !== lab.lab_id),
+                        }))}
+                      />
+                      <span>{lab.display_name}</span>
+                      {!lab.available && <small>Coming soon</small>}
+                    </label>
+                  ))}
+                </fieldset>
                 <div className="admin-form-actions">
                   <button
                     className="secondary"
@@ -1217,7 +1275,7 @@ function AdminUsers() {
                   >
                     Cancel
                   </button>
-                  <button disabled={creating}>
+                  <button disabled={creating || !draft.lab_ids.length}>
                     {creating ? "Creating…" : "Create user"}
                   </button>
                 </div>
@@ -1235,7 +1293,7 @@ function AdminUsers() {
                     <th>Name</th>
                     <th>Email</th>
                     <th>Status</th>
-                    <th>Industry</th>
+                    <th>Laboratories</th>
                     <th>Identity</th>
                     <th className="actions-column">Actions</th>
                   </tr>
@@ -1262,7 +1320,64 @@ function AdminUsers() {
                           {user.status}
                         </span>
                       </td>
-                      <td>{industryLabel(user.industry)}</td>
+                      <td>
+                        <div className="assigned-labs">
+                          {user.labs.map((lab) => (
+                            <div className="assigned-lab" key={lab.lab_id}>
+                              <span>
+                                <strong>{labLabel(catalog, lab.lab_id)}</strong>
+                                <small>{lab.pack_version} · {lab.phase}</small>
+                              </span>
+                              <button
+                                className="table-action table-reset"
+                                type="button"
+                                onClick={() => {
+                                  setOperationError("");
+                                  setPendingLabAction({ kind: "redeploy", user, lab });
+                                }}
+                                aria-label={`Redeploy ${labLabel(catalog, lab.lab_id)} for ${user.email}`}
+                                title="Redeploy lab"
+                              >
+                                <RefreshIcon />
+                              </button>
+                              <button
+                                className="table-action table-delete"
+                                type="button"
+                                disabled={user.labs.length === 1}
+                                onClick={() => {
+                                  setOperationError("");
+                                  setPendingLabAction({ kind: "remove", user, lab });
+                                }}
+                                aria-label={`Remove ${labLabel(catalog, lab.lab_id)} from ${user.email}`}
+                                title={user.labs.length === 1 ? "Delete the participant to remove the last lab" : "Remove lab"}
+                              >
+                                <TrashIcon />
+                              </button>
+                            </div>
+                          ))}
+                          <div className="add-lab-row">
+                            <select
+                              aria-label={`Lab to add for ${user.email}`}
+                              value={labChoices[user.id] || ""}
+                              onChange={(event) => setLabChoices((current) => ({ ...current, [user.id]: event.target.value }))}
+                            >
+                              <option value="">Add laboratory…</option>
+                              {catalog.map((lab) => (
+                                <option
+                                  key={lab.lab_id}
+                                  value={lab.lab_id}
+                                  disabled={!lab.available || user.labs.some((assigned) => assigned.lab_id === lab.lab_id)}
+                                >
+                                  {lab.display_name}{!lab.available ? " — Coming soon" : ""}
+                                </option>
+                              ))}
+                            </select>
+                            <button type="button" onClick={() => void addLab(user)} disabled={!labChoices[user.id]}>
+                              Add
+                            </button>
+                          </div>
+                        </div>
+                      </td>
                       <td>
                         <span
                           className={`badge ${user.active ? "active" : "inactive"}`}
@@ -1272,28 +1387,6 @@ function AdminUsers() {
                       </td>
                       <td className="row-actions">
                         <span className="row-action-group">
-                          <button
-                            className="table-action table-reset"
-                            type="button"
-                            onClick={() => {
-                              const operation =
-                                resetOperationsRef.current.get(user.id) ||
-                                loadResetOperation(
-                                  window.localStorage,
-                                  user.id,
-                                  industryValues,
-                                );
-                              if (operation)
-                                resetOperationsRef.current.set(user.id, operation);
-                              setResetError("");
-                              setResetIndustry(operation?.industry || user.industry || "banking");
-                              setPendingReset(user);
-                            }}
-                            aria-label={`Reset AIDP environment for ${user.email}`}
-                            title="Reset AIDP"
-                          >
-                            <RefreshIcon />
-                          </button>
                           <button
                             className="table-action table-delete"
                             type="button"
@@ -1326,36 +1419,18 @@ function AdminUsers() {
       </Shell>
       <Toast message={message} onDismiss={() => setMessage("")} />
       <ConfirmModal
-        open={Boolean(pendingReset) && !resetting}
-        kind="reset"
-        title="Reset AIDP environment?"
-        description={`This will delete and reinstall only ${pendingReset?.email ?? "this participant"}'s AIDP job, tables, Object Storage objects, and workspace files for the selected industry. The OCI Identity account is preserved.`}
-        error={resetError}
-        confirmLabel="Reset AIDP"
+        open={Boolean(pendingLabAction) && !operating}
+        kind={pendingLabAction?.kind === "remove" ? "delete" : "reset"}
+        title={pendingLabAction?.kind === "remove" ? "Remove laboratory?" : "Redeploy laboratory?"}
+        description={`${pendingLabAction?.kind === "remove" ? "Remove" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this lab"} for ${pendingLabAction?.user.email ?? "this participant"}. Other laboratories and Identity access are preserved.`}
+        error={operationError}
+        confirmLabel={pendingLabAction?.kind === "remove" ? "Remove lab" : "Redeploy lab"}
         onClose={() => {
-          setResetError("");
-          setPendingReset(null);
+          setOperationError("");
+          setPendingLabAction(null);
         }}
-        onConfirm={() => void resetUser()}
-      >
-        <label className="confirm-field">
-          Industry
-          <select
-            value={resetIndustry}
-            onChange={(event) => setResetIndustry(event.target.value)}
-            disabled={Boolean(
-              pendingReset && resetOperationsRef.current.has(pendingReset.id),
-            )}
-            required
-          >
-            {industryOptions.map((industry) => (
-              <option key={industry.value} value={industry.value}>
-                {industry.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </ConfirmModal>
+        onConfirm={() => void runLabAction()}
+      />
       <ConfirmModal
         open={Boolean(pendingDelete)}
         kind="delete"
@@ -1378,12 +1453,11 @@ function AdminUsers() {
         onClose={() => setLogoutOpen(false)}
         onConfirm={() => void logout()}
       />
-      {resetting && (
+      {operating && (
         <ProvisioningOverlay
-          phase={resetProgress?.phase || "cleanup"}
+          phase={operationProgress?.phase || "cleanup"}
           message={
-            resetProgress?.message ||
-            "Resetting the participant's AIDP environment."
+            operationProgress?.message || "Updating the participant's laboratory."
           }
         />
       )}

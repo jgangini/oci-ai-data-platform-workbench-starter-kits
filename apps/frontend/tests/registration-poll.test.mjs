@@ -31,9 +31,9 @@ await promisify(execFile)(
 const require = createRequire(import.meta.url);
 const {
   ApiRequestError,
-  getOrCreateResetOperation,
-  loadResetOperation,
-  persistResetOperation,
+  getOrCreateLabOperation,
+  loadLabOperation,
+  persistLabOperation,
   RegistrationPollingTimeout,
   parseRetryAfter,
   pollRegistration,
@@ -136,8 +136,8 @@ test("polling propagates caller aborts without reporting a timeout", async () =>
   });
 });
 
-test("polling preserves an immutable-industry 409", async () => {
-  const conflict = new ApiRequestError("industry is immutable", 409);
+test("polling preserves an incompatible-operation 409", async () => {
+  const conflict = new ApiRequestError("another lab operation is active", 409);
   await assert.rejects(
     pollRegistration({
       request: async () => {
@@ -145,31 +145,32 @@ test("polling preserves an immutable-industry 409", async () => {
       },
       deadlineMs: 1_000,
     }),
-    (error) => error === conflict && error.message === "industry is immutable",
+    (error) => error === conflict && error.message === "another lab operation is active",
   );
 });
 
-test("reset operations reuse one UUID until completion", () => {
+test("lab operations reuse one UUID until completion", () => {
   let created = 0;
   const createId = () => `operation-${++created}`;
-  const first = getOrCreateResetOperation(undefined, "banking", createId);
-  const retry = getOrCreateResetOperation(first, "banking", createId);
+  const first = getOrCreateLabOperation(undefined, "banking", "redeploy", createId);
+  const retry = getOrCreateLabOperation(first, "banking", "redeploy", createId);
 
-  assert.deepEqual(first, { industry: "banking", operationId: "operation-1" });
+  assert.deepEqual(first, { labId: "banking", kind: "redeploy", operationId: "operation-1" });
   assert.equal(retry, first);
   assert.equal(created, 1);
   assert.throws(
-    () => getOrCreateResetOperation(first, "retail", createId),
-    /Finish the pending AIDP reset/,
+    () => getOrCreateLabOperation(first, "retail", "redeploy", createId),
+    /Finish the pending AIDP lab operation/,
   );
   assert.equal(created, 1);
-  assert.deepEqual(getOrCreateResetOperation(undefined, "retail", createId), {
-    industry: "retail",
+  assert.deepEqual(getOrCreateLabOperation(undefined, "retail", "remove", createId), {
+    labId: "retail",
+    kind: "remove",
     operationId: "operation-2",
   });
 });
 
-test("reset operations survive a page reload until completion", () => {
+test("lab operations survive a page reload until completion", () => {
   const values = new Map();
   const storage = {
     getItem: (key) => values.get(key) ?? null,
@@ -177,20 +178,21 @@ test("reset operations survive a page reload until completion", () => {
     removeItem: (key) => values.delete(key),
   };
   const operation = {
-    industry: "healthcare",
+    labId: "healthcare",
+    kind: "redeploy",
     operationId: "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43",
   };
 
-  persistResetOperation(storage, "user-1", operation);
-  assert.deepEqual(loadResetOperation(storage, "user-1", ["healthcare"]), operation);
-  persistResetOperation(storage, "user-1");
-  assert.equal(loadResetOperation(storage, "user-1", ["healthcare"]), undefined);
+  persistLabOperation(storage, "user-1", "healthcare", "redeploy", operation);
+  assert.deepEqual(loadLabOperation(storage, "user-1", "healthcare", "redeploy"), operation);
+  persistLabOperation(storage, "user-1", "healthcare", "redeploy");
+  assert.equal(loadLabOperation(storage, "user-1", "healthcare", "redeploy"), undefined);
   assert.doesNotThrow(() =>
-    persistResetOperation({ ...storage, removeItem: () => { throw new Error("blocked"); } }, "user-1"),
+    persistLabOperation({ ...storage, removeItem: () => { throw new Error("blocked"); } }, "user-1", "healthcare", "redeploy"),
   );
   storage.setItem(
-    "aidp-lab.reset.user-1",
-    JSON.stringify({ industry: "unknown", operationId: operation.operationId }),
+    "aidp-lab.operation.redeploy.user-1.healthcare",
+    JSON.stringify({ labId: "unknown", kind: "redeploy", operationId: operation.operationId }),
   );
-  assert.equal(loadResetOperation(storage, "user-1", ["healthcare"]), undefined);
+  assert.equal(loadLabOperation(storage, "user-1", "healthcare", "redeploy"), undefined);
 });

@@ -1,0 +1,13 @@
+source_row_id,plan_id,plan_type,monthly_fee,included_data_mb,included_voice_minutes,overage_rate,status,updated_at
+plans-000001,PL-001,postpaid,20.00,5000,200,0.02,active,2026-01-01T00:00:00Z
+plans-000002,PL-002,prepaid,25.00,7500,250,0.02,active,2026-01-01T00:17:00Z
+plans-000003,PL-003,prepaid,30.00,10000,300,0.02,active,2026-01-01T00:34:00Z
+plans-000004,PL-004,prepaid,35.00,12500,350,0.02,active,2026-01-01T00:51:00Z
+plans-000005,PL-005,postpaid,40.00,15000,400,0.02,active,2026-01-01T01:08:00Z
+plans-000006,PL-006,business,45.00,17500,450,0.02,active,2026-01-01T01:25:00Z
+plans-000007,PL-007,business,50.00,20000,500,0.02,active,2026-01-01T01:42:00Z
+plans-000008,PL-008,prepaid,55.00,22500,550,0.02,active,2026-01-01T01:59:00Z
+plans-000009,PL-009,postpaid,60.00,25000,600,0.02,active,2026-01-01T02:16:00Z
+plans-000010,PL-010,postpaid,65.00,27500,650,0.02,active,2026-01-01T02:33:00Z
+plans-000011,PL-011,postpaid,70.00,30000,700,0.02,active,2026-01-01T02:50:00Z
+plans-000012,PL-012, POSTPAID ,75.00,32500,750,0.02,active,2026-01-01T03:07:00Z

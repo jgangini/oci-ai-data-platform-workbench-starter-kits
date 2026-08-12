@@ -35,29 +35,31 @@ export type RegistrationResponse = {
   aidp_url?: string;
 };
 
-export type ResetOperation = {
-  industry: string;
+export type LabOperation = {
+  labId: string;
+  kind: "redeploy" | "remove";
   operationId: string;
 };
 
-type ResetOperationStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
-const resetOperationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+type LabOperationStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+const labOperationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function resetOperationStorageKey(userId: string) {
-  return `aidp-lab.reset.${userId}`;
+function labOperationStorageKey(userId: string, labId: string, kind: LabOperation["kind"]) {
+  return `aidp-lab.operation.${kind}.${userId}.${labId}`;
 }
 
-export function loadResetOperation(
-  storage: ResetOperationStorage,
+export function loadLabOperation(
+  storage: LabOperationStorage,
   userId: string,
-  industries: readonly string[],
-): ResetOperation | undefined {
+  labId: string,
+  kind: LabOperation["kind"],
+): LabOperation | undefined {
   try {
-    const value = JSON.parse(storage.getItem(resetOperationStorageKey(userId)) || "null");
+    const value = JSON.parse(storage.getItem(labOperationStorageKey(userId, labId, kind)) || "null");
     return value &&
-      industries.includes(value.industry) &&
+      value.labId === labId && value.kind === kind &&
       typeof value.operationId === "string" &&
-      resetOperationId.test(value.operationId)
+      labOperationId.test(value.operationId)
       ? value
       : undefined;
   } catch {
@@ -65,30 +67,33 @@ export function loadResetOperation(
   }
 }
 
-export function persistResetOperation(
-  storage: ResetOperationStorage,
+export function persistLabOperation(
+  storage: LabOperationStorage,
   userId: string,
-  operation?: ResetOperation,
+  labId: string,
+  kind: LabOperation["kind"],
+  operation?: LabOperation,
 ) {
   if (operation)
-    storage.setItem(resetOperationStorageKey(userId), JSON.stringify(operation));
+    storage.setItem(labOperationStorageKey(userId, labId, kind), JSON.stringify(operation));
   else {
     try {
-      storage.removeItem(resetOperationStorageKey(userId));
+      storage.removeItem(labOperationStorageKey(userId, labId, kind));
     } catch {
-      // ponytail: a stale UUID only replays an idempotent completed reset; never mask remote success.
+      // ponytail: a stale UUID only replays an idempotent completed lab operation.
     }
   }
 }
 
-export function getOrCreateResetOperation(
-  current: ResetOperation | undefined,
-  industry: string,
+export function getOrCreateLabOperation(
+  current: LabOperation | undefined,
+  labId: string,
+  kind: LabOperation["kind"],
   createId: () => string,
-): ResetOperation {
-  if (!current) return { industry, operationId: createId() };
-  if (current.industry !== industry)
-    throw new Error("Finish the pending AIDP reset before choosing another industry.");
+): LabOperation {
+  if (!current) return { labId, kind, operationId: createId() };
+  if (current.labId !== labId || current.kind !== kind)
+    throw new Error("Finish the pending AIDP lab operation first.");
   return current;
 }
 

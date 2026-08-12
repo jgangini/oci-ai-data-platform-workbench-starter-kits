@@ -92,7 +92,7 @@ def test_hook_result_matches_runner_and_manifest_contract() -> None:
     assert module.POST_APPLY_BUDGET_SECONDS < manifest["post_apply"]["timeout_seconds"]
     context = {
         "deployment_id": "deployment-test",
-        "source": {"repository": "owner/repo", "ref": "v1.0.0", "commit_sha": "0" * 40},
+        "source": {"repository": "owner/repo", "ref": "v2.0.0-rc.1", "commit_sha": "0" * 40},
     }
     resources = {
         "catalog_key": "catalog",

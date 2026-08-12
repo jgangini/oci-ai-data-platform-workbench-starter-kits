@@ -2,24 +2,24 @@
 
 An end-to-end Oracle Cloud Infrastructure laboratory for learning data engineering with Oracle AI Data Platform (AIDP). It deploys an AIDP platform and shared workspace, shared Spark compute, a governed Oracle-managed Object Storage data plane, and a self-service registration application.
 
-Release v1.0.0 keeps one private `aidp-data-<suffix>` bucket with `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/` prefixes. Notebooks address these locations with OCI URIs and external tables; the package creates neither external AIDP volumes nor an explicit OSCS/OpenSearch resource. The workspace uses the participant email as the visible folder name, while an opaque key still scopes jobs, Object Storage paths, and table names.
+Release v2.0.0 keeps one private `aidp-data-<suffix>` bucket with `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/` prefixes. Notebooks address these locations with OCI URIs and external tables; the package creates neither external AIDP volumes nor an explicit OSCS/OpenSearch resource. The workspace uses the participant email as the visible folder name, while an opaque key and lab ID scope jobs, Object Storage paths, and table names.
 
-The active industry, exact workspace path, reconciliation phase, and idempotent administrator reset journal live in `/Workspace/medallon/.control/<participant>.json`, outside each participant's `ADMIN` subtree. The visible `lab-manifest.json` is tutorial metadata only; neither it nor the student-writable bucket controls authorization, overwrite behavior, or cleanup scope.
+The assigned labs, package versions and hashes, exact workspace paths, reconciliation phases, and independent administrator operation journals live in a layout-v3 manifest at `/Workspace/medallon/.control/<participant>.json`, outside each participant's `ADMIN` subtree. Layout-v2 manifests are migrated in place without replacing active assets. The visible `lab-manifest.json` is tutorial metadata only; neither it nor the student-writable bucket controls authorization, overwrite behavior, or cleanup scope.
 
 The data bucket uses the default Oracle-managed encryption key. The lab creates no OCI Vault, KMS key, OAuth client, dedicated provisioner identity, or additional OCI API key. Identity Domains and AIDP requests use the same operator profile uploaded to Deploy Studio.
 
-## Participant data kits
+## Versioned lab packages
 
-Each industry has four deterministic synthetic CSV datasets with deliberate quality defects for the Silver-stage exercises:
+`apps/backend/app/labs/catalog.json` lists immutable, versioned packages. Each available lab has four canonical CSV datasets with deliberate quality defects and exactly five canonical notebooks: Landing, Bronze, Silver, Gold, and Lineage. `agent` is catalogued as planned and cannot be assigned until it has functional assets and the required AI infrastructure.
 
-| Industry | Dataset row counts |
-| --- | --- |
-| Banking | branches 20; customers 200; accounts 320; transactions 4,000 |
-| Telecommunications | plans 12; network sites 30; subscribers 250; usage events 6,000 |
-| Retail | customers 300; products 150; orders 1,200; order items 3,000 |
-| Healthcare | patients 240; providers 48; appointments 900; encounters 700 |
+| Lab | Package | Dataset row counts |
+| --- | --- | --- |
+| Banking | 1.0.0 | branches 20; customers 200; accounts 320; transactions 4,000 |
+| Telecommunications | 1.0.0 | plans 12; network sites 30; subscribers 250; usage events 6,000 |
+| Retail | 1.0.0 | customers 300; products 150; orders 1,200; order items 3,000 |
+| Healthcare | 1.0.0 | patients 240; providers 48; appointments 900; encounters 700 |
 
-The participant root is `/Workspace/medallon/<normalized-email>/<industry>`. Four notebooks move data through Landing, Bronze, Silver, and Gold, and a personal workflow runs those stages on the shared compute. All participants collaborate through `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold`; table names retain the opaque participant key and industry to prevent collisions.
+The participant root is `/Workspace/medallon/<normalized-email>/<lab_id>`. CSV and notebook bytes are identical for every participant. Landing adds the technical `participant_key`; AIDP job parameters provide `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, and `objectstorage_namespace`. One workflow per lab derives its task graph from `lab.json`, so adding a notebook does not require Python changes. All participants use the shared `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas; table names retain the opaque participant key and lab ID to prevent collisions.
 
 ## RBAC and registration lifecycle
 
@@ -34,7 +34,7 @@ The permissions are intentionally split:
 
 Developer IAM can `use ai-data-platforms`, read bucket metadata, and manage objects only in the exact `aidp-data-<suffix>` bucket. The deployment operator retains its existing administrative identity; the lab creates no operator-specific user, group, role, policy, grant, or API key. Pending participants receive no AIDP IAM grant.
 
-Registration first creates or reconciles the Identity Domains user in the pending group. The API idempotently prepares the workspace, schemas, content, and permissions. Only after every phase succeeds does it add the user to the developer group and remove pending membership. Public registration keeps the selected industry immutable. An administrator can instead use **Reset AIDP** to remove only that participant's AIDP job, tables, bucket objects, and workspace files, select another industry, and reinstall the kit without deleting the OCI Identity account. A durable operation ID makes retries resume the same reset rather than deleting the new environment again.
+Registration first validates every selected lab and then creates or reconciles the Identity Domains user in the pending group. The API provisions each lab idempotently and promotes the user to the developer group only when all initially selected labs are active. Participants may select multiple available labs only during registration. Administrators can later add, redeploy, or remove a lab independently; the last lab cannot be removed without deleting the participant. A durable operation ID and per-lab journal make retries resume the same mutation without touching other labs.
 
 ## Safety contract
 
@@ -45,7 +45,7 @@ Registration first creates or reconciles the Identity Domains user in the pendin
 - The VM decrypts the envelope locally, verifies that the profile user matches the preflight operator OCID and that `key.pem` matches the configured fingerprint, writes both files atomically with mode `0600`, then deletes the Object Storage object and verifies its absence. The temporary bootstrap key is removed afterward.
 - Participant and developer access is granted through AIDP RBAC. Post-apply verifies that the deployment operator is a direct member of built-in `AI_DATA_PLATFORM_ADMIN`; it never creates `AIDP_LAB_PROVISIONER`.
 - The runtime signs both Identity Domains and AIDP requests with the installed operator profile selected by `OCI_CONFIG_FILE`. Instance principals can access only the exact one-use bootstrap object and are not a runtime authentication fallback. The VM `.env` contains identifiers and PBKDF2 hashes, but no private key, OAuth secret, or plaintext administrator credential.
-- The v1.0.0 path has no explicit OSCS/OpenSearch deployment and no external AIDP volumes.
+- The v2.0.0 path has no explicit OSCS/OpenSearch deployment and no external AIDP volumes.
 - The lab does not require the Default Identity Domain's **Access Signing Certificate** setting and does not request public JWK access; that setting remains a tenant security-policy decision.
 - OCI Provider 8.21 does not expose `force_destroy`; its native delete refuses a non-empty data bucket. The medallion prefixes therefore stay virtual until the first workload write, while real lab data must be emptied before destroying the stack.
 - The HTTPS certificate is self-signed and includes the public IP/FQDN as SANs, so browsers will show a trust warning.
@@ -95,13 +95,13 @@ terraform init -backend=false
 terraform validate
 ```
 
-The v1.0.0 preflight accepts only the trusted repository and immutable release SHA in `us-chicago-1`, while keeping the compartment name as the editable Deploy Studio input. Names follow OCI's 1-100 character alphanumeric, period, hyphen, and underscore contract. In `new` mode validation confirms that the exact name is available to create; in `existing` mode it confirms one unambiguous ACTIVE compartment. It also rejects forbidden infrastructure and policies, rejects conflicting AIDP work requests for the selected name, and checks current VM capacity. For a saved Terraform plan, run `python terraform/release_gate.py --plan-json <plan.json>`; it fails unless every managed resource action is create-only.
+The v2.0.0 preflight accepts only the trusted repository and the immutable `v2.0.0-rc.1` or `v2.0.0` release SHA in `us-chicago-1`, while keeping the compartment name as the editable Deploy Studio input. Names follow OCI's 1-100 character alphanumeric, period, hyphen, and underscore contract. In `new` mode validation confirms that the exact name is available to create; in `existing` mode it confirms one unambiguous ACTIVE compartment. It also rejects forbidden infrastructure and policies, rejects conflicting AIDP work requests for the selected name, and checks current VM capacity. For a saved Terraform plan, run `python terraform/release_gate.py --plan-json <plan.json>`; it fails unless every managed resource action is create-only.
 
 Deploy Studio manifest v1 currently has no hook between Resource Manager PLAN and its automatic APPLY, and it does not pass the plan JSON to repository preflight. Therefore the create-only plan check is available for manual/CI validation but cannot be enforced by this repository inside the current CloudTechNext PLAN/APPLY sequence. Do not start a lab APPLY until that explicit plan check has passed or CloudTechNext adds a post-plan/pre-apply hook.
 
 Deploy Studio creates or resolves the target compartment before starting Resource Manager. The repository preflight discovers the tenancy home region and operator user OCID, then uses OCI `create_compute_capacity_report` in the selected availability domain for E5/E4 Flex with the requested OCPUs and memory. Only the non-secret operator OCID reaches Terraform; the uploaded config and key remain hook inputs until the encrypted one-use delivery.
 
-The base deployment reconciles the AIDP workspace, catalog, shared compute, four collaborative schemas, root `/Workspace/medallon` folder, and pending/developer roles after verifying the operator's built-in platform administration. Registration then idempotently creates the email-named participant folder, synthetic content, notebooks, job, and individual folder/job permissions before promoting pending membership. The bucket is addressed directly through OCI URIs; no external volumes or explicit OSCS/OpenSearch deployment participate in this path. Reconciliation waits for credential consumption, asynchronous AIDP resources, and strict HTTPS health, and refuses ambiguous or conflicting resources.
+The base deployment reconciles the AIDP workspace, catalog, shared compute, four collaborative schemas, root `/Workspace/medallon` folder, and pending/developer roles after verifying the operator's built-in platform administration. Registration then installs the selected canonical packages and individual folder/job permissions before promoting pending membership. The bucket is addressed directly through OCI URIs; no external volumes or explicit OSCS/OpenSearch deployment participate in this path. Reconciliation waits for credential consumption, asynchronous AIDP resources, and strict HTTPS health, and refuses ambiguous or conflicting resources.
 
 The VM shape remains explicit per APPLY. The capacity report is a preselection, not a reservation, so capacity can change before instance creation. When the report says E5 is unavailable and E4 is available, preflight selects E4 without requiring another secret or user choice. If creation later fails because capacity changed, run a new APPLY; this package deliberately does not claim an automatic post-failure retry.
 
@@ -111,11 +111,12 @@ For a release candidate, use structured deployment events, API responses, logs, 
 
 1. Require a successful Resource Manager APPLY and post-apply result, then verify `GET /api/health` returns exactly `200` and `{"status":"ok"}`.
 2. Verify the workspace, catalog, shared compute, `/Workspace/medallon` root, four collaborative schemas, and the RBAC matrix above. Confirm operator membership in `AI_DATA_PLATFORM_ADMIN`, absence of `AIDP_LAB_PROVISIONER`, deletion of `.bootstrap/operator-credentials.json`, zero external volumes, and no explicit OSCS/OpenSearch resource.
-3. Register one real Banking participant. Observe pending phases for identity, workspace, schemas, content, and permissions; the user must remain pending until all provisioning succeeds and then move to developers.
-4. Confirm the normalized email names the participant folder, four notebooks are present, and the Banking source folder contains 20 branches, 200 customers, 320 accounts, and 4,000 transactions. The four shared schemas must contain exactly the participant's 15 opaque-key-prefixed tables without colliding with other users.
-5. Run the participant workflow through Landing, Bronze, Silver, and Gold. Require a successful terminal run, `quality_issues > 0`, Bronze totals equal to Landing totals, Silver totals no greater than Bronze, and Gold `banking_customer_value` plus `banking_branch_daily`.
-6. Run the workflow a second time and require the same row counts; retries must be idempotent.
-7. Leave that participant and the lab active for follow-up testing; cleanup is a separate, explicit operation.
+3. Register participant A with all four available labs and participant B with Banking and Retail. Observe pending phases for identity, workspace, schemas, content, and permissions; each user must remain pending until all initial labs are active.
+4. Confirm five notebooks per lab, exact package SHA-256 values, canonical dataset row counts, and distinct participant paths, tables, and jobs.
+5. Run every workflow through Lineage and compare counts, aggregates, quality checks, and the lineage result with each package's `expected_results`. Banking results and asset hashes must match between A and B.
+6. Run every workflow a second time and require identical results. Verify upstream/downstream and column derivation in Master Catalog from structured DOM/API state.
+7. Add Telecommunications to B, redeploy only B's Banking lab, and remove only B's Retail lab. A must remain unchanged and Agent must remain visible but disabled.
+8. Leave the validated candidate active for review; cleanup of any baseline is a separate, exact-OCID operation.
 
 ## License
 

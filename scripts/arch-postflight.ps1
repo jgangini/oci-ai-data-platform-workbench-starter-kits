@@ -9,9 +9,7 @@ try {
         graphify update .
     }
     if (Get-Command sentrux -ErrorAction SilentlyContinue) {
-        if (Test-Path ".\.sentrux\rules.toml") {
-            sentrux check .
-        }
+        sentrux check .
         $previousErrorActionPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = "Continue"
