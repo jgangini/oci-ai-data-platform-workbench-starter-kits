@@ -49,7 +49,7 @@
     {
       "depends_on": [],
       "file": "01_landing_healthcare.ipynb",
-      "sha256": "e6526dd361385929e9a347e1218ec2ef144c7ed36301a20d23c6b0cd3c9a6373",
+      "sha256": "388c49b023109f696506a1d13310a626bf8e05d968b9e9be1022412321275222",
       "task_key": "01_landing_healthcare"
     },
     {
@@ -57,7 +57,7 @@
         "01_landing_healthcare"
       ],
       "file": "02_bronze_healthcare.ipynb",
-      "sha256": "800d3c8486bb665f4999537542cb3c675f2916903c84d0323482818172104f1c",
+      "sha256": "05fcb64b2949cd8c0e8ad54d367e8e5266104743045b44685c1e0fd4074da0ce",
       "task_key": "02_bronze_healthcare"
     },
     {
@@ -65,7 +65,7 @@
         "02_bronze_healthcare"
       ],
       "file": "03_silver_healthcare.ipynb",
-      "sha256": "9aab8cb9fb6a9f490968bccf803fd82ad22ffcda28a072ea6a9638bf62d407fe",
+      "sha256": "5864c7bec775ab070d4fa825fece69ede7fd66f743aa7f9b150a680435e38714",
       "task_key": "03_silver_healthcare"
     },
     {
@@ -73,7 +73,7 @@
         "03_silver_healthcare"
       ],
       "file": "04_gold_healthcare.ipynb",
-      "sha256": "a29233be4468b34fd65ac2ec4dbecf74223e99015f4801319a9827ad70785fcd",
+      "sha256": "ae3e0ce3ac2a96ff9abd82fa323d384b8fc5fcbbba489fb7abc233d05e6fbafb",
       "task_key": "04_gold_healthcare"
     },
     {
@@ -81,12 +81,12 @@
         "04_gold_healthcare"
       ],
       "file": "05_lineage_healthcare.ipynb",
-      "sha256": "f242819080f7b9e8a14f48304fa8e96e4f6bd9d1cc50440daf989891cfb96d6e",
+      "sha256": "e102a96c5290885454e62e5220dff8fa8beb01146dc2b388260b13ebfa90d945",
       "task_key": "05_lineage_healthcare"
     }
   ],
-  "pack_sha256": "cfeb5b25b1686566d044a1628e597d0e7f0f58cfb95d74b6720f0965c21fafd5",
-  "pack_version": "1.0.0",
+  "pack_sha256": "a7c47c018cd27f250345c8c9b9e8462e459a8b2aa99205424621018f3d2ba267",
+  "pack_version": "1.0.2",
   "schema_version": 1,
   "status": "available",
   "tables": {

@@ -234,7 +234,7 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
     )
 
 
-def lab_catalog() -> tuple[LabPack, ...]:
+def _catalog_manifest() -> tuple[tuple[str, ...], dict[str, str]]:
     catalog = _object(LABS_ROOT / "catalog.json")
     lab_ids = catalog.get("labs")
     if catalog.get("schema_version") != 1 or not isinstance(lab_ids, list):
@@ -242,6 +242,22 @@ def lab_catalog() -> tuple[LabPack, ...]:
     ids = tuple(map(str, lab_ids))
     if len(ids) != len(set(ids)):
         raise LabPackError("Lab catalog contains duplicates")
+    descriptions = catalog.get("descriptions")
+    if (
+        not isinstance(descriptions, dict)
+        or set(descriptions) != set(ids)
+        or any(
+            not isinstance(descriptions[lab_id], str)
+            or not descriptions[lab_id].strip()
+            for lab_id in ids
+        )
+    ):
+        raise LabPackError("Lab catalog descriptions must cover every lab")
+    return ids, {lab_id: descriptions[lab_id].strip() for lab_id in ids}
+
+
+def lab_catalog() -> tuple[LabPack, ...]:
+    ids, _ = _catalog_manifest()
     return tuple(load_lab_pack(lab_id, require_available=False) for lab_id in ids)
 
 
@@ -250,10 +266,12 @@ def available_lab_ids() -> tuple[str, ...]:
 
 
 def public_lab_catalog() -> list[dict[str, Any]]:
+    _, descriptions = _catalog_manifest()
     return [
         {
             "lab_id": pack.lab_id,
             "display_name": pack.display_name,
+            "description": descriptions[pack.lab_id],
             "pack_version": pack.pack_version,
             "status": pack.status,
             "available": pack.available,

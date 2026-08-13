@@ -46,20 +46,30 @@ type AssignedLab = {
 type CatalogLab = {
   lab_id: string;
   display_name: string;
+  description?: string;
   pack_version: string;
   status: "available" | "planned";
   available: boolean;
 };
+type UserDraft = { name: string; email: string; lab_ids: string[] };
 const fallbackCatalog: CatalogLab[] = [
-  { lab_id: "banking", display_name: "Banking", pack_version: "1.0.0", status: "available", available: true },
-  { lab_id: "telecommunications", display_name: "Telecommunications", pack_version: "1.0.0", status: "available", available: true },
-  { lab_id: "retail", display_name: "Retail", pack_version: "1.0.0", status: "available", available: true },
-  { lab_id: "healthcare", display_name: "Healthcare", pack_version: "1.0.0", status: "available", available: true },
+  { lab_id: "banking", display_name: "Banking", pack_version: "1.0.2", status: "available", available: true },
+  { lab_id: "telecommunications", display_name: "Telecommunications", pack_version: "1.0.2", status: "available", available: true },
+  { lab_id: "retail", display_name: "Retail", pack_version: "1.0.2", status: "available", available: true },
+  { lab_id: "healthcare", display_name: "Healthcare", pack_version: "1.0.2", status: "available", available: true },
   { lab_id: "agent", display_name: "Agent", pack_version: "0.0.0", status: "planned", available: false },
 ];
 
 function labLabel(catalog: CatalogLab[], labId: string) {
   return catalog.find(({ lab_id }) => lab_id === labId)?.display_name ?? labId;
+}
+
+function labDescription(lab: CatalogLab) {
+  return lab.description || "Description unavailable.";
+}
+
+function labPhaseLabel(phase: string) {
+  return phase ? `${phase[0].toUpperCase()}${phase.slice(1)}` : "Pending";
 }
 
 const registrationPhaseLabels: Record<RegistrationPhase, string> = {
@@ -314,6 +324,145 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     : ((await response.json()) as T);
 }
 
+function CreateUserModal({
+  open,
+  catalog,
+  draft,
+  creating,
+  error,
+  onDraftChange,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  catalog: CatalogLab[];
+  draft: UserDraft;
+  creating: boolean;
+  error: string;
+  onDraftChange: (draft: UserDraft) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  useDialogFocus(open, creating ? () => undefined : onClose, panelRef, nameRef);
+
+  if (!open) return null;
+  return createPortal(
+    <div className="lab-manager-overlay">
+      <section
+        className="lab-manager-modal create-user-modal"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        aria-busy={creating}
+        tabIndex={-1}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Participant access</p>
+            <h2 id={titleId}>Add user</h2>
+            <p id={descriptionId}>
+              Enter the participant details and select one or more initial laboratories.
+            </p>
+          </div>
+          <span className="lab-selection-count">
+            {draft.lab_ids.length} selected
+          </span>
+        </header>
+        <form className="create-user-form" onSubmit={onSubmit}>
+          <div className="create-user-fields">
+            <label>
+              Full name
+              <input
+                ref={nameRef}
+                value={draft.name}
+                onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
+                minLength={2}
+                maxLength={120}
+                disabled={creating}
+                autoComplete="name"
+                required
+              />
+            </label>
+            <label>
+              Email
+              <input
+                type="email"
+                value={draft.email}
+                onChange={(event) => onDraftChange({ ...draft, email: event.target.value })}
+                disabled={creating}
+                autoComplete="email"
+                required
+              />
+            </label>
+          </div>
+          <div className="lab-manager-table-wrap">
+            <table className="lab-manager-table create-user-lab-table">
+              <caption className="sr-only">Select initial laboratories</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Select</th>
+                  <th scope="col">Laboratory</th>
+                  <th scope="col">Version</th>
+                  <th scope="col">Description</th>
+                  <th scope="col">Availability</th>
+                </tr>
+              </thead>
+              <tbody>
+                {catalog.map((lab) => {
+                  const selected = draft.lab_ids.includes(lab.lab_id);
+                  return (
+                    <tr key={lab.lab_id}>
+                      <td>
+                        <input
+                          className="lab-assignment-check"
+                          type="checkbox"
+                          checked={selected}
+                          disabled={creating || !lab.available}
+                          aria-label={`Select ${lab.display_name} laboratory`}
+                          onChange={(event) => onDraftChange({
+                            ...draft,
+                            lab_ids: event.target.checked
+                              ? [...draft.lab_ids, lab.lab_id]
+                              : draft.lab_ids.filter((value) => value !== lab.lab_id),
+                          })}
+                        />
+                      </td>
+                      <td><strong>{lab.display_name}</strong></td>
+                      <td>{lab.pack_version}</td>
+                      <td className="lab-table-description">{labDescription(lab)}</td>
+                      <td>
+                        <span className={`lab-state ${lab.available ? "unassigned" : "planned"}`}>
+                          {lab.available ? "Available" : "Planned"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {error && <p className="lab-manager-error" role="alert">{error}</p>}
+          <footer>
+            <button className="secondary" type="button" disabled={creating} onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" disabled={creating || !draft.lab_ids.length}>
+              {creating ? "Creating..." : "Create user"}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 function LabManagerModal({
   open,
   user,
@@ -378,6 +527,7 @@ function LabManagerModal({
                 <th scope="col">Assigned</th>
                 <th scope="col">Laboratory</th>
                 <th scope="col">Version</th>
+                <th scope="col">Description</th>
                 <th scope="col">State</th>
                 <th scope="col" className="actions-column">Action</th>
               </tr>
@@ -404,9 +554,10 @@ function LabManagerModal({
                     </td>
                     <td><strong>{lab.display_name}</strong></td>
                     <td>{installed?.pack_version ?? lab.pack_version}</td>
+                    <td className="lab-table-description">{labDescription(lab)}</td>
                     <td>
                       <span className={`lab-state ${installed ? "installed" : lab.available ? "unassigned" : "planned"}`}>
-                        {installed ? installed.phase : lab.available ? "Not assigned" : "Coming soon"}
+                        {installed ? labPhaseLabel(installed.phase) : lab.available ? "Pending" : "Planned"}
                       </span>
                     </td>
                     <td className="actions-column">
@@ -536,6 +687,24 @@ function RefreshIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M20 11a8 8 0 0 0-14.8-4L3 10m0-6v6h6m-5 3a8 8 0 0 0 14.8 4L21 14m0 6v-6h-6"
+      />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M13.5 6.5 17.5 10.5M4 20l4.3-1 10.9-10.9a2.8 2.8 0 0 0-4-4L4.3 15 4 20Z"
       />
     </svg>
   );
@@ -919,7 +1088,7 @@ function RegisterPage() {
                   }
                 />
                 <span>{lab.display_name}</span>
-                {!lab.available && <small>Coming soon</small>}
+                {!lab.available && <small>Planned</small>}
               </label>
             ))}
           </fieldset>
@@ -1096,6 +1265,7 @@ function AdminUsers() {
   const [message, setMessage] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [createProgress, setCreateProgress] = useState<RegistrationResponse | null>(null);
   const [draft, setDraft] = useState({ name: "", email: "", lab_ids: ["banking"] as string[] });
   const createAbortRef = useRef<AbortController | null>(null);
   const operationAbortRef = useRef<AbortController | null>(null);
@@ -1147,6 +1317,12 @@ function AdminUsers() {
   async function createUser(event: FormEvent) {
     event.preventDefault();
     setCreating(true);
+    setCreateOpen(false);
+    setCreateProgress({
+      status: "pending",
+      phase: "identity",
+      message: "Preparing the participant account.",
+    });
     setError("");
     setMessage("");
     createAbortRef.current?.abort();
@@ -1161,11 +1337,7 @@ function AdminUsers() {
             body: JSON.stringify(draft),
             signal,
           }),
-        onPending: (pending) =>
-          setMessage(
-            pending.message ||
-              `${registrationPhaseLabel(pending.phase)}. Reconciliation is still running.`,
-          ),
+        onPending: setCreateProgress,
       });
       setDraft({ name: "", email: "", lab_ids: ["banking"] });
       setCreateOpen(false);
@@ -1173,13 +1345,21 @@ function AdminUsers() {
       await loadUsers();
     } catch (reason) {
       if (controller.signal.aborted) return;
+      setCreateOpen(true);
       setError(
         reason instanceof Error ? reason.message : "Unable to create user",
       );
     } finally {
       if (createAbortRef.current === controller) createAbortRef.current = null;
+      setCreateProgress(null);
       setCreating(false);
     }
+  }
+  function closeCreateUser() {
+    if (creating) return;
+    setCreateOpen(false);
+    setError("");
+    setDraft({ name: "", email: "", lab_ids: ["banking"] });
   }
   async function deleteUser() {
     if (!pendingDelete) return;
@@ -1361,16 +1541,17 @@ function AdminUsers() {
   return (
     <>
       <Shell adminLink={false} onSignOut={() => setLogoutOpen(true)}>
-        <section className="admin" aria-busy={operating} inert={operating}>
+        <section className="admin" aria-busy={operating || creating} inert={operating || creating}>
           <div className="admin-panel">
             <div className="admin-panel-heading">
               <h1>Users</h1>
               <button
                 className="create-user"
                 type="button"
+                aria-haspopup="dialog"
                 aria-expanded={createOpen}
                 onClick={() => {
-                  setCreateOpen((current) => !current);
+                  setCreateOpen(true);
                   setError("");
                 }}
               >
@@ -1416,76 +1597,6 @@ function AdminUsers() {
                 </button>
               </div>
             </div>
-            {createOpen && (
-              <form className="admin-create" onSubmit={createUser}>
-                <label>
-                  Full name
-                  <input
-                    value={draft.name}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        name: event.target.value,
-                      }))
-                    }
-                    minLength={2}
-                    maxLength={120}
-                    required
-                  />
-                </label>
-                <label>
-                  Email
-                  <input
-                    type="email"
-                    value={draft.email}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        email: event.target.value,
-                      }))
-                    }
-                    required
-                  />
-                </label>
-                <fieldset className="lab-picker">
-                  <legend>Laboratories</legend>
-                  {catalog.map((lab) => (
-                    <label key={lab.lab_id}>
-                      <input
-                        type="checkbox"
-                        checked={draft.lab_ids.includes(lab.lab_id)}
-                        disabled={!lab.available}
-                        onChange={(event) => setDraft((current) => ({
-                          ...current,
-                          lab_ids: event.target.checked
-                            ? [...current.lab_ids, lab.lab_id]
-                            : current.lab_ids.filter((value) => value !== lab.lab_id),
-                        }))}
-                      />
-                      <span>{lab.display_name}</span>
-                      {!lab.available && <small>Coming soon</small>}
-                    </label>
-                  ))}
-                </fieldset>
-                <div className="admin-form-actions">
-                  <button
-                    className="secondary"
-                    type="button"
-                    onClick={() => setCreateOpen(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button disabled={creating || !draft.lab_ids.length}>
-                    {creating ? "Creating…" : "Create user"}
-                  </button>
-                </div>
-              </form>
-            )}
-            {createOpen && error && (
-              <p className="notice error" role="alert">
-                {error}
-              </p>
-            )}
             <div className="table-wrap">
               <table>
                 <thead>
@@ -1530,15 +1641,6 @@ function AdminUsers() {
                                 : `${user.labs.filter((lab) => lab.phase === "active").length} active`}
                             </small>
                           </span>
-                          <button
-                            className="manage-labs-button"
-                            type="button"
-                            aria-haspopup="dialog"
-                            aria-expanded={labManagerUserId === user.id}
-                            onClick={() => openLabManager(user)}
-                          >
-                            Manage
-                          </button>
                         </div>
                       </td>
                       <td>
@@ -1550,6 +1652,17 @@ function AdminUsers() {
                       </td>
                       <td className="row-actions">
                         <span className="row-action-group">
+                          <button
+                            className="table-action table-edit"
+                            type="button"
+                            aria-haspopup="dialog"
+                            aria-expanded={labManagerUserId === user.id}
+                            onClick={() => openLabManager(user)}
+                            aria-label={`Manage laboratories for ${user.email}`}
+                            title="Manage laboratories"
+                          >
+                            <EditIcon />
+                          </button>
                           <button
                             className="table-action table-delete"
                             type="button"
@@ -1580,6 +1693,24 @@ function AdminUsers() {
           </div>
         </section>
       </Shell>
+      <CreateUserModal
+        open={createOpen}
+        catalog={catalog}
+        draft={draft}
+        creating={creating}
+        error={error}
+        onDraftChange={setDraft}
+        onClose={closeCreateUser}
+        onSubmit={createUser}
+      />
+      {creating && (
+        <ProvisioningOverlay
+          phase={createProgress?.phase || "identity"}
+          message={
+            createProgress?.message || "Preparing the participant account."
+          }
+        />
+      )}
       <Toast message={message} onDismiss={() => setMessage("")} />
       <LabManagerModal
         open={Boolean(labManagerUser) && !operating}

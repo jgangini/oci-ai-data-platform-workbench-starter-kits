@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.lab_packs import LabPackError, lab_catalog, load_lab_pack
+from app.lab_packs import LabPackError, lab_catalog, load_lab_pack, public_lab_catalog
 
 
 ACTIVE_LABS = ("banking", "telecommunications", "retail", "healthcare")
@@ -14,8 +14,11 @@ ACTIVE_LABS = ("banking", "telecommunications", "retail", "healthcare")
 
 def test_catalog_has_four_versioned_labs_and_disabled_agent() -> None:
     packs = lab_catalog()
+    public = public_lab_catalog()
     assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "agent")
-    assert all(pack.pack_version == "1.0.0" and pack.available for pack in packs[:4])
+    assert all(pack.pack_version == "1.0.2" and pack.available for pack in packs[:4])
+    assert all(item["description"].strip() for item in public)
+    assert "transactions" in public[0]["description"]
     assert packs[-1].status == "planned"
     assert not packs[-1].datasets and not packs[-1].notebooks
     with pytest.raises(LabPackError, match="not available"):
@@ -64,11 +67,13 @@ def test_pack_hashes_rows_notebooks_parameters_and_lineage_contract(lab_id: str)
         "objectstorage_namespace",
     ):
         assert f'required_parameter("{parameter}")' in rendered
-    assert "oidlUtils.parameters.getParameter(name)" in rendered
+    assert 'oidlUtils.parameters.getParameter(name, "")' in rendered
     assert "import oidlUtils" not in rendered
     assert all(b"\r\n" not in asset.read_bytes() for asset in pack.notebooks)
     assert "spark.aidp.lineage.enabled=false" not in rendered
     assert "lineage_demo" in rendered
+    assert "source = spark.table(source_table)" in rendered
+    assert "saveAsTable(target_table)" in rendered
 
 
 def test_canonical_assets_are_identical_for_every_participant() -> None:

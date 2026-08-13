@@ -104,6 +104,8 @@ class IdentityClient:
             raise IdentityConflict("An unmanaged Identity Domains account already uses this email")
         if len(matches) > 1:
             raise IdentityConflict("Identity Domains returned multiple users for this email")
+        if matches and str(matches[0].get("userName", "")).casefold() != email.casefold():
+            raise IdentityConflict("An Identity Domains account uses this email with a different username")
         return matches[0] if matches else None
 
     async def create_user(self, name: str, email: str) -> dict[str, Any]:

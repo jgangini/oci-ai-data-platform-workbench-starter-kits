@@ -49,7 +49,7 @@
     {
       "depends_on": [],
       "file": "01_landing_telecommunications.ipynb",
-      "sha256": "d840bd03ef868d2c5ab5ee88226f9c15197813ce96775a5dbbbeb3d759ce2755",
+      "sha256": "d3693a3a87015399e068c5ba1f06c04397a610b25b1dfeca06d62ff25c341fed",
       "task_key": "01_landing_telecommunications"
     },
     {
@@ -57,7 +57,7 @@
         "01_landing_telecommunications"
       ],
       "file": "02_bronze_telecommunications.ipynb",
-      "sha256": "7be1d5a2a14e993214ebd5dae9642197e9be4c313e8d45ef4db9ca83e573bdfa",
+      "sha256": "924407f74fa74d10dbf5f1411e4a939cd07e8eece62938c462dd47bd0640583e",
       "task_key": "02_bronze_telecommunications"
     },
     {
@@ -65,7 +65,7 @@
         "02_bronze_telecommunications"
       ],
       "file": "03_silver_telecommunications.ipynb",
-      "sha256": "5c169e5640795d863dcea56a5f939fb8f2c75803685549d72aa00c623144e844",
+      "sha256": "c4a0f73e5bb67dedf34e7c26813be9cf6557ebcf6f92d7110c26b2885193b93a",
       "task_key": "03_silver_telecommunications"
     },
     {
@@ -73,7 +73,7 @@
         "03_silver_telecommunications"
       ],
       "file": "04_gold_telecommunications.ipynb",
-      "sha256": "276792dff3b67e6d2f3bd8089b140aa9babb58eb956a47b8b5cd4892374ac656",
+      "sha256": "035d0639f24d68da786235c36a0e2f940bbfce2b84e6ff3a3dece8bbc5ef23ca",
       "task_key": "04_gold_telecommunications"
     },
     {
@@ -81,12 +81,12 @@
         "04_gold_telecommunications"
       ],
       "file": "05_lineage_telecommunications.ipynb",
-      "sha256": "4d6c612beab2487cbe7f115d009ba6d01f89ebcdb8c6197020266175e78980dd",
+      "sha256": "396ce246d7332d951fd8fc1e4d757f0f072062892f88f87941b9ff369ec872c2",
       "task_key": "05_lineage_telecommunications"
     }
   ],
-  "pack_sha256": "ef8f0b70e0557dfde32634b8573632b69673e457e05205a80db911c0e35ef399",
-  "pack_version": "1.0.0",
+  "pack_sha256": "8bf8dbcf4505138132c60bdbb7107bef0d8cb293236b899e22030f8e0cb031f1",
+  "pack_version": "1.0.2",
   "schema_version": 1,
   "status": "available",
   "tables": {

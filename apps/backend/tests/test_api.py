@@ -179,6 +179,7 @@ def test_public_catalog_exposes_four_available_labs_and_planned_agent(tmp_path: 
         "banking", "telecommunications", "retail", "healthcare", "agent"
     ]
     assert all(lab["available"] for lab in payload["labs"][:4])
+    assert all(lab["description"].strip() for lab in payload["labs"])
     assert payload["labs"][-1]["status"] == "planned"
     assert payload["labs"][-1]["available"] is False
     assert "industries" not in payload
