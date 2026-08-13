@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { labAssignmentChanges } from "../src/labAssignments.ts";
+
 const source = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
 const pollingSource = await readFile(new URL("../src/registrationPoll.ts", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -90,10 +92,30 @@ test("administrator mutates one participant laboratory at a time", () => {
   assert.match(source, /open=\{Boolean\(pendingLabAction\) && !operating\}/);
   assert.match(source, /aria-busy=\{operating\} inert=\{operating\}/);
   assert.match(source, /operationAbortRef\.current\?\.abort\(\)/);
-  assert.match(source, /Delete the participant to remove the last lab/);
+  assert.match(source, /A participant must keep at least one laboratory/);
+  assert.match(source, /disabled=\{!hasChanges \|\| !selectedLabIds\.length\}/);
   assert.match(source, /select:not\(\[disabled\]\)/);
   assert.match(source, /function ProvisioningOverlay/);
   assert.match(styles, /\.table-action \{[^}]*width: 44px;[^}]*min-height: 44px;/);
+});
+
+test("laboratory manager derives only the requested assignment changes", () => {
+  assert.deepEqual(
+    labAssignmentChanges(
+      ["banking", "retail"],
+      ["banking", "telecommunications", "healthcare"],
+    ),
+    {
+      add: ["telecommunications", "healthcare"],
+      remove: ["retail"],
+    },
+  );
+  assert.match(source, /function LabManagerModal/);
+  assert.match(source, /Participant laboratories/);
+  assert.match(source, /Save changes/);
+  assert.match(source, /Confirm changes/);
+  assert.match(source, /lab-assignment-check/);
+  assert.match(source, /Redeploy \$\{lab\.display_name\} for \$\{user\.email\}/);
 });
 
 test("registration retries OCI reconciliation with phases, backoff, and a real deadline", () => {

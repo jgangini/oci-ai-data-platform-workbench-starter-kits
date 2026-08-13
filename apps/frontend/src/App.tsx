@@ -10,6 +10,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { labAssignmentChanges } from "./labAssignments";
+
 import {
   ApiRequestError,
   getOrCreateLabOperation,
@@ -310,6 +312,139 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.status === 204
     ? (undefined as T)
     : ((await response.json()) as T);
+}
+
+function LabManagerModal({
+  open,
+  user,
+  catalog,
+  selectedLabIds,
+  confirmingRemoval,
+  error,
+  onSelectionChange,
+  onRedeploy,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  user: LabUser | null;
+  catalog: CatalogLab[];
+  selectedLabIds: string[];
+  confirmingRemoval: boolean;
+  error: string;
+  onSelectionChange: (labIds: string[]) => void;
+  onRedeploy: (lab: AssignedLab) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus(open, onClose, panelRef, closeRef);
+
+  if (!open || !user) return null;
+  const assigned = new Map(user.labs.map((lab) => [lab.lab_id, lab]));
+  const changes = labAssignmentChanges(
+    user.labs.map((lab) => lab.lab_id),
+    selectedLabIds,
+  );
+  const hasChanges = Boolean(changes.add.length || changes.remove.length);
+  return createPortal(
+    <div className="lab-manager-overlay">
+      <section
+        className="lab-manager-modal"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Participant laboratories</p>
+            <h2 id={titleId}>Manage laboratories</h2>
+            <p id={descriptionId}>{user.email}</p>
+          </div>
+          <span className="lab-selection-count">
+            {selectedLabIds.length} selected
+          </span>
+        </header>
+        <div className="lab-manager-table-wrap">
+          <table className="lab-manager-table">
+            <thead>
+              <tr>
+                <th scope="col">Assigned</th>
+                <th scope="col">Laboratory</th>
+                <th scope="col">Version</th>
+                <th scope="col">State</th>
+                <th scope="col" className="actions-column">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {catalog.map((lab) => {
+                const installed = assigned.get(lab.lab_id);
+                const selected = selectedLabIds.includes(lab.lab_id);
+                return (
+                  <tr key={lab.lab_id}>
+                    <td>
+                      <input
+                        className="lab-assignment-check"
+                        type="checkbox"
+                        checked={selected}
+                        disabled={!lab.available}
+                        aria-label={`${selected ? "Remove" : "Add"} ${lab.display_name} ${selected ? "from" : "to"} ${user.email}`}
+                        onChange={(event) => onSelectionChange(
+                          event.target.checked
+                            ? [...selectedLabIds, lab.lab_id]
+                            : selectedLabIds.filter((value) => value !== lab.lab_id),
+                        )}
+                      />
+                    </td>
+                    <td><strong>{lab.display_name}</strong></td>
+                    <td>{installed?.pack_version ?? lab.pack_version}</td>
+                    <td>
+                      <span className={`lab-state ${installed ? "installed" : lab.available ? "unassigned" : "planned"}`}>
+                        {installed ? installed.phase : lab.available ? "Not assigned" : "Coming soon"}
+                      </span>
+                    </td>
+                    <td className="actions-column">
+                      <button
+                        className="table-action table-reset"
+                        type="button"
+                        disabled={!installed}
+                        onClick={() => installed && onRedeploy(installed)}
+                        aria-label={`Redeploy ${lab.display_name} for ${user.email}`}
+                        title={installed ? "Redeploy lab" : "Assign the lab before redeploying"}
+                      >
+                        <RefreshIcon />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {confirmingRemoval && (
+          <p className="lab-manager-warning" role="alert">
+            Confirm removal of {changes.remove.length} {changes.remove.length === 1 ? "laboratory" : "laboratories"}. Only their jobs, tables, objects and workspace content will be deleted.
+          </p>
+        )}
+        {error && <p className="lab-manager-error" role="alert">{error}</p>}
+        <footer>
+          <button ref={closeRef} className="secondary" type="button" onClick={onClose}>
+            {confirmingRemoval ? "Back" : "Cancel"}
+          </button>
+          <button type="button" disabled={!hasChanges || !selectedLabIds.length} onClick={onSave}>
+            {confirmingRemoval ? "Confirm changes" : "Save changes"}
+          </button>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
 }
 
 function useLabCatalog() {
@@ -964,7 +1099,10 @@ function AdminUsers() {
   const [draft, setDraft] = useState({ name: "", email: "", lab_ids: ["banking"] as string[] });
   const createAbortRef = useRef<AbortController | null>(null);
   const operationAbortRef = useRef<AbortController | null>(null);
-  const [labChoices, setLabChoices] = useState<Record<string, string>>({});
+  const [labManagerUserId, setLabManagerUserId] = useState<string | null>(null);
+  const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
+  const [confirmingLabRemoval, setConfirmingLabRemoval] = useState(false);
+  const [labManagerError, setLabManagerError] = useState("");
   const [pendingLabAction, setPendingLabAction] = useState<{
     kind: "redeploy" | "remove";
     user: LabUser;
@@ -979,7 +1117,9 @@ function AdminUsers() {
   async function loadUsers() {
     setTableError("");
     try {
-      setUsers((await api<{ users: LabUser[] }>("/api/admin/users")).users);
+      const loaded = (await api<{ users: LabUser[] }>("/api/admin/users")).users;
+      setUsers(loaded);
+      return loaded;
     } catch (reason) {
       if (reason instanceof ApiRequestError && reason.status === 401)
         window.location.assign("/admin/login");
@@ -999,6 +1139,7 @@ function AdminUsers() {
   const visible = users.filter((user) =>
     `${user.name} ${user.email}`.toLowerCase().includes(query.toLowerCase()),
   );
+  const labManagerUser = users.find((user) => user.id === labManagerUserId) ?? null;
   async function logout() {
     await api("/api/admin/logout", { method: "POST" });
     window.location.assign("/");
@@ -1078,27 +1219,112 @@ function AdminUsers() {
     return operation;
   }
 
-  async function addLab(user: LabUser) {
-    const labId = labChoices[user.id] || catalog.find(
-      (item) => item.available && !user.labs.some((lab) => lab.lab_id === item.lab_id),
-    )?.lab_id;
-    if (!labId) return;
-    setOperating(true);
-    setOperationError("");
+  async function requestLabAddition(user: LabUser, labId: string, signal: AbortSignal) {
+    return pollRegistration({
+      signal,
+      request: (requestSignal) => api<RegistrationResponse>(
+        `/api/admin/users/${encodeURIComponent(user.id)}/labs`,
+        { method: "POST", body: JSON.stringify({ lab_id: labId }), signal: requestSignal },
+      ),
+      onPending: setOperationProgress,
+    });
+  }
+
+  async function requestLabAction(
+    action: NonNullable<typeof pendingLabAction>,
+    signal: AbortSignal,
+  ) {
+    let operation;
     try {
-      await pollRegistration({
-        request: (signal) => api<RegistrationResponse>(
-          `/api/admin/users/${encodeURIComponent(user.id)}/labs`,
-          { method: "POST", body: JSON.stringify({ lab_id: labId }), signal },
-        ),
-        onPending: setOperationProgress,
-      });
-      setMessage(`${labLabel(catalog, labId)} was added for ${user.email}.`);
-      setLabChoices((current) => ({ ...current, [user.id]: "" }));
+      operation = operationId(action);
+    } catch {
+      throw new Error("Browser storage is unavailable; the lab operation was not started.");
+    }
+    const base = `/api/admin/users/${encodeURIComponent(action.user.id)}/labs/${encodeURIComponent(action.lab.lab_id)}`;
+    const result = await pollRegistration({
+      signal,
+      request: (requestSignal) => action.kind === "redeploy"
+        ? api<RegistrationResponse>(`${base}/redeploy`, {
+            method: "POST",
+            body: JSON.stringify({ operation_id: operation.operationId }),
+            signal: requestSignal,
+          })
+        : api<RegistrationResponse>(`${base}?operation_id=${encodeURIComponent(operation.operationId)}`, {
+            method: "DELETE",
+            signal: requestSignal,
+          }),
+      onPending: setOperationProgress,
+    });
+    persistLabOperation(
+      window.localStorage, action.user.id, action.lab.lab_id, action.kind,
+    );
+    return result;
+  }
+
+  function openLabManager(user: LabUser) {
+    setLabManagerUserId(user.id);
+    setSelectedLabIds(user.labs.map((lab) => lab.lab_id));
+    setConfirmingLabRemoval(false);
+    setLabManagerError("");
+  }
+
+  async function saveLabAssignments() {
+    if (!labManagerUser) return;
+    const changes = labAssignmentChanges(
+      labManagerUser.labs.map((lab) => lab.lab_id),
+      selectedLabIds,
+    );
+    if (!selectedLabIds.length) {
+      setLabManagerError("A participant must keep at least one laboratory.");
+      return;
+    }
+    if (changes.remove.length && !confirmingLabRemoval) {
+      setConfirmingLabRemoval(true);
+      setLabManagerError("");
+      return;
+    }
+    if (!changes.add.length && !changes.remove.length) {
+      setLabManagerUserId(null);
+      return;
+    }
+    const controller = new AbortController();
+    operationAbortRef.current?.abort();
+    operationAbortRef.current = controller;
+    setOperating(true);
+    setLabManagerError("");
+    setMessage("");
+    try {
+      for (const labId of changes.add) {
+        setOperationProgress({
+          status: "pending",
+          phase: "workspace",
+          message: `Adding ${labLabel(catalog, labId)}.`,
+        });
+        await requestLabAddition(labManagerUser, labId, controller.signal);
+      }
+      for (const labId of changes.remove) {
+        const lab = labManagerUser.labs.find((item) => item.lab_id === labId);
+        if (!lab) continue;
+        setOperationProgress({
+          status: "pending",
+          phase: "cleanup",
+          message: `Removing ${labLabel(catalog, labId)}.`,
+        });
+        await requestLabAction({ kind: "remove", user: labManagerUser, lab }, controller.signal);
+      }
       await loadUsers();
+      setLabManagerUserId(null);
+      setConfirmingLabRemoval(false);
+      setMessage(`Laboratories updated for ${labManagerUser.email}.`);
     } catch (reason) {
-      setOperationError(reason instanceof Error ? reason.message : "Unable to add the lab.");
+      if (controller.signal.aborted) return;
+      const loaded = await loadUsers();
+      const refreshed = loaded?.find((user) => user.id === labManagerUser.id);
+      if (refreshed) setSelectedLabIds(refreshed.labs.map((lab) => lab.lab_id));
+      setConfirmingLabRemoval(false);
+      setLabManagerError(reason instanceof Error ? reason.message : "Unable to update the laboratories.");
     } finally {
+      if (operationAbortRef.current === controller) operationAbortRef.current = null;
       setOperationProgress(null);
       setOperating(false);
     }
@@ -1107,13 +1333,6 @@ function AdminUsers() {
   async function runLabAction() {
     if (!pendingLabAction) return;
     const action = pendingLabAction;
-    let operation;
-    try {
-      operation = operationId(action);
-    } catch {
-      setOperationError("Browser storage is unavailable; the lab operation was not started.");
-      return;
-    }
     const controller = new AbortController();
     operationAbortRef.current?.abort();
     operationAbortRef.current = controller;
@@ -1126,26 +1345,7 @@ function AdminUsers() {
       message: `${action.kind === "redeploy" ? "Reinstalling" : "Removing"} the selected lab resources.`,
     });
     try {
-      const result = await pollRegistration({
-        signal: controller.signal,
-        request: (signal) => {
-          const base = `/api/admin/users/${encodeURIComponent(action.user.id)}/labs/${encodeURIComponent(action.lab.lab_id)}`;
-          return action.kind === "redeploy"
-            ? api<RegistrationResponse>(`${base}/redeploy`, {
-                method: "POST",
-                body: JSON.stringify({ operation_id: operation.operationId }),
-                signal,
-              })
-            : api<RegistrationResponse>(`${base}?operation_id=${encodeURIComponent(operation.operationId)}`, {
-                method: "DELETE",
-                signal,
-              });
-        },
-        onPending: setOperationProgress,
-      });
-      persistLabOperation(
-        window.localStorage, action.user.id, action.lab.lab_id, action.kind,
-      );
+      const result = await requestLabAction(action, controller.signal);
       setPendingLabAction(null);
       setMessage(result.message || "The lab operation completed.");
       await loadUsers();
@@ -1321,61 +1521,24 @@ function AdminUsers() {
                         </span>
                       </td>
                       <td>
-                        <div className="assigned-labs">
-                          {user.labs.map((lab) => (
-                            <div className="assigned-lab" key={lab.lab_id}>
-                              <span>
-                                <strong>{labLabel(catalog, lab.lab_id)}</strong>
-                                <small>{lab.pack_version} · {lab.phase}</small>
-                              </span>
-                              <button
-                                className="table-action table-reset"
-                                type="button"
-                                onClick={() => {
-                                  setOperationError("");
-                                  setPendingLabAction({ kind: "redeploy", user, lab });
-                                }}
-                                aria-label={`Redeploy ${labLabel(catalog, lab.lab_id)} for ${user.email}`}
-                                title="Redeploy lab"
-                              >
-                                <RefreshIcon />
-                              </button>
-                              <button
-                                className="table-action table-delete"
-                                type="button"
-                                disabled={user.labs.length === 1}
-                                onClick={() => {
-                                  setOperationError("");
-                                  setPendingLabAction({ kind: "remove", user, lab });
-                                }}
-                                aria-label={`Remove ${labLabel(catalog, lab.lab_id)} from ${user.email}`}
-                                title={user.labs.length === 1 ? "Delete the participant to remove the last lab" : "Remove lab"}
-                              >
-                                <TrashIcon />
-                              </button>
-                            </div>
-                          ))}
-                          <div className="add-lab-row">
-                            <select
-                              aria-label={`Lab to add for ${user.email}`}
-                              value={labChoices[user.id] || ""}
-                              onChange={(event) => setLabChoices((current) => ({ ...current, [user.id]: event.target.value }))}
-                            >
-                              <option value="">Add laboratory…</option>
-                              {catalog.map((lab) => (
-                                <option
-                                  key={lab.lab_id}
-                                  value={lab.lab_id}
-                                  disabled={!lab.available || user.labs.some((assigned) => assigned.lab_id === lab.lab_id)}
-                                >
-                                  {lab.display_name}{!lab.available ? " — Coming soon" : ""}
-                                </option>
-                              ))}
-                            </select>
-                            <button type="button" onClick={() => void addLab(user)} disabled={!labChoices[user.id]}>
-                              Add
-                            </button>
-                          </div>
+                        <div className="lab-summary">
+                          <span>
+                            <strong>{user.labs.length} {user.labs.length === 1 ? "laboratory" : "laboratories"}</strong>
+                            <small>
+                              {user.labs.every((lab) => lab.phase === "active")
+                                ? "All active"
+                                : `${user.labs.filter((lab) => lab.phase === "active").length} active`}
+                            </small>
+                          </span>
+                          <button
+                            className="manage-labs-button"
+                            type="button"
+                            aria-haspopup="dialog"
+                            aria-expanded={labManagerUserId === user.id}
+                            onClick={() => openLabManager(user)}
+                          >
+                            Manage
+                          </button>
                         </div>
                       </td>
                       <td>
@@ -1418,6 +1581,34 @@ function AdminUsers() {
         </section>
       </Shell>
       <Toast message={message} onDismiss={() => setMessage("")} />
+      <LabManagerModal
+        open={Boolean(labManagerUser) && !operating}
+        user={labManagerUser}
+        catalog={catalog}
+        selectedLabIds={selectedLabIds}
+        confirmingRemoval={confirmingLabRemoval}
+        error={labManagerError}
+        onSelectionChange={(labIds) => {
+          setSelectedLabIds(labIds);
+          setConfirmingLabRemoval(false);
+          setLabManagerError("");
+        }}
+        onRedeploy={(lab) => {
+          if (!labManagerUser) return;
+          setLabManagerUserId(null);
+          setOperationError("");
+          setPendingLabAction({ kind: "redeploy", user: labManagerUser, lab });
+        }}
+        onClose={() => {
+          if (confirmingLabRemoval) {
+            setConfirmingLabRemoval(false);
+            return;
+          }
+          setLabManagerUserId(null);
+          setLabManagerError("");
+        }}
+        onSave={() => void saveLabAssignments()}
+      />
       <ConfirmModal
         open={Boolean(pendingLabAction) && !operating}
         kind={pendingLabAction?.kind === "remove" ? "delete" : "reset"}
