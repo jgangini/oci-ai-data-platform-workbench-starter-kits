@@ -1,5 +1,6 @@
 """Stable AIDP naming conventions shared by provisioning and lab packages."""
 
+import re
 from urllib.parse import quote
 
 from .lab_packs import available_lab_ids
@@ -31,14 +32,16 @@ def participant_folder(email: str) -> str:
     return quote(normalized, safe="@._+-")
 
 
-def workspace_participant_root(email: str) -> str:
-    return f"{WORKSPACE_ROOT}/{participant_folder(email)}"
+def workspace_participant_root(participant_key: str) -> str:
+    if not re.fullmatch(r"u_[0-9a-f]{16}", participant_key):
+        raise ValueError("A valid participant key is required")
+    return f"{WORKSPACE_ROOT}/{participant_key}"
 
 
-def workspace_root(email: str, lab_id: str) -> str:
+def workspace_root(participant_key: str, lab_id: str) -> str:
     if lab_id not in available_lab_ids():
         raise ValueError("Choose an available lab")
-    return f"{workspace_participant_root(email)}/{lab_id}"
+    return f"{workspace_participant_root(participant_key)}/{lab_id}"
 
 
 def table_name(participant_key: str, lab_id: str, dataset: str) -> str:

@@ -2,12 +2,16 @@
 
 This ledger maps the two operational stages. It is deliberately conservative: automated
 coverage can justify retaining a deployment contract, but deletion requires both baseline
-and candidate evidence. Live evidence is therefore `pending` until Deploy Studio records the
-Resource Manager identifiers, plan/apply, outputs, post-apply events, AIDP inventory and app
-health for `v1.0.0` and the current candidate. The `v1.0.0` baseline reached the
-AIDP create operation but exceeded the provider request deadline after 59 minutes; its exact
-Resource Manager stack was then destroyed successfully (`17 destroyed`). `v2.0.0-rc.2` carries
-the evidence-driven 120-minute AIDP create timeout and remains pending live acceptance.
+and candidate evidence. Deploy Studio recorded the Resource Manager identifiers, plan/apply,
+outputs, post-apply events, AIDP inventory and app health for the first two live runs. The
+`v1.0.0` baseline reached the AIDP create operation but exceeded the provider request deadline
+after 59 minutes; its exact Resource Manager stack was then destroyed successfully (`17
+destroyed`). `v2.0.0-rc.2` completed AIDP creation after `1h44m43s`, Resource Manager APPLY,
+`post_apply`, encrypted credential consumption/deletion, strict HTTPS health, catalog, four
+schemas, compute, workspace, and RBAC. Participant A then exposed a live `400` while creating
+an email-named workspace folder; all four journals remained safely at `workspace`.
+`v2.0.0-rc.3` replaces new and explicitly redeployed participant paths with the already-defined
+opaque `participant_key`; final participant and workflow acceptance remains pending.
 
 ## End-to-end chains
 
@@ -15,10 +19,10 @@ the evidence-driven 120-minute AIDP create timeout and remains pending live acce
 |---|---|---|---|---|---|
 | Release | `deploy-studio.json`, source context, plan JSON | `release_gate.main → validate_context → validate_source → validate_plan` | `tests/test_release_gate.py`, `tests/test_manifest.py` | Pending baseline/candidate artifacts | Keep: schema-v1/fresh-only trust boundary. |
 | Preflight | OCI config/key paths and Deploy Studio context | `k_preflight.main → _load_sdk_config → select_inputs → compartment/capacity/key validators` | `tests/test_preflight.py` | Pending preflight events | Keep: validates compartment, home region, capacity and unencrypted key before apply. |
-| Terraform | runtime inputs | naming → network → bucket → VM/bootstrap → Identity/IAM → AIDP → outputs | Terraform validate/test and the HCL tests listed below | Pending plan/apply and inventory | Keep addresses unchanged; replacement is not justified. |
-| Bootstrap VM | commit-pinned source and Terraform outputs | `user_data.sh → retry/use_reachable_base_images → release download → Docker → one-use credential → health` | `tests/test_local_bootstrap.py`, `tests/test_identity_runtime.py`, `tests/test_manifest.py` | Pending cloud-init/run-command/health logs | Keep: application and credential-consumption boundary. |
-| Post-apply | Terraform outputs and operator credential files | `post_apply.main → reconcile → resources/roles/permissions → deliver_operator_credentials → health → build_success_result` | `tests/test_post_apply.py` | Pending hook events and sanitized artifact | Keep: idempotent data-plane reconciliation and final artifact. |
-| Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | Pending candidate participants A/B | Keep: stage 2 participant assignment. |
+| Terraform | runtime inputs | naming → network → bucket → VM/bootstrap → Identity/IAM → AIDP → outputs | Terraform validate/test and the HCL tests listed below | RC2 APPLY succeeded; AIDP ACTIVE after `1h44m43s`; outputs recorded | Keep addresses unchanged; replacement is not justified. |
+| Bootstrap VM | commit-pinned source and Terraform outputs | `user_data.sh → retry/use_reachable_base_images → release download → Docker → one-use credential → health` | `tests/test_local_bootstrap.py`, `tests/test_identity_runtime.py`, `tests/test_manifest.py` | RC2 encrypted object consumed and deleted; HTTPS health succeeded | Keep: application and credential-consumption boundary. |
+| Post-apply | Terraform outputs and operator credential files | `post_apply.main → reconcile → resources/roles/permissions → deliver_operator_credentials → health → build_success_result` | `tests/test_post_apply.py` | RC2 hook completed; catalog, schemas, compute, workspace and roles created | Keep: idempotent data-plane reconciliation and final artifact. |
+| Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | RC2 participant A isolated a `workspace` 400 on email path; RC3 retest pending | Keep: stage 2 participant assignment; use opaque-key workspace paths. |
 | Lab administration | user, lab, operation UUID | `add_lab/redeploy_lab/delete_lab → per-lab journal → _provision_lab/_cleanup_lab` | `apps/backend/tests/test_api.py`, `test_aidp.py` | Pending candidate add/redeploy/delete | Keep: isolated idempotent operations; last-lab guard covered. |
 
 ## Terraform resources and data sources
