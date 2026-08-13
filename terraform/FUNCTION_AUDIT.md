@@ -4,7 +4,10 @@ This ledger maps the two operational stages. It is deliberately conservative: au
 coverage can justify retaining a deployment contract, but deletion requires both baseline
 and candidate evidence. Live evidence is therefore `pending` until Deploy Studio records the
 Resource Manager identifiers, plan/apply, outputs, post-apply events, AIDP inventory and app
-health for `v1.0.0` and `v2.0.0-rc.1`.
+health for `v1.0.0` and the current candidate. The `v1.0.0` baseline reached the
+AIDP create operation but exceeded the provider request deadline after 59 minutes; its exact
+Resource Manager stack was then destroyed successfully (`17 destroyed`). `v2.0.0-rc.2` carries
+the evidence-driven 120-minute AIDP create timeout and remains pending live acceptance.
 
 ## End-to-end chains
 

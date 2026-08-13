@@ -29,6 +29,10 @@ resource "oci_ai_data_platform_ai_data_platform" "lab" {
     workload   = "migration-lab"
   }
 
+  timeouts {
+    create = "120m"
+  }
+
   depends_on = [oci_identity_policy.aidp_service]
 }
 

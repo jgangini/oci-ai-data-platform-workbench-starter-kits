@@ -186,6 +186,8 @@ def test_runtime_security_contracts() -> None:
     assert 'resource "oci_objectstorage_object"' not in storage
     assert 'web_socket_endpoint == null ? "" : oci_ai_data_platform_ai_data_platform.lab.web_socket_endpoint' in aidp
     assert 'alias_key == null ? "" : oci_ai_data_platform_ai_data_platform.lab.alias_key' in aidp
+    assert 'timeouts {' in aidp
+    assert 'create = "120m"' in aidp
     network = (root / "terraform/e_oci_core_vcn.tf").read_text(encoding="utf-8")
     assert 'resource "oci_core_security_list" "web"' in network
     assert "security_list_ids          = [oci_core_security_list.web.id]" in network
