@@ -319,6 +319,70 @@ def test_cleanup_lab_targets_only_declared_lab_resources() -> None:
     ]
 
 
+def test_redeploy_cleanup_preserves_workspace_container_for_in_place_repair() -> None:
+    client = bare_client()
+    key = participant_key(USER_OCID)
+    state = {
+        "workspace_path": workspace_root(key, "banking"),
+        "job_name": f"wf_{key}_banking",
+    }
+    calls: list[tuple[str, ...]] = []
+    client._cleanup_lab_job = lambda workspace, job: calls.append(("job", workspace, job))
+    client._catalog = lambda: {"key": "catalog"}
+    client._cleanup_lab_tables = lambda catalog, participant, lab: calls.append(
+        ("tables", catalog, participant, lab)
+    )
+    client._cleanup_lab_object_storage = lambda participant, lab: calls.append(
+        ("objects", participant, lab)
+    )
+    client._delete_workspace_path = lambda *_args: calls.append(("workspace",))
+
+    client._cleanup_lab(
+        "workspace", key, "banking", state, preserve_workspace=True
+    )
+
+    assert calls == [
+        ("job", "workspace", f"wf_{key}_banking"),
+        ("tables", "catalog", key, "banking"),
+        ("objects", key, "banking"),
+    ]
+
+
+def test_redeploy_uses_in_place_cleanup_before_provisioning() -> None:
+    client = bare_client()
+    key = participant_key(USER_OCID)
+    state = {
+        "pack_version": "1.0.0",
+        "pack_hash": load_lab_pack("banking").pack_sha256,
+        "workspace_path": workspace_root(key, "banking"),
+        "job_name": f"wf_{key}_banking",
+        "phase": "active",
+        "operation": None,
+    }
+    manifest = {"layout_version": 3, "participant_key": key, "labs": {"banking": state}}
+    calls: list[tuple[str, bool]] = []
+    client._workspace = lambda: {"key": "workspace"}
+    client._manifest = lambda *_args: manifest
+    client._write_manifest = lambda *_args: None
+    client._cleanup_lab = lambda _workspace, _key, lab, _state, *, preserve_workspace=False: (
+        calls.append((lab, preserve_workspace))
+    )
+    client._provision_lab = lambda *_args: UserMaterial(
+        EMAIL,
+        "banking",
+        key,
+        workspace_root(key, "banking"),
+        f"wf_{key}_banking",
+        "1.0.0",
+    )
+
+    client._redeploy_lab(
+        USER_OCID, EMAIL, "banking", "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
+    )
+
+    assert calls == [("banking", True)]
+
+
 def test_full_cleanup_delegates_to_each_lab_without_cross_lab_discovery() -> None:
     client = bare_client()
     key = participant_key(USER_OCID)
