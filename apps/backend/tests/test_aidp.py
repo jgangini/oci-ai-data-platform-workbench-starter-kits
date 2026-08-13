@@ -165,7 +165,7 @@ def test_job_contract_is_derived_from_pack_and_accepts_a_sixth_notebook() -> Non
     assert tasks[-1]["taskKey"] == "06_extension_banking"
     assert tasks[-1]["dependsOn"] == [{"taskKey": "05_lineage_banking"}]
     assert tasks[-1]["parameters"] == [
-        {"key": key, "value": value} for key, value in parameters.items()
+        {"name": name, "value": value} for name, value in parameters.items()
     ]
     assert client._job_tasks_match(tasks, tasks, "compute")
 

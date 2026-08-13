@@ -16,7 +16,11 @@ commit `a562facc26d2`; plus-address registration created the keyed workspace suc
 failed deterministically while the Banking journal was at `schemas`. Because that checkpoint
 also covers content upload, `v2.0.0-rc.4` reports a redacted method, endpoint, phase, object path,
 and Oracle `code`/`message` so the next live attempt can identify the exact rejected contract.
-Final participant and workflow acceptance remains pending.
+That attempt completed infrastructure in `13m11s` from commit `addcb7ffc706`, preserved Agent
+as disabled, and identified the exact shared job defect: task parameters used `key`, while the
+live and published AIDP `Parameter` schema requires `name`. `v2.0.0-rc.5` corrects that single
+job-construction helper for every lab and arbitrary notebook count. Final participant and
+workflow acceptance remains pending.
 
 ## End-to-end chains
 
@@ -27,7 +31,7 @@ Final participant and workflow acceptance remains pending.
 | Terraform | runtime inputs | naming → network → bucket → VM/bootstrap → Identity/IAM → AIDP → outputs | Terraform validate/test and the HCL tests listed below | RC2 APPLY succeeded; AIDP ACTIVE after `1h44m43s`; outputs recorded | Keep addresses unchanged; replacement is not justified. |
 | Bootstrap VM | commit-pinned source and Terraform outputs | `user_data.sh → retry/use_reachable_base_images → release download → Docker → one-use credential → health` | `tests/test_local_bootstrap.py`, `tests/test_identity_runtime.py`, `tests/test_manifest.py` | RC2 encrypted object consumed and deleted; HTTPS health succeeded | Keep: application and credential-consumption boundary. |
 | Post-apply | Terraform outputs and operator credential files | `post_apply.main → reconcile → resources/roles/permissions → deliver_operator_credentials → health → build_success_result` | `tests/test_post_apply.py` | RC2 hook completed; catalog, schemas, compute, workspace and roles created | Keep: idempotent data-plane reconciliation and final artifact. |
-| Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | RC3 infrastructure succeeded; plus-address keyed workspace succeeded, then a deterministic redacted content-stage `400` required exact request diagnostics | Keep: stage 2 participant assignment; use opaque-key workspace paths and retain safe live diagnostics until full acceptance. |
+| Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | RC4 infrastructure succeeded in `13m11s`; live registration reached job update and proved AIDP task parameters require `name`, not `key` | Keep: stage 2 participant assignment; fix the one shared job builder and retain safe live diagnostics until full acceptance. |
 | Lab administration | user, lab, operation UUID | `add_lab/redeploy_lab/delete_lab → per-lab journal → _provision_lab/_cleanup_lab` | `apps/backend/tests/test_api.py`, `test_aidp.py` | Pending candidate add/redeploy/delete | Keep: isolated idempotent operations; last-lab guard covered. |
 
 ## Terraform resources and data sources
