@@ -66,6 +66,7 @@ def test_pack_hashes_rows_notebooks_parameters_and_lineage_contract(lab_id: str)
         assert f'required_parameter("{parameter}")' in rendered
     assert "oidlUtils.parameters.getParameter(name)" in rendered
     assert "import oidlUtils" not in rendered
+    assert all(b"\r\n" not in asset.read_bytes() for asset in pack.notebooks)
     assert "spark.aidp.lineage.enabled=false" not in rendered
     assert "lineage_demo" in rendered
 
