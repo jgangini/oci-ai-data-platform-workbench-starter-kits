@@ -10,6 +10,7 @@ import pytest
 from app.aidp import (
     AidpClient,
     AidpProvisionConflict,
+    AidpProvisionError,
     LocalAidpClient,
     UserMaterial,
     participant_key,
@@ -78,6 +79,48 @@ def test_request_retry_token_covers_binary_content_and_identity_headers() -> Non
     tokens = [call["headers"]["opc-retry-token"] for call in calls]
     assert tokens[0] == tokens[1]
     assert tokens[0] != tokens[2]
+
+
+def test_request_error_identifies_safe_operation_without_disclosing_secrets() -> None:
+    client = bare_client()
+
+    class Session:
+        def request(self, *_args, **_kwargs):
+            return FakeResponse(
+                {
+                    "code": "InvalidParameter",
+                    "message": (
+                        "student+alias@example.com sent token=do-not-leak and "
+                        "https://objectstorage.example/par-secret for "
+                        "ocid1.user.oc1..secret"
+                    ),
+                },
+                status_code=400,
+            )
+
+    client.session = Session()
+    with pytest.raises(AidpProvisionError) as raised:
+        client._request(
+            "POST",
+            "/workspaces/private-workspace/objects",
+            data=b"private-content",
+            headers={
+                "path": "/Workspace/medallon/u_1111111111111111/banking/source/accounts.csv",
+                "type": "FILE",
+            },
+            phase="content",
+        )
+
+    detail = str(raised.value)
+    assert "POST /workspaces/{workspace}/objects during content" in detail
+    assert "/Workspace/medallon/u_1111111111111111/banking/source/accounts.csv" in detail
+    assert "400" in detail and "InvalidParameter" in detail
+    assert "private-content" not in detail
+    assert "private-workspace" not in detail
+    assert "student+alias@example.com" not in detail
+    assert "do-not-leak" not in detail
+    assert "par-secret" not in detail
+    assert "ocid1.user" not in detail
 
 
 def test_list_follows_opc_next_page_and_preserves_filters() -> None:

@@ -167,7 +167,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if client is not None:
                 await client.close()
 
-    app = FastAPI(title="OCI AIDP Lab", version="2.0.0-rc.3", docs_url=None, redoc_url=None, lifespan=lifespan)
+    app = FastAPI(title="OCI AIDP Lab", version="2.0.0-rc.4", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.settings = settings
     app.state.settings_store = SettingsStore(settings)
     app.state.session_key = load_or_create_session_key(settings.session_secret_file)
