@@ -242,6 +242,56 @@ class AidpClient:
         except ValueError:
             return response.content
 
+    @staticmethod
+    def _safe_diagnostic_fragment(value: Any, *, limit: int = 240) -> str:
+        if not isinstance(value, str):
+            return ""
+        fragment = " ".join(value.split())
+        fragment = re.sub(r"https?://\S+", "[url]", fragment, flags=re.IGNORECASE)
+        fragment = re.sub(r"\bocid1\.[A-Za-z0-9._-]+", "[ocid]", fragment)
+        fragment = re.sub(
+            r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+            "[email]",
+            fragment,
+            flags=re.IGNORECASE,
+        )
+        fragment = re.sub(
+            r"(?i)\b(authorization|credential|password|secret|token)\s*[:=]\s*\S+",
+            r"\1=[redacted]",
+            fragment,
+        )
+        return fragment[:limit]
+
+    @classmethod
+    def _request_error_message(
+        cls,
+        method: str,
+        path: str,
+        phase: str,
+        request_headers: dict[str, str],
+        response: Any,
+    ) -> str:
+        endpoint = re.sub(r"(/workspaces/)[^/]+", r"\1{workspace}", path)
+        endpoint = cls._safe_diagnostic_fragment(endpoint, limit=180)
+        target = cls._safe_diagnostic_fragment(request_headers.get("path"), limit=180)
+        body = cls._response_body(response)
+        code = cls._safe_diagnostic_fragment(
+            body.get("code") if isinstance(body, dict) else None, limit=80
+        )
+        message = cls._safe_diagnostic_fragment(
+            body.get("message") if isinstance(body, dict) else None
+        )
+        context = f"{method.upper()} {endpoint} during {phase}"
+        if target:
+            context += f" for {target}"
+        oracle_detail = ""
+        if code or message:
+            oracle_detail = f" Oracle {code or 'error'}: {message or 'No message provided.'}"
+        return (
+            f"AIDP rejected {context} ({response.status_code}).{oracle_detail} "
+            "Check the AIDP policy and request contract, then retry."
+        )
+
     def _request(
         self,
         method: str,
@@ -281,7 +331,9 @@ class AidpClient:
             return (None, response.headers) if include_headers else None
         if response.status_code >= 400:
             raise AidpProvisionError(
-                f"AIDP could not complete this operation ({response.status_code}). Check the AIDP policy and retry."
+                self._request_error_message(
+                    method, path, phase, request_headers, response
+                )
             )
         result = self._response_body(response)
         return (result, response.headers) if include_headers else result

@@ -10,8 +10,13 @@ destroyed`). `v2.0.0-rc.2` completed AIDP creation after `1h44m43s`, Resource Ma
 `post_apply`, encrypted credential consumption/deletion, strict HTTPS health, catalog, four
 schemas, compute, workspace, and RBAC. Participant A then exposed a live `400` while creating
 an email-named workspace folder; all four journals remained safely at `workspace`.
-`v2.0.0-rc.3` replaces new and explicitly redeployed participant paths with the already-defined
-opaque `participant_key`; final participant and workflow acceptance remains pending.
+`v2.0.0-rc.3` replaced new and explicitly redeployed participant paths with the already-defined
+opaque `participant_key`. Its infrastructure completed in `16m09s` (AIDP in `7m36s`) from
+commit `a562facc26d2`; plus-address registration created the keyed workspace successfully, then
+failed deterministically while the Banking journal was at `schemas`. Because that checkpoint
+also covers content upload, `v2.0.0-rc.4` reports a redacted method, endpoint, phase, object path,
+and Oracle `code`/`message` so the next live attempt can identify the exact rejected contract.
+Final participant and workflow acceptance remains pending.
 
 ## End-to-end chains
 
@@ -22,7 +27,7 @@ opaque `participant_key`; final participant and workflow acceptance remains pend
 | Terraform | runtime inputs | naming → network → bucket → VM/bootstrap → Identity/IAM → AIDP → outputs | Terraform validate/test and the HCL tests listed below | RC2 APPLY succeeded; AIDP ACTIVE after `1h44m43s`; outputs recorded | Keep addresses unchanged; replacement is not justified. |
 | Bootstrap VM | commit-pinned source and Terraform outputs | `user_data.sh → retry/use_reachable_base_images → release download → Docker → one-use credential → health` | `tests/test_local_bootstrap.py`, `tests/test_identity_runtime.py`, `tests/test_manifest.py` | RC2 encrypted object consumed and deleted; HTTPS health succeeded | Keep: application and credential-consumption boundary. |
 | Post-apply | Terraform outputs and operator credential files | `post_apply.main → reconcile → resources/roles/permissions → deliver_operator_credentials → health → build_success_result` | `tests/test_post_apply.py` | RC2 hook completed; catalog, schemas, compute, workspace and roles created | Keep: idempotent data-plane reconciliation and final artifact. |
-| Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | RC2 participant A isolated a `workspace` 400 on email path; RC3 retest pending | Keep: stage 2 participant assignment; use opaque-key workspace paths. |
+| Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | RC3 infrastructure succeeded; plus-address keyed workspace succeeded, then a deterministic redacted content-stage `400` required exact request diagnostics | Keep: stage 2 participant assignment; use opaque-key workspace paths and retain safe live diagnostics until full acceptance. |
 | Lab administration | user, lab, operation UUID | `add_lab/redeploy_lab/delete_lab → per-lab journal → _provision_lab/_cleanup_lab` | `apps/backend/tests/test_api.py`, `test_aidp.py` | Pending candidate add/redeploy/delete | Keep: isolated idempotent operations; last-lab guard covered. |
 
 ## Terraform resources and data sources
