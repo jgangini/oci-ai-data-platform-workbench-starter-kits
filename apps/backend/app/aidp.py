@@ -948,7 +948,7 @@ class AidpClient:
                 "notebookPath": f"{root}/{notebook.name}",
                 "cluster": {"clusterKey": compute_key},
                 "parameters": [
-                    {"key": name, "value": value}
+                    {"name": name, "value": value}
                     for name, value in parameters.items()
                 ],
             }
