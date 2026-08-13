@@ -49,7 +49,7 @@
     {
       "depends_on": [],
       "file": "01_landing_telecommunications.ipynb",
-      "sha256": "3086cf795b753a19afe0b109f95f706fca0f765954f280adf749bdd52b0e6101",
+      "sha256": "291f1ebcdca17a739599d7c38868cd8ecdaae124a753a0a7d2eef7f3dca72662",
       "task_key": "01_landing_telecommunications"
     },
     {
@@ -57,7 +57,7 @@
         "01_landing_telecommunications"
       ],
       "file": "02_bronze_telecommunications.ipynb",
-      "sha256": "9fc419f77039ed4617c23234d0638f2c8cac5489fca57879585c58ee2da8430b",
+      "sha256": "c90deefe1f2a6f9a48f02d53e7b20f5817ae161ecac9bd279168d91c2bbf8cf4",
       "task_key": "02_bronze_telecommunications"
     },
     {
@@ -65,7 +65,7 @@
         "02_bronze_telecommunications"
       ],
       "file": "03_silver_telecommunications.ipynb",
-      "sha256": "382c89d8b6ea24f2527ae61f33b3b1685d0893a125caecc58a9e130970b3389a",
+      "sha256": "c7e684617fbb0c8fe81aa12a166985cc42d4751bafa6620b89a87835dc03d297",
       "task_key": "03_silver_telecommunications"
     },
     {
@@ -73,7 +73,7 @@
         "03_silver_telecommunications"
       ],
       "file": "04_gold_telecommunications.ipynb",
-      "sha256": "1b5189c97599c838923d4f196f933717677211adea97838c97fa8a0f75df9118",
+      "sha256": "f0de2658edd443080d15146c82cba5424cd22258adfefdd44517dd70552f5a1d",
       "task_key": "04_gold_telecommunications"
     },
     {
@@ -81,11 +81,11 @@
         "04_gold_telecommunications"
       ],
       "file": "05_lineage_telecommunications.ipynb",
-      "sha256": "1c9b00a9c05bd54432be862325ea37fdb20ecc197544e3d306f68e5c11ba3944",
+      "sha256": "394b067b02beceab40c4185c67c82bea9b8fd70c23c048459a5ddf342a409aa7",
       "task_key": "05_lineage_telecommunications"
     }
   ],
-  "pack_sha256": "716461a55f45f99f6d4053d3352e185eb6bd9013a146760f38783a33b69e4985",
+  "pack_sha256": "60b3ac24d367209ab608d195dae0b1268a59af2f20c30ec2fef0f26ec85b2416",
   "pack_version": "1.0.0",
   "schema_version": 1,
   "status": "available",

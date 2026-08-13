@@ -49,7 +49,7 @@
     {
       "depends_on": [],
       "file": "01_landing_banking.ipynb",
-      "sha256": "42b6a8fd184dfe859f6b0afa62c04ae1a283f704cd2666439adaab0c1345df32",
+      "sha256": "35c008885b8cf9f1c3ebee4969fa8b767b87f0673b783c64121f5716a2f98664",
       "task_key": "01_landing_banking"
     },
     {
@@ -57,7 +57,7 @@
         "01_landing_banking"
       ],
       "file": "02_bronze_banking.ipynb",
-      "sha256": "002c9551d09b9b87598af01e720c47bc7df17e55318dec4cf5d4d27be7eec2a4",
+      "sha256": "34f23583a9c00fc47cf9b05602bde0076a97f9c4c9ac78d8fca8846bd001ceb4",
       "task_key": "02_bronze_banking"
     },
     {
@@ -65,7 +65,7 @@
         "02_bronze_banking"
       ],
       "file": "03_silver_banking.ipynb",
-      "sha256": "e44334578ed16f323ddeec732154bdcbaf561b99b2e08f62ae3854a03feaecbb",
+      "sha256": "a6201e165b9838bd8b49b47fefd1a806dab17aa3c7c04acfabb53b687d6ad667",
       "task_key": "03_silver_banking"
     },
     {
@@ -73,7 +73,7 @@
         "03_silver_banking"
       ],
       "file": "04_gold_banking.ipynb",
-      "sha256": "a655f3ee6b7db23d88b5599cf0b58df1674e0e9b844c42856e731e1f4f931b03",
+      "sha256": "a02528e19312f72515f42c91c955d80daf65abc519cc41a78f0ff9295fceda56",
       "task_key": "04_gold_banking"
     },
     {
@@ -81,11 +81,11 @@
         "04_gold_banking"
       ],
       "file": "05_lineage_banking.ipynb",
-      "sha256": "6a1fd22006ff808cf9a43ca80fb930f510dbfe7a9554bca36c3b3134de305165",
+      "sha256": "a7828979f6933e11275ce37bc9c9556caa193aca98822128b0a50c4cc74f5844",
       "task_key": "05_lineage_banking"
     }
   ],
-  "pack_sha256": "e50093eb1a79aee3606b365d033d6957f8f2b90cd51e5b6c8c90b9c29861fbaa",
+  "pack_sha256": "a632c941f8bd59d2a211be717b4374fd63c696c889b46eb2a8f322b6a30af6e7",
   "pack_version": "1.0.0",
   "schema_version": 1,
   "status": "available",

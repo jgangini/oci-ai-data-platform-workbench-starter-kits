@@ -49,7 +49,7 @@
     {
       "depends_on": [],
       "file": "01_landing_retail.ipynb",
-      "sha256": "f2d4e739cca0586ca874803d41c5c2c838ce844471aa7a0a8e7c2ee3ecd97c25",
+      "sha256": "a430093585ba455909a0e5522d3520e9217f0bf19e738d6587ae2997ef20ddf7",
       "task_key": "01_landing_retail"
     },
     {
@@ -57,7 +57,7 @@
         "01_landing_retail"
       ],
       "file": "02_bronze_retail.ipynb",
-      "sha256": "a0d837b89f204fd201f131febbf4b28c06cc566d3ccfa97df83920d0d9811fa2",
+      "sha256": "09fc1309dad1a615c87465ae4474aa5d94287522db2d97a7298a1d6e5f48184d",
       "task_key": "02_bronze_retail"
     },
     {
@@ -65,7 +65,7 @@
         "02_bronze_retail"
       ],
       "file": "03_silver_retail.ipynb",
-      "sha256": "7bc0082849536cb481841ec5fd998105bfa11e41b9aec2b93b627d1716264bc0",
+      "sha256": "5383e9fd43ac7411a2243d06ab9d44f7cf9aa5797960e07f38de7efaf513231b",
       "task_key": "03_silver_retail"
     },
     {
@@ -73,7 +73,7 @@
         "03_silver_retail"
       ],
       "file": "04_gold_retail.ipynb",
-      "sha256": "ed383109ec79a27beb6338075ab3e3a527cc7b15a0e66b914b072558c2f165f9",
+      "sha256": "def61394d5f89dda59200e7876ff576adf04d49865983c782bcc9ca085ef62b7",
       "task_key": "04_gold_retail"
     },
     {
@@ -81,11 +81,11 @@
         "04_gold_retail"
       ],
       "file": "05_lineage_retail.ipynb",
-      "sha256": "c49d9ee15de4bd533d1ba6662357bc07d5c18d7043601f0c66760bdf23a68386",
+      "sha256": "0b7daa8697a5ef7c4d5822f977da5ecab56f65a79d3186a690234e583d069e88",
       "task_key": "05_lineage_retail"
     }
   ],
-  "pack_sha256": "623fcb2d2c39781894786afeb44d8c068a1a822ac62beb2fead736bda838984c",
+  "pack_sha256": "e62842079c8c5fb2b3a328e5ad7d0a11a9230b4af87bd458a5bb8d726c2f679e",
   "pack_version": "1.0.0",
   "schema_version": 1,
   "status": "available",
