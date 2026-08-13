@@ -18,9 +18,16 @@ also covers content upload, `v2.0.0-rc.4` reports a redacted method, endpoint, p
 and Oracle `code`/`message` so the next live attempt can identify the exact rejected contract.
 That attempt completed infrastructure in `13m11s` from commit `addcb7ffc706`, preserved Agent
 as disabled, and identified the exact shared job defect: task parameters used `key`, while the
-live and published AIDP `Parameter` schema requires `name`. `v2.0.0-rc.5` corrects that single
-job-construction helper for every lab and arbitrary notebook count. Final participant and
-workflow acceptance remains pending.
+live and published AIDP `Parameter` schema requires `name`. `v2.0.0-rc.5` corrected that single
+job-construction helper for every lab and arbitrary notebook count. Its infrastructure completed
+in `49m33s`; participant A activated four labs after an idempotent retry, participant B activated
+Banking and Retail, and adding Telecommunications completed without affecting either existing
+lab. The subsequent Banking redeploy exposed AIDP delete/recreate eventual consistency: the lab
+root remained unpublished beyond the ten-minute client deadline while Retail, Telecommunications
+and every lab for participant A stayed active. `v2.0.0-rc.6` therefore keeps the validated lab
+container during redeploy and replaces only the lab-owned job, tables, Object Storage data and
+canonical content. Lab deletion and participant deletion still remove the exact workspace root.
+Final workflow and lineage acceptance remains pending.
 
 ## End-to-end chains
 
@@ -31,8 +38,8 @@ workflow acceptance remains pending.
 | Terraform | runtime inputs | naming → network → bucket → VM/bootstrap → Identity/IAM → AIDP → outputs | Terraform validate/test and the HCL tests listed below | RC2 APPLY succeeded; AIDP ACTIVE after `1h44m43s`; outputs recorded | Keep addresses unchanged; replacement is not justified. |
 | Bootstrap VM | commit-pinned source and Terraform outputs | `user_data.sh → retry/use_reachable_base_images → release download → Docker → one-use credential → health` | `tests/test_local_bootstrap.py`, `tests/test_identity_runtime.py`, `tests/test_manifest.py` | RC2 encrypted object consumed and deleted; HTTPS health succeeded | Keep: application and credential-consumption boundary. |
 | Post-apply | Terraform outputs and operator credential files | `post_apply.main → reconcile → resources/roles/permissions → deliver_operator_credentials → health → build_success_result` | `tests/test_post_apply.py` | RC2 hook completed; catalog, schemas, compute, workspace and roles created | Keep: idempotent data-plane reconciliation and final artifact. |
-| Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | RC4 infrastructure succeeded in `13m11s`; live registration reached job update and proved AIDP task parameters require `name`, not `key` | Keep: stage 2 participant assignment; fix the one shared job builder and retain safe live diagnostics until full acceptance. |
-| Lab administration | user, lab, operation UUID | `add_lab/redeploy_lab/delete_lab → per-lab journal → _provision_lab/_cleanup_lab` | `apps/backend/tests/test_api.py`, `test_aidp.py` | Pending candidate add/redeploy/delete | Keep: isolated idempotent operations; last-lab guard covered. |
+| Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | RC5 participant A activated Banking, Telecommunications, Retail and Healthcare after a safe retry; B activated Banking and Retail; Agent stayed disabled | Keep: multi-lab assignment, partial-failure recovery and activation boundary proven live. |
+| Lab administration | user, lab, operation UUID | `add_lab/redeploy_lab/delete_lab → per-lab journal → _provision_lab/_cleanup_lab` | `apps/backend/tests/test_api.py`, `test_aidp.py` | RC5 add Telecommunications succeeded; Banking redeploy isolated an AIDP same-path tombstone while other labs stayed active | Keep: isolated journals proven; RC6 preserves the lab container during redeploy and retains exact-root deletion semantics for remove/full cleanup. |
 
 ## Terraform resources and data sources
 

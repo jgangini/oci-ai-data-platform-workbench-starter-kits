@@ -13,7 +13,7 @@ EXPECTED_REPOSITORIES = {
     "https://github.com/jgangini/oci-aidp-cloud-migration-lab",
     "https://github.com/jgangini/oci-aidp-cloud-migration-lab.git",
 }
-EXPECTED_REFS = frozenset({"v2.0.0-rc.1", "v2.0.0-rc.2", "v2.0.0-rc.3", "v2.0.0-rc.4", "v2.0.0-rc.5", "v2.0.0"})
+EXPECTED_REFS = frozenset({"v2.0.0-rc.1", "v2.0.0-rc.2", "v2.0.0-rc.3", "v2.0.0-rc.4", "v2.0.0-rc.5", "v2.0.0-rc.6", "v2.0.0"})
 EXPECTED_REGION = "us-chicago-1"
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -90,7 +90,7 @@ def validate_context(context: dict[str, Any]) -> None:
         raise ValueError("release requires the trusted GitHub repository")
     if source.get("ref") not in EXPECTED_REFS:
         raise ValueError(
-            "release requires source ref v2.0.0-rc.1, v2.0.0-rc.2, v2.0.0-rc.3, v2.0.0-rc.4, v2.0.0-rc.5, or v2.0.0"
+            "release requires source ref v2.0.0-rc.1 through v2.0.0-rc.6, or v2.0.0"
         )
     if not _SHA.fullmatch(str(source.get("commit_sha") or "")):
         raise ValueError("release requires a full lowercase 40-character source SHA")

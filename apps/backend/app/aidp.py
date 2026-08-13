@@ -1514,7 +1514,9 @@ class AidpClient:
             self._write_manifest(workspace_key, key, manifest)
 
         if operation.get("phase") == "cleanup":
-            self._cleanup_lab(workspace_key, key, lab_id, state)
+            self._cleanup_lab(
+                workspace_key, key, lab_id, state, preserve_workspace=True
+            )
             pack = load_lab_pack(lab_id)
             state.update(
                 pack_version=pack.pack_version,
@@ -1792,6 +1794,8 @@ class AidpClient:
         key: str,
         lab_id: str,
         state: dict[str, Any],
+        *,
+        preserve_workspace: bool = False,
     ) -> None:
         workspace_path = str(state.get("workspace_path") or "")
         validated = {
@@ -1804,11 +1808,12 @@ class AidpClient:
         catalog_key = str(self._catalog()["key"])
         self._cleanup_lab_tables(catalog_key, key, lab_id)
         self._cleanup_lab_object_storage(key, lab_id)
-        self._delete_workspace_path(
-            workspace_key,
-            workspace_path,
-            "Lab workspace deletion is still in progress.",
-        )
+        if not preserve_workspace:
+            self._delete_workspace_path(
+                workspace_key,
+                workspace_path,
+                "Lab workspace deletion is still in progress.",
+            )
 
     def _cleanup_user(self, key: str, preserve_manifest: bool = False) -> None:
         workspace_key = str(self._workspace()["key"])
