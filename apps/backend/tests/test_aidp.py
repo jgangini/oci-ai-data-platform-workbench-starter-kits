@@ -16,7 +16,7 @@ from app.aidp import (
 )
 from app.config import Settings
 from app.lab_packs import LabAsset, load_lab_pack
-from app.notebooks import participant_folder, workspace_root
+from app.notebooks import participant_folder, workspace_participant_root, workspace_root
 
 
 USER_OCID = "ocid1.user.oc1..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -48,14 +48,18 @@ def bare_client() -> AidpClient:
     return client
 
 
-def test_participant_key_is_stable_opaque_and_workspace_escapes_delimiters() -> None:
+def test_participant_key_is_stable_opaque_and_workspace_uses_only_the_key() -> None:
     expected = "u_" + hashlib.sha256(USER_OCID.encode()).hexdigest()[:16]
     assert participant_key(USER_OCID) == expected
     assert EMAIL not in expected
     assert len(expected) == 18
+    assert workspace_participant_root(expected) == f"/Workspace/medallon/{expected}"
+    assert workspace_root(expected, "banking") == f"/Workspace/medallon/{expected}/banking"
     assert participant_folder("student/lab@example.com") == "student%2Flab@example.com"
     with pytest.raises(ValueError, match="valid OCI user OCID"):
         participant_key(EMAIL)
+    with pytest.raises(ValueError, match="valid participant key"):
+        workspace_participant_root(EMAIL)
 
 
 def test_request_retry_token_covers_binary_content_and_identity_headers() -> None:
@@ -109,7 +113,7 @@ def test_job_contract_is_derived_from_pack_and_accepts_a_sixth_notebook() -> Non
     parameters = {
         "participant_key": participant_key(USER_OCID),
         "lab_id": "banking",
-        "workspace_root": workspace_root(EMAIL, "banking"),
+        "workspace_root": workspace_root(participant_key(USER_OCID), "banking"),
         "bucket_name": "bucket",
         "objectstorage_namespace": "namespace",
     }
@@ -150,8 +154,8 @@ def test_two_participants_upload_identical_pack_assets_with_isolated_job_identit
         files.pop("/lab-manifest.json")
         return files, notebooks, jobs
 
-    first = capture("u_1111111111111111", "/Workspace/medallon/one@example.com/banking")
-    second = capture("u_2222222222222222", "/Workspace/medallon/two@example.com/banking")
+    first = capture("u_1111111111111111", "/Workspace/medallon/u_1111111111111111/banking")
+    second = capture("u_2222222222222222", "/Workspace/medallon/u_2222222222222222/banking")
     assert first[:2] == second[:2]
     assert first[2] != second[2]
 
@@ -159,7 +163,7 @@ def test_two_participants_upload_identical_pack_assets_with_isolated_job_identit
 def test_v2_manifest_migrates_to_v3_without_updating_assets() -> None:
     client = bare_client()
     key = participant_key(USER_OCID)
-    old_root = workspace_root(EMAIL, "banking")
+    old_root = f"/Workspace/medallon/{participant_folder(EMAIL)}/banking"
     manifest = {
         "layout_version": 2,
         "participant_key": key,
@@ -187,6 +191,30 @@ def test_v2_manifest_migrates_to_v3_without_updating_assets() -> None:
         AssertionError("active v2 assets must not be rewritten")
     )
     assert client._provision_lab(USER_OCID, EMAIL, "banking", migrated).pack_version == "legacy-v2"
+
+
+def test_new_v3_manifest_uses_opaque_participant_workspace_paths() -> None:
+    client = bare_client()
+    key = participant_key(USER_OCID)
+    writes: list[dict] = []
+    client._manifest = lambda _workspace, _key: None
+    client._write_manifest = lambda _workspace, _key, value: writes.append(
+        json.loads(json.dumps(value))
+    )
+
+    manifest = client._ensure_manifest(
+        "workspace", key, "student+alias@example.com", ("banking", "retail")
+    )
+
+    assert writes == [manifest]
+    assert {
+        lab_id: state["workspace_path"]
+        for lab_id, state in manifest["labs"].items()
+    } == {
+        "banking": workspace_root(key, "banking"),
+        "retail": workspace_root(key, "retail"),
+    }
+    assert "student" not in json.dumps(manifest)
 
 
 def test_local_multi_lab_lifecycle_is_idempotent_and_protects_last_lab() -> None:
@@ -222,7 +250,7 @@ def test_cleanup_lab_targets_only_declared_lab_resources() -> None:
     state = {
         "pack_version": "1.0.0",
         "pack_hash": load_lab_pack("banking").pack_sha256,
-        "workspace_path": workspace_root(EMAIL, "banking"),
+        "workspace_path": workspace_root(key, "banking"),
         "job_name": f"wf_{key}_banking",
         "phase": "active",
         "operation": None,
@@ -244,7 +272,7 @@ def test_cleanup_lab_targets_only_declared_lab_resources() -> None:
         ("job", "workspace", f"wf_{key}_banking"),
         ("tables", "catalog", key, "banking"),
         ("objects", key, "banking"),
-        ("workspace", "workspace", workspace_root(EMAIL, "banking")),
+        ("workspace", "workspace", workspace_root(key, "banking")),
     ]
 
 
@@ -253,7 +281,7 @@ def test_full_cleanup_delegates_to_each_lab_without_cross_lab_discovery() -> Non
     key = participant_key(USER_OCID)
     roots = {
         lab_id: {
-            "workspace_path": workspace_root(EMAIL, lab_id),
+            "workspace_path": workspace_root(key, lab_id),
             "job_name": f"wf_{key}_{lab_id}",
         }
         for lab_id in ("banking", "retail")
@@ -276,8 +304,8 @@ def test_full_cleanup_delegates_to_each_lab_without_cross_lab_discovery() -> Non
     client._cleanup_user(key)
 
     assert calls == [
-        ("banking", workspace_root(EMAIL, "banking")),
-        ("retail", workspace_root(EMAIL, "retail")),
+        ("banking", workspace_root(key, "banking")),
+        ("retail", workspace_root(key, "retail")),
     ]
 
 
@@ -293,4 +321,23 @@ def test_cleanup_rejects_untrusted_workspace_path() -> None:
                 "workspace_path": "/Workspace/Shared/not-ours/banking",
                 "job_name": f"wf_{key}_banking",
             },
+        )
+
+
+def test_v3_manifest_rejects_email_scoped_workspace_path() -> None:
+    client = bare_client()
+    key = participant_key(USER_OCID)
+    with pytest.raises(Exception, match="exact lab workspace path"):
+        client._manifest_labs(
+            {
+                "layout_version": 3,
+                "participant_key": key,
+                "labs": {
+                    "banking": {
+                        "pack_version": "1.0.0",
+                        "workspace_path": f"/Workspace/medallon/{EMAIL}/banking",
+                    }
+                },
+            },
+            key,
         )

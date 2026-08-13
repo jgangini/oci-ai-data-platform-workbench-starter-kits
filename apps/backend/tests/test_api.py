@@ -77,7 +77,7 @@ class FakeAidp:
     def material(email: str, lab_id: str) -> UserMaterial:
         return UserMaterial(
             email, lab_id, "u_0123456789abcdef",
-            f"/Workspace/medallon/{email}/{lab_id}",
+            f"/Workspace/medallon/u_0123456789abcdef/{lab_id}",
             f"wf_u_0123456789abcdef_{lab_id}", "1.0.0", "active",
         )
 

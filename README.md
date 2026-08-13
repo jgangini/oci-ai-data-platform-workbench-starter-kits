@@ -2,7 +2,7 @@
 
 An end-to-end Oracle Cloud Infrastructure laboratory for learning data engineering with Oracle AI Data Platform (AIDP). It deploys an AIDP platform and shared workspace, shared Spark compute, a governed Oracle-managed Object Storage data plane, and a self-service registration application.
 
-Release v2.0.0 keeps one private `aidp-data-<suffix>` bucket with `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/` prefixes. Notebooks address these locations with OCI URIs and external tables; the package creates neither external AIDP volumes nor an explicit OSCS/OpenSearch resource. The workspace uses the participant email as the visible folder name, while an opaque key and lab ID scope jobs, Object Storage paths, and table names.
+Release v2.0.0 keeps one private `aidp-data-<suffix>` bucket with `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/` prefixes. Notebooks address these locations with OCI URIs and external tables; the package creates neither external AIDP volumes nor an explicit OSCS/OpenSearch resource. The workspace uses the opaque participant key as its folder name, so email characters and PII never enter AIDP paths; the same key and lab ID scope jobs, Object Storage paths, and table names.
 
 The assigned labs, package versions and hashes, exact workspace paths, reconciliation phases, and independent administrator operation journals live in a layout-v3 manifest at `/Workspace/medallon/.control/<participant>.json`, outside each participant's `ADMIN` subtree. Layout-v2 manifests are migrated in place without replacing active assets. The visible `lab-manifest.json` is tutorial metadata only; neither it nor the student-writable bucket controls authorization, overwrite behavior, or cleanup scope.
 
@@ -19,7 +19,7 @@ The data bucket uses the default Oracle-managed encryption key. The lab creates 
 | Retail | 1.0.0 | customers 300; products 150; orders 1,200; order items 3,000 |
 | Healthcare | 1.0.0 | patients 240; providers 48; appointments 900; encounters 700 |
 
-The participant root is `/Workspace/medallon/<normalized-email>/<lab_id>`. CSV and notebook bytes are identical for every participant. Landing adds the technical `participant_key`; AIDP job parameters provide `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, and `objectstorage_namespace`. One workflow per lab derives its task graph from `lab.json`, so adding a notebook does not require Python changes. All participants use the shared `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas; table names retain the opaque participant key and lab ID to prevent collisions.
+The participant root is `/Workspace/medallon/<participant_key>/<lab_id>`. CSV and notebook bytes are identical for every participant. Landing adds the technical `participant_key`; AIDP job parameters provide `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, and `objectstorage_namespace`. One workflow per lab derives its task graph from `lab.json`, so adding a notebook does not require Python changes. All participants use the shared `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas; table names retain the opaque participant key and lab ID to prevent collisions.
 
 ## RBAC and registration lifecycle
 
@@ -30,7 +30,7 @@ The permissions are intentionally split:
 | Pending participants | Workspace `USER` only; no OCI IAM permission to operate AIDP |
 | Developer group | Workspace `USER`, catalog `SELECT`, shared compute `USE`, and `ADMIN` on the four collaborative schemas |
 | Deployment operator | Built-in `AI_DATA_PLATFORM_ADMIN`, inherited from creating the platform and verified by post-apply |
-| Individual participant | Root `READ` without cascade, own email-named folder `ADMIN` with cascade, and own job `MANAGE` |
+| Individual participant | Root `READ` without cascade, own opaque-key folder `ADMIN` with cascade, and own job `MANAGE` |
 
 Developer IAM can `use ai-data-platforms`, read bucket metadata, and manage objects only in the exact `aidp-data-<suffix>` bucket. The deployment operator retains its existing administrative identity; the lab creates no operator-specific user, group, role, policy, grant, or API key. Pending participants receive no AIDP IAM grant.
 
@@ -95,7 +95,7 @@ terraform init -backend=false
 terraform validate
 ```
 
-The v2.0.0 preflight accepts only the trusted repository and the immutable `v2.0.0-rc.1`, `v2.0.0-rc.2`, or `v2.0.0` release SHA in `us-chicago-1`, while keeping the compartment name as the editable Deploy Studio input. Names follow OCI's 1-100 character alphanumeric, period, hyphen, and underscore contract. In `new` mode validation confirms that the exact name is available to create; in `existing` mode it confirms one unambiguous ACTIVE compartment. It also rejects forbidden infrastructure and policies, rejects conflicting AIDP work requests for the selected name, and checks current VM capacity. For a saved Terraform plan, run `python terraform/release_gate.py --plan-json <plan.json>`; it fails unless every managed resource action is create-only.
+The v2.0.0 preflight accepts only the trusted repository and the immutable `v2.0.0-rc.1`, `v2.0.0-rc.2`, `v2.0.0-rc.3`, or `v2.0.0` release SHA in `us-chicago-1`, while keeping the compartment name as the editable Deploy Studio input. Names follow OCI's 1-100 character alphanumeric, period, hyphen, and underscore contract. In `new` mode validation confirms that the exact name is available to create; in `existing` mode it confirms one unambiguous ACTIVE compartment. It also rejects forbidden infrastructure and policies, rejects conflicting AIDP work requests for the selected name, and checks current VM capacity. For a saved Terraform plan, run `python terraform/release_gate.py --plan-json <plan.json>`; it fails unless every managed resource action is create-only.
 
 Deploy Studio manifest v1 currently has no hook between Resource Manager PLAN and its automatic APPLY, and it does not pass the plan JSON to repository preflight. Therefore the create-only plan check is available for manual/CI validation but cannot be enforced by this repository inside the current CloudTechNext PLAN/APPLY sequence. Do not start a lab APPLY until that explicit plan check has passed or CloudTechNext adds a post-plan/pre-apply hook.
 

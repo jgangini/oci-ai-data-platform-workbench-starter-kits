@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import threading
 import uuid
 from dataclasses import dataclass
@@ -21,7 +22,6 @@ from .notebooks import (
     participant_folder,
     schema_name,
     table_name,
-    workspace_participant_root,
     workspace_root,
 )
 
@@ -99,7 +99,7 @@ class LocalAidpClient:
             email,
             lab_id,
             key,
-            workspace_root(email, lab_id),
+            workspace_root(key, lab_id),
             f"wf_{key}_{lab_id}",
             pack.pack_version,
         )
@@ -696,19 +696,19 @@ class AidpClient:
                 or lab_id not in LEGACY_LAB_IDS | set(available_lab_ids())
             ):
                 raise AidpProvisionError("The participant lab journal is invalid; cleanup stopped.")
-            workspace_path = str(state.get("workspace_path") or "")
-            relative = workspace_path.removeprefix(f"{WORKSPACE_ROOT}/")
-            parts = relative.split("/")
-            if (
-                not workspace_path.startswith(f"{WORKSPACE_ROOT}/")
-                or len(parts) != 2
-                or parts[0] in {"", ".control"}
-                or parts[1] != lab_id
-            ):
+            if not cls._lab_workspace_path_is_exact(state, key, lab_id):
                 raise AidpProvisionError(
                     "The participant control manifest does not contain an exact lab workspace path; cleanup stopped."
                 )
         return labs
+
+    @staticmethod
+    def _lab_workspace_path_is_exact(
+        state: dict[str, Any], key: str, lab_id: str
+    ) -> bool:
+        owner = r"(?!\.control(?:/|$))[^/]+" if state.get("pack_version") == "legacy-v2" else re.escape(key)
+        pattern = rf"{re.escape(WORKSPACE_ROOT)}/{owner}/{re.escape(lab_id)}"
+        return re.fullmatch(pattern, str(state.get("workspace_path") or "")) is not None
 
     def _write_manifest(
         self,
@@ -786,7 +786,7 @@ class AidpClient:
             labs[lab_id] = {
                 "pack_version": pack.pack_version,
                 "pack_hash": pack.pack_sha256,
-                "workspace_path": workspace_root(email, lab_id),
+                "workspace_path": workspace_root(key, lab_id),
                 "job_name": f"wf_{key}_{lab_id}",
                 "phase": "workspace",
                 "operation": None,
@@ -1296,8 +1296,8 @@ class AidpClient:
         state = self._manifest_labs(manifest, key)[lab_id]
         previous_phase = str(state.get("phase") or "workspace")
         was_active = previous_phase == "active"
-        participant_root = workspace_participant_root(email)
         root = str(state["workspace_path"])
+        participant_root = root.rsplit("/", 1)[0]
         job_name = str(state["job_name"])
         if was_active:
             return UserMaterial(
@@ -1467,7 +1467,7 @@ class AidpClient:
             state.update(
                 pack_version=pack.pack_version,
                 pack_hash=pack.pack_sha256,
-                workspace_path=workspace_root(email, lab_id),
+                workspace_path=workspace_root(key, lab_id),
                 job_name=f"wf_{key}_{lab_id}",
                 phase="workspace",
             )
