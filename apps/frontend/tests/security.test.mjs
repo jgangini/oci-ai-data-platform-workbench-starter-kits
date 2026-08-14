@@ -60,6 +60,8 @@ test("administrator UI manages lab users through protected API routes", () => {
   assert.match(source, /\{tableError\} Refresh and try again\./);
   assert.match(source, /className="table-error"/);
   assert.match(source, /!tableError && !visible\.length/);
+  assert.match(source, /user\.participant_code \?\? "--"/);
+  assert.doesNotMatch(source, /String\(index \+ 1\)\.padStart/);
   assert.match(source, /Open AI Data Platform/);
   assert.match(source, /function Toast/);
   assert.match(source, /window\.setTimeout\(onDismiss, 4_000\)/);
@@ -134,7 +136,7 @@ test("laboratory manager derives only the requested assignment changes", () => {
   assert.match(source, /aria-label={`Manage laboratories for \$\{user\.email\}`}/);
   assert.doesNotMatch(source, /className="manage-labs-button"/);
   assert.match(source, /Participant laboratories/);
-  assert.match(source, /Save changes/);
+  assert.match(source, /confirmingRemoval \? "Confirm changes" : "Save"/);
   assert.match(source, /Confirm changes/);
   assert.match(source, /lab-assignment-check/);
   assert.match(source, /Redeploy \$\{lab\.display_name\} for \$\{user\.email\}/);
@@ -147,7 +149,8 @@ test("registration retries OCI reconciliation with phases, backoff, and a real d
   assert.match(pollingSource, /"identity"[\s\S]*"workspace"[\s\S]*"schemas"[\s\S]*"content"[\s\S]*"permissions"/);
   assert.match(pollingSource, /2_000, 4_000, 8_000, 16_000, 30_000/);
   assert.match(pollingSource, /10 \* 60 \* 1_000/);
-  assert.match(pollingSource, /error\.status !== 429/);
+  assert.match(pollingSource, /\[408, 429, 502, 504\]\.includes\(error\.status\)/);
+  assert.match(pollingSource, /error instanceof TypeError/);
   assert.match(source, /pollRegistration\(\{/);
   assert.match(source, /registrationAbortRef\.current\?\.abort\(\)/);
   assert.match(source, /phase: pending\.phase/);

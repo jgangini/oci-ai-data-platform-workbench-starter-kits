@@ -45,6 +45,7 @@ class LabPack:
     datasets: tuple[LabAsset, ...]
     notebooks: tuple[LabAsset, ...]
     tables: dict[str, tuple[str, ...]]
+    formats: dict[str, str]
     expected_results: dict[str, Any]
 
     @property
@@ -212,6 +213,24 @@ def _pack_expected_results(
     return expected
 
 
+def _pack_formats(
+    metadata: dict[str, Any], status: str, lab_id: str
+) -> dict[str, str]:
+    raw_formats = metadata.get("formats", {})
+    if not isinstance(raw_formats, dict):
+        raise LabPackError(f"Invalid table formats: {lab_id}")
+    if not raw_formats:
+        return {}
+    formats = {str(layer): str(value).upper() for layer, value in raw_formats.items()}
+    if (
+        status == "available"
+        and set(formats) != MEDALLION_LAYERS
+        or any(value not in {"CSV", "DELTA", "ICEBERG"} for value in formats.values())
+    ):
+        raise LabPackError(f"Invalid table formats: {lab_id}")
+    return formats
+
+
 def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
     if LAB_ID_PATTERN.fullmatch(lab_id) is None:
         raise LabPackError("Invalid lab_id")
@@ -230,6 +249,7 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
         datasets=datasets,
         notebooks=notebooks,
         tables=_pack_tables(metadata, status, lab_id),
+        formats=_pack_formats(metadata, status, lab_id),
         expected_results=_pack_expected_results(metadata, status, lab_id),
     )
 

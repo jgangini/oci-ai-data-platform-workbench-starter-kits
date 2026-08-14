@@ -126,6 +126,7 @@ def test_runtime_security_contracts() -> None:
     root = Path(__file__).parents[2]
     attributes = (root / ".gitattributes").read_text(encoding="utf-8")
     nginx = (root / "docker/nginx.conf").read_text(encoding="utf-8")
+    local_nginx = (root / "docker/nginx.oci-local.conf").read_text(encoding="utf-8")
     entrypoint = (root / "docker/entrypoint.sh").read_text(encoding="utf-8")
     cloud_init = (root / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")
     variables = (root / "terraform/b_variables.tf").read_text(encoding="utf-8")
@@ -138,6 +139,9 @@ def test_runtime_security_contracts() -> None:
     assert "$proxy_add_x_forwarded_for" not in nginx
     assert "*.sh text eol=lf" in attributes
     assert nginx.count("X-Forwarded-For $remote_addr") == 1
+    for proxy in (nginx, local_nginx):
+        assert "proxy_read_timeout 300s;" in proxy
+        assert "proxy_send_timeout 300s;" in proxy
     assert "limit_req" not in nginx
     assert "opaque_rate_limit_key" in backend_main
     assert 'headers={"Retry-After": str(' in backend_main

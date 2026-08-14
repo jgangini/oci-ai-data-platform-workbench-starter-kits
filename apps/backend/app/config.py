@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -83,6 +84,7 @@ class SettingsStore:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._lock = threading.Lock()
 
     def get_admin_settings(self) -> dict[str, str | bool]:
         values = self._load()
@@ -111,12 +113,30 @@ class SettingsStore:
         self._write(values)
         return self.get_admin_settings()
 
-    def _load(self) -> dict[str, str]:
+    def participant_code(self, email: str) -> int:
+        normalized = email.strip().casefold()
+        if normalized.count("@") != 1 or any(character.isspace() for character in normalized):
+            raise ValueError("A valid participant email is required")
+        with self._lock:
+            values = self._load()
+            codes = values["participant_codes"]
+            existing = codes.get(normalized)
+            if isinstance(existing, int) and existing >= 101:
+                return existing
+            code = values["next_participant_code"]
+            codes[normalized] = code
+            values["next_participant_code"] = code + 1
+            self._write(values)
+            return code
+
+    def _load(self) -> dict[str, object]:
         values = {
             "aidp_workbench_url": self._settings.aidp_workbench_url
             if _valid_workbench_url(self._settings.aidp_workbench_url)
             else "",
             "registration_code_hash": self._settings.registration_code_hash,
+            "next_participant_code": 101,
+            "participant_codes": {},
         }
         path = Path(self._settings.aidp_settings_file)
         if path.is_file():
@@ -128,12 +148,29 @@ class SettingsStore:
                     values["aidp_workbench_url"] = aidp_url
                 if isinstance(registration_code_hash, str) and registration_code_hash:
                     values["registration_code_hash"] = registration_code_hash
+                next_code = stored.get("next_participant_code")
+                participant_codes = stored.get("participant_codes")
+                if isinstance(participant_codes, dict):
+                    valid_codes = {
+                        str(email).casefold(): code
+                        for email, code in participant_codes.items()
+                        if isinstance(email, str)
+                        and isinstance(code, int)
+                        and not isinstance(code, bool)
+                        and code >= 101
+                    }
+                    values["participant_codes"] = valid_codes
+                    minimum_next = max(valid_codes.values(), default=100) + 1
+                    if isinstance(next_code, int) and not isinstance(next_code, bool):
+                        values["next_participant_code"] = max(101, next_code, minimum_next)
+                    else:
+                        values["next_participant_code"] = minimum_next
             except (OSError, ValueError, TypeError):
                 pass
 
         return values
 
-    def _write(self, values: dict[str, str]) -> None:
+    def _write(self, values: dict[str, object]) -> None:
         path = Path(self._settings.aidp_settings_file)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")

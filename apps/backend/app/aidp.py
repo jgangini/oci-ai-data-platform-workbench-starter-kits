@@ -20,6 +20,7 @@ from .notebooks import (
     LAYER_PREFIXES,
     WORKSPACE_ROOT,
     participant_folder,
+    participant_key,
     schema_name,
     table_name,
     workspace_root,
@@ -57,6 +58,7 @@ class UserMaterial:
     job_name: str
     pack_version: str = "1.0.0"
     phase: str = "active"
+    participant_code: int | None = None
 
 
 def _validated_lab_ids(lab_ids: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
@@ -69,8 +71,8 @@ def _validated_lab_ids(lab_ids: str | list[str] | tuple[str, ...]) -> tuple[str,
     return values
 
 
-def participant_key(user_ocid: str) -> str:
-    """Derive the stable, non-PII participant identifier from an OCI user OCID."""
+def participant_owner_key(user_ocid: str) -> str:
+    """Derive the stable control-manifest owner from an OCI user OCID."""
     if not user_ocid.startswith("ocid1.user.") or any(character.isspace() for character in user_ocid):
         raise ValueError("A valid OCI user OCID is required")
     return f"u_{hashlib.sha256(user_ocid.encode('utf-8')).hexdigest()[:16]}"
@@ -92,56 +94,62 @@ class LocalAidpClient:
         return None
 
     @staticmethod
-    def _material(user_ocid: str, email: str, lab_id: str) -> UserMaterial:
+    def _material(user_ocid: str, email: str, lab_id: str, participant_code: int) -> UserMaterial:
         pack = load_lab_pack(lab_id)
-        key = participant_key(user_ocid)
+        key = participant_key(participant_code)
         return UserMaterial(
             email,
             lab_id,
             key,
-            workspace_root(key, lab_id),
+            workspace_root(key, lab_id, email),
             f"wf_{key}_{lab_id}",
             pack.pack_version,
+            participant_code=participant_code,
         )
 
     async def provision_user(
-        self, user_ocid: str, email: str, lab_ids: str | list[str]
+        self, user_ocid: str, email: str, lab_ids: str | list[str], participant_code: int
     ) -> UserMaterial | tuple[UserMaterial, ...]:
         requested = _validated_lab_ids(lab_ids)
-        key = participant_key(user_ocid)
-        async with self._locks.setdefault(key, asyncio.Lock()):
-            labs = self.users.setdefault(key, {})
+        owner_key = participant_owner_key(user_ocid)
+        async with self._locks.setdefault(owner_key, asyncio.Lock()):
+            labs = self.users.setdefault(owner_key, {})
             for lab_id in requested:
-                labs.setdefault(lab_id, self._material(user_ocid, email, lab_id))
+                labs.setdefault(lab_id, self._material(user_ocid, email, lab_id, participant_code))
             result = tuple(labs[lab_id] for lab_id in requested)
             return result[0] if isinstance(lab_ids, str) else result
 
     async def add_lab(self, user_ocid: str, email: str, lab_id: str) -> UserMaterial:
-        return await self.provision_user(user_ocid, email, lab_id)
+        owner_key = participant_owner_key(user_ocid)
+        assigned = next(iter(self.users.get(owner_key, {}).values()), None)
+        if assigned is None or assigned.participant_code is None:
+            raise AidpProvisionConflict("This participant has no assigned laboratory")
+        return await self.provision_user(user_ocid, email, lab_id, assigned.participant_code)
 
     async def redeploy_lab(
         self, user_ocid: str, email: str, lab_id: str, operation_id: str
     ) -> UserMaterial:
         _validated_lab_ids(lab_id)
-        key = participant_key(user_ocid)
-        async with self._locks.setdefault(key, asyncio.Lock()):
-            if lab_id not in self.users.get(key, {}):
+        owner_key = participant_owner_key(user_ocid)
+        async with self._locks.setdefault(owner_key, asyncio.Lock()):
+            if lab_id not in self.users.get(owner_key, {}):
                 raise AidpProvisionConflict("This lab is not assigned to the participant")
-            operation_key = (key, lab_id)
+            operation_key = (owner_key, lab_id)
             completed = self._operations.get(operation_key)
             if completed is not None and completed[0] == operation_id:
                 return completed[1]
-            material = self._material(user_ocid, email, lab_id)
-            self.users[key][lab_id] = material
+            assigned = self.users[owner_key][lab_id]
+            material = self._material(user_ocid, email, lab_id, assigned.participant_code or 0)
+            self.users[owner_key][lab_id] = material
             self._operations[operation_key] = (operation_id, material)
             return material
 
     async def delete_lab(
         self, user_ocid: str, lab_id: str, operation_id: str
     ) -> None:
-        key = participant_key(user_ocid)
-        async with self._locks.setdefault(key, asyncio.Lock()):
-            labs = self.users.get(key, {})
+        owner_key = participant_owner_key(user_ocid)
+        async with self._locks.setdefault(owner_key, asyncio.Lock()):
+            labs = self.users.get(owner_key, {})
             if lab_id not in labs:
                 return
             if len(labs) == 1:
@@ -154,16 +162,16 @@ class LocalAidpClient:
         self, user_ocids: list[str]
     ) -> dict[str, list[UserMaterial]]:
         return {
-            user_ocid: list(self.users.get(participant_key(user_ocid), {}).values())
+            user_ocid: list(self.users.get(participant_owner_key(user_ocid), {}).values())
             for user_ocid in user_ocids
-            if self.users.get(participant_key(user_ocid))
+            if self.users.get(participant_owner_key(user_ocid))
         }
 
     async def cleanup_user(self, user_ocid: str) -> None:
-        key = participant_key(user_ocid)
-        async with self._locks.setdefault(key, asyncio.Lock()):
-            self.users.pop(key, None)
-            for operation_key in [item for item in self._operations if item[0] == key]:
+        owner_key = participant_owner_key(user_ocid)
+        async with self._locks.setdefault(owner_key, asyncio.Lock()):
+            self.users.pop(owner_key, None)
+            for operation_key in [item for item in self._operations if item[0] == owner_key]:
                 self._operations.pop(operation_key, None)
 
 
@@ -690,12 +698,33 @@ class AidpClient:
             raise AidpProvisionError(invalid_message)
         return payload
 
-    def _manifest(self, workspace_key: str, key: str) -> dict[str, Any] | None:
+    def _manifest(self, workspace_key: str, owner_key: str) -> dict[str, Any] | None:
         return self._workspace_json(
             workspace_key,
-            self._control_manifest_path(key),
+            self._control_manifest_path(owner_key),
             "The participant control manifest is invalid; delete the participant before retrying.",
         )
+
+    @staticmethod
+    def _manifest_participant_key(manifest: dict[str, Any], owner_key: str) -> str:
+        key = str(manifest.get("participant_key") or "")
+        declared_owner = manifest.get("owner_key")
+        if declared_owner is None:
+            if key != owner_key:
+                raise AidpProvisionError("The participant control manifest has a different owner.")
+            return key
+        if declared_owner != owner_key:
+            raise AidpProvisionError("The participant control manifest has a different owner.")
+        code = manifest.get("participant_code")
+        if (
+            not isinstance(code, int)
+            or isinstance(code, bool)
+            or code < 101
+            or key != participant_key(code)
+        ):
+            raise AidpProvisionError("The participant control manifest has an invalid participant code.")
+        participant_folder(str(manifest.get("participant_email") or ""))
+        return key
 
     @staticmethod
     def _legacy_manifest_workspace_path(manifest: dict[str, Any], key: str) -> str:
@@ -736,19 +765,20 @@ class AidpClient:
         labs = manifest.get("labs")
         if (
             manifest.get("layout_version") != 3
-            or manifest.get("participant_key") != key
             or not isinstance(labs, dict)
         ):
             raise AidpProvisionError(
                 "The participant control manifest is invalid; cleanup stopped."
             )
+        participant = cls._manifest_participant_key(manifest, key)
+        email = str(manifest.get("participant_email") or "") if manifest.get("owner_key") else None
         for lab_id, state in labs.items():
             if (
                 not isinstance(state, dict)
                 or lab_id not in LEGACY_LAB_IDS | set(available_lab_ids())
             ):
                 raise AidpProvisionError("The participant lab journal is invalid; cleanup stopped.")
-            if not cls._lab_workspace_path_is_exact(state, key, lab_id):
+            if not cls._lab_workspace_path_is_exact(state, participant, lab_id, email):
                 raise AidpProvisionError(
                     "The participant control manifest does not contain an exact lab workspace path; cleanup stopped."
                 )
@@ -756,11 +786,15 @@ class AidpClient:
 
     @staticmethod
     def _lab_workspace_path_is_exact(
-        state: dict[str, Any], key: str, lab_id: str
+        state: dict[str, Any], key: str, lab_id: str, email: str | None = None
     ) -> bool:
-        owner = r"(?!\.control(?:/|$))[^/]+" if state.get("pack_version") == "legacy-v2" else re.escape(key)
-        pattern = rf"{re.escape(WORKSPACE_ROOT)}/{owner}/{re.escape(lab_id)}"
-        return re.fullmatch(pattern, str(state.get("workspace_path") or "")) is not None
+        if state.get("pack_version") == "legacy-v2":
+            pattern = rf"{re.escape(WORKSPACE_ROOT)}/(?!\.control(?:/|$))[^/]+/{re.escape(lab_id)}"
+            return re.fullmatch(pattern, str(state.get("workspace_path") or "")) is not None
+        if email is None and re.fullmatch(r"u[1-9][0-9]*", key):
+            pattern = rf"{re.escape(WORKSPACE_ROOT)}/{re.escape(key)}_[^/]+/{re.escape(lab_id)}"
+            return re.fullmatch(pattern, str(state.get("workspace_path") or "")) is not None
+        return str(state.get("workspace_path") or "") == workspace_root(key, lab_id, email)
 
     def _write_manifest(
         self,
@@ -815,21 +849,30 @@ class AidpClient:
     def _ensure_manifest(
         self,
         workspace_key: str,
-        key: str,
+        owner_key: str,
         email: str,
+        participant_code: int,
         lab_ids: str | tuple[str, ...],
     ) -> dict[str, Any]:
         requested = _validated_lab_ids(lab_ids)
-        existing = self._manifest(workspace_key, key)
+        normalized_email = email.strip().casefold()
+        participant_folder(normalized_email)
+        existing = self._manifest(workspace_key, owner_key)
         if existing is not None:
-            existing = self._migrate_manifest(workspace_key, key, existing)
+            existing = self._migrate_manifest(workspace_key, owner_key, existing)
         if existing is None:
             existing = {
                 "layout_version": 3,
-                "participant_key": key,
+                "owner_key": owner_key,
+                "participant_key": participant_key(participant_code),
+                "participant_code": participant_code,
+                "participant_email": normalized_email,
                 "labs": {},
             }
-        labs = self._manifest_labs(existing, key)
+        key = self._manifest_participant_key(existing, owner_key)
+        if existing.get("owner_key") and existing.get("participant_email") != normalized_email:
+            raise AidpProvisionConflict("The participant email does not match the assigned workspace")
+        labs = self._manifest_labs(existing, owner_key)
         changed = False
         for lab_id in requested:
             if lab_id in labs:
@@ -838,14 +881,14 @@ class AidpClient:
             labs[lab_id] = {
                 "pack_version": pack.pack_version,
                 "pack_hash": pack.pack_sha256,
-                "workspace_path": workspace_root(key, lab_id),
+                "workspace_path": workspace_root(key, lab_id, normalized_email if existing.get("owner_key") else None),
                 "job_name": f"wf_{key}_{lab_id}",
                 "phase": "workspace",
                 "operation": None,
             }
             changed = True
-        if changed or self._manifest(workspace_key, key) is None:
-            self._write_manifest(workspace_key, key, existing)
+        if changed or self._manifest(workspace_key, owner_key) is None:
+            self._write_manifest(workspace_key, owner_key, existing)
         return existing
 
     def _advance_lab_manifest(
@@ -855,15 +898,14 @@ class AidpClient:
         lab_id: str,
         phase: str,
     ) -> None:
-        state = self._manifest_labs(
-            manifest, str(manifest["participant_key"])
-        )[lab_id]
+        owner_key = str(manifest.get("owner_key") or manifest["participant_key"])
+        state = self._manifest_labs(manifest, owner_key)[lab_id]
         if state.get("phase") == phase:
             return
         state["phase"] = phase
         self._write_manifest(
             workspace_key,
-            str(manifest["participant_key"]),
+            owner_key,
             manifest,
         )
 
@@ -1338,14 +1380,16 @@ class AidpClient:
         manifest: dict[str, Any],
     ) -> UserMaterial:
         pack = load_lab_pack(lab_id)
-        key = participant_key(user_ocid)
+        owner_key = participant_owner_key(user_ocid)
+        key = self._manifest_participant_key(manifest, owner_key)
+        participant_code = manifest.get("participant_code")
         participant_folder(email)
         workspace_key = str(self._workspace()["key"])
         workspace_changed = self._ensure_workspace_layout(
             workspace_key,
             (WORKSPACE_ROOT, CONTROL_ROOT),
         )
-        state = self._manifest_labs(manifest, key)[lab_id]
+        state = self._manifest_labs(manifest, owner_key)[lab_id]
         previous_phase = str(state.get("phase") or "workspace")
         was_active = previous_phase == "active"
         root = str(state["workspace_path"])
@@ -1359,6 +1403,7 @@ class AidpClient:
                 root,
                 job_name,
                 str(state.get("pack_version") or "legacy-v2"),
+                participant_code=participant_code if isinstance(participant_code, int) else None,
             )
         repair_drift = True
 
@@ -1414,17 +1459,22 @@ class AidpClient:
                 "permissions",
             )
         self._advance_lab_manifest(workspace_key, manifest, lab_id, "active")
-        return UserMaterial(email, lab_id, key, root, job_name, pack.pack_version)
+        return UserMaterial(
+            email, lab_id, key, root, job_name, pack.pack_version,
+            participant_code=participant_code if isinstance(participant_code, int) else None,
+        )
 
     def _provision_user(
-        self, user_ocid: str, email: str, lab_ids: str | list[str]
+        self, user_ocid: str, email: str, lab_ids: str | list[str], participant_code: int
     ) -> UserMaterial | tuple[UserMaterial, ...]:
         requested = _validated_lab_ids(lab_ids)
-        key = participant_key(user_ocid)
+        owner_key = participant_owner_key(user_ocid)
         participant_folder(email)
         workspace_key = str(self._workspace()["key"])
         self._ensure_workspace_layout(workspace_key, (WORKSPACE_ROOT, CONTROL_ROOT))
-        manifest = self._ensure_manifest(workspace_key, key, email, requested)
+        manifest = self._ensure_manifest(
+            workspace_key, owner_key, email, participant_code, requested
+        )
         materials = tuple(
             self._provision_lab(user_ocid, email, lab_id, manifest)
             for lab_id in requested
@@ -1432,17 +1482,19 @@ class AidpClient:
         return materials[0] if isinstance(lab_ids, str) else materials
 
     async def provision_user(
-        self, user_ocid: str, email: str, lab_ids: str | list[str]
+        self, user_ocid: str, email: str, lab_ids: str | list[str], participant_code: int
     ) -> UserMaterial | tuple[UserMaterial, ...]:
-        key = participant_key(user_ocid)
-        async with self._locks.setdefault(key, asyncio.Lock()):
-            return await asyncio.to_thread(self._provision_user, user_ocid, email, lab_ids)
+        owner_key = participant_owner_key(user_ocid)
+        async with self._locks.setdefault(owner_key, asyncio.Lock()):
+            return await asyncio.to_thread(
+                self._provision_user, user_ocid, email, lab_ids, participant_code
+            )
 
     def _user_labs(self, user_ocids: list[str]) -> dict[str, list[UserMaterial]]:
         if not user_ocids:
             return {}
         workspace_key = str(self._workspace()["key"])
-        keys = {participant_key(user_ocid): user_ocid for user_ocid in user_ocids}
+        keys = {participant_owner_key(user_ocid): user_ocid for user_ocid in user_ocids}
         result: dict[str, list[UserMaterial]] = {}
         for key, user_ocid in keys.items():
             manifest = self._manifest(workspace_key, key)
@@ -1456,15 +1508,18 @@ class AidpClient:
                     "The legacy participant control manifest is invalid.",
                 )
                 labs = self._manifest_labs(legacy, key) if legacy else {}
+            technical_key = self._manifest_participant_key(manifest, key) if manifest else key
+            participant_code = manifest.get("participant_code") if manifest else None
             materials = [
                 UserMaterial(
                     "",
                     lab_id,
-                    key,
+                    technical_key,
                     str(state["workspace_path"]),
                     str(state["job_name"]),
                     str(state.get("pack_version") or "legacy-v2"),
                     str(state.get("phase") or "workspace"),
+                    participant_code if isinstance(participant_code, int) else None,
                 )
                 for lab_id, state in labs.items()
             ]
@@ -1478,7 +1533,21 @@ class AidpClient:
         return await asyncio.to_thread(self._user_labs, user_ocids)
 
     async def add_lab(self, user_ocid: str, email: str, lab_id: str) -> UserMaterial:
-        material = await self.provision_user(user_ocid, email, lab_id)
+        owner_key = participant_owner_key(user_ocid)
+        async with self._locks.setdefault(owner_key, asyncio.Lock()):
+            return await asyncio.to_thread(self._add_lab, user_ocid, email, lab_id)
+
+    def _add_lab(self, user_ocid: str, email: str, lab_id: str) -> UserMaterial:
+        owner_key = participant_owner_key(user_ocid)
+        workspace_key = str(self._workspace()["key"])
+        manifest = self._manifest(workspace_key, owner_key)
+        if manifest is None:
+            raise AidpProvisionConflict("This participant has no assigned laboratory")
+        manifest = self._migrate_manifest(workspace_key, owner_key, manifest)
+        participant_code = manifest.get("participant_code")
+        if not isinstance(participant_code, int):
+            raise AidpProvisionConflict("Legacy participants must be recreated before adding laboratories")
+        material = self._provision_user(user_ocid, email, lab_id, participant_code)
         assert isinstance(material, UserMaterial)
         return material
 
@@ -1490,28 +1559,30 @@ class AidpClient:
         operation_id: str,
     ) -> UserMaterial:
         _validated_lab_ids(lab_id)
-        key = participant_key(user_ocid)
+        owner_key = participant_owner_key(user_ocid)
         workspace_key = str(self._workspace()["key"])
-        manifest = self._manifest(workspace_key, key)
+        manifest = self._manifest(workspace_key, owner_key)
         if manifest is None:
             raise AidpProvisionConflict("This lab is not assigned to the participant")
-        manifest = self._migrate_manifest(workspace_key, key, manifest)
-        if lab_id not in self._manifest_labs(manifest, key):
+        manifest = self._migrate_manifest(workspace_key, owner_key, manifest)
+        key = self._manifest_participant_key(manifest, owner_key)
+        if lab_id not in self._manifest_labs(manifest, owner_key):
             raise AidpProvisionConflict("This lab is not assigned to the participant")
-        state = self._manifest_labs(manifest, key)[lab_id]
+        state = self._manifest_labs(manifest, owner_key)[lab_id]
         operation = state.get("operation")
         if isinstance(operation, dict) and operation.get("operation_id") == operation_id:
             if operation.get("phase") == "complete":
                 return UserMaterial(
                     email, lab_id, key, str(state["workspace_path"]),
-                    str(state["job_name"]), str(state["pack_version"]), "active"
+                    str(state["job_name"]), str(state["pack_version"]), "active",
+                    manifest.get("participant_code") if isinstance(manifest.get("participant_code"), int) else None,
                 )
         elif isinstance(operation, dict) and operation.get("phase") in {"cleanup", "provision"}:
             raise AidpProvisionConflict("Another operation is already in progress for this lab")
         else:
             operation = {"operation_id": operation_id, "type": "redeploy", "phase": "cleanup"}
             state["operation"] = operation
-            self._write_manifest(workspace_key, key, manifest)
+            self._write_manifest(workspace_key, owner_key, manifest)
 
         if operation.get("phase") == "cleanup":
             self._cleanup_lab(
@@ -1521,22 +1592,24 @@ class AidpClient:
             state.update(
                 pack_version=pack.pack_version,
                 pack_hash=pack.pack_sha256,
-                workspace_path=workspace_root(key, lab_id),
+                workspace_path=workspace_root(
+                    key, lab_id, str(manifest.get("participant_email") or "") or None
+                ),
                 job_name=f"wf_{key}_{lab_id}",
                 phase="workspace",
             )
             operation["phase"] = "provision"
-            self._write_manifest(workspace_key, key, manifest)
+            self._write_manifest(workspace_key, owner_key, manifest)
         material = self._provision_lab(user_ocid, email, lab_id, manifest)
         operation["phase"] = "complete"
-        self._write_manifest(workspace_key, key, manifest)
+        self._write_manifest(workspace_key, owner_key, manifest)
         return material
 
     async def redeploy_lab(
         self, user_ocid: str, email: str, lab_id: str, operation_id: str
     ) -> UserMaterial:
-        key = participant_key(user_ocid)
-        async with self._locks.setdefault(key, asyncio.Lock()):
+        owner_key = participant_owner_key(user_ocid)
+        async with self._locks.setdefault(owner_key, asyncio.Lock()):
             return await asyncio.to_thread(
                 self._redeploy_lab, user_ocid, email, lab_id, operation_id
             )
@@ -1544,13 +1617,14 @@ class AidpClient:
     def _delete_lab(
         self, user_ocid: str, lab_id: str, operation_id: str
     ) -> None:
-        key = participant_key(user_ocid)
+        owner_key = participant_owner_key(user_ocid)
         workspace_key = str(self._workspace()["key"])
-        manifest = self._manifest(workspace_key, key)
+        manifest = self._manifest(workspace_key, owner_key)
         if manifest is None:
             return
-        manifest = self._migrate_manifest(workspace_key, key, manifest)
-        labs = self._manifest_labs(manifest, key)
+        manifest = self._migrate_manifest(workspace_key, owner_key, manifest)
+        key = self._manifest_participant_key(manifest, owner_key)
+        labs = self._manifest_labs(manifest, owner_key)
         if lab_id not in labs:
             return
         if len(labs) == 1:
@@ -1562,16 +1636,16 @@ class AidpClient:
         if isinstance(operation, dict) and operation.get("operation_id") != operation_id and operation.get("phase") != "complete":
             raise AidpProvisionConflict("Another operation is already in progress for this lab")
         state["operation"] = {"operation_id": operation_id, "type": "delete", "phase": "cleanup"}
-        self._write_manifest(workspace_key, key, manifest)
+        self._write_manifest(workspace_key, owner_key, manifest)
         self._cleanup_lab(workspace_key, key, lab_id, state)
         labs.pop(lab_id)
-        self._write_manifest(workspace_key, key, manifest)
+        self._write_manifest(workspace_key, owner_key, manifest)
 
     async def delete_lab(
         self, user_ocid: str, lab_id: str, operation_id: str
     ) -> None:
-        key = participant_key(user_ocid)
-        async with self._locks.setdefault(key, asyncio.Lock()):
+        owner_key = participant_owner_key(user_ocid)
+        async with self._locks.setdefault(owner_key, asyncio.Lock()):
             await asyncio.to_thread(self._delete_lab, user_ocid, lab_id, operation_id)
 
     def _delete_object_storage_prefix(self, prefix: str) -> None:
@@ -1764,6 +1838,18 @@ class AidpClient:
                 "Lab Object Storage cleanup is still in progress.", "cleanup"
             )
 
+    def _cleanup_participant_object_storage(self, key: str) -> None:
+        prefixes = [
+            f"{prefix}/users/{key}/"
+            for prefix in LAYER_PREFIXES.values()
+        ]
+        for prefix in prefixes:
+            self._delete_object_storage_prefix(prefix)
+        if any(self._object_storage_prefix_exists(prefix) for prefix in prefixes):
+            raise AidpProvisionPending(
+                "Participant Object Storage cleanup is still in progress.", "cleanup"
+            )
+
     def _delete_workspace_path(
         self,
         workspace_key: str,
@@ -1815,18 +1901,22 @@ class AidpClient:
                 "Lab workspace deletion is still in progress.",
             )
 
-    def _cleanup_user(self, key: str, preserve_manifest: bool = False) -> None:
+    def _cleanup_user(self, owner_key: str, preserve_manifest: bool = False) -> None:
         workspace_key = str(self._workspace()["key"])
-        manifest = self._manifest(workspace_key, key)
+        manifest = self._manifest(workspace_key, owner_key)
         participant_roots: set[str] = set()
         if manifest is not None:
-            labs = self._manifest_labs(manifest, key)
+            key = self._manifest_participant_key(manifest, owner_key)
+            labs = self._manifest_labs(manifest, owner_key)
             for lab_id, state in labs.items():
                 participant_roots.add(str(state["workspace_path"]).rsplit("/", 1)[0])
                 self._cleanup_lab(workspace_key, key, lab_id, state)
+        else:
+            key = owner_key
         catalog_key = str(self._catalog()["key"])
         self._cleanup_legacy_tables(catalog_key, key)
         self._cleanup_legacy_schemas(catalog_key, key)
+        self._cleanup_participant_object_storage(key)
         for participant_root in participant_roots:
             self._delete_workspace_path(
                 workspace_key,
@@ -1835,26 +1925,26 @@ class AidpClient:
             )
         self._delete_workspace_path(
             workspace_key,
-            f"{LEGACY_WORKSPACE_ROOT}/{key}",
+            f"{LEGACY_WORKSPACE_ROOT}/{owner_key}",
             "Legacy participant workspace deletion is still in progress.",
         )
         if not preserve_manifest:
             self._delete_workspace_path(
                 workspace_key,
-                self._control_manifest_path(key),
+                self._control_manifest_path(owner_key),
                 "Participant control manifest deletion is still in progress.",
             )
         self._delete_workspace_path(
             workspace_key,
-            self._legacy_control_manifest_path(key),
+            self._legacy_control_manifest_path(owner_key),
             "Legacy participant control manifest deletion is still in progress.",
         )
 
 
     async def cleanup_user(self, user_ocid: str) -> None:
-        key = participant_key(user_ocid)
-        async with self._locks.setdefault(key, asyncio.Lock()):
-            await asyncio.to_thread(self._cleanup_user, key)
+        owner_key = participant_owner_key(user_ocid)
+        async with self._locks.setdefault(owner_key, asyncio.Lock()):
+            await asyncio.to_thread(self._cleanup_user, owner_key)
 
     def _healthcheck(self) -> None:
         workspace = self._workspace()

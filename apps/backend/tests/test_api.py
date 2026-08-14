@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.aidp import AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, UserMaterial
-from app.config import Settings
+from app.config import Settings, SettingsStore
 from app.identity import IdentityConflict, IdentityPending, IdentityRejected, RegistrationResult
 from app.main import LOCAL_COOKIE_NAME, create_app
 from app.security import RateLimiter, hash_secret
@@ -76,12 +76,15 @@ class FakeAidp:
     @staticmethod
     def material(email: str, lab_id: str) -> UserMaterial:
         return UserMaterial(
-            email, lab_id, "u_0123456789abcdef",
-            f"/Workspace/medallon/u_0123456789abcdef/{lab_id}",
-            f"wf_u_0123456789abcdef_{lab_id}", "1.0.0", "active",
+            email, lab_id, "u101",
+            f"/Workspace/medallon/u101_ada@example.com/{lab_id}",
+            f"wf_u101_{lab_id}", "1.0.0", "active", 101,
         )
 
-    async def provision_user(self, user_ocid: str, email: str, lab_ids: list[str]):
+    async def provision_user(
+        self, user_ocid: str, email: str, lab_ids: list[str], participant_code: int
+    ):
+        assert participant_code == 101
         if self.mode == "aidp-pending":
             raise AidpProvisionPending("workbench is creating shared material", "schemas")
         if self.mode == "aidp-conflict":
@@ -164,6 +167,17 @@ def register_payload(**updates):
     }
 
 
+def test_participant_codes_start_at_101_and_are_stable_by_email(tmp_path: Path) -> None:
+    settings = Settings(aidp_settings_file=str(tmp_path / "settings.json"))
+    store = SettingsStore(settings)
+    assert store.participant_code("Nadia.Cloud.AI@gmail.com") == 101
+    assert store.participant_code("nadia.cloud.ai@gmail.com") == 101
+    assert store.participant_code("next@example.com") == 102
+    reloaded = SettingsStore(settings)
+    assert reloaded.participant_code("nadia.cloud.ai@gmail.com") == 101
+    assert reloaded.participant_code("third@example.com") == 103
+
+
 def login(client: TestClient) -> None:
     response = client.post(
         "/api/admin/login",
@@ -173,12 +187,12 @@ def login(client: TestClient) -> None:
     assert LOCAL_COOKIE_NAME in response.cookies
 
 
-def test_public_catalog_exposes_four_available_labs_and_planned_agent(tmp_path: Path) -> None:
+def test_public_catalog_exposes_five_available_labs_and_planned_agent(tmp_path: Path) -> None:
     payload = make_client(tmp_path).get("/api/config").json()
     assert [lab["lab_id"] for lab in payload["labs"]] == [
-        "banking", "telecommunications", "retail", "healthcare", "agent"
+        "banking", "telecommunications", "telco_lineage", "retail", "healthcare", "agent"
     ]
-    assert all(lab["available"] for lab in payload["labs"][:4])
+    assert all(lab["available"] for lab in payload["labs"][:5])
     assert all(lab["description"].strip() for lab in payload["labs"])
     assert payload["labs"][-1]["status"] == "planned"
     assert payload["labs"][-1]["available"] is False
@@ -308,6 +322,7 @@ def test_local_development_mode_runs_multi_lab_lifecycle_without_oci(tmp_path: P
         registration_code_hash=hash_secret("AIDP-2026", iterations=1_000, salt=b"local-code-salt"),
         aidp_workbench_url="https://example.datalake.oci.oraclecloud.com#?tenant=local&domain=Default",
         session_secret_file=str(tmp_path / "session.key"), cookie_secure=False,
+        aidp_settings_file=str(tmp_path / "settings.json"),
         local_development_mode=True,
     )
     with TestClient(create_app(settings)) as client:
@@ -322,6 +337,7 @@ def test_local_development_mode_runs_multi_lab_lifecycle_without_oci(tmp_path: P
         )
         assert created.status_code == 201
         user = client.get("/api/admin/users").json()["users"][0]
+        assert user["participant_code"] == 101
         assert [lab["lab_id"] for lab in user["labs"]] == ["healthcare", "retail"]
         assert client.delete(f"/api/admin/users/{user['id']}").status_code == 204
 

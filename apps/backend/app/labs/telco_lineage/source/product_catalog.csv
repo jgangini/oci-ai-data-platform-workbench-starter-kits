@@ -1,0 +1,16 @@
+source_row_id,product_id,service_type,product_name,product_family,monthly_fee,status,updated_at
+SRC-PROD-001,PRE01,PREPAID,Basico,Prepaid Portfolio,0.00,active,2026-01-03T00:00:00Z
+SRC-PROD-002,PRE02,PREPAID,Social,Prepaid Portfolio,0.00,active,2026-01-03T00:00:00Z
+SRC-PROD-003,PRE03,PREPAID,Datos,Prepaid Portfolio,0.00,active,2026-01-03T00:00:00Z
+SRC-PROD-004,PRE04,PREPAID,Voz,Prepaid Portfolio,0.00,active,2026-01-03T00:00:00Z
+SRC-PROD-005,PRE05,PREPAID,Total,Prepaid Portfolio,0.00,active,2026-01-03T00:00:00Z
+SRC-PROD-006,POST01,POSTPAID,Inicio,Postpaid Portfolio,29.90,active,2026-01-03T00:00:00Z
+SRC-PROD-007,POST02,POSTPAID,Plus,Postpaid Portfolio,39.90,active,2026-01-03T00:00:00Z
+SRC-PROD-008,POST03,POSTPAID,Familia,Postpaid Portfolio,49.90,active,2026-01-03T00:00:00Z
+SRC-PROD-009,POST04,POSTPAID,Pro,Postpaid Portfolio,69.90,active,2026-01-03T00:00:00Z
+SRC-PROD-010,POST05,POSTPAID,Max,Postpaid Portfolio,89.90,active,2026-01-03T00:00:00Z
+SRC-PROD-011,HOME01,HOME,Fibra 100,Home Portfolio,39.90,active,2026-01-03T00:00:00Z
+SRC-PROD-012,HOME02,HOME,Fibra 300,Home Portfolio,49.90,active,2026-01-03T00:00:00Z
+SRC-PROD-013,HOME03,HOME,Fibra 600,Home Portfolio,59.90,active,2026-01-03T00:00:00Z
+SRC-PROD-014,HOME04,HOME,Duo,Home Portfolio,69.90,active,2026-01-03T00:00:00Z
+SRC-PROD-015,HOME05,HOME,Premium,Home Portfolio,89.90,active,2026-01-03T00:00:00Z

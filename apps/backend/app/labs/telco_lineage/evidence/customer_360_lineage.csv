@@ -1,0 +1,6 @@
+"S.No.","DisplayName","Type","Depth","Direction","Path"
+"1","u101_telco_lineage_customer_360","Table","0","null","aidp_lab.oci_gold.u101_telco_lineage_customer_360"
+"2","11_gold_customer_360","Task","1","Upstream","wf_u101_telco_lineage/11_gold_customer_360"
+"3","customer_master","Table","2","Upstream","aidp_lab.telco_lineage.customer_master"
+"4","customer_addresses","Table","2","Upstream","aidp_lab.telco_lineage.customer_addresses"
+"5","service_ownership","Table","2","Upstream","aidp_lab.telco_lineage.service_ownership"

@@ -34,6 +34,7 @@ type LabUser = {
   labs: AssignedLab[];
   active: boolean;
   managed?: boolean;
+  participant_code?: number | null;
 };
 
 type AssignedLab = {
@@ -53,10 +54,11 @@ type CatalogLab = {
 };
 type UserDraft = { name: string; email: string; lab_ids: string[] };
 const fallbackCatalog: CatalogLab[] = [
-  { lab_id: "banking", display_name: "Banking", pack_version: "1.0.2", status: "available", available: true },
-  { lab_id: "telecommunications", display_name: "Telecommunications", pack_version: "1.0.2", status: "available", available: true },
-  { lab_id: "retail", display_name: "Retail", pack_version: "1.0.2", status: "available", available: true },
-  { lab_id: "healthcare", display_name: "Healthcare", pack_version: "1.0.2", status: "available", available: true },
+  { lab_id: "banking", display_name: "Banking", pack_version: "1.0.3", status: "available", available: true },
+  { lab_id: "telecommunications", display_name: "Telecommunications", pack_version: "1.0.3", status: "available", available: true },
+  { lab_id: "telco_lineage", display_name: "Telco Customer 360 Lineage", description: "Trace prepaid, postpaid and home services into a Delta Customer 360 with entity and column lineage.", pack_version: "1.1.1", status: "available", available: true },
+  { lab_id: "retail", display_name: "Retail", pack_version: "1.0.3", status: "available", available: true },
+  { lab_id: "healthcare", display_name: "Healthcare", pack_version: "1.0.3", status: "available", available: true },
   { lab_id: "agent", display_name: "Agent", pack_version: "0.0.0", status: "planned", available: false },
 ];
 
@@ -589,7 +591,7 @@ function LabManagerModal({
             {confirmingRemoval ? "Back" : "Cancel"}
           </button>
           <button type="button" disabled={!hasChanges || !selectedLabIds.length} onClick={onSave}>
-            {confirmingRemoval ? "Confirm changes" : "Save changes"}
+                  {confirmingRemoval ? "Confirm changes" : "Save"}
           </button>
         </footer>
       </section>
@@ -1617,11 +1619,11 @@ function AdminUsers() {
                       </td>
                     </tr>
                   ) : (
-                    visible.map((user, index) => (
+                    visible.map((user) => (
                     <tr key={user.id}>
                       <td>
                         <span className="row-index">
-                          {String(index + 1).padStart(2, "0")}
+                          {user.participant_code ?? "--"}
                         </span>
                         {user.name}
                       </td>

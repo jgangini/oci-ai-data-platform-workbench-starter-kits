@@ -32,16 +32,27 @@ def participant_folder(email: str) -> str:
     return quote(normalized, safe="@._+-")
 
 
-def workspace_participant_root(participant_key: str) -> str:
-    if not re.fullmatch(r"u_[0-9a-f]{16}", participant_key):
+def participant_key(participant_code: int) -> str:
+    if not isinstance(participant_code, int) or isinstance(participant_code, bool) or participant_code < 101:
+        raise ValueError("A participant code starting at 101 is required")
+    return f"u{participant_code}"
+
+
+def workspace_participant_root(participant_key: str, email: str | None = None) -> str:
+    if re.fullmatch(r"u_[0-9a-f]{16}", participant_key):
+        # Existing v3 participants retain their opaque workspace until an explicit rebuild.
+        folder = participant_key
+    elif re.fullmatch(r"u[1-9][0-9]*", participant_key) and int(participant_key[1:]) >= 101 and email:
+        folder = f"{participant_key}_{participant_folder(email)}"
+    else:
         raise ValueError("A valid participant key is required")
-    return f"{WORKSPACE_ROOT}/{participant_key}"
+    return f"{WORKSPACE_ROOT}/{folder}"
 
 
-def workspace_root(participant_key: str, lab_id: str) -> str:
+def workspace_root(participant_key: str, lab_id: str, email: str | None = None) -> str:
     if lab_id not in available_lab_ids():
         raise ValueError("Choose an available lab")
-    return f"{workspace_participant_root(participant_key)}/{lab_id}"
+    return f"{workspace_participant_root(participant_key, email)}/{lab_id}"
 
 
 def table_name(participant_key: str, lab_id: str, dataset: str) -> str:

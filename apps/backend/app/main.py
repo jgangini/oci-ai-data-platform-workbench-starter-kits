@@ -139,6 +139,7 @@ def _material_payload(
         "status": "active",
         "email": email,
         "participant_key": values[0].participant_key,
+        "participant_code": values[0].participant_code,
         "labs": [
             {
                 "lab_id": material.lab_id,
@@ -167,7 +168,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if client is not None:
                 await client.close()
 
-    app = FastAPI(title="OCI AIDP Lab", version="2.0.0-rc.7", docs_url=None, redoc_url=None, lifespan=lifespan)
+    app = FastAPI(title="OCI AIDP Lab", version="2.0.0", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.settings = settings
     app.state.settings_store = SettingsStore(settings)
     app.state.session_key = load_or_create_session_key(settings.session_secret_file)
@@ -270,8 +271,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     status.HTTP_409_CONFLICT,
                     "Existing lab assignments can only be changed by an administrator",
                 )
+        participant_code = app.state.settings_store.participant_code(result.email)
         try:
-            material = await aidp.provision_user(result.user_ocid, email, lab_ids)
+            material = await aidp.provision_user(
+                result.user_ocid, email, lab_ids, participant_code
+            )
         except AidpProvisionPending as exc:
             await restore_existing_access()
             return JSONResponse(
@@ -431,6 +435,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except (AidpProvisionPending, AidpProvisionError) as exc:
                 logger.warning("AIDP participant lab inventory is unavailable (%s)", type(exc).__name__)
         for user in users:
+            materials = assigned_labs.get(str(user.get("ocid") or ""), [])
+            user["participant_code"] = materials[0].participant_code if materials else None
             user["labs"] = [
                 {
                     "lab_id": material.lab_id,
@@ -439,7 +445,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "workspace_path": material.workspace_path,
                     "job_name": material.job_name,
                 }
-                for material in assigned_labs.get(str(user.get("ocid") or ""), [])
+                for material in materials
             ]
             user.pop("ocid", None)
         return {"users": users}
