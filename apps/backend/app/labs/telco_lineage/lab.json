@@ -1,0 +1,304 @@
+{
+  "datasets": [
+    {
+      "file": "crm_customers.csv",
+      "name": "crm_customers",
+      "row_count": 500,
+      "sha256": "b55bde8ced16b9f7d3c138388b9fcf73fdca620e5af74ca2cc64ca5f7f1da62b"
+    },
+    {
+      "file": "crm_addresses.csv",
+      "name": "crm_addresses",
+      "row_count": 620,
+      "sha256": "1fabb2fe306cf45245ebc0c078a660897835e39393d16d93bd72c1b95845722c"
+    },
+    {
+      "file": "product_catalog.csv",
+      "name": "product_catalog",
+      "row_count": 15,
+      "sha256": "398cf6bc3c0ec97833e2202413bb55dcd63bece15395c9f27825bd575e4f003c"
+    },
+    {
+      "file": "prepaid_lines.csv",
+      "name": "prepaid_lines",
+      "row_count": 650,
+      "sha256": "b8b1ebb5403ae9202bc407a38fe839ba4d5cdfff2e7af5cce9ddeedcd83c9c89"
+    },
+    {
+      "file": "prepaid_recharges.csv",
+      "name": "prepaid_recharges",
+      "row_count": 3000,
+      "sha256": "de662a60f9b0fa91377d8df0f0e21da8a2a3b7a028f5cccef221e8d52a747f4f"
+    },
+    {
+      "file": "postpaid_accounts.csv",
+      "name": "postpaid_accounts",
+      "row_count": 280,
+      "sha256": "1360a509b8800b6a7ad0bc29e69172749db291a77e95f5c2860f0aa792a2b7ce"
+    },
+    {
+      "file": "postpaid_lines.csv",
+      "name": "postpaid_lines",
+      "row_count": 400,
+      "sha256": "bfae5e1cc7668e607e4a5a99d1723174eee298a5f687a93a008dce5cc78464c9"
+    },
+    {
+      "file": "postpaid_invoices.csv",
+      "name": "postpaid_invoices",
+      "row_count": 1500,
+      "sha256": "e69d0f22bf42d5b6e2fcd1d9dd5fc661c78780d9cd22fe6061a4afbb51ee4fad"
+    },
+    {
+      "file": "home_services.csv",
+      "name": "home_services",
+      "row_count": 220,
+      "sha256": "83d87b9d71c1effef7b99a53c2d88b3b7e0320fe6035371293f8e5b79641d5a8"
+    },
+    {
+      "file": "home_installations.csv",
+      "name": "home_installations",
+      "row_count": 220,
+      "sha256": "c7f29ce80b4ef140ca5f1b0d2980c71430e647ad0b0409df6f496abf69b4e463"
+    }
+  ],
+  "display_name": "Telco Customer 360 Lineage",
+  "expected_results": {
+    "business_aggregates": {
+      "postpaid_invoices.amount.sum": "106800.30",
+      "prepaid_recharges.amount.sum": "44910.00",
+      "product_catalog.monthly_fee.sum": "589.00"
+    },
+    "lineage": {
+      "direction": "BOTH",
+      "expected_column_edges": [
+        "bronze.crm_customers.document_number->silver.customer_master.document_number->gold.customer_360.document_number",
+        "bronze.prepaid_lines.msisdn->silver.prepaid_service.service_number->silver.service_ownership.service_number->gold.customer_service_portfolio.service_number",
+        "bronze.postpaid_lines.msisdn->silver.postpaid_service.service_number->silver.service_ownership.service_number->gold.customer_service_portfolio.service_number",
+        "bronze.crm_addresses.region->silver.customer_addresses.region->gold.customer_360.region->gold.geographic_service_summary.region",
+        "bronze.prepaid_recharges.amount->silver.prepaid_service.monthly_value->silver.service_ownership.monthly_value->gold.customer_360.monthly_value_total->gold.geographic_service_summary.monthly_value_total",
+        "bronze.product_catalog.product_name->silver.product_catalog.product_name->gold.customer_service_portfolio.product_name"
+      ],
+      "expected_entity_edges": [
+        "landing.crm_customers->bronze.crm_customers",
+        "bronze.crm_customers->silver.customer_master",
+        "bronze.prepaid_lines->silver.prepaid_service",
+        "bronze.postpaid_lines->silver.postpaid_service",
+        "bronze.home_services->silver.home_service",
+        "silver.prepaid_service->silver.service_ownership",
+        "silver.postpaid_service->silver.service_ownership",
+        "silver.home_service->silver.service_ownership",
+        "silver.customer_master->gold.customer_360",
+        "silver.service_ownership->gold.customer_360",
+        "silver.service_ownership->gold.customer_service_portfolio",
+        "gold.customer_360->gold.geographic_service_summary",
+        "gold.customer_service_portfolio->gold.geographic_service_summary"
+      ],
+      "expected_table_rows": {
+        "customer_360": 493,
+        "customer_addresses": 617,
+        "customer_master": 493,
+        "customer_service_portfolio": 1261,
+        "geographic_service_summary": 12,
+        "home_service": 218,
+        "postpaid_service": 398,
+        "prepaid_service": 645,
+        "product_catalog": 15,
+        "quality_issues": 30,
+        "service_ownership": 1261
+      },
+      "max_depth": 8,
+      "target_tables": [
+        "customer_360",
+        "customer_service_portfolio",
+        "geographic_service_summary"
+      ]
+    },
+    "quality": {
+      "exact_quarantined_rows": 30,
+      "minimum_quarantined_rows": 30
+    },
+    "source_row_counts": {
+      "crm_addresses": 620,
+      "crm_customers": 500,
+      "home_installations": 220,
+      "home_services": 220,
+      "postpaid_accounts": 280,
+      "postpaid_invoices": 1500,
+      "postpaid_lines": 400,
+      "prepaid_lines": 650,
+      "prepaid_recharges": 3000,
+      "product_catalog": 15
+    }
+  },
+  "formats": {
+    "bronze": "DELTA",
+    "gold": "DELTA",
+    "landing": "CSV",
+    "silver": "DELTA"
+  },
+  "lab_id": "telco_lineage",
+  "notebooks": [
+    {
+      "depends_on": [],
+      "file": "01_landing_telco_lineage.ipynb",
+      "sha256": "acfb1e8fe7385e0309b3a242eed2a8bcb76de36c2bd52bcf3eb847135b0bfae6",
+      "task_key": "01_landing_telco_lineage"
+    },
+    {
+      "depends_on": [
+        "01_landing_telco_lineage"
+      ],
+      "file": "02_bronze_crm_products.ipynb",
+      "sha256": "70974d5a2e9abf694d2ab583614dd581fbad5888958dc01f1f3906a95e36b429",
+      "task_key": "02_bronze_crm_products"
+    },
+    {
+      "depends_on": [
+        "01_landing_telco_lineage"
+      ],
+      "file": "03_bronze_prepaid.ipynb",
+      "sha256": "d33f0a3b7bece7abcdb5c1372ff21b2296d5987971b8e18310cbf4c3acbc9171",
+      "task_key": "03_bronze_prepaid"
+    },
+    {
+      "depends_on": [
+        "01_landing_telco_lineage"
+      ],
+      "file": "04_bronze_postpaid.ipynb",
+      "sha256": "6bb39681fc309c4b451ba1a99ca26436f74e2791dcd16a8409d8edd15fa02087",
+      "task_key": "04_bronze_postpaid"
+    },
+    {
+      "depends_on": [
+        "01_landing_telco_lineage"
+      ],
+      "file": "05_bronze_home.ipynb",
+      "sha256": "fa6753cd9fdb6d4aeca4822d720fc98241ddb1570feb87ba560c6e812c95447a",
+      "task_key": "05_bronze_home"
+    },
+    {
+      "depends_on": [
+        "02_bronze_crm_products"
+      ],
+      "file": "06_silver_customer.ipynb",
+      "sha256": "54ebf52cf0555c11bea5899eaa44631da844d7d17ae4b07aa1fd73c1ebc1681c",
+      "task_key": "06_silver_customer"
+    },
+    {
+      "depends_on": [
+        "03_bronze_prepaid",
+        "06_silver_customer"
+      ],
+      "file": "07_silver_prepaid.ipynb",
+      "sha256": "d05f1157e3dd26fe275012c1d97384ecaa6b39f8921e79c9d940309dc92bc441",
+      "task_key": "07_silver_prepaid"
+    },
+    {
+      "depends_on": [
+        "04_bronze_postpaid",
+        "06_silver_customer"
+      ],
+      "file": "08_silver_postpaid.ipynb",
+      "sha256": "c96fe4f48927633c51a47d68193cf8cea18ae617e15d407b4db2a512cb4a0f77",
+      "task_key": "08_silver_postpaid"
+    },
+    {
+      "depends_on": [
+        "05_bronze_home",
+        "06_silver_customer"
+      ],
+      "file": "09_silver_home.ipynb",
+      "sha256": "aac2095c5177e7777d13a46ceb92800f41c5f81eba3124e10a48719f3e9bc3c2",
+      "task_key": "09_silver_home"
+    },
+    {
+      "depends_on": [
+        "06_silver_customer",
+        "07_silver_prepaid",
+        "08_silver_postpaid",
+        "09_silver_home"
+      ],
+      "file": "10_silver_ownership_quality.ipynb",
+      "sha256": "2c9f4979bf4008c4046f2c763c783e5a2d5e1176c1535c779796e44e8c176698",
+      "task_key": "10_silver_ownership_quality"
+    },
+    {
+      "depends_on": [
+        "10_silver_ownership_quality"
+      ],
+      "file": "11_gold_customer_360.ipynb",
+      "sha256": "38f053ece84a9ab4ff1f61d39f683a2ec3a03885d0a3c2dddda196ca10094f36",
+      "task_key": "11_gold_customer_360"
+    },
+    {
+      "depends_on": [
+        "10_silver_ownership_quality"
+      ],
+      "file": "12_gold_service_portfolio.ipynb",
+      "sha256": "7a2dafba67778c42e37f1891ebf784ee17f75afc286f86d9010641efeae99cef",
+      "task_key": "12_gold_service_portfolio"
+    },
+    {
+      "depends_on": [
+        "11_gold_customer_360",
+        "12_gold_service_portfolio"
+      ],
+      "file": "13_gold_geographic_summary.ipynb",
+      "sha256": "6c8ec97a29a815c1d50a156e78be6340fac0fa5eaa6713b3e1adf1c07c743bad",
+      "task_key": "13_gold_geographic_summary"
+    },
+    {
+      "depends_on": [
+        "13_gold_geographic_summary"
+      ],
+      "file": "14_validate_lineage.ipynb",
+      "sha256": "65bc3651b23033b9ccffaccc5e88c4435ab9f009e4c58191cd9adcd1ee73057d",
+      "task_key": "14_validate_lineage"
+    }
+  ],
+  "pack_sha256": "8af57e3aff715ed4a7839e62ab9ebbc40126ea6313d3d0a20fa3f11a2652eb02",
+  "pack_version": "1.1.1",
+  "schema_version": 1,
+  "status": "available",
+  "tables": {
+    "bronze": [
+      "crm_customers",
+      "crm_addresses",
+      "product_catalog",
+      "prepaid_lines",
+      "prepaid_recharges",
+      "postpaid_accounts",
+      "postpaid_lines",
+      "postpaid_invoices",
+      "home_services",
+      "home_installations"
+    ],
+    "gold": [
+      "customer_360",
+      "customer_service_portfolio",
+      "geographic_service_summary"
+    ],
+    "landing": [
+      "crm_customers",
+      "crm_addresses",
+      "product_catalog",
+      "prepaid_lines",
+      "prepaid_recharges",
+      "postpaid_accounts",
+      "postpaid_lines",
+      "postpaid_invoices",
+      "home_services",
+      "home_installations"
+    ],
+    "silver": [
+      "customer_master",
+      "customer_addresses",
+      "product_catalog",
+      "prepaid_service",
+      "postpaid_service",
+      "home_service",
+      "service_ownership",
+      "quality_issues"
+    ]
+  }
+}

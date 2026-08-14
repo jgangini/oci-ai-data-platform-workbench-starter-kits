@@ -88,22 +88,51 @@ test("registration progress counts completed provisioning phases", () => {
   });
 });
 
-test("polling honors Retry-After and keeps reconciling after 429", async () => {
+test("polling retries rate limits and gateway timeouts", async () => {
   let attempts = 0;
   const delays = [];
   const result = await pollRegistration({
     request: async () => {
       attempts += 1;
       if (attempts === 1) throw new ApiRequestError("limited", 429, 7_000);
+      if (attempts === 2) throw new ApiRequestError("gateway timeout", 504);
       return { status: "active" };
     },
     sleep: async (delay) => delays.push(delay),
     deadlineMs: 1_000,
   });
   assert.equal(result.status, "active");
-  assert.equal(attempts, 2);
-  assert.deepEqual(delays, [7_000]);
+  assert.equal(attempts, 3);
+  assert.deepEqual(delays, [7_000, 4_000]);
   assert.equal(parseRetryAfter("7", 0), 7_000);
+});
+
+test("polling retries a transient network failure", async () => {
+  let attempts = 0;
+  const result = await pollRegistration({
+    request: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError("Failed to fetch");
+      return { status: "active" };
+    },
+    sleep: async () => undefined,
+    deadlineMs: 1_000,
+  });
+  assert.equal(result.status, "active");
+  assert.equal(attempts, 2);
+});
+
+test("polling preserves application service errors", async () => {
+  const unavailable = new ApiRequestError("AIDP rejected the operation", 503);
+  await assert.rejects(
+    pollRegistration({
+      request: async () => {
+        throw unavailable;
+      },
+      deadlineMs: 1_000,
+    }),
+    (error) => error === unavailable,
+  );
 });
 
 test("polling aborts an in-flight request at the deadline", async () => {

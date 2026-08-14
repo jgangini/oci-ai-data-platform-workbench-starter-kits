@@ -45,6 +45,7 @@ class LabPack:
     datasets: tuple[LabAsset, ...]
     notebooks: tuple[LabAsset, ...]
     tables: dict[str, tuple[str, ...]]
+    formats: dict[str, str]
     expected_results: dict[str, Any]
 
     @property
@@ -212,6 +213,24 @@ def _pack_expected_results(
     return expected
 
 
+def _pack_formats(
+    metadata: dict[str, Any], status: str, lab_id: str
+) -> dict[str, str]:
+    raw_formats = metadata.get("formats", {})
+    if not isinstance(raw_formats, dict):
+        raise LabPackError(f"Invalid table formats: {lab_id}")
+    if not raw_formats:
+        return {}
+    formats = {str(layer): str(value).upper() for layer, value in raw_formats.items()}
+    if (
+        status == "available"
+        and set(formats) != MEDALLION_LAYERS
+        or any(value not in {"CSV", "DELTA", "ICEBERG"} for value in formats.values())
+    ):
+        raise LabPackError(f"Invalid table formats: {lab_id}")
+    return formats
+
+
 def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
     if LAB_ID_PATTERN.fullmatch(lab_id) is None:
         raise LabPackError("Invalid lab_id")
@@ -230,11 +249,12 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
         datasets=datasets,
         notebooks=notebooks,
         tables=_pack_tables(metadata, status, lab_id),
+        formats=_pack_formats(metadata, status, lab_id),
         expected_results=_pack_expected_results(metadata, status, lab_id),
     )
 
 
-def lab_catalog() -> tuple[LabPack, ...]:
+def _catalog_manifest() -> tuple[tuple[str, ...], dict[str, str]]:
     catalog = _object(LABS_ROOT / "catalog.json")
     lab_ids = catalog.get("labs")
     if catalog.get("schema_version") != 1 or not isinstance(lab_ids, list):
@@ -242,6 +262,22 @@ def lab_catalog() -> tuple[LabPack, ...]:
     ids = tuple(map(str, lab_ids))
     if len(ids) != len(set(ids)):
         raise LabPackError("Lab catalog contains duplicates")
+    descriptions = catalog.get("descriptions")
+    if (
+        not isinstance(descriptions, dict)
+        or set(descriptions) != set(ids)
+        or any(
+            not isinstance(descriptions[lab_id], str)
+            or not descriptions[lab_id].strip()
+            for lab_id in ids
+        )
+    ):
+        raise LabPackError("Lab catalog descriptions must cover every lab")
+    return ids, {lab_id: descriptions[lab_id].strip() for lab_id in ids}
+
+
+def lab_catalog() -> tuple[LabPack, ...]:
+    ids, _ = _catalog_manifest()
     return tuple(load_lab_pack(lab_id, require_available=False) for lab_id in ids)
 
 
@@ -250,10 +286,12 @@ def available_lab_ids() -> tuple[str, ...]:
 
 
 def public_lab_catalog() -> list[dict[str, Any]]:
+    _, descriptions = _catalog_manifest()
     return [
         {
             "lab_id": pack.lab_id,
             "display_name": pack.display_name,
+            "description": descriptions[pack.lab_id],
             "pack_version": pack.pack_version,
             "status": pack.status,
             "available": pack.available,

@@ -8,6 +8,7 @@ const source = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8"
 const pollingSource = await readFile(new URL("../src/registrationPoll.ts", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 const viteConfig = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
+const labCatalog = JSON.parse(await readFile(new URL("../../backend/app/labs/catalog.json", import.meta.url), "utf8"));
 
 test("browser storage is limited to the non-secret lab operation", () => {
   assert.doesNotMatch(source, /localStorage\.setItem|sessionStorage/);
@@ -22,7 +23,7 @@ test("registration has no password field while administrator login remains prote
   assert.match(source, /function AdminLogin/);
   assert.match(source, /Laboratories/);
   assert.match(source, /lab_id: "banking"/);
-  assert.match(source, /Coming soon/);
+  assert.match(source, /Planned/);
   assert.doesNotMatch(source, /Generate password/);
 });
 
@@ -59,6 +60,8 @@ test("administrator UI manages lab users through protected API routes", () => {
   assert.match(source, /\{tableError\} Refresh and try again\./);
   assert.match(source, /className="table-error"/);
   assert.match(source, /!tableError && !visible\.length/);
+  assert.match(source, /user\.participant_code \?\? "--"/);
+  assert.doesNotMatch(source, /String\(index \+ 1\)\.padStart/);
   assert.match(source, /Open AI Data Platform/);
   assert.match(source, /function Toast/);
   assert.match(source, /window\.setTimeout\(onDismiss, 4_000\)/);
@@ -70,6 +73,24 @@ test("administrator UI manages lab users through protected API routes", () => {
   assert.match(source, /className="settings-url-control"/);
   assert.match(source, /aria-label="Copy AI Data Platform URL"/);
   assert.match(source, /className="confirm-error"/);
+});
+
+test("administrator adds a user from an accessible catalog-driven lab table", () => {
+  assert.match(source, /function CreateUserModal/);
+  assert.match(source, /<span>Users<\/span>/);
+  assert.match(source, /aria-haspopup="dialog"/);
+  assert.match(source, /Select initial laboratories/);
+  assert.match(source, /<th scope="col">Description<\/th>/);
+  assert.match(source, /labDescription\(lab\)/);
+  assert.match(source, /aria-label={`Select \$\{lab\.display_name\} laboratory`}/);
+  assert.doesNotMatch(source, /className="admin-create"/);
+  assert.match(styles, /\.create-user-modal/);
+  assert.match(styles, /\.create-user-fields/);
+  assert.match(source, /setCreateOpen\(false\);[\s\S]*setCreateProgress/);
+  assert.match(source, /\{creating && \([\s\S]*<ProvisioningOverlay/);
+  assert.match(source, /setCreateOpen\(true\);[\s\S]*Unable to create user/);
+  assert.deepEqual(Object.keys(labCatalog.descriptions), labCatalog.labs);
+  assert.ok(Object.values(labCatalog.descriptions).every((description) => description.length >= 40));
 });
 
 test("settings can rotate the registration code without exposing or persisting it", () => {
@@ -90,7 +111,7 @@ test("administrator mutates one participant laboratory at a time", () => {
   assert.match(source, /operation_id: operation\.operationId/);
   assert.match(source, /Other laboratories and Identity access are preserved/);
   assert.match(source, /open=\{Boolean\(pendingLabAction\) && !operating\}/);
-  assert.match(source, /aria-busy=\{operating\} inert=\{operating\}/);
+  assert.match(source, /aria-busy=\{operating \|\| creating\} inert=\{operating \|\| creating\}/);
   assert.match(source, /operationAbortRef\.current\?\.abort\(\)/);
   assert.match(source, /A participant must keep at least one laboratory/);
   assert.match(source, /disabled=\{!hasChanges \|\| !selectedLabIds\.length\}/);
@@ -111,18 +132,25 @@ test("laboratory manager derives only the requested assignment changes", () => {
     },
   );
   assert.match(source, /function LabManagerModal/);
+  assert.match(source, /function EditIcon/);
+  assert.match(source, /aria-label={`Manage laboratories for \$\{user\.email\}`}/);
+  assert.doesNotMatch(source, /className="manage-labs-button"/);
   assert.match(source, /Participant laboratories/);
-  assert.match(source, /Save changes/);
+  assert.match(source, /confirmingRemoval \? "Confirm changes" : "Save"/);
   assert.match(source, /Confirm changes/);
   assert.match(source, /lab-assignment-check/);
   assert.match(source, /Redeploy \$\{lab\.display_name\} for \$\{user\.email\}/);
+  assert.match(source, /labPhaseLabel\(installed\.phase\)/);
+  assert.match(source, /lab\.available \? "Pending" : "Planned"/);
+  assert.match(styles, /\.lab-manager-modal \{[^}]*1120px/);
 });
 
 test("registration retries OCI reconciliation with phases, backoff, and a real deadline", () => {
   assert.match(pollingSource, /"identity"[\s\S]*"workspace"[\s\S]*"schemas"[\s\S]*"content"[\s\S]*"permissions"/);
   assert.match(pollingSource, /2_000, 4_000, 8_000, 16_000, 30_000/);
   assert.match(pollingSource, /10 \* 60 \* 1_000/);
-  assert.match(pollingSource, /error\.status !== 429/);
+  assert.match(pollingSource, /\[408, 429, 502, 504\]\.includes\(error\.status\)/);
+  assert.match(pollingSource, /error instanceof TypeError/);
   assert.match(source, /pollRegistration\(\{/);
   assert.match(source, /registrationAbortRef\.current\?\.abort\(\)/);
   assert.match(source, /phase: pending\.phase/);

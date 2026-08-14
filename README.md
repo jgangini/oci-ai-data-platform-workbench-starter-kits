@@ -19,7 +19,7 @@ The data bucket uses the default Oracle-managed encryption key. The lab creates 
 | Retail | 1.0.0 | customers 300; products 150; orders 1,200; order items 3,000 |
 | Healthcare | 1.0.0 | patients 240; providers 48; appointments 900; encounters 700 |
 
-The participant root is `/Workspace/medallon/<participant_key>/<lab_id>`. CSV and notebook bytes are identical for every participant. Landing adds the technical `participant_key`; AIDP job parameters provide `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, and `objectstorage_namespace`. One workflow per lab derives its task graph from `lab.json`, so adding a notebook does not require Python changes. All participants use the shared `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas; table names retain the opaque participant key and lab ID to prevent collisions.
+Participant codes start at `101`. The technical key (`u101`, `u102`, ...) prefixes tables, jobs, and Object Storage paths, while the participant root is `/Workspace/medallon/<participant_key>_<email>/<lab_id>`. CSV and notebook bytes are identical for every participant. Landing adds the technical `participant_key`; AIDP job parameters provide `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, and `objectstorage_namespace`. One workflow per lab derives its task graph from `lab.json`, so adding a notebook does not require Python changes. All participants use the shared `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas; table names retain the participant key and lab ID to prevent collisions.
 
 ## RBAC and registration lifecycle
 

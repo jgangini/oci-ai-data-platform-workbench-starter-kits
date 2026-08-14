@@ -183,6 +183,10 @@ def test_prepare_registration_initiates_identity_activation_without_a_password()
     create_request = next(request for request in requests if request[:2] == ("POST", "/admin/v1/Users"))
     activation_request = next(request for request in requests if "UserActivationInitiator" in request[1])
     assert "password" not in create_request[2]
+    assert create_request[2]["userName"] == "ada@example.com"
+    assert create_request[2]["emails"] == [
+        {"value": "ada@example.com", "type": "work", "primary": True}
+    ]
     assert activation_request == (
         "PUT",
         "/admin/v1/UserActivationInitiator/managed-user",
@@ -353,6 +357,42 @@ def test_unmanaged_existing_account_is_never_modified() -> None:
     assert methods == ["GET"]
     literal = json.dumps("ada@example.com")
     assert filters == [f"userName eq {literal} or emails.value eq {literal}"]
+
+
+def test_managed_account_with_different_username_is_never_reconciled() -> None:
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        return httpx.Response(
+            200,
+            json={
+                "Resources": [
+                    {
+                        "id": "legacy-managed",
+                        "userName": "ada+legacy@example.com",
+                        "emails": [{"value": "ada@example.com"}],
+                        "externalId": "lab",
+                    }
+                ]
+            },
+        )
+
+    async def run() -> None:
+        client = IdentityClient(
+            Settings(identity_domain_url="https://identity.example.test", lab_marker="lab"),
+            client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        try:
+            await client.prepare_registration("Ada", "ada@example.com")
+        except IdentityConflict as exc:
+            assert "different username" in str(exc)
+        else:
+            raise AssertionError("a different username must not be reused for this email")
+        await client.close()
+
+    asyncio.run(run())
+    assert methods == ["GET"]
 
 
 def test_partial_group_failure_retries_idempotently() -> None:

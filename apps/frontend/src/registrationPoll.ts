@@ -114,7 +114,7 @@ export class ApiRequestError extends Error {
 
 export class RegistrationPollingTimeout extends Error {
   constructor() {
-    super("OCI did not finish reconciling your access within 10 minutes. Please try again.");
+    super("OCI did not finish reconciling the operation within 10 minutes. Refresh to see its latest state.");
     this.name = "RegistrationPollingTimeout";
   }
 }
@@ -184,10 +184,13 @@ export async function pollRegistration({
       } catch (error) {
         if (deadlineReached) throw new RegistrationPollingTimeout();
         if (controller.signal.aborted) throw error;
-        if (!(error instanceof ApiRequestError) || error.status !== 429)
+        const retryableResponse =
+          error instanceof ApiRequestError &&
+          [408, 429, 502, 504].includes(error.status);
+        if (!retryableResponse && !(error instanceof TypeError))
           throw error;
         const retryDelay =
-          error.retryAfterMs ??
+          (error instanceof ApiRequestError ? error.retryAfterMs : undefined) ??
           delaysMs[Math.min(attempt, delaysMs.length - 1)];
         await sleep(retryDelay, controller.signal);
         continue;

@@ -6,23 +6,32 @@ from decimal import Decimal
 
 import pytest
 
-from app.lab_packs import LabPackError, lab_catalog, load_lab_pack
+from app.lab_packs import LabPackError, lab_catalog, load_lab_pack, public_lab_catalog
+from scripts.generate_telco_lineage_lab import _source_data, _validate_source_contract
 
 
-ACTIVE_LABS = ("banking", "telecommunications", "retail", "healthcare")
+LEGACY_LABS = ("banking", "telecommunications", "retail", "healthcare")
+ACTIVE_LABS = ("banking", "telecommunications", "telco_lineage", "retail", "healthcare")
 
 
-def test_catalog_has_four_versioned_labs_and_disabled_agent() -> None:
+def test_catalog_has_five_versioned_labs_and_disabled_agent() -> None:
     packs = lab_catalog()
+    public = public_lab_catalog()
     assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "agent")
-    assert all(pack.pack_version == "1.0.0" and pack.available for pack in packs[:4])
+    assert all(pack.available for pack in packs[:5])
+    assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == {
+        "banking": "1.0.3", "telecommunications": "1.0.3",
+        "telco_lineage": "1.1.1", "retail": "1.0.3", "healthcare": "1.0.3",
+    }
+    assert all(item["description"].strip() for item in public)
+    assert "transactions" in public[0]["description"]
     assert packs[-1].status == "planned"
     assert not packs[-1].datasets and not packs[-1].notebooks
     with pytest.raises(LabPackError, match="not available"):
         load_lab_pack("agent")
 
 
-@pytest.mark.parametrize("lab_id", ACTIVE_LABS)
+@pytest.mark.parametrize("lab_id", LEGACY_LABS)
 def test_pack_hashes_rows_notebooks_parameters_and_lineage_contract(lab_id: str) -> None:
     pack = load_lab_pack(lab_id)
     assert len(pack.datasets) == 4
@@ -64,11 +73,83 @@ def test_pack_hashes_rows_notebooks_parameters_and_lineage_contract(lab_id: str)
         "objectstorage_namespace",
     ):
         assert f'required_parameter("{parameter}")' in rendered
-    assert "oidlUtils.parameters.getParameter(name)" in rendered
+    assert 'oidlUtils.parameters.getParameter(name, "")' in rendered
     assert "import oidlUtils" not in rendered
     assert all(b"\r\n" not in asset.read_bytes() for asset in pack.notebooks)
     assert "spark.aidp.lineage.enabled=false" not in rendered
     assert "lineage_demo" in rendered
+    assert "source = spark.table(source_table)" in rendered
+    assert "saveAsTable(target_table)" in rendered
+
+
+def test_telco_lineage_pack_has_variable_dag_delta_lineage_and_tutorials() -> None:
+    pack = load_lab_pack("telco_lineage")
+    assert len(pack.datasets) == 10
+    assert sum(asset.row_count or 0 for asset in pack.datasets) == 7405
+    assert len(pack.notebooks) == 14
+    assert sum(len(names) for names in pack.tables.values()) == 31
+    assert pack.formats == {
+        "landing": "CSV", "bronze": "DELTA", "silver": "DELTA", "gold": "DELTA",
+    }
+    assert pack.tables["silver"] == (
+        "customer_master", "customer_addresses", "product_catalog",
+        "prepaid_service", "postpaid_service", "home_service",
+        "service_ownership", "quality_issues",
+    )
+    assert pack.tables["gold"] == (
+        "customer_360", "customer_service_portfolio", "geographic_service_summary",
+    )
+    assert pack.expected_results["quality"]["exact_quarantined_rows"] == 30
+    assert pack.expected_results["lineage"]["expected_table_rows"] == {
+        "customer_master": 493, "customer_addresses": 617, "product_catalog": 15,
+        "prepaid_service": 645, "postpaid_service": 398, "home_service": 218,
+        "service_ownership": 1261, "quality_issues": 30, "customer_360": 493,
+        "customer_service_portfolio": 1261, "geographic_service_summary": 12,
+    }
+    assert pack.notebooks[9].depends_on == (
+        "06_silver_customer", "07_silver_prepaid", "08_silver_postpaid", "09_silver_home",
+    )
+    assert pack.notebooks[12].depends_on == (
+        "11_gold_customer_360", "12_gold_service_portfolio",
+    )
+
+    rendered = ""
+    for asset in pack.notebooks:
+        notebook = json.loads(asset.read_bytes())
+        assert all(
+            cell.get("execution_count") is None and cell.get("outputs") == []
+            for cell in notebook["cells"] if cell["cell_type"] == "code"
+        )
+        markdown = "".join(
+            "".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "markdown"
+        )
+        assert "Learning goals" in markdown and "Exercise" in markdown and "Pitfall" in markdown
+        for cell in notebook["cells"]:
+            if cell["cell_type"] == "code":
+                source = "".join(cell["source"])
+                ast.parse(source)
+                rendered += source
+    for parameter in (
+        "participant_key", "lab_id", "workspace_root", "bucket_name",
+        "objectstorage_namespace",
+    ):
+        assert rendered.count(f'required_parameter("{parameter}")') == 14
+    assert "CREATE EXTERNAL TABLE IF NOT EXISTS" in rendered
+    assert "USING ICEBERG" not in rendered
+    assert 'frame.write.format("delta")' in rendered
+    assert ".saveAsTable(target)" in rendered
+    assert 'provider == ["delta"]' in rendered
+    assert 'spark.conf.get("spark.aidp.lineage.enabled", "true").lower() == "true"' in rendered
+    assert "nadia.cloud.ai" not in rendered.casefold()
+
+
+def test_telco_lineage_source_contract_has_exactly_thirty_independent_issues() -> None:
+    assert _validate_source_contract(_source_data()) == {
+        "crm_customers": 7, "crm_addresses": 3, "product_catalog": 0,
+        "prepaid_lines": 5, "prepaid_recharges": 3,
+        "postpaid_accounts": 2, "postpaid_lines": 2, "postpaid_invoices": 3,
+        "home_services": 2, "home_installations": 3,
+    }
 
 
 def test_canonical_assets_are_identical_for_every_participant() -> None:
