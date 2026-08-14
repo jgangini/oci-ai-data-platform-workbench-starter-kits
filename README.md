@@ -1,125 +1,315 @@
 # OCI AI Data Platform Cloud Migration Lab
 
-An end-to-end Oracle Cloud Infrastructure laboratory for learning data engineering with Oracle AI Data Platform (AIDP). It deploys an AIDP platform and shared workspace, shared Spark compute, a governed Oracle-managed Object Storage data plane, and a self-service registration application.
+OCI AI Data Platform Cloud Migration Lab is a hands-on data engineering environment for Oracle AI Data Platform (AIDP). It provides ready-to-run, versioned laboratories that guide participants through Landing, Bronze, Silver, and Gold data layers, workflow execution, data quality, and lineage analysis.
 
-Release v2.0.0 keeps one private `aidp-data-<suffix>` bucket with `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/` prefixes. Notebooks address these locations with OCI URIs and external tables; the package creates neither external AIDP volumes nor an explicit OSCS/OpenSearch resource. The workspace uses the opaque participant key as its folder name, so email characters and PII never enter AIDP paths; the same key and lab ID scope jobs, Object Storage paths, and table names.
+The project deploys the shared OCI infrastructure once. Participants can then register for one or more laboratories without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-The assigned labs, package versions and hashes, exact workspace paths, reconciliation phases, and independent administrator operation journals live in a layout-v3 manifest at `/Workspace/medallon/.control/<participant>.json`, outside each participant's `ADMIN` subtree. Layout-v2 manifests are migrated in place without replacing active assets. The visible `lab-manifest.json` is tutorial metadata only; neither it nor the student-writable bucket controls authorization, overwrite behavior, or cleanup scope.
+Current project release: **v2.0.0**.
 
-The data bucket uses the default Oracle-managed encryption key. The lab creates no OCI Vault, KMS key, OAuth client, dedicated provisioner identity, or additional OCI API key. Identity Domains and AIDP requests use the same operator profile uploaded to Deploy Studio.
+## What the project provides
 
-## Versioned lab packages
+- A shared AIDP workspace, Spark compute, catalog, and four medallion schemas.
+- A private Object Storage bucket organized as `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/`.
+- A registration and administration web application hosted on an OCI Compute VM.
+- Identity Domains onboarding with pending and active participant groups.
+- Versioned laboratory packages containing canonical CSV files, notebooks, task dependencies, expected results, and SHA-256 hashes.
+- One independent AIDP workflow per participant and laboratory.
+- Per-laboratory administration for adding, redeploying, or removing content safely.
+- A Deploy Studio package for guided infrastructure deployment.
 
-`apps/backend/app/labs/catalog.json` lists immutable, versioned packages. Each available lab has four canonical CSV datasets with deliberate quality defects and exactly five canonical notebooks: Landing, Bronze, Silver, Gold, and Lineage. `agent` is catalogued as planned and cannot be assigned until it has functional assets and the required AI infrastructure.
+## Medallion learning path
 
-| Lab | Package | Dataset row counts |
+Each laboratory follows the same progression while using a different business scenario.
+
+| Layer | Participant activity | Typical output |
 | --- | --- | --- |
-| Banking | 1.0.0 | branches 20; customers 200; accounts 320; transactions 4,000 |
-| Telecommunications | 1.0.0 | plans 12; network sites 30; subscribers 250; usage events 6,000 |
-| Retail | 1.0.0 | customers 300; products 150; orders 1,200; order items 3,000 |
-| Healthcare | 1.0.0 | patients 240; providers 48; appointments 900; encounters 700 |
+| Landing | Register the canonical CSV sources in the participant area. | Source-aligned CSV tables |
+| Bronze | Ingest source records and add technical metadata without changing the business meaning. | Raw governed tables |
+| Silver | Validate, standardize, join, and quarantine invalid records. | Curated domain tables and quality issues |
+| Gold | Build business-ready aggregations and analytical views. | Customer, service, operational, or financial insights |
+| Lineage | Validate known transformations and inspect upstream, downstream, and column derivations. | Master Catalog lineage graph |
 
-Participant codes start at `101`. The technical key (`u101`, `u102`, ...) prefixes tables, jobs, and Object Storage paths, while the participant root is `/Workspace/medallon/<participant_key>_<email>/<lab_id>`. CSV and notebook bytes are identical for every participant. Landing adds the technical `participant_key`; AIDP job parameters provide `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, and `objectstorage_namespace`. One workflow per lab derives its task graph from `lab.json`, so adding a notebook does not require Python changes. All participants use the shared `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas; table names retain the participant key and lab ID to prevent collisions.
+The standard laboratories contain five notebooks, one for each stage. The Telco Customer 360 Lineage laboratory uses a larger 14-task directed acyclic graph to demonstrate parallel domain processing and multi-source convergence.
 
-## RBAC and registration lifecycle
+## Available laboratories
 
-The permissions are intentionally split:
+| Laboratory | Package | Sources | Workflow | Main outcome |
+| --- | ---: | ---: | ---: | --- |
+| Banking | 1.0.3 | 4 CSV files | 5 tasks | Customer value, branch activity, transaction quality, and lineage |
+| Telecommunications | 1.0.3 | 4 CSV files | 5 tasks | Subscriber usage, network-site activity, service quality, and lineage |
+| Telco Customer 360 Lineage | 1.1.1 | 10 CSV files | 14 tasks | Cross-domain Customer 360, service ownership, geographic summaries, and detailed lineage |
+| Retail | 1.0.3 | 4 CSV files | 5 tasks | Customer value, product sales, order quality, and lineage |
+| Healthcare | 1.0.3 | 4 CSV files | 5 tasks | Patient utilization, provider activity, encounter quality, and lineage |
+| Agent | 0.0.0 | — | — | Planned; visible in the catalog but not assignable |
 
-| Principal | AIDP access |
-| --- | --- |
-| Pending participants | Workspace `USER` only; no OCI IAM permission to operate AIDP |
-| Developer group | Workspace `USER`, catalog `SELECT`, shared compute `USE`, and `ADMIN` on the four collaborative schemas |
-| Deployment operator | Built-in `AI_DATA_PLATFORM_ADMIN`, inherited from creating the platform and verified by post-apply |
-| Individual participant | Root `READ` without cascade, own opaque-key folder `ADMIN` with cascade, and own job `MANAGE` |
+Laboratory order, descriptions, versions, and availability come from [`apps/backend/app/labs/catalog.json`](apps/backend/app/labs/catalog.json) and each package's `lab.json`. Adding a future package does not require hard-coded changes to the registration interface.
 
-Developer IAM can `use ai-data-platforms`, read bucket metadata, and manage objects only in the exact `aidp-data-<suffix>` bucket. The deployment operator retains its existing administrative identity; the lab creates no operator-specific user, group, role, policy, grant, or API key. Pending participants receive no AIDP IAM grant.
+### Banking
 
-Registration first validates every selected lab and then creates or reconciles the Identity Domains user in the pending group. The API provisions each lab idempotently and promotes the user to the developer group only when all initially selected labs are active. Participants may select multiple available labs only during registration. Administrators can later add, redeploy, or remove a lab independently; the last lab cannot be removed without deleting the participant. A durable operation ID and per-lab journal make retries resume the same mutation without touching other labs.
+Banking introduces a governed pipeline for branches, customers, accounts, and transactions.
 
-## Safety contract
+- Source rows: 20 branches, 200 customers, 320 accounts, and 4,000 transactions.
+- Silver work: standardize records, preserve valid relationships, and isolate quality issues.
+- Gold tables: `banking_customer_value`, `banking_branch_daily`, and `lineage_demo`.
+- Reproducible check: transaction amount total `600066.50`.
 
-- Operator credentials never enter Git, Terraform variables, Terraform state, VM metadata, hook artifacts, or logs. Post-apply delivers the uploaded `config` and `key.pem` to the VM exactly once through an application-encrypted Object Storage envelope.
-- The uploaded `key.pem` must be an unencrypted RSA API key. Preflight rejects encrypted, unreadable, or non-RSA keys before OCI provisioning and never echoes key material or passphrases.
-- The VM generates a temporary 3072-bit RSA bootstrap key. Post-apply wraps an AES-256-GCM data key with RSA-OAEP/SHA-256 and uploads only the encrypted envelope as `.bootstrap/operator-credentials.json`; no Vault, KMS key, OAuth client, or additional OCI API key is created.
-- The administrator password and registration code reach Terraform only as PBKDF2 hashes. Lab users activate their own Identity Domains password from the standard OCI welcome email.
-- The VM decrypts the envelope locally, verifies that the profile user matches the preflight operator OCID and that `key.pem` matches the configured fingerprint, writes both files atomically with mode `0600`, then deletes the Object Storage object and verifies its absence. The temporary bootstrap key is removed afterward.
-- Participant and developer access is granted through AIDP RBAC. Post-apply verifies that the deployment operator is a direct member of built-in `AI_DATA_PLATFORM_ADMIN`; it never creates `AIDP_LAB_PROVISIONER`.
-- The runtime signs both Identity Domains and AIDP requests with the installed operator profile selected by `OCI_CONFIG_FILE`. Instance principals can access only the exact one-use bootstrap object and are not a runtime authentication fallback. The VM `.env` contains identifiers and PBKDF2 hashes, but no private key, OAuth secret, or plaintext administrator credential.
-- The v2.0.0 path has no explicit OSCS/OpenSearch deployment and no external AIDP volumes.
-- The lab does not require the Default Identity Domain's **Access Signing Certificate** setting and does not request public JWK access; that setting remains a tenant security-policy decision.
-- OCI Provider 8.21 does not expose `force_destroy`; its native delete refuses a non-empty data bucket. The medallion prefixes therefore stay virtual until the first workload write, while real lab data must be emptied before destroying the stack.
-- The HTTPS certificate is self-signed and includes the public IP/FQDN as SANs, so browsers will show a trust warning.
-- Tenancy-level IAM and Identity Domains resources use an OCI provider alias pinned to the tenancy home region; regional AIDP, Compute, Networking, and Object Storage resources continue to use the deployment region.
+### Telecommunications
 
-## Local application
+Telecommunications analyzes plans, network sites, subscribers, and usage events.
 
-```powershell
-docker build -f docker/Dockerfile -t aidp-lab .
-docker run --rm -p 8080:80 -p 8443:443 --env-file .env aidp-lab
+- Source rows: 12 plans, 30 network sites, 250 subscribers, and 6,000 usage events.
+- Silver work: curate subscriber, plan, site, and usage data and record quality issues.
+- Gold tables: `telecommunications_subscriber_monthly`, `telecommunications_site_daily`, and `lineage_demo`.
+- Reproducible check: usage charge total `15026.56`.
+
+### Telco Customer 360 Lineage
+
+Telco Customer 360 Lineage is the most complete lineage exercise. It combines CRM, prepaid, postpaid, product, and home-service data into a unified view of each customer and every service registered in that customer's name.
+
+The ten sources contain 7,405 rows:
+
+- CRM customers and addresses.
+- Product catalog.
+- Prepaid lines and recharges.
+- Postpaid accounts, lines, and invoices.
+- Home services and installations.
+
+The workflow contains 14 tasks. Bronze processing branches by domain, Silver tasks curate each domain in parallel, and the branches converge into service ownership and Gold analytics.
+
+Silver tables include `customer_master`, `customer_addresses`, `prepaid_service`, `postpaid_service`, `home_service`, `service_ownership`, and `quality_issues`. Gold produces:
+
+- `customer_360`: 493 valid customers with primary address, service counts, and monthly value.
+- `customer_service_portfolio`: 1,261 prepaid, postpaid, and home services with product and ownership details.
+- `geographic_service_summary`: 12 regional summaries of customers, services, and monthly value.
+
+The source data contains exactly 30 controlled quality incidents. Landing uses CSV, while Bronze, Silver, and Gold use Delta tables so AIDP can expose the complete entity and column lineage demonstrated by the laboratory.
+
+### Retail
+
+Retail transforms customers, products, orders, and order items into sales analytics.
+
+- Source rows: 300 customers, 150 products, 1,200 orders, and 3,000 order items.
+- Silver work: validate customer, product, order, and item relationships and quarantine quality issues.
+- Gold tables: `retail_customer_value`, `retail_product_daily`, and `lineage_demo`.
+- Reproducible check: item quantity total `7487`.
+
+### Healthcare
+
+Healthcare prepares patient, provider, appointment, and encounter data for operational analysis.
+
+- Source rows: 240 patients, 48 providers, 900 appointments, and 700 encounters.
+- Silver work: standardize operational records, validate references, and isolate quality issues.
+- Gold tables: `healthcare_patient_utilization`, `healthcare_provider_daily`, and `lineage_demo`.
+- Reproducible check: encounter cost total `557597.00`.
+
+## End-to-end user guide
+
+### 1. Deploy the shared environment
+
+Use OCI Deploy Studio with the `v2.0.0` release. Deploy Studio provisions the network, private data bucket, registration VM, Identity Domains groups and policies, AIDP workspace, catalog, shared compute, medallion schemas, and permissions.
+
+When the deployment completes, retain these outputs:
+
+- Application URL for participant registration.
+- Administrator URL for user and laboratory management.
+- AIDP Workbench URL.
+- Lab access summary artifact.
+
+See [OCI Deploy Studio compatibility](#oci-deploy-studio-compatibility) for the supported package contract and required inputs.
+
+### 2. Create or register a participant
+
+There are two onboarding paths:
+
+1. A participant opens the application URL, enters the registration code, full name, email address, and one or more available laboratories.
+2. An administrator opens the administrator URL, selects **Users**, chooses **Add user**, enters the participant details, and selects laboratories from the catalog table.
+
+The email address is also the OCI Identity Domains username. It is never rewritten with aliases or release-specific suffixes.
+
+Registration progresses through Identity, Workspace, Schemas, Content, and Permissions. The participant remains pending until every initially selected laboratory is active. The application can resume a retryable operation by its operation ID, so a browser timeout does not require creating another participant.
+
+### 3. Activate the OCI account
+
+The participant receives the standard OCI Identity Domains welcome email and sets a password. After activation, the participant signs in to the AIDP Workbench URL using the same email address.
+
+Participant codes begin at `101`. The first participant receives `u101`, the next receives `u102`, and so on. A participant workspace follows this convention:
+
+```text
+/Workspace/medallon/u101_participant@example.com/<lab_id>
 ```
 
-Required runtime values are documented in `apps/backend/.env.example`. They include `IDENTITY_DOMAIN_URL`, `OCI_CONFIG_FILE=/etc/aidp-lab/oci/config`, `OBJECTSTORAGE_NAMESPACE`, and `BUCKET_NAME`. Identity and AIDP use the uploaded operator profile installed at `OCI_CONFIG_FILE`; there is no OAuth secret or separate provisioner setting.
+The code is used for technical isolation; the email makes the participant folder easy for an instructor to identify.
 
-`GET /api/health` is strict: missing runtime configuration, a failed signed Identity Domains query, or an inaccessible required AIDP workspace/catalog/compute or exact data bucket returns `503`. It returns `200 {"status":"ok"}` only when those registration dependencies are usable; upstream details and credentials are never returned. Successful deep probes are cached for 30 seconds and failures for 5 seconds so Docker and browser polling cannot throttle OCI.
+### 4. Open and run a laboratory
 
-### Local VM-equivalent profile
+In AIDP Workbench:
 
-The development profile runs the same nginx, FastAPI and React image as the VM, but substitutes Identity Domains with in-memory users. It is intentionally local-only and cannot validate OCI policies, API signing, or AIDP permissions.
+1. Open the participant folder under `/Workspace/medallon`.
+2. Select the laboratory folder.
+3. Review the canonical source files and notebooks.
+4. Open the workflow named `wf_<participant_key>_<lab_id>`.
+5. Confirm that the shared Spark compute is running.
+6. Run the workflow and monitor every task until it reaches a successful terminal state.
+7. Review the validation task and compare the results with the expected values documented in the laboratory package.
+
+Notebooks receive `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, and `objectstorage_namespace` as AIDP task parameters. They do not contain participant-specific rendered values.
+
+### 5. Inspect tables and lineage
+
+All participants share the governed `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas. Table names include the participant key and laboratory ID, for example:
+
+```text
+u101_telco_lineage_customer_360
+```
+
+After a successful workflow:
+
+1. Open Master Catalog.
+2. Find a Silver or Gold table for the participant.
+3. Open Lineage and select both upstream and downstream directions.
+4. Inspect entity-level dependencies.
+5. Switch to column-level lineage to trace source columns into curated and analytical outputs.
+
+For the Telco Customer 360 Lineage package, useful traces include CRM document to `customer_360`, prepaid or postpaid MSISDN to `customer_service_portfolio`, and customer region and monthly value to `geographic_service_summary`.
+
+## Administrator guide
+
+The **Users** page shows participant status, Identity status, participant code, and a summary of assigned laboratories.
+
+Use the edit action for a participant to open the laboratory manager. From there an administrator can:
+
+- Select an available laboratory and save to provision it.
+- Refresh or redeploy one laboratory to install the current package version.
+- Clear a laboratory selection to remove only that laboratory's workflow, tables, objects, workspace content, and grants.
+- Delete the participant to clean up all laboratories and then remove the Identity Domains account.
+
+At least one laboratory must remain assigned. To remove the final laboratory, delete the participant instead. Operations are serialized per participant and journaled independently per laboratory, so a pending or failed change does not make other active laboratories unavailable.
+
+The **Settings** page lets an administrator update the registration code and review the AIDP Workbench URL without exposing stored secrets.
+
+## Reproducibility and participant isolation
+
+Every active package is immutable for its declared version:
+
+- CSV and notebook bytes have declared SHA-256 hashes.
+- Two participants assigned the same package receive byte-for-byte identical assets.
+- Expected source counts, quality controls, business aggregations, table counts, and lineage relationships are declared in `lab.json`.
+- Re-running a workflow must produce the same results.
+
+Only technical locations and permissions differ:
+
+```text
+Workspace:      /Workspace/medallon/<participant_key>_<email>/<lab_id>
+Object Storage: <layer>/users/<participant_key>/<lab_id>/...
+Table:          <participant_key>_<lab_id>_<dataset>
+Workflow:       wf_<participant_key>_<lab_id>
+```
+
+## Local development and testing
+
+### Local-only profile
+
+The local development profile runs the same nginx, FastAPI, and React image as the OCI VM. Identity and AIDP operations use local substitutes, so this mode is suitable for UI and API development but does not validate live OCI permissions or lineage.
 
 ```powershell
 Copy-Item .env.example .env.dev
 docker compose -f docker/docker-compose.dev.yml up --build -d
 ```
 
-Open `https://localhost:18444` and accept the local self-signed certificate. The sample profile uses `admin` / `admin` and registration code `AIDP-2026`; change the hashes in `.env.dev` before sharing the environment. Stop it with `docker compose -f docker/docker-compose.dev.yml down`.
+Open `https://localhost:18444`. The example profile uses administrator credentials `admin` / `admin` and registration code `AIDP-2026`; change them before sharing the environment.
+
+Stop the profile with:
+
+```powershell
+docker compose -f docker/docker-compose.dev.yml down
+```
 
 ### OCI-connected local profile
 
-To exercise the same image against deployed Identity Domains and AIDP resources, generate the ignored `.env` and sanitized OCI config, then use the localhost-only profile:
+Use this profile to run the application locally while connecting to an already deployed Identity Domain and AIDP environment.
 
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\bootstrap_local_oci_env.py --config <oci-config> --key <oci-key.pem>
-docker compose --env-file .env -f docker/docker-compose.oci-local.yml config --quiet
 docker compose --env-file .env -f docker/docker-compose.oci-local.yml up --build --detach
 ```
 
-The bootstrap discovers exactly one active lab, its `aidp-data-<suffix>` bucket, and its Object Storage namespace. It writes runtime values to ignored `.env` and a non-secret config to `.tmp/oci-local/<suffix>/config`; that config rewrites only `key_file` to `/etc/aidp-lab/oci/key.pem`. Compose bind-mounts the generated config and the original operator `--key` file read-only. Neither file contents nor host paths are printed. Because passphrases are never copied, the supplied operator key must be unencrypted for this local profile.
+Open `http://127.0.0.1:18082`. This HTTP endpoint avoids the deployed VM's self-signed certificate during local DOM-based testing. The profile binds only to localhost and is not a production deployment mode.
 
-Open `http://127.0.0.1:18082`. This profile has no restart policy and binds only to `127.0.0.1`; it is for development testing, not a replacement for the OCI VM. It deliberately uses HTTP so DOM-based tests can run without accepting the VM-style self-signed certificate. Stop it with `docker compose --env-file .env -f docker/docker-compose.oci-local.yml down`.
-
-## Terraform
+Stop it with:
 
 ```powershell
-cd terraform
-terraform init -backend=false
-terraform validate
+docker compose --env-file .env -f docker/docker-compose.oci-local.yml down
 ```
 
-The v2.0.0 preflight accepts only the trusted repository and the immutable `v2.0.0-rc.1` through `v2.0.0-rc.7`, or `v2.0.0`, release SHA in `us-chicago-1`, while keeping the compartment name as the editable Deploy Studio input. Names follow OCI's 1-100 character alphanumeric, period, hyphen, and underscore contract. In `new` mode validation confirms that the exact name is available to create; in `existing` mode it confirms one unambiguous ACTIVE compartment. It also rejects forbidden infrastructure and policies, rejects conflicting AIDP work requests for the selected name, and checks current VM capacity. For a saved Terraform plan, run `python terraform/release_gate.py --plan-json <plan.json>`; it fails unless every managed resource action is create-only.
+## Repository layout
 
-Deploy Studio manifest v1 currently has no hook between Resource Manager PLAN and its automatic APPLY, and it does not pass the plan JSON to repository preflight. Therefore the create-only plan check is available for manual/CI validation but cannot be enforced by this repository inside the current CloudTechNext PLAN/APPLY sequence. Do not start a lab APPLY until that explicit plan check has passed or CloudTechNext adds a post-plan/pre-apply hook.
+```text
+apps/backend/app/               Registration API, Identity, AIDP provisioning
+apps/backend/app/labs/          Canonical laboratory catalog and packages
+apps/frontend/                  Registration and administration UI
+docker/                         OCI VM and local Compose profiles
+scripts/                        Local bootstrap, generators, and architecture gates
+terraform/                      OCI infrastructure and Deploy Studio package
+terraform/hooks/post_apply.py   AIDP reconciliation and final access artifact
+```
 
-Deploy Studio creates or resolves the target compartment before starting Resource Manager. The repository preflight discovers the tenancy home region and operator user OCID, then uses OCI `create_compute_capacity_report` in the selected availability domain for E5/E4 Flex with the requested OCPUs and memory. Only the non-secret operator OCID reaches Terraform; the uploaded config and key remain hook inputs until the encrypted one-use delivery.
+## Contributor validation
 
-The base deployment reconciles the AIDP workspace, catalog, shared compute, four collaborative schemas, root `/Workspace/medallon` folder, and pending/developer roles after verifying the operator's built-in platform administration. Registration then installs the selected canonical packages and individual folder/job permissions before promoting pending membership. The bucket is addressed directly through OCI URIs; no external volumes or explicit OSCS/OpenSearch deployment participate in this path. Reconciliation waits for credential consumption, asynchronous AIDP resources, and strict HTTPS health, and refuses ambiguous or conflicting resources.
+Documentation-only changes do not require runtime gates. Changes to code, packages, infrastructure, or generated assets should run the relevant checks:
 
-The VM shape remains explicit per APPLY. The capacity report is a preselection, not a reservation, so capacity can change before instance creation. When the report says E5 is unavailable and E4 is available, preflight selects E4 without requiring another secret or user choice. If creation later fails because capacity changed, run a new APPLY; this package deliberately does not claim an automatic post-failure retry.
+```powershell
+python -m pytest apps/backend/tests terraform/tests
+cd apps/frontend
+npm ci
+npm test
+npm run build
+cd ../..
+terraform -chdir=terraform fmt -check -recursive
+terraform -chdir=terraform init -backend=false
+terraform -chdir=terraform validate
+terraform -chdir=terraform test
+docker build -f docker/Dockerfile -t aidp-lab:test .
+.\scripts\arch-postflight.ps1
+```
 
-## Lab acceptance
+## Troubleshooting
 
-For a release candidate, use structured deployment events, API responses, logs, and DOM/accessibility state rather than screenshots:
+- **The deployed application certificate is not trusted:** the VM uses a self-signed HTTPS certificate. Use the OCI-connected local HTTP profile for browser automation, or install and trust an organization-approved certificate for normal browser access.
+- **A participant remains Pending or Permissions is displayed:** refresh the user list or reopen the laboratory manager. Provisioning is resumable and continues from its operation journal.
+- **A request returns 502 or 504:** the application treats transient upstream and gateway timeouts as retryable. Keep the same operation rather than creating a duplicate user or laboratory.
+- **A workflow says the cluster cannot be started:** start the shared AIDP compute manually before running the workflow. A cluster explicitly stopped by a user cannot be started by the workflow.
+- **Lineage is incomplete:** confirm the workflow completed, the compute configuration does not set `spark.aidp.lineage.enabled=false`, and the relevant Silver and Gold tables use the package-declared format. Telco Customer 360 Lineage uses Delta because it was live-validated for complete entity and column lineage in this environment.
+- **Agent cannot be selected:** Agent is intentionally marked as planned until its content and AI infrastructure are available.
 
-1. Require a successful Resource Manager APPLY and post-apply result, then verify `GET /api/health` returns exactly `200` and `{"status":"ok"}`.
-2. Verify the workspace, catalog, shared compute, `/Workspace/medallon` root, four collaborative schemas, and the RBAC matrix above. Confirm operator membership in `AI_DATA_PLATFORM_ADMIN`, absence of `AIDP_LAB_PROVISIONER`, deletion of `.bootstrap/operator-credentials.json`, zero external volumes, and no explicit OSCS/OpenSearch resource.
-3. Register participant A with all four available labs and participant B with Banking and Retail. Observe pending phases for identity, workspace, schemas, content, and permissions; each user must remain pending until all initial labs are active.
-4. Confirm five notebooks per lab, exact package SHA-256 values, canonical dataset row counts, and distinct participant paths, tables, and jobs.
-5. Run every workflow through Lineage and compare counts, aggregates, quality checks, and the lineage result with each package's `expected_results`. Banking results and asset hashes must match between A and B.
-6. Run every workflow a second time and require identical results. Verify upstream/downstream and column derivation in Master Catalog from structured DOM/API state.
-7. Add Telecommunications to B, redeploy only B's Banking lab, and remove only B's Retail lab. A must remain unchanged and Agent must remain visible but disabled.
-8. Leave the validated candidate active for review; cleanup of any baseline is a separate, exact-OCID operation.
+## Security essentials
+
+- Never commit OCI configuration files, private keys, passwords, registration codes, Terraform state, generated certificates, or deployment artifacts containing identifiers.
+- Upload an unencrypted RSA OCI API key only through the deployment workflow. Preflight rejects unreadable, encrypted, or non-RSA keys.
+- Deploy Studio does not package OCI credentials in the Terraform source or state.
+- The VM receives the operator profile once through an encrypted bootstrap object, validates it, installs it with restrictive permissions, and deletes the bootstrap object.
+- Participants receive access only to their folder, workflow, namespaced objects, and namespaced tables.
+- The data bucket uses Oracle-managed encryption and remains private.
+
+## OCI Deploy Studio compatibility
+
+Release **v2.0.0** is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1.
+
+Deploy Studio support includes:
+
+- New or existing compartment modes.
+- Guided upload of the OCI configuration and unencrypted RSA API key without packaging either credential in Terraform.
+- Administrator username, hashed administrator password, and hashed registration code inputs.
+- Preflight validation for compartment selection, tenancy home region, operator identity, supported VM capacity, and release source.
+- Terraform plan and apply through OCI Resource Manager.
+- Post-apply reconciliation of the AIDP workspace, catalog, shared compute, medallion schemas, Identity roles, participant application, and final access artifact.
+- Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
+
+The package does not require a database profile or a Generative AI region. The validated v2.0.0 release targets `us-chicago-1` and preserves Deploy Studio's schema-v1 contract. Select the immutable `v2.0.0` release in Deploy Studio rather than an untagged development commit.
+
+Deploy Studio currently applies the Resource Manager plan automatically after planning and does not expose a repository hook between those stages. For controlled deployments, review the generated plan or run `python terraform/release_gate.py --plan-json <plan.json>` in CI before starting the final apply.
 
 ## License
 
-This project is licensed under the [MIT License](https://github.com/jgangini/oci-aidp-cloud-migration-lab/blob/main/LICENSE).
+This project is licensed under the [MIT License](LICENSE).
 
-OCI AIDP Cloud Migration Lab is an independent project and is not an official Oracle product. It is not affiliated with, endorsed by, or sponsored by Oracle Corporation. Oracle, OCI, and related marks are trademarks or registered trademarks of Oracle and/or its affiliates. Third-party trademarks, logos, service names, and assets remain the property of their respective owners.
+OCI AI Data Platform Cloud Migration Lab is an independent project and is not an official Oracle product. It is not affiliated with, endorsed by, or sponsored by Oracle Corporation. Oracle, OCI, and related marks are trademarks or registered trademarks of Oracle and/or its affiliates. Third-party trademarks, logos, service names, and assets remain the property of their respective owners.
