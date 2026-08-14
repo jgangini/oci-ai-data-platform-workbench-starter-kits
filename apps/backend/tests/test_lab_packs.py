@@ -21,7 +21,7 @@ def test_catalog_has_five_versioned_labs_and_disabled_agent() -> None:
     assert all(pack.available for pack in packs[:5])
     assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == {
         "banking": "1.0.3", "telecommunications": "1.0.3",
-        "telco_lineage": "1.1.1", "retail": "1.0.3", "healthcare": "1.0.3",
+        "telco_lineage": "1.1.2", "retail": "1.0.3", "healthcare": "1.0.3",
     }
     assert all(item["description"].strip() for item in public)
     assert "transactions" in public[0]["description"]
@@ -134,13 +134,29 @@ def test_telco_lineage_pack_has_variable_dag_delta_lineage_and_tutorials() -> No
         "objectstorage_namespace",
     ):
         assert rendered.count(f'required_parameter("{parameter}")') == 14
-    assert "CREATE EXTERNAL TABLE IF NOT EXISTS" in rendered
+    assert "CREATE EXTERNAL TABLE IF NOT EXISTS" not in rendered
     assert "USING ICEBERG" not in rendered
+    assert 'source.write.format("csv")' in rendered
     assert 'frame.write.format("delta")' in rendered
     assert ".saveAsTable(target)" in rendered
-    assert 'provider == ["delta"]' in rendered
+    assert '.option("path", target_location)' not in rendered
+    assert 'formatted.get("type") == "managed"' in rendered
     assert 'spark.conf.get("spark.aidp.lineage.enabled", "true").lower() == "true"' in rendered
     assert "nadia.cloud.ai" not in rendered.casefold()
+
+    metadata = json.loads((pack.datasets[0].path.parents[1] / "lab.json").read_text(encoding="utf-8"))
+    assert metadata["table_storage"] == dict.fromkeys(
+        ("landing", "bronze", "silver", "gold"), "MANAGED"
+    )
+    lineage = metadata["expected_results"]["lineage"]
+    assert lineage["required_schema_paths"] == [
+        "aidp_lab.oci_landing.", "aidp_lab.oci_bronze.",
+        "aidp_lab.oci_silver.", "aidp_lab.oci_gold.",
+    ]
+    assert lineage["forbidden_schema_paths"] == ["aidp_lab.telco_lineage."]
+    assert lineage["qualified_node_template"] == (
+        "aidp_lab.oci_{layer}.{participant_key}_telco_lineage_{table}"
+    )
 
 
 def test_telco_lineage_source_contract_has_exactly_thirty_independent_issues() -> None:

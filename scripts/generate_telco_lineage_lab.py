@@ -423,9 +423,8 @@ def location(layer, logical_name):
 
 def write_delta(frame, layer, logical_name, _ddl):
     target = table(layer, logical_name)
-    target_location = location(layer, logical_name)
     (frame.write.format("delta").mode("overwrite")
-        .option("overwriteSchema", "true").option("path", target_location)
+        .option("overwriteSchema", "true")
         .saveAsTable(target))
     actual = spark.table(target).count()
     assert actual == frame.count(), f"Delta count mismatch for {logical_name}"
@@ -442,9 +441,8 @@ for dataset in datasets:
         .withColumn("_source_file", F.input_file_name())
         .withColumn("_ingested_at", F.current_timestamp()))
     target = table("bronze", dataset)
-    target_location = location("bronze", dataset)
     (bronze.write.format("delta").mode("overwrite")
-        .option("overwriteSchema", "true").option("path", target_location)
+        .option("overwriteSchema", "true")
         .saveAsTable(target))
     assert spark.table(target).count() == source.count()
     print(f"Delta bronze.{{dataset}}: {{source.count()}} rows")
@@ -467,10 +465,9 @@ for dataset, columns in dataset_columns.items():
         .withColumn("participant_key", F.lit(participant_key))
         .select("participant_key", *columns))
     assert source.count() == expected_counts[dataset]
-    target_location = location("landing", dataset)
-    source.write.mode("overwrite").option("header", True).csv(target_location)
-    ddl = ", ".join(["participant_key STRING", *[f"`{{name}}` STRING" for name in columns]])
-    spark.sql(f"CREATE EXTERNAL TABLE IF NOT EXISTS {{table('landing', dataset)}} ({{ddl}}) USING CSV OPTIONS (header 'true') LOCATION '{{target_location}}'")
+    target = table("landing", dataset)
+    (source.write.format("csv").mode("overwrite")
+        .option("header", "true").saveAsTable(target))
     assert spark.table(table("landing", dataset)).count() == expected_counts[dataset]
     print(f"CSV landing.{{dataset}}: {{expected_counts[dataset]}} rows")
 '''
@@ -714,14 +711,18 @@ for logical_name, expected in expected_counts.items():
     actual = spark.table(table(layer, logical_name)).count()
     assert actual == expected, f"{{layer}}.{{logical_name}} expected {{expected}}, got {{actual}}"
 
-for layer in ("silver", "gold"):
-    for logical_name in {[*TABLES['silver'], *TABLES['gold']]!r}:
-        if (layer == "silver") != (logical_name in {TABLES['silver']!r}):
-            continue
+for layer, logical_names in {TABLES!r}.items():
+    for logical_name in logical_names:
         details = spark.sql(f"DESCRIBE FORMATTED {{table(layer, logical_name)}}")
-        provider = [str(row["data_type"]).strip().lower() for row in details.collect() if str(row["col_name"]).strip().lower() == "provider"]
-        assert provider == ["delta"], f"{{table(layer, logical_name)}} is not Delta: {{provider}}"
-        assert spark.sql(f"DESCRIBE HISTORY {{table(layer, logical_name)}}").count() >= 1
+        formatted = {{
+            str(row["col_name"]).strip().lower(): str(row["data_type"]).strip().lower()
+            for row in details.collect()
+        }}
+        expected_provider = "csv" if layer == "landing" else "delta"
+        assert formatted.get("provider") == expected_provider, f"{{table(layer, logical_name)}} provider mismatch: {{formatted.get('provider')}}"
+        assert formatted.get("type") == "managed", f"{{table(layer, logical_name)}} must be managed: {{formatted.get('type')}}"
+        if layer != "landing":
+            assert spark.sql(f"DESCRIBE HISTORY {{table(layer, logical_name)}}").count() >= 1
 
 portfolio = spark.table(table("gold", "customer_service_portfolio"))
 service_mix = {{row["service_type"]: row["count"] for row in portfolio.groupBy("service_type").count().collect()}}
@@ -732,7 +733,7 @@ geographic_total = spark.table(table("gold", "geographic_service_summary")).agg(
 assert abs(float(customer_total) - float(portfolio_total)) < 0.01
 assert abs(float(customer_total) - float(geographic_total)) < 0.01
 assert spark.conf.get("spark.aidp.lineage.enabled", "true").lower() == "true"
-print("Telco Customer 360 validated: 31 tables, 30 quality issues, Delta Silver/Gold")
+print("Telco Customer 360 validated: 31 managed tables, 30 quality issues, governed medallion lineage")
 '''
 
     return {
@@ -855,12 +856,13 @@ def generate() -> None:
         "schema_version": 1,
         "lab_id": LAB_ID,
         "display_name": "Telco Customer 360 Lineage",
-        "pack_version": "1.1.1",
+        "pack_version": "1.1.2",
         "status": "available",
         "datasets": datasets,
         "notebooks": notebooks,
         "tables": TABLES,
         "formats": {"landing": "CSV", "bronze": "DELTA", "silver": "DELTA", "gold": "DELTA"},
+        "table_storage": {"landing": "MANAGED", "bronze": "MANAGED", "silver": "MANAGED", "gold": "MANAGED"},
         "expected_results": {
             "source_row_counts": EXPECTED_SOURCE_COUNTS,
             "business_aggregates": _business_aggregates(data),
@@ -870,6 +872,12 @@ def generate() -> None:
                 "expected_table_rows": EXPECTED_TABLE_COUNTS,
                 "expected_entity_edges": expected_entity_edges,
                 "expected_column_edges": expected_column_edges,
+                "qualified_node_template": "aidp_lab.oci_{layer}.{participant_key}_telco_lineage_{table}",
+                "required_schema_paths": [
+                    "aidp_lab.oci_landing.", "aidp_lab.oci_bronze.",
+                    "aidp_lab.oci_silver.", "aidp_lab.oci_gold.",
+                ],
+                "forbidden_schema_paths": ["aidp_lab.telco_lineage."],
                 "direction": "BOTH", "max_depth": 8,
             },
         },

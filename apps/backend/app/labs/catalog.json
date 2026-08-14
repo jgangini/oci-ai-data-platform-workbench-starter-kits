@@ -11,7 +11,7 @@
   "descriptions": {
     "banking": "Explore customer accounts, branches and transactions through a governed medallion pipeline.",
     "telecommunications": "Analyze subscribers, plans, network sites and usage events for service and network insights.",
-    "telco_lineage": "Trace prepaid, postpaid and home services into a Delta Customer 360 with entity and column lineage.",
+    "telco_lineage": "Test end-to-end data lineage for prepaid, postpaid and home services, from Landing through Gold with entity and column relationships.",
     "retail": "Transform customers, products, orders and order items into sales and customer analytics.",
     "healthcare": "Prepare patients, providers, appointments and encounters for operational healthcare analysis.",
     "agent": "Planned agentic AI laboratory; content and required AI infrastructure are not yet available."

@@ -54,12 +54,12 @@ type CatalogLab = {
 };
 type UserDraft = { name: string; email: string; lab_ids: string[] };
 const fallbackCatalog: CatalogLab[] = [
-  { lab_id: "banking", display_name: "Banking", pack_version: "1.0.3", status: "available", available: true },
-  { lab_id: "telecommunications", display_name: "Telecommunications", pack_version: "1.0.3", status: "available", available: true },
-  { lab_id: "telco_lineage", display_name: "Telco Customer 360 Lineage", description: "Trace prepaid, postpaid and home services into a Delta Customer 360 with entity and column lineage.", pack_version: "1.1.1", status: "available", available: true },
-  { lab_id: "retail", display_name: "Retail", pack_version: "1.0.3", status: "available", available: true },
-  { lab_id: "healthcare", display_name: "Healthcare", pack_version: "1.0.3", status: "available", available: true },
-  { lab_id: "agent", display_name: "Agent", pack_version: "0.0.0", status: "planned", available: false },
+  { lab_id: "banking", display_name: "Banking", description: "Explore customer accounts, branches and transactions through a governed medallion pipeline.", pack_version: "1.0.3", status: "available", available: true },
+  { lab_id: "telecommunications", display_name: "Telecommunications", description: "Analyze subscribers, plans, network sites and usage events for service and network insights.", pack_version: "1.0.3", status: "available", available: true },
+  { lab_id: "telco_lineage", display_name: "Telco Customer 360 Lineage", description: "Test end-to-end data lineage for prepaid, postpaid and home services, from Landing through Gold with entity and column relationships.", pack_version: "1.1.2", status: "available", available: true },
+  { lab_id: "retail", display_name: "Retail", description: "Transform customers, products, orders and order items into sales and customer analytics.", pack_version: "1.0.3", status: "available", available: true },
+  { lab_id: "healthcare", display_name: "Healthcare", description: "Prepare patients, providers, appointments and encounters for operational healthcare analysis.", pack_version: "1.0.3", status: "available", available: true },
+  { lab_id: "agent", display_name: "Agent", description: "Planned agentic AI laboratory; content and required AI infrastructure are not yet available.", pack_version: "0.0.0", status: "planned", available: false },
 ];
 
 function labLabel(catalog: CatalogLab[], labId: string) {
@@ -1075,24 +1075,35 @@ function RegisterPage() {
           </label>
           <fieldset className="lab-picker">
             <legend>Laboratories</legend>
-            {catalog.map((lab) => (
-              <label key={lab.lab_id}>
-                <input
-                  type="checkbox"
-                  checked={labIds.includes(lab.lab_id)}
-                  disabled={!lab.available}
-                  onChange={(event) =>
-                    setLabIds((current) =>
-                      event.target.checked
-                        ? [...current, lab.lab_id]
-                        : current.filter((value) => value !== lab.lab_id),
-                    )
-                  }
-                />
-                <span>{lab.display_name}</span>
-                {!lab.available && <small>Planned</small>}
-              </label>
-            ))}
+            {catalog.map((lab) => {
+              const descriptionId = `registration-lab-${lab.lab_id}-description`;
+              return (
+                <label className="lab-picker-option" key={lab.lab_id}>
+                  <input
+                    type="checkbox"
+                    checked={labIds.includes(lab.lab_id)}
+                    disabled={!lab.available}
+                    aria-describedby={descriptionId}
+                    onChange={(event) =>
+                      setLabIds((current) =>
+                        event.target.checked
+                          ? [...current, lab.lab_id]
+                          : current.filter((value) => value !== lab.lab_id),
+                      )
+                    }
+                  />
+                  <span className="lab-picker-copy">
+                    <span className="lab-picker-title">
+                      <strong>{lab.display_name}</strong>
+                      {!lab.available && <small>Planned</small>}
+                    </span>
+                    <span className="lab-picker-description" id={descriptionId}>
+                      {labDescription(lab)}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
           </fieldset>
           <fieldset className="registration-code">
             <legend>Registration code</legend>

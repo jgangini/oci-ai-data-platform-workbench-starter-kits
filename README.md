@@ -37,7 +37,7 @@ The standard laboratories contain five notebooks, one for each stage. The Telco 
 | --- | ---: | ---: | ---: | --- |
 | Banking | 1.0.3 | 4 CSV files | 5 tasks | Customer value, branch activity, transaction quality, and lineage |
 | Telecommunications | 1.0.3 | 4 CSV files | 5 tasks | Subscriber usage, network-site activity, service quality, and lineage |
-| Telco Customer 360 Lineage | 1.1.1 | 10 CSV files | 14 tasks | Cross-domain Customer 360, service ownership, geographic summaries, and detailed lineage |
+| Telco Customer 360 Lineage | 1.1.2 | 10 CSV files | 14 tasks | Cross-domain Customer 360, service ownership, geographic summaries, and detailed lineage |
 | Retail | 1.0.3 | 4 CSV files | 5 tasks | Customer value, product sales, order quality, and lineage |
 | Healthcare | 1.0.3 | 4 CSV files | 5 tasks | Patient utilization, provider activity, encounter quality, and lineage |
 | Agent | 0.0.0 | — | — | Planned; visible in the catalog but not assignable |
@@ -278,7 +278,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 - **A participant remains Pending or Permissions is displayed:** refresh the user list or reopen the laboratory manager. Provisioning is resumable and continues from its operation journal.
 - **A request returns 502 or 504:** the application treats transient upstream and gateway timeouts as retryable. Keep the same operation rather than creating a duplicate user or laboratory.
 - **A workflow says the cluster cannot be started:** start the shared AIDP compute manually before running the workflow. A cluster explicitly stopped by a user cannot be started by the workflow.
-- **Lineage is incomplete:** confirm the workflow completed, the compute configuration does not set `spark.aidp.lineage.enabled=false`, and the relevant Silver and Gold tables use the package-declared format. Telco Customer 360 Lineage uses Delta because it was live-validated for complete entity and column lineage in this environment.
+- **Lineage is incomplete:** confirm the workflow completed, the compute configuration does not set `spark.aidp.lineage.enabled=false`, and the four medallion layers use managed catalog tables. Telco Customer 360 Lineage keeps Landing in CSV and Bronze, Silver, and Gold in Delta; managed tables preserve the governed `oci_landing -> oci_bronze -> oci_silver -> oci_gold` entity and column paths in this environment.
 - **Agent cannot be selected:** Agent is intentionally marked as planned until its content and AI infrastructure are available.
 
 ## Security essentials

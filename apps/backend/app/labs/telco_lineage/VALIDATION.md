@@ -5,64 +5,111 @@ report excludes credentials, OCIDs, tenant URLs, and participant PII.
 
 ## Package contract
 
-- Version: `1.1.1`.
-- Package SHA-256: `8af57e3aff715ed4a7839e62ab9ebbc40126ea6313d3d0a20fa3f11a2652eb02`.
+- Version: `1.1.2`.
+- Package SHA-256: `b3718984e4c967007cd623da195c72678b61406ec4d8db821cc4b5c0a80ed054`.
 - Sources: 10 deterministic CSV files, 7,405 rows, and 30 controlled quality incidents.
 - Workflow: 14 parameterized notebooks and 31 declared tables.
 - Formats: `CSV -> DELTA -> DELTA -> DELTA`.
+- Storage: all 31 catalog tables are managed so that AIDP lineage retains their qualified catalog and schema identity.
 - Expected Gold rows: Customer 360 493, service portfolio 1,261, and geographic summary 12.
+
+## Root cause and correction
+
+The previous package registered catalog tables as external tables with an
+Object Storage location. The current AIDP lineage runtime resolved reads from
+those tables by their physical path and emitted synthetic source nodes such as
+`aidp_lab.telco_lineage.customer_master`. Those nodes had no catalog format or
+column metadata, so the visible graph stopped at the Silver-to-Gold boundary.
+
+Version `1.1.2` writes the same deterministic data to managed catalog tables in
+the four governed schemas. It does not create a synthetic `telco_lineage`
+schema. The resulting physical path is now:
+
+`aidp_lab.oci_landing.* -> aidp_lab.oci_bronze.* -> aidp_lab.oci_silver.* -> aidp_lab.oci_gold.*`
 
 ## Participant isolation
 
-- The deleted legacy participant resources and Identity user were absent before recreation.
-- Recreation assigned code `101`, technical key `u101`, and an exact match between email and Identity username.
-- The workspace root is `/Workspace/medallon/u101_<email>/telco_lineage` and the job is `wf_u101_telco_lineage`.
-- The lab was redesployed independently; Identity access and the participant code were preserved.
+- The existing participant identity, code `101`, technical key `u101`, and Banking assignment were preserved.
+- The workspace root remains `/Workspace/medallon/u101_<email>/telco_lineage` and the job is `wf_u101_telco_lineage`.
+- Only `telco_lineage` was redeployed, idempotently, from package `1.1.2`.
 
-## Live Delta workflow
+## Live workflow
 
 The shared compute was active with `spark.aidp.lineage.enabled=true`. Both runs
-used the same 14-task job and emitted `Telco Customer 360 validated: 31 tables,
-30 quality issues, Delta Silver/Gold`.
+used the same 14-task job and completed successfully.
 
-| Run | Result | Tasks | Duration |
+| Run | Result | Tasks | Client-observed duration |
 | --- | --- | ---: | ---: |
-| `0272edcd-dc78-46e2-9241-8adc687954ec` | Success | 14/14 | 508,565 ms |
-| `9491a361-372c-4b6c-90bd-f253a23aa6eb` | Success | 14/14 | 430,695 ms |
+| `436a0290-3c05-4b04-9c68-17913e85996d` | Success | 14/14 | approximately 731 s |
+| `66086863-f8ff-4f99-ac76-5687cdfb0e49` | Success | 14/14 | approximately 1,282 s |
 
-Master Catalog reported 31 active tables: 10 Landing, 10 Bronze, 8 Silver,
-and 3 Gold. The details endpoint confirmed all 11 Silver/Gold tables as
-`tableType=EXTERNAL`, `externalTableDataFormat=DELTA`, and located under the
-isolated `users/u101/telco_lineage` prefixes.
+Master Catalog reported 31 active managed tables with populated columns:
+
+| Layer | Tables | Format | Minimum columns per table |
+| --- | ---: | --- | ---: |
+| Landing | 10 | CSV | 7 |
+| Bronze | 10 | Delta | 9 |
+| Silver | 8 | Delta | 6 |
+| Gold | 3 | Delta | 10 |
 
 ## Structured lineage acceptance
 
 Queries used `direction=BOTH`, `maxDepth=8`, `shouldIncludeEdges=true`, and
 both `level=ENTITY` and `level=COLUMN`.
 
-- Entity relationships: 13/13 declared direct relationships present.
-- Column relationships: 17/17 declared segments present (16 unique; one segment is shared by two paths).
-- Customer 360: 5 entity nodes / 4 links; 26 column nodes / 13 links.
-- Service portfolio: 6 entity nodes / 5 links; 35 column nodes / 18 links.
-- Geographic summary: 4 entity nodes / 3 links; 14 column nodes / 7 links.
-- The corrected `customer_360.monthly_value_total -> geographic_service_summary.monthly_value_total` derivation is present.
+| Gold anchor | Entity nodes / links | Column nodes / links |
+| --- | ---: | ---: |
+| Customer 360 | 50 / 56 | 85 / 73 |
+| Service Portfolio | 54 / 61 | 135 / 119 |
+| Geographic Summary | 36 / 46 | 43 / 37 |
 
-The official export for Customer 360 is stored in
-`evidence/customer_360_lineage.csv` (527 bytes, SHA-256
-`6ba3d454446df362eda9d15e51f1dcc73cb4c70d1aca430a6f7c0db4846d6106`).
+Across the three Gold anchors, the physical schema coverage is 10 Landing
+tables, 10 Bronze tables, 7 Silver tables, and all 3 Gold tables. The eighth
+Silver table, `quality_issues`, is intentionally a validation sink rather than
+an input to a Gold table. There are 163 entity links and 229 column links in
+the combined responses. No node matches the forbidden
+`aidp_lab.telco_lineage.*` prefix.
+
+The second workflow execution returned the same physical layer counts, zero
+forbidden nodes, 163 entity links, and 229 column links.
+
+After validation, the shared compute returned from `ACTIVE` through `STOPPING`
+to its prior `STOPPED` state. The temporary OCI-local container was removed
+without deleting its persistent volume.
+
+## Master Catalog UI acceptance
+
+The Customer 360 lineage panel was validated from structured DOM state, not a
+screenshot. The Lineage settings upstream and downstream depths were both set
+to 8. The rendered graph contained these exact schema-label counts:
+
+- `oci_landing`: 9
+- `oci_bronze`: 10
+- `oci_silver`: 7
+- `oci_gold`: 3
+- `telco_lineage`: 0
+
+The managed source node `u101_telco_lineage_customer_master` was present and
+the legacy unqualified `customer_master` node was absent. A lower UI depth can
+still intentionally hide earlier layers even though the API contains them.
+
+The official Customer 360 export is stored in
+`evidence/customer_360_lineage.csv`. Participant email paths are sanitized.
+The file is 6,269 bytes with SHA-256
+`3fd7aa3ccda01857e5ec82e1c72b17fdb2c2a07db120d9abbc6c296c6d2ab71c`.
 
 ## Iceberg diagnostic retained
 
-Before the Delta package, multiple native external Iceberg write paths were
-tested with the same lineage-enabled compute. DataFrameWriter V2 produced no
-entity or column links. DataFrameWriter V1 and SQL overwrite/CTAS produced the
-three-node entity graph but no column links. An existing Delta table returned
-both levels, isolating the limitation to Iceberg lineage capture in this AIDP
-runtime rather than authentication or the lineage endpoints.
+Native external Iceberg was previously tested on the same lineage-enabled
+runtime. DataFrameWriter V2 produced no entity or column links; Writer V1 and
+SQL overwrite/CTAS produced a three-node entity graph but no column links.
+Delta produced both levels. The current package therefore uses Delta for the
+complete entity-and-column lineage demonstration instead of presenting a
+partial Iceberg graph as complete.
 
 ## Acceptance decision
 
-The Delta package satisfies functional, idempotence, entity-lineage, and
-column-lineage acceptance. Iceberg remains unsuitable for this specific
-lineage demonstration until the deployed AIDP runtime exposes equivalent
-column lineage for native external Iceberg writes.
+Package `1.1.2` satisfies functional, idempotence, managed-table, entity-lineage,
+column-lineage, and complete medallion-schema acceptance. The full upstream
+path to every Gold table is available through the structured API and is visible
+in Master Catalog when the lineage depth is set to 8.

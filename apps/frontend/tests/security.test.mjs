@@ -24,6 +24,11 @@ test("registration has no password field while administrator login remains prote
   assert.match(source, /Laboratories/);
   assert.match(source, /lab_id: "banking"/);
   assert.match(source, /Planned/);
+  assert.match(source, /className="lab-picker-description"/);
+  assert.match(source, /aria-describedby=\{descriptionId\}/);
+  assert.match(source, /\{labDescription\(lab\)\}/);
+  assert.match(styles, /\.lab-picker \{[^}]*grid-template-columns: minmax\(0,1fr\)/);
+  assert.doesNotMatch(styles, /\.lab-picker \{[^}]*grid-template-columns: repeat\(2/);
   assert.doesNotMatch(source, /Generate password/);
 });
 
