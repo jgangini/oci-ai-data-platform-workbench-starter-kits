@@ -24,11 +24,16 @@ test("registration has no password field while administrator login remains prote
   assert.match(source, /Laboratories/);
   assert.match(source, /lab_id: "banking"/);
   assert.match(source, /Planned/);
-  assert.match(source, /className="lab-picker-description"/);
-  assert.match(source, /aria-describedby=\{descriptionId\}/);
+  assert.match(source, /role="combobox"/);
+  assert.match(source, /aria-multiselectable="true"/);
+  assert.match(source, /role="option"/);
+  assert.match(source, /className="lab-combobox-description"/);
   assert.match(source, /\{labDescription\(lab\)\}/);
-  assert.match(styles, /\.lab-picker \{[^}]*grid-template-columns: minmax\(0,1fr\)/);
-  assert.doesNotMatch(styles, /\.lab-picker \{[^}]*grid-template-columns: repeat\(2/);
+  assert.match(source, /event\.key !== "Escape"/);
+  assert.match(source, /labPickerRef\.current\?\.contains/);
+  assert.match(styles, /\.lab-combobox-menu \{[^}]*position: absolute/);
+  assert.match(styles, /\.lab-combobox-menu \{[^}]*max-height: 320px/);
+  assert.match(styles, /\.lab-combobox-menu \{[^}]*overflow-y: auto/);
   assert.doesNotMatch(source, /Generate password/);
 });
 
@@ -74,9 +79,12 @@ test("administrator UI manages lab users through protected API routes", () => {
   assert.match(source, /className="toast-dismiss"/);
   assert.match(source, /aria-label="Dismiss notification"/);
   assert.match(source, /function CopyIcon/);
-  assert.match(source, /navigator\.clipboard\.writeText\(aidpUrl\)/);
+  assert.match(source, /function copyAidpValue/);
+  assert.match(source, /navigator\.clipboard\.writeText\(value\)/);
   assert.match(source, /className="settings-url-control"/);
   assert.match(source, /aria-label="Copy AI Data Platform URL"/);
+  assert.match(source, /AI Data Platform OCID/);
+  assert.match(source, /aria-label="Copy AI Data Platform OCID"/);
   assert.match(source, /className="confirm-error"/);
 });
 

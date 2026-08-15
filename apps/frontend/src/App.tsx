@@ -53,6 +53,11 @@ type CatalogLab = {
   available: boolean;
 };
 type UserDraft = { name: string; email: string; lab_ids: string[] };
+type AdminSettingsResponse = {
+  aidp_url: string;
+  aidp_platform_id: string;
+  registration_code_configured: boolean;
+};
 const fallbackCatalog: CatalogLab[] = [
   { lab_id: "banking", display_name: "Banking", description: "Explore customer accounts, branches and transactions through a governed medallion pipeline.", pack_version: "1.0.3", status: "available", available: true },
   { lab_id: "telecommunications", display_name: "Telecommunications", description: "Analyze subscribers, plans, network sites and usage events for service and network insights.", pack_version: "1.0.3", status: "available", available: true },
@@ -878,8 +883,13 @@ function RegisterPage() {
   const catalog = useLabCatalog();
   const [form, setForm] = useState({ name: "", email: "" });
   const [labIds, setLabIds] = useState<string[]>(["banking"]);
+  const [labPickerOpen, setLabPickerOpen] = useState(false);
   const [codeSlots, setCodeSlots] = useState<string[]>(() => Array(8).fill(""));
   const codeInputs = useRef<Array<HTMLInputElement | null>>([]);
+  const labPickerRef = useRef<HTMLDivElement>(null);
+  const labPickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const labPickerLabelId = useId();
+  const labPickerMenuId = useId();
   const registrationAbortRef = useRef<AbortController | null>(null);
   const readyDialogRef = useRef<HTMLDivElement>(null);
   const readyCloseRef = useRef<HTMLButtonElement>(null);
@@ -902,9 +912,34 @@ function RegisterPage() {
     },
     [],
   );
+  useEffect(() => {
+    if (!labPickerOpen) return undefined;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!labPickerRef.current?.contains(event.target as Node))
+        setLabPickerOpen(false);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setLabPickerOpen(false);
+      labPickerTriggerRef.current?.focus();
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [labPickerOpen]);
   const update = (name: keyof typeof form, value: string) =>
     setForm((current) => ({ ...current, [name]: value }));
   const registrationCode = `${codeSlots.slice(0, 4).join("")}-${codeSlots.slice(4).join("")}`;
+  const selectedLabSummary =
+    labIds.length === 0
+      ? "Choose laboratories"
+      : labIds.length === 1
+        ? labLabel(catalog, labIds[0])
+        : `${labIds.length} laboratories selected`;
 
   function focusCode(index: number) {
     codeInputs.current[Math.min(index, 7)]?.focus();
@@ -1073,38 +1108,65 @@ function RegisterPage() {
               required
             />
           </label>
-          <fieldset className="lab-picker">
-            <legend>Laboratories</legend>
-            {catalog.map((lab) => {
-              const descriptionId = `registration-lab-${lab.lab_id}-description`;
-              return (
-                <label className="lab-picker-option" key={lab.lab_id}>
-                  <input
-                    type="checkbox"
-                    checked={labIds.includes(lab.lab_id)}
-                    disabled={!lab.available}
-                    aria-describedby={descriptionId}
-                    onChange={(event) =>
-                      setLabIds((current) =>
-                        event.target.checked
-                          ? [...current, lab.lab_id]
-                          : current.filter((value) => value !== lab.lab_id),
-                      )
-                    }
-                  />
-                  <span className="lab-picker-copy">
-                    <span className="lab-picker-title">
-                      <strong>{lab.display_name}</strong>
-                      {!lab.available && <small>Planned</small>}
-                    </span>
-                    <span className="lab-picker-description" id={descriptionId}>
-                      {labDescription(lab)}
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
-          </fieldset>
+          <div className="lab-combobox" ref={labPickerRef}>
+            <span className="lab-combobox-label" id={labPickerLabelId}>
+              Laboratories
+            </span>
+            <button
+              ref={labPickerTriggerRef}
+              type="button"
+              className="lab-combobox-trigger"
+              role="combobox"
+              aria-expanded={labPickerOpen}
+              aria-haspopup="listbox"
+              aria-controls={labPickerMenuId}
+              aria-labelledby={`${labPickerLabelId} ${labPickerMenuId}-summary`}
+              onClick={() => setLabPickerOpen((open) => !open)}
+            >
+              <span id={`${labPickerMenuId}-summary`}>{selectedLabSummary}</span>
+            </button>
+            {labPickerOpen && (
+              <div
+                className="lab-combobox-menu"
+                id={labPickerMenuId}
+                role="listbox"
+                aria-labelledby={labPickerLabelId}
+                aria-multiselectable="true"
+              >
+                {catalog.map((lab) => {
+                  const selected = labIds.includes(lab.lab_id);
+                  return (
+                    <button
+                      type="button"
+                      className={`lab-combobox-option${selected ? " selected" : ""}`}
+                      key={lab.lab_id}
+                      role="option"
+                      aria-selected={selected}
+                      disabled={!lab.available}
+                      onClick={() =>
+                        setLabIds((current) =>
+                          current.includes(lab.lab_id)
+                            ? current.filter((value) => value !== lab.lab_id)
+                            : [...current, lab.lab_id],
+                        )
+                      }
+                    >
+                      <span className="lab-combobox-check" aria-hidden="true" />
+                      <span className="lab-combobox-copy">
+                        <span className="lab-combobox-title">
+                          <strong>{lab.display_name}</strong>
+                          {!lab.available && <small>Planned</small>}
+                        </span>
+                        <span className="lab-combobox-description">
+                          {labDescription(lab)}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <fieldset className="registration-code">
             <legend>Registration code</legend>
             <span id="registration-code-help" className="sr-only">
@@ -1802,15 +1864,18 @@ function AdminUsers() {
 
 function AdminSettings() {
   const [aidpUrl, setAidpUrl] = useState("");
+  const [aidpPlatformId, setAidpPlatformId] = useState("");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const urlRef = useRef<HTMLInputElement>(null);
+  const platformIdRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    void api<{ aidp_url: string; registration_code_configured: boolean }>("/api/admin/settings")
+    void api<AdminSettingsResponse>("/api/admin/settings")
       .then((result) => {
         setAidpUrl(result.aidp_url);
+        setAidpPlatformId(result.aidp_platform_id);
         setRegistrationCodeConfigured(result.registration_code_configured);
       })
       .catch((reason) => {
@@ -1828,24 +1893,28 @@ function AdminSettings() {
     await api("/api/admin/logout", { method: "POST" });
     window.location.assign("/");
   }
-  async function copyAidpUrl() {
-    if (!aidpUrl) return;
+  async function copyAidpValue(
+    value: string,
+    inputRef: RefObject<HTMLInputElement | null>,
+    label: string,
+  ) {
+    if (!value) return;
     try {
-      await navigator.clipboard.writeText(aidpUrl);
+      await navigator.clipboard.writeText(value);
     } catch {
-      urlRef.current?.select();
+      inputRef.current?.select();
       if (!document.execCommand("copy")) {
-        setError("Unable to copy the AI Data Platform URL.");
+        setError(`Unable to copy the ${label}.`);
         return;
       }
     }
-    setToast("AI Data Platform URL copied.");
+    setToast(`${label} copied.`);
   }
   async function saveSettings() {
     setError("");
     const rotatesRegistrationCode = Boolean(registrationCode);
     try {
-      const result = await api<{ aidp_url: string; registration_code_configured: boolean }>("/api/admin/settings", {
+      const result = await api<AdminSettingsResponse>("/api/admin/settings", {
         method: "PUT",
         body: JSON.stringify({
           ...(aidpUrl ? { aidp_url: aidpUrl } : {}),
@@ -1853,6 +1922,7 @@ function AdminSettings() {
         }),
       });
       setAidpUrl(result.aidp_url);
+      setAidpPlatformId(result.aidp_platform_id);
       setRegistrationCode("");
       setRegistrationCodeConfigured(result.registration_code_configured);
       setToast(rotatesRegistrationCode ? "Lab settings saved. Registration code updated." : "AI Data Platform URL saved.");
@@ -1893,7 +1963,9 @@ function AdminSettings() {
               <button
                 type="button"
                 className="copy-url"
-                onClick={() => void copyAidpUrl()}
+                onClick={() =>
+                  void copyAidpValue(aidpUrl, urlRef, "AI Data Platform URL")
+                }
                 disabled={!aidpUrl}
                 aria-label="Copy AI Data Platform URL"
                 title="Copy AI Data Platform URL"
@@ -1911,6 +1983,35 @@ function AdminSettings() {
                 Open AI Data Platform
               </a>
             )}
+          </label>
+          <label className="settings-field">
+            AI Data Platform OCID
+            <span className="settings-url-control">
+              <input
+                ref={platformIdRef}
+                value={aidpPlatformId}
+                readOnly
+                spellCheck={false}
+                aria-label="AI Data Platform OCID"
+                placeholder="Not configured"
+              />
+              <button
+                type="button"
+                className="copy-url"
+                onClick={() =>
+                  void copyAidpValue(
+                    aidpPlatformId,
+                    platformIdRef,
+                    "AI Data Platform OCID",
+                  )
+                }
+                disabled={!aidpPlatformId}
+                aria-label="Copy AI Data Platform OCID"
+                title="Copy AI Data Platform OCID"
+              >
+                <CopyIcon />
+              </button>
+            </span>
           </label>
           <label className="settings-field">
             Lab registration code

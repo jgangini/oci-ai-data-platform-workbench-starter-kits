@@ -199,6 +199,14 @@ def test_public_catalog_exposes_five_available_labs_and_planned_agent(tmp_path: 
     assert "industries" not in payload
 
 
+def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    login(client)
+    response = client.get("/api/admin/settings")
+    assert response.status_code == 200
+    assert response.json()["aidp_platform_id"] == "ocid1.aidataplatform.oc1..test"
+
+
 def test_registration_accepts_multiple_labs_and_activates_after_all_are_ready(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     response = client.post("/api/register", json=register_payload())

@@ -90,6 +90,7 @@ class SettingsStore:
         values = self._load()
         return {
             "aidp_url": values["aidp_workbench_url"],
+            "aidp_platform_id": self._settings.aidp_platform_id,
             "registration_code_configured": bool(values["registration_code_hash"]),
         }
 
