@@ -30,7 +30,7 @@ from .notebooks import (
 )
 
 
-API_VERSION = "20240831"
+API_VERSION = "20260430"
 SHARED_COMPUTE_NAME = "aidp_lab_shared_compute"
 AGENT_COMPUTE_NAME = "aidp_agent_shared_compute"
 LEGACY_CATALOG_NAME = "aidp_lab"
@@ -200,7 +200,7 @@ class AidpClient:
         self.settings = settings
         self.base = (
             f"https://datalake.{settings.aidp_region}.oci.oraclecloud.com/{API_VERSION}/"
-            f"dataLakes/{settings.aidp_platform_id}"
+            f"aiDataPlatforms/{settings.aidp_platform_id}"
         )
         import oci
 

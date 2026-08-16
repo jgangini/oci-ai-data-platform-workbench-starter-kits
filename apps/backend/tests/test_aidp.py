@@ -25,8 +25,8 @@ USER_OCID = "ocid1.user.oc1..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 EMAIL = "ada@example.com"
 
 
-def test_aidp_api_version_matches_live_control_plane() -> None:
-    assert API_VERSION == "20240831"
+def test_aidp_api_version_supports_agent_flows() -> None:
+    assert API_VERSION == "20260430"
 
 
 class FakeResponse:
