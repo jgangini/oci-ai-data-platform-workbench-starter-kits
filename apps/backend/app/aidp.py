@@ -30,7 +30,7 @@ from .notebooks import (
 )
 
 
-API_VERSION = "20260430"
+API_VERSION = "20240831"
 SHARED_COMPUTE_NAME = "aidp_lab_shared_compute"
 AGENT_COMPUTE_NAME = "aidp_agent_shared_compute"
 LEGACY_CATALOG_NAME = "aidp_lab"

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.aidp import (
+    API_VERSION,
     AidpClient,
     AidpProvisionConflict,
     AidpProvisionError,
@@ -22,6 +23,10 @@ from app.notebooks import participant_folder, participant_key, workspace_partici
 
 USER_OCID = "ocid1.user.oc1..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 EMAIL = "ada@example.com"
+
+
+def test_aidp_api_version_matches_live_control_plane() -> None:
+    assert API_VERSION == "20240831"
 
 
 class FakeResponse:
