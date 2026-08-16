@@ -125,3 +125,19 @@ def test_missing_wallet_fails_before_creating_database_users(
     with pytest.raises(AutonomousProvisionError, match="wallet is unavailable"):
         client.ensure_participant("u101")
     assert calls == []
+
+
+def test_database_failures_report_only_safe_error_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _calls, _connections = _client(tmp_path, monkeypatch)
+
+    def connect(**_kwargs: str) -> FakeConnection:
+        raise RuntimeError("ORA-01017: invalid credential password=must-not-leak")
+
+    monkeypatch.setitem(sys.modules, "oracledb", SimpleNamespace(connect=connect))
+
+    with pytest.raises(AutonomousProvisionError) as raised:
+        client.ensure_participant("u101")
+    assert str(raised.value).endswith("(ORA-01017)")
+    assert "must-not-leak" not in str(raised.value)

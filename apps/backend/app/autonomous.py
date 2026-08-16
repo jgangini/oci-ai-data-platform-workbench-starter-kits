@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import string
 import threading
@@ -15,6 +16,12 @@ from .governance import database_names
 
 class AutonomousProvisionError(RuntimeError):
     pass
+
+
+def _database_error_marker(exc: Exception) -> str:
+    """Return a diagnostic category without leaking connection or credential details."""
+    match = re.search(r"\b(?:ORA|DPY)-\d+\b", str(exc), re.IGNORECASE)
+    return match.group(0).upper() if match else type(exc).__name__
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +76,8 @@ class AutonomousGovernanceClient:
                     connection.commit()
             except Exception as exc:
                 raise AutonomousProvisionError(
-                    "Autonomous rejected the participant governance schema reconciliation"
+                    "Autonomous rejected the participant governance schema reconciliation "
+                    f"({_database_error_marker(exc)})"
                 ) from exc
             users[participant_key] = credentials
             self._write_users(users)
@@ -96,7 +104,8 @@ class AutonomousGovernanceClient:
                     connection.commit()
             except Exception as exc:
                 raise AutonomousProvisionError(
-                    "Autonomous rejected the participant governance schema cleanup"
+                    "Autonomous rejected the participant governance schema cleanup "
+                    f"({_database_error_marker(exc)})"
                 ) from exc
             users = self._users()
             users.pop(participant_key, None)
