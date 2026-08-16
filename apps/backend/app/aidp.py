@@ -517,6 +517,8 @@ class AidpClient:
         )
 
     def _ensure_agent_compute(self, workspace_key: str) -> tuple[dict[str, Any], bool]:
+        retry_scope = ""
+
         def matches() -> list[dict[str, Any]]:
             return [
                 item
@@ -528,9 +530,79 @@ class AidpClient:
                 in {"AI_COMPUTE"}
             ]
 
+        def recover_hidden() -> dict[str, Any] | None:
+            nonlocal retry_scope
+            operations = sorted(
+                [
+                    item
+                    for item in self._list(
+                        "/asyncOperations",
+                        params={"resourceType": "AI_COMPUTE"},
+                        phase="workspace",
+                    )
+                    if item.get("resourceDisplayName") == AGENT_COMPUTE_NAME
+                ],
+                key=lambda item: str(item.get("timeStarted") or ""),
+                reverse=True,
+            )
+            if operations:
+                retry_scope = str(operations[0].get("key") or "")
+            for operation in operations:
+                resource = str(operation.get("resourceName") or "").split(".")
+                if len(resource) != 2 or resource[0] != workspace_key:
+                    continue
+                candidate = self._request(
+                    "GET",
+                    f"/workspaces/{workspace_key}/clusters/{resource[1]}",
+                    allow_not_found=True,
+                    phase="workspace",
+                )
+                if (
+                    isinstance(candidate, dict)
+                    and self._resource_name(candidate) == AGENT_COMPUTE_NAME
+                    and str(candidate.get("type") or candidate.get("sourceApi") or "").upper()
+                    == "AI_COMPUTE"
+                ):
+                    return {
+                        **candidate,
+                        "_async_operation_action": operation.get("actionType"),
+                        "_async_operation_status": operation.get("status"),
+                    }
+            return None
+
         current = matches()
+        if not current:
+            hidden = recover_hidden()
+            if hidden:
+                current = [hidden]
         if len(current) > 1:
             raise AidpProvisionError(f"AIDP has duplicate AI compute named {AGENT_COMPUTE_NAME}.")
+        if current:
+            resource_state = str(
+                current[0].get("lifecycleState") or current[0].get("state") or ""
+            ).upper()
+            failed_create = (
+                str(current[0].get("_async_operation_action") or "").upper()
+                == "CREATE_CLUSTER"
+                and str(current[0].get("_async_operation_status") or "").upper()
+                == "FAILED"
+            )
+            if failed_create and resource_state not in {"ACTIVE", "STOPPED"}:
+                cluster_key = str(current[0].get("key") or current[0].get("id") or "")
+                if not cluster_key:
+                    raise AidpProvisionError(
+                        "The failed AIDP AI compute has no identifier for safe recovery."
+                    )
+                self._request(
+                    "DELETE",
+                    f"/workspaces/{workspace_key}/clusters/{cluster_key}",
+                    allow_not_found=True,
+                    phase="workspace",
+                )
+                raise AidpProvisionPending(
+                    "The failed AIDP AI compute is being removed before a safe retry.",
+                    "workspace",
+                )
         if not current:
             self._request(
                 "POST",
@@ -544,6 +616,7 @@ class AidpClient:
                     },
                 },
                 phase="workspace",
+                retry_scope=f"agent-compute:{retry_scope}",
             )
             current = matches()
             if len(current) != 1:

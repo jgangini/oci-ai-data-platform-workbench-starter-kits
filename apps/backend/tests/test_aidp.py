@@ -8,10 +8,12 @@ from types import SimpleNamespace
 import pytest
 
 from app.aidp import (
+    AGENT_COMPUTE_NAME,
     API_VERSION,
     AidpClient,
     AidpProvisionConflict,
     AidpProvisionError,
+    AidpProvisionPending,
     LocalAidpClient,
     UserMaterial,
     participant_owner_key,
@@ -151,6 +153,125 @@ def test_list_follows_opc_next_page_and_preserves_filters() -> None:
     assert calls[1] == {
         "limit": "100", "catalogKey": "catalog", "page": "next-token"
     }
+
+
+def test_agent_compute_recovers_resource_hidden_behind_async_operation() -> None:
+    client = bare_client()
+    workspace_key = "workspace"
+    hidden_key = "hidden-ai-compute"
+    calls: list[tuple[str, str]] = []
+
+    def list_items(path: str, *, params=None, **_kwargs):
+        if path.endswith("/clusters"):
+            return []
+        assert path == "/asyncOperations"
+        assert params == {"resourceType": "AI_COMPUTE"}
+        return [
+            {
+                "resourceDisplayName": AGENT_COMPUTE_NAME,
+                "resourceName": f"{workspace_key}.{hidden_key}",
+                "timeStarted": "2026-08-16T17:08:22Z",
+            }
+        ]
+
+    def request(method: str, path: str, **_kwargs):
+        calls.append((method, path))
+        return {
+            "key": hidden_key,
+            "displayName": AGENT_COMPUTE_NAME,
+            "type": "AI_COMPUTE",
+            "sourceApi": "AI_COMPUTE",
+            "state": "ACTIVE",
+        }
+
+    client._list = list_items
+    client._request = request
+
+    compute, created = client._ensure_agent_compute(workspace_key)
+
+    assert compute["key"] == hidden_key
+    assert created is False
+    assert calls == [("GET", f"/workspaces/{workspace_key}/clusters/{hidden_key}")]
+
+
+def test_agent_compute_removes_failed_hidden_resource_before_retry() -> None:
+    client = bare_client()
+    workspace_key = "workspace"
+    hidden_key = "failed-ai-compute"
+    calls: list[tuple[str, str]] = []
+
+    def list_items(path: str, *, params=None, **_kwargs):
+        if path.endswith("/clusters"):
+            return []
+        assert path == "/asyncOperations"
+        assert params == {"resourceType": "AI_COMPUTE"}
+        return [
+            {
+                "actionType": "CREATE_CLUSTER",
+                "resourceDisplayName": AGENT_COMPUTE_NAME,
+                "resourceName": f"{workspace_key}.{hidden_key}",
+                "status": "FAILED",
+                "timeStarted": "2026-08-16T17:08:22Z",
+            }
+        ]
+
+    def request(method: str, path: str, **_kwargs):
+        calls.append((method, path))
+        if method == "GET":
+            return {
+                "key": hidden_key,
+                "displayName": AGENT_COMPUTE_NAME,
+                "type": "AI_COMPUTE",
+                "state": "CREATING",
+            }
+        return None
+
+    client._list = list_items
+    client._request = request
+
+    with pytest.raises(AidpProvisionPending, match="being removed before a safe retry"):
+        client._ensure_agent_compute(workspace_key)
+
+    assert calls == [
+        ("GET", f"/workspaces/{workspace_key}/clusters/{hidden_key}"),
+        ("DELETE", f"/workspaces/{workspace_key}/clusters/{hidden_key}"),
+    ]
+
+
+def test_agent_compute_rotates_retry_token_after_terminal_attempt() -> None:
+    client = bare_client()
+    workspace_key = "workspace"
+    failed_key = "failed-ai-compute"
+    post_kwargs: dict[str, object] = {}
+
+    def list_items(path: str, *, params=None, **_kwargs):
+        if path.endswith("/clusters"):
+            return []
+        assert path == "/asyncOperations"
+        assert params == {"resourceType": "AI_COMPUTE"}
+        return [
+            {
+                "key": "failed-operation",
+                "actionType": "CREATE_CLUSTER",
+                "resourceDisplayName": AGENT_COMPUTE_NAME,
+                "resourceName": f"{workspace_key}.{failed_key}",
+                "status": "FAILED",
+                "timeStarted": "2026-08-16T17:25:22Z",
+            }
+        ]
+
+    def request(method: str, _path: str, **kwargs):
+        if method == "POST":
+            post_kwargs.update(kwargs)
+        return None
+
+    client._list = list_items
+    client._request = request
+
+    with pytest.raises(AidpProvisionPending, match="has not published"):
+        client._ensure_agent_compute(workspace_key)
+
+    assert post_kwargs["retry_scope"] == "agent-compute:failed-operation"
 
 
 def test_job_contract_is_derived_from_pack_and_accepts_a_sixth_notebook() -> None:
