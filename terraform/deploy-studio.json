@@ -8,7 +8,9 @@
   "capabilities": {
     "compartment_modes": ["new", "existing"],
     "requires_genai_region": false,
-    "database_profile": "none"
+    "database_profile": "new_or_existing",
+    "region_selection": "subscribed_compatible",
+    "regional_requirements": ["aidp", "autonomous_26ai_dw", "genai_chat"]
   },
   "presentation": {
     "title": "OCI AI Data Platform Cloud Migration Lab",
@@ -29,6 +31,8 @@
     {"key": "network", "label": "VCN and public subnet"},
     {"key": "bucket", "label": "Medallion Object Storage"},
     {"key": "compute", "label": "Registration VM"},
+    {"key": "database", "label": "Autonomous AI Database 26ai"},
+    {"key": "wallet", "label": "Database wallet and AI features"},
     {"key": "application", "label": "AIDP workspace, catalog and RBAC"},
     {"key": "artifacts", "label": "Lab access summary"},
     {"key": "email", "label": "Access email"},
@@ -65,6 +69,76 @@
         "min_length": 9,
         "max_length": 9,
         "transform": "uppercase_pbkdf2_sha256"
+      },
+      {
+        "name": "agent_model_id",
+        "label": "Agent LLM model",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_genai_chat_models",
+        "span": 2
+      },
+      {
+        "name": "autonomous_database_mode",
+        "label": "Database mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "options": [
+          {"value": "new", "label": "Create new database"},
+          {"value": "existing", "label": "Use existing database"}
+        ]
+      },
+      {
+        "name": "autonomous_database_version",
+        "label": "Database profile",
+        "type": "select",
+        "required": true,
+        "default": "26ai:DW",
+        "transform": "database_profile",
+        "visible_when": {"field": "autonomous_database_mode", "equals": "new"},
+        "options": [
+          {"value": "26ai:DW", "label": "Oracle AI Database 26ai — Data Warehouse"}
+        ]
+      },
+      {
+        "name": "autonomous_database_compute_count",
+        "label": "Database ECPU count",
+        "type": "number",
+        "required": true,
+        "default": 4,
+        "min_length": 1,
+        "max_length": 3,
+        "visible_when": {"field": "autonomous_database_mode", "equals": "new"}
+      },
+      {
+        "name": "existing_autonomous_database_ocid",
+        "label": "Database OCID",
+        "type": "text",
+        "required": true,
+        "pattern": "^ocid1\\.autonomousdatabase\\..+$",
+        "min_length": 30,
+        "max_length": 255,
+        "visible_when": {"field": "autonomous_database_mode", "equals": "existing"},
+        "span": 2
+      },
+      {
+        "name": "autonomous_database_admin_password",
+        "label": "Database ADMIN password",
+        "type": "password",
+        "required": true,
+        "secret": true,
+        "min_length": 12,
+        "max_length": 128
+      },
+      {
+        "name": "autonomous_database_wallet_password",
+        "label": "Database wallet password",
+        "type": "password",
+        "required": true,
+        "secret": true,
+        "min_length": 12,
+        "max_length": 128
       }
     ],
     "email_access_fields": ["admin_username", "admin_password", "registration_code"]
@@ -82,6 +156,12 @@
     "objectstorage_namespace",
     "medallion_prefixes",
     "ai_data_platform_id",
+    "autonomous_database_id",
+    "autonomous_database_mode",
+    "autonomous_database_version",
+    "autonomous_database_workload",
+    "autonomous_database_compute_count",
+    "agent_model_id",
     "default_workspace_name",
     "developer_group_ocid",
     "pending_group_ocid",
@@ -101,6 +181,7 @@
     "entrypoint": "terraform/k_preflight.py",
     "timeout_seconds": 60,
     "requires_oci_credentials": true,
+    "secret_inputs": ["autonomous_database_admin_password", "autonomous_database_wallet_password"],
     "output_inputs": ["home_region", "operator_user_ocid", "preferred_vm_shape", "availability_domain_index"],
     "runtime_fields": [
       {
@@ -145,6 +226,7 @@
   "post_apply": {
     "entrypoint": "terraform/hooks/post_apply.py",
     "timeout_seconds": 3600,
-    "requires_oci_credentials": true
+    "requires_oci_credentials": true,
+    "secret_inputs": ["autonomous_database_admin_password", "autonomous_database_wallet_password"]
   }
 }

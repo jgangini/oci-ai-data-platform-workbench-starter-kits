@@ -8,10 +8,15 @@ import configparser
 import hashlib
 import json
 import os
+import re
+import secrets
+import string
 import sys
+import tempfile
 import time
 import uuid
-from io import StringIO
+import zipfile
+from io import BytesIO, StringIO
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -26,7 +31,9 @@ DEVELOPER_ROLE_NAME = "AIDP_LAB_DEVELOPER"
 PENDING_ROLE_NAME = "AIDP_LAB_PENDING"
 SHARED_COMPUTE_NAME = "aidp_lab_shared_compute"
 BOOTSTRAP_OBJECT_NAME = ".bootstrap/operator-credentials.json"
-BOOTSTRAP_READY = "AIDP_LAB_CREDENTIALS_READY"
+BOOTSTRAP_VERSION = 2
+BOOTSTRAP_READY = "AIDP_LAB_CREDENTIALS_V2_READY"
+DATABASE_OPERATOR = "AIDP_LAB_OPERATOR"
 LAYERS = ("landing", "bronze", "silver", "gold")
 SHARED_SCHEMA_NAMES = {layer: f"oci_{layer}" for layer in LAYERS}
 RESOURCE_WAIT_ATTEMPTS = 120
@@ -731,7 +738,16 @@ def fetch_bootstrap_public_key(
     raise ReconcileError("Timed out waiting for the VM bootstrap state Run Command")
 
 
-def encrypt_bootstrap_credentials(public_key: str, config_text: str, key_text: str) -> bytes:
+def encrypt_bootstrap_credentials(
+    public_key: str,
+    config_text: str,
+    key_text: str,
+    wallet: bytes,
+    wallet_password: str,
+    operator_username: str,
+    operator_password: str,
+    dsn: str,
+) -> bytes:
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding, rsa
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -745,7 +761,15 @@ def encrypt_bootstrap_credentials(public_key: str, config_text: str, key_text: s
     data_key = AESGCM.generate_key(bit_length=256)
     nonce = os.urandom(12)
     plaintext = json.dumps(
-        {"config_text": config_text, "key_text": key_text},
+        {
+            "config_text": config_text,
+            "key_text": key_text,
+            "wallet_zip_b64": base64.b64encode(wallet).decode("ascii"),
+            "wallet_password": wallet_password,
+            "operator_username": operator_username,
+            "operator_password": operator_password,
+            "dsn": dsn,
+        },
         separators=(",", ":"),
     ).encode("utf-8")
     ciphertext = AESGCM(data_key).encrypt(nonce, plaintext, None)
@@ -758,7 +782,7 @@ def encrypt_bootstrap_credentials(public_key: str, config_text: str, key_text: s
         ),
     )
     envelope = {
-        "schema_version": 1,
+        "schema_version": BOOTSTRAP_VERSION,
         "wrapped_key_b64": base64.b64encode(wrapped_key).decode("ascii"),
         "nonce_b64": base64.b64encode(nonce).decode("ascii"),
         "ciphertext_b64": base64.b64encode(ciphertext).decode("ascii"),
@@ -1047,6 +1071,9 @@ def deliver_operator_credentials(
     object_storage: Any,
     config_text: str,
     key_text: str,
+    wallet: bytes,
+    wallet_password: str,
+    admin_password: str,
 ) -> bool:
     if str(outputs["operator_user_ocid"]) != str(config.get("user") or ""):
         raise ReconcileError("Terraform operator_user_ocid does not match the uploaded OCI config")
@@ -1063,7 +1090,23 @@ def deliver_operator_credentials(
     if public_key == BOOTSTRAP_READY:
         delete_bootstrap_object(oci_module, object_storage, outputs)
         return False
-    envelope = encrypt_bootstrap_credentials(public_key, config_text, key_text)
+    database_operator = bootstrap_autonomous_governance(
+        wallet,
+        wallet_password,
+        admin_password,
+    )
+    operator_username, operator_password, dsn = database_operator
+    envelope = encrypt_bootstrap_credentials(
+        public_key,
+        config_text,
+        key_text,
+        wallet,
+        wallet_password,
+        operator_username,
+        operator_password,
+        dsn,
+    )
+    delete_bootstrap_object(oci_module, object_storage, outputs)
     try:
         object_storage.put_object(
             str(outputs["objectstorage_namespace"]),
@@ -1128,7 +1171,9 @@ def build_success_result(
             {
                 "name": "aidp_lab_summary.json",
                 "content_type": "application/json",
-                "content_b64": base64.b64encode((json.dumps(summary, indent=2, sort_keys=True) + "\n").encode()).decode(),
+                "content_b64": base64.b64encode(
+                    (json.dumps(summary, indent=2, sort_keys=True) + "\n").encode()
+                ).decode(),
             }
         ],
         "outputs": {
@@ -1145,6 +1190,291 @@ def build_success_result(
     }
 
 
+def _wait_for_autonomous_available(database: Any, database_id: str, *, attempts: int = 120) -> None:
+    item = database.get_autonomous_database(database_id).data
+    state = str(getattr(item, "lifecycle_state", "") or "").upper()
+    if state == "STOPPED":
+        database.start_autonomous_database(database_id)
+    elif state != "AVAILABLE":
+        raise ReconcileError(f"Autonomous database is {state or 'not available'}")
+    for _ in range(attempts):
+        state = str(
+            getattr(database.get_autonomous_database(database_id).data, "lifecycle_state", "") or ""
+        ).upper()
+        if state == "AVAILABLE":
+            return
+        if state in {"FAILED", "TERMINATED", "TERMINATING", "UNAVAILABLE"}:
+            raise ReconcileError(f"Autonomous database entered terminal state {state}")
+        _sleep(10)
+    raise ReconcileError("Timed out waiting for Autonomous database availability")
+
+
+def _response_bytes(response: Any) -> bytes:
+    data = getattr(response, "data", None)
+    if isinstance(data, bytes):
+        return data
+    content = getattr(data, "content", None)
+    if isinstance(content, bytes):
+        return content
+    raw = getattr(data, "raw", None)
+    if raw is not None and callable(getattr(raw, "read", None)):
+        value = raw.read()
+        if isinstance(value, bytes):
+            return value
+    raise ReconcileError("Autonomous wallet response did not contain bytes")
+
+
+def _validate_wallet(wallet: bytes) -> bytes:
+    if len(wallet) > 10 * 1024 * 1024:
+        raise ReconcileError("Autonomous wallet exceeds the 10 MiB safety limit")
+    try:
+        with zipfile.ZipFile(BytesIO(wallet)) as archive:
+            names = archive.namelist()
+            if not names or any(
+                name.startswith(("/", "\\")) or ".." in Path(name.replace("\\", "/")).parts
+                for name in names
+            ):
+                raise ReconcileError("Autonomous wallet archive contains an unsafe path")
+            if any(item.file_size > 5 * 1024 * 1024 for item in archive.infolist()):
+                raise ReconcileError("Autonomous wallet archive contains an oversized entry")
+    except zipfile.BadZipFile as exc:
+        raise ReconcileError("Autonomous wallet archive is invalid") from exc
+    return wallet
+
+
+def prepare_autonomous_wallet(
+    oci_module: Any,
+    database: Any,
+    database_id: str,
+    database_mode: str,
+    wallet_password: str,
+) -> bytes:
+    if database_mode == "existing":
+        wallet_path = os.environ.get("DEPLOY_STUDIO_ADB_WALLET", "")
+        if not wallet_path:
+            raise ReconcileError("Existing Autonomous database mode requires the uploaded wallet")
+        return _validate_wallet(Path(wallet_path).read_bytes())
+    details = oci_module.database.models.GenerateAutonomousDatabaseWalletDetails(
+        password=wallet_password
+    )
+    response = database.generate_autonomous_database_wallet(database_id, details)
+    return _validate_wallet(_response_bytes(response))
+
+
+def ensure_ai_features(
+    oci_module: Any,
+    config: dict[str, Any],
+    signer: Any,
+    platform_id: str,
+    database_id: str,
+    admin_password: str,
+    *,
+    attempts: int = 180,
+) -> bool:
+    client = oci_module.ai_data_platform.AiDataPlatformClient(config, signer=signer)
+    platform = client.get_ai_data_platform(platform_id).data
+    if bool(
+        getattr(platform, "is_ai_feature_enabled", False)
+        or getattr(platform, "ai_feature_enabled", False)
+    ):
+        return False
+    details = oci_module.ai_data_platform.models.EnableAiFeatureDetails(
+        vector_db_id=database_id,
+        vector_db_admin_cred=admin_password,
+    )
+    try:
+        response = client.enable_ai_feature(platform_id, details)
+    except oci_module.exceptions.ServiceError as exc:
+        if exc.status == 409:
+            return False
+        raise ReconcileError(f"AIDP AI feature enablement failed with OCI {exc.status}") from exc
+    work_request_id = str((getattr(response, "headers", None) or {}).get("opc-work-request-id") or "")
+    if not work_request_id:
+        return True
+    for _ in range(attempts):
+        work_request = client.get_work_request(work_request_id).data
+        status = str(getattr(work_request, "status", "") or "").upper()
+        if status == "SUCCEEDED":
+            return True
+        if status in {"FAILED", "CANCELED", "CANCELING"}:
+            raise ReconcileError(f"AIDP AI feature work request ended in {status}")
+        _sleep(10)
+    raise ReconcileError("Timed out enabling AIDP AI features")
+
+
+GOVERNANCE_PACKAGE_SPEC = """
+CREATE OR REPLACE PACKAGE AIDP_LAB_GOVERNANCE AUTHID DEFINER AS
+  PROCEDURE ENSURE_PARTICIPANT(
+    P_PARTICIPANT_KEY IN VARCHAR2,
+    P_OWNER_PASSWORD IN VARCHAR2,
+    P_READER_PASSWORD IN VARCHAR2
+  );
+  PROCEDURE DROP_PARTICIPANT(P_PARTICIPANT_KEY IN VARCHAR2);
+END AIDP_LAB_GOVERNANCE;
+""".strip()
+
+GOVERNANCE_PACKAGE_BODY = """
+CREATE OR REPLACE PACKAGE BODY AIDP_LAB_GOVERNANCE AS
+  FUNCTION VALIDATED_STEM(P_PARTICIPANT_KEY IN VARCHAR2) RETURN VARCHAR2 IS
+    L_KEY VARCHAR2(64) := LOWER(TRIM(P_PARTICIPANT_KEY));
+    L_NUMBER NUMBER;
+  BEGIN
+    IF L_KEY != TRIM(P_PARTICIPANT_KEY) OR NOT REGEXP_LIKE(L_KEY, '^u[0-9]+$', 'c') THEN
+      RAISE_APPLICATION_ERROR(-20001, 'Invalid participant key');
+    END IF;
+    L_NUMBER := TO_NUMBER(SUBSTR(L_KEY, 2));
+    IF L_NUMBER < 101 THEN
+      RAISE_APPLICATION_ERROR(-20001, 'Invalid participant key');
+    END IF;
+    RETURN DBMS_ASSERT.SIMPLE_SQL_NAME(UPPER(L_KEY));
+  END;
+
+  FUNCTION QUOTED_PASSWORD(P_PASSWORD IN VARCHAR2) RETURN VARCHAR2 IS
+  BEGIN
+    IF NOT REGEXP_LIKE(P_PASSWORD, '^[A-Za-z0-9]{24,64}$', 'c') THEN
+      RAISE_APPLICATION_ERROR(-20002, 'Invalid generated password');
+    END IF;
+    RETURN '"' || P_PASSWORD || '"';
+  END;
+
+  FUNCTION USER_EXISTS(P_USERNAME IN VARCHAR2) RETURN BOOLEAN IS
+    L_COUNT NUMBER;
+  BEGIN
+    SELECT COUNT(*) INTO L_COUNT FROM ALL_USERS WHERE USERNAME = P_USERNAME;
+    RETURN L_COUNT = 1;
+  END;
+
+  PROCEDURE ENSURE_USER(P_USERNAME IN VARCHAR2, P_PASSWORD IN VARCHAR2, P_QUOTA IN BOOLEAN) IS
+  BEGIN
+    IF USER_EXISTS(P_USERNAME) THEN
+      EXECUTE IMMEDIATE 'ALTER USER ' || P_USERNAME || ' IDENTIFIED BY ' || QUOTED_PASSWORD(P_PASSWORD) || ' ACCOUNT UNLOCK';
+    ELSE
+      EXECUTE IMMEDIATE 'CREATE USER ' || P_USERNAME || ' IDENTIFIED BY ' || QUOTED_PASSWORD(P_PASSWORD) ||
+        CASE WHEN P_QUOTA THEN ' DEFAULT TABLESPACE DATA QUOTA 100M ON DATA' ELSE '' END;
+    END IF;
+    EXECUTE IMMEDIATE 'GRANT CREATE SESSION TO ' || P_USERNAME;
+  END;
+
+  PROCEDURE ENSURE_TABLES(P_OWNER IN VARCHAR2, P_READER IN VARCHAR2) IS
+    L_COUNT NUMBER;
+  BEGIN
+    SELECT COUNT(*) INTO L_COUNT FROM ALL_TABLES WHERE OWNER = P_OWNER AND TABLE_NAME = 'LAB_METRICS';
+    IF L_COUNT = 0 THEN
+      EXECUTE IMMEDIATE 'CREATE TABLE ' || P_OWNER || '.LAB_METRICS (' ||
+        'LAB_ID VARCHAR2(64) NOT NULL, METRIC_NAME VARCHAR2(128) NOT NULL, ' ||
+        'METRIC_VALUE VARCHAR2(4000), UPDATED_AT TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL, ' ||
+        'PRIMARY KEY (LAB_ID, METRIC_NAME))';
+    END IF;
+    SELECT COUNT(*) INTO L_COUNT FROM ALL_TABLES WHERE OWNER = P_OWNER AND TABLE_NAME = 'LINEAGE_RELATIONS';
+    IF L_COUNT = 0 THEN
+      EXECUTE IMMEDIATE 'CREATE TABLE ' || P_OWNER || '.LINEAGE_RELATIONS (' ||
+        'LAB_ID VARCHAR2(64) NOT NULL, LINEAGE_LEVEL VARCHAR2(16) NOT NULL, ' ||
+        'RELATION_PATH VARCHAR2(4000) NOT NULL, UPDATED_AT TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL)';
+    END IF;
+    EXECUTE IMMEDIATE 'GRANT SELECT ON ' || P_OWNER || '.LAB_METRICS TO ' || P_READER;
+    EXECUTE IMMEDIATE 'GRANT SELECT ON ' || P_OWNER || '.LINEAGE_RELATIONS TO ' || P_READER;
+    EXECUTE IMMEDIATE 'GRANT READ, WRITE ON DIRECTORY DATA_PUMP_DIR TO ' || P_READER;
+  END;
+
+  PROCEDURE ENSURE_PARTICIPANT(
+    P_PARTICIPANT_KEY IN VARCHAR2,
+    P_OWNER_PASSWORD IN VARCHAR2,
+    P_READER_PASSWORD IN VARCHAR2
+  ) IS
+    L_STEM VARCHAR2(64) := VALIDATED_STEM(P_PARTICIPANT_KEY);
+    L_OWNER VARCHAR2(128) := DBMS_ASSERT.SIMPLE_SQL_NAME(L_STEM || '_AGENT');
+    L_READER VARCHAR2(128) := DBMS_ASSERT.SIMPLE_SQL_NAME(L_STEM || '_AGENT_RO');
+  BEGIN
+    ENSURE_USER(L_OWNER, P_OWNER_PASSWORD, TRUE);
+    ENSURE_USER(L_READER, P_READER_PASSWORD, FALSE);
+    ENSURE_TABLES(L_OWNER, L_READER);
+  END;
+
+  PROCEDURE DROP_PARTICIPANT(P_PARTICIPANT_KEY IN VARCHAR2) IS
+    L_STEM VARCHAR2(64) := VALIDATED_STEM(P_PARTICIPANT_KEY);
+    L_OWNER VARCHAR2(128) := DBMS_ASSERT.SIMPLE_SQL_NAME(L_STEM || '_AGENT');
+    L_READER VARCHAR2(128) := DBMS_ASSERT.SIMPLE_SQL_NAME(L_STEM || '_AGENT_RO');
+  BEGIN
+    IF USER_EXISTS(L_READER) THEN
+      EXECUTE IMMEDIATE 'DROP USER ' || L_READER || ' CASCADE';
+    END IF;
+    IF USER_EXISTS(L_OWNER) THEN
+      EXECUTE IMMEDIATE 'DROP USER ' || L_OWNER || ' CASCADE';
+    END IF;
+  END;
+END AIDP_LAB_GOVERNANCE;
+""".strip()
+
+
+def _generated_database_password() -> str:
+    alphabet = string.ascii_letters + string.digits
+    while True:
+        value = "".join(secrets.choice(alphabet) for _ in range(32))
+        if any(c.islower() for c in value) and any(c.isupper() for c in value) and any(c.isdigit() for c in value):
+            return value
+
+
+def _wallet_dsn(wallet_dir: Path) -> str:
+    aliases = re.findall(
+        r"(?mi)^\s*([A-Za-z][A-Za-z0-9_.-]*)\s*=",
+        (wallet_dir / "tnsnames.ora").read_text(encoding="utf-8"),
+    )
+    if not aliases:
+        raise ReconcileError("Autonomous wallet has no TNS aliases")
+    return next((alias for alias in aliases if alias.lower().endswith("_low")), aliases[0])
+
+
+def bootstrap_autonomous_governance(
+    wallet: bytes,
+    wallet_password: str,
+    admin_password: str,
+) -> tuple[str, str, str]:
+    """Install the allowlisted definer package, then return a rotated EXECUTE-only login."""
+    import oracledb
+
+    operator_password = _generated_database_password()
+    with tempfile.TemporaryDirectory(prefix="aidp-wallet-") as temporary:
+        wallet_dir = Path(temporary)
+        with zipfile.ZipFile(BytesIO(_validate_wallet(wallet))) as archive:
+            archive.extractall(wallet_dir)
+        dsn = _wallet_dsn(wallet_dir)
+        try:
+            with oracledb.connect(
+                user="ADMIN",
+                password=admin_password,
+                dsn=dsn,
+                config_dir=str(wallet_dir),
+                wallet_location=str(wallet_dir),
+                wallet_password=wallet_password,
+            ) as connection:
+                cursor = connection.cursor()
+                cursor.execute(GOVERNANCE_PACKAGE_SPEC)
+                cursor.execute(GOVERNANCE_PACKAGE_BODY)
+                cursor.execute(
+                    "SELECT COUNT(*) FROM ALL_USERS WHERE USERNAME = :username",
+                    username=DATABASE_OPERATOR,
+                )
+                exists = int(cursor.fetchone()[0]) == 1
+                quoted_password = f'"{operator_password}"'
+                cursor.execute(
+                    ("ALTER USER " if exists else "CREATE USER ")
+                    + DATABASE_OPERATOR
+                    + " IDENTIFIED BY "
+                    + quoted_password
+                    + (" ACCOUNT UNLOCK" if exists else "")
+                )
+                cursor.execute(f"GRANT CREATE SESSION TO {DATABASE_OPERATOR}")
+                cursor.execute(
+                    f"GRANT EXECUTE ON ADMIN.AIDP_LAB_GOVERNANCE TO {DATABASE_OPERATOR}"
+                )
+                connection.commit()
+        except Exception as exc:
+            raise ReconcileError(
+                "Autonomous governance package bootstrap failed; ADMIN credentials were not persisted"
+            ) from exc
+    return DATABASE_OPERATOR, operator_password, dsn
+
+
 def main() -> int:
     global _post_apply_deadline
     output_path = os.environ.get("DEPLOY_STUDIO_OUTPUT")
@@ -1155,7 +1485,14 @@ def main() -> int:
     bootstrap_uploaded = False
     try:
         context = read_json_env("DEPLOY_STUDIO_CONTEXT")
-        read_json_env("DEPLOY_STUDIO_SECRETS")  # Validate the complete hook contract; values are intentionally unused.
+        secret_document = read_json_env("DEPLOY_STUDIO_SECRETS")
+        secret_inputs = secret_document.get("inputs")
+        if not isinstance(secret_inputs, dict):
+            raise ReconcileError("Deploy Studio secrets have an invalid shape")
+        admin_password = str(secret_inputs.get("autonomous_database_admin_password") or "")
+        wallet_password = str(secret_inputs.get("autonomous_database_wallet_password") or "")
+        if len(admin_password) < 12 or len(wallet_password) < 12:
+            raise ReconcileError("Autonomous database secrets are missing or invalid")
         config_path = os.environ["DEPLOY_STUDIO_OCI_CONFIG"]
         key_path = os.environ["DEPLOY_STUDIO_OCI_KEY"]
         outputs = context["terraform_outputs"]
@@ -1164,6 +1501,7 @@ def main() -> int:
         import oci
 
         object_storage = oci.object_storage.ObjectStorageClient(oci_config, signer=signer)
+        database = oci.database.DatabaseClient(oci_config, signer=signer)
         messages = describe_object_prefixes()
         api = AidpApi(context["region"], outputs["ai_data_platform_id"], signer, context["deployment_id"])
         reconciled, reconcile_messages = reconcile(api, outputs)
@@ -1171,6 +1509,28 @@ def main() -> int:
         aidp_url = resolve_workbench_url(outputs, oci_config, signer)
         if not aidp_url:
             raise ReconcileError("AIDP Workbench direct URL is not published yet")
+        database_id = str(outputs["autonomous_database_id"])
+        _wait_for_autonomous_available(database, database_id)
+        wallet = prepare_autonomous_wallet(
+            oci,
+            database,
+            database_id,
+            str(outputs["autonomous_database_mode"]),
+            wallet_password,
+        )
+        ai_enabled = ensure_ai_features(
+            oci,
+            oci_config,
+            signer,
+            str(outputs["ai_data_platform_id"]),
+            database_id,
+            admin_password,
+        )
+        messages.append(
+            "AIDP AI features enabled with the deployment Autonomous database"
+            if ai_enabled
+            else "AIDP AI features already enabled"
+        )
         bootstrap_uploaded = deliver_operator_credentials(
             oci,
             oci_config,
@@ -1180,14 +1540,19 @@ def main() -> int:
             object_storage,
             render_runtime_oci_config(oci_config),
             Path(key_path).read_text(encoding="utf-8"),
+            wallet,
+            wallet_password,
+            admin_password,
         )
         if bootstrap_uploaded:
-            messages.append("Encrypted operator OCI credentials delivered for one-use VM bootstrap")
+            messages.append(
+                "Autonomous governance package installed; encrypted wallet and EXECUTE-only operator delivered to the VM"
+            )
             wait_for_bootstrap_consumed(oci, object_storage, outputs)
             bootstrap_uploaded = False
             messages.append("Registration VM consumed and deleted the encrypted bootstrap object")
         else:
-            messages.append("Registration VM already has the validated operator OCI profile")
+            messages.append("Registration VM already has the validated Autonomous bootstrap v2 runtime")
         wait_for_application(str(outputs["application_url"]))
         messages.append("Registration application is healthy over HTTPS")
         reconciled["runtime_ready"] = True

@@ -24,7 +24,7 @@ def _context() -> dict[str, object]:
         "compartment_mode": "new",
         "source": {
             "repository": "https://github.com/jgangini/oci-aidp-cloud-migration-lab.git",
-            "ref": "v2.0.0-rc.7",
+            "ref": "v3.0.0-rc.1",
             "commit_sha": "0123456789abcdef0123456789abcdef01234567",
         },
     }
@@ -58,20 +58,14 @@ def _plan(
     }
 
 
-def test_context_requires_release_candidate_or_final_v200_source() -> None:
+def test_context_requires_release_candidate_or_final_v300_source() -> None:
     release_gate.validate_context(_context())
-    previous = _context()
-    previous["source"] = {**previous["source"], "ref": "v2.0.0-rc.1"}  # type: ignore[arg-type]
-    release_gate.validate_context(previous)
-    previous_rc2 = _context()
-    previous_rc2["source"] = {**previous_rc2["source"], "ref": "v2.0.0-rc.2"}  # type: ignore[arg-type]
-    release_gate.validate_context(previous_rc2)
     final = _context()
-    final["source"] = {**final["source"], "ref": "v2.0.0"}  # type: ignore[arg-type]
+    final["source"] = {**final["source"], "ref": "v3.0.0"}  # type: ignore[arg-type]
     release_gate.validate_context(final)
     invalid = _context()
     invalid["source"] = {**invalid["source"], "ref": "main"}  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="v2.0.0-rc.7"):
+    with pytest.raises(ValueError, match="v3.0.0-rc.1"):
         release_gate.validate_context(invalid)
 
 
@@ -79,7 +73,7 @@ def test_context_requires_release_candidate_or_final_v200_source() -> None:
     "field,value,message",
     [
         ("project_id", "other", "project_id"),
-        ("region", "us-ashburn-1", "us-chicago-1"),
+        ("region", "invalid region", "effective OCI region"),
     ],
 )
 def test_context_rejects_wrong_release_target(field: str, value: str, message: str) -> None:

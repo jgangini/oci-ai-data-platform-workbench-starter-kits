@@ -109,14 +109,19 @@
       "forbidden_schema_paths": [
         "aidp_lab.telco_lineage."
       ],
-      "max_depth": 8,
-      "qualified_node_template": "aidp_lab.oci_{layer}.{participant_key}_telco_lineage_{table}",
-      "required_schema_paths": [
-        "aidp_lab.oci_landing.",
-        "aidp_lab.oci_bronze.",
-        "aidp_lab.oci_silver.",
-        "aidp_lab.oci_gold."
+      "levels": [
+        "ENTITY",
+        "COLUMN"
       ],
+      "max_depth": 8,
+      "qualified_node_template": "{participant_key}_aidp_lab.oci_{layer}.{participant_key}_telco_lineage_{table}",
+      "required_schema_paths": [
+        "{participant_key}_aidp_lab.oci_landing.",
+        "{participant_key}_aidp_lab.oci_bronze.",
+        "{participant_key}_aidp_lab.oci_silver.",
+        "{participant_key}_aidp_lab.oci_gold."
+      ],
+      "should_include_edges": true,
       "target_tables": [
         "customer_360",
         "customer_service_portfolio",
@@ -143,7 +148,7 @@
   "formats": {
     "bronze": "DELTA",
     "gold": "DELTA",
-    "landing": "CSV",
+    "landing": "DELTA",
     "silver": "DELTA"
   },
   "lab_id": "telco_lineage",
@@ -151,7 +156,7 @@
     {
       "depends_on": [],
       "file": "01_landing_telco_lineage.ipynb",
-      "sha256": "59f6b93a973c28adb819a355918d6b2f6f64dc073bffb9d761db14cbbd30bf53",
+      "sha256": "1678dc62a9fed1bb4d2fe756d3fb8152b505c0537a59ca82bd56f246e11d0e5c",
       "task_key": "01_landing_telco_lineage"
     },
     {
@@ -159,7 +164,7 @@
         "01_landing_telco_lineage"
       ],
       "file": "02_bronze_crm_products.ipynb",
-      "sha256": "2c6c26c9bd550ea8ce92e58b754d728b5a65d7bb9ae02cbc53a134e000e0c8c3",
+      "sha256": "4a041da976e2fcccd468fe03b91fb7eccf845a10eff94f4cf60b70e2eaa4c99a",
       "task_key": "02_bronze_crm_products"
     },
     {
@@ -167,7 +172,7 @@
         "01_landing_telco_lineage"
       ],
       "file": "03_bronze_prepaid.ipynb",
-      "sha256": "c20862e4747ff7d6668fafdda54fda84a9c1e70f5666f27a60f1b1b5ffa749cb",
+      "sha256": "5bb32dbc5f3ef3360f7781d3f807c14ffcc2ea7f10d6482966c1a7d1cdb4d9dc",
       "task_key": "03_bronze_prepaid"
     },
     {
@@ -175,7 +180,7 @@
         "01_landing_telco_lineage"
       ],
       "file": "04_bronze_postpaid.ipynb",
-      "sha256": "f371c21c6b8728373b0261693c7ca189d08147f925976f30ecc8f2529b04a792",
+      "sha256": "646e91745db274d6f442d8be2302ba17a9c4e4d02dd57f0f8cc1cff85283d2af",
       "task_key": "04_bronze_postpaid"
     },
     {
@@ -183,7 +188,7 @@
         "01_landing_telco_lineage"
       ],
       "file": "05_bronze_home.ipynb",
-      "sha256": "13b6c6152d5c551f2fcff469fba38553281fe4f3a9ead0de2cd1d8b3c18f3cc0",
+      "sha256": "201670d4195cc278bbf1dfd787c12ad42cafa3295fbf8fa40a3e806a0190599a",
       "task_key": "05_bronze_home"
     },
     {
@@ -191,7 +196,7 @@
         "02_bronze_crm_products"
       ],
       "file": "06_silver_customer.ipynb",
-      "sha256": "1f23b726b526090174a14cee040240d8858fc105a1c1b4ffb973865c309d9733",
+      "sha256": "fcd700fc285687fa397355b25f3d044f3b477b1d34438d8e198deec524880740",
       "task_key": "06_silver_customer"
     },
     {
@@ -200,7 +205,7 @@
         "06_silver_customer"
       ],
       "file": "07_silver_prepaid.ipynb",
-      "sha256": "f6c9c3993f01f924d976e86f41d47c41c35ad92f29ad55fe343a7623e311d1c6",
+      "sha256": "66a0e5510fcd07db3e2a19770b2146790f23be7fc9a0cd1c120a9adb28af3f7d",
       "task_key": "07_silver_prepaid"
     },
     {
@@ -209,7 +214,7 @@
         "06_silver_customer"
       ],
       "file": "08_silver_postpaid.ipynb",
-      "sha256": "96709531197e5fb71b5d73a651e06a0d73e4f1d677fe4d9e15de5217141b591c",
+      "sha256": "58fc042b6d7ca9a65886da4684ab9221a44c4fa9cc5b1c5daaf8cc3f65c0c621",
       "task_key": "08_silver_postpaid"
     },
     {
@@ -218,7 +223,7 @@
         "06_silver_customer"
       ],
       "file": "09_silver_home.ipynb",
-      "sha256": "4c737bf5246338a2f4a4837fbc1921aa9062bc93426830782198e7f06eefb63b",
+      "sha256": "359cb09c475bdb7210cfb011110cbef751d64e520d2674e897443ca82e7142c7",
       "task_key": "09_silver_home"
     },
     {
@@ -229,7 +234,7 @@
         "09_silver_home"
       ],
       "file": "10_silver_ownership_quality.ipynb",
-      "sha256": "4824959e9bb2a63c93fddd950812e83bbe5ee568686f58b0525a11abd3362710",
+      "sha256": "36f2016abe1ed80b51702fe421c1510f1f336935ca47074a3954e9c8f5fde961",
       "task_key": "10_silver_ownership_quality"
     },
     {
@@ -237,7 +242,7 @@
         "10_silver_ownership_quality"
       ],
       "file": "11_gold_customer_360.ipynb",
-      "sha256": "edb73261b8a29a67e4d3ac7c88cd3beeee87cc382d44c99276376ea564b20767",
+      "sha256": "2d8c107843c9a2c9723bd34a2632cb473b23d9d172bbc1b5a46a0d93fd6ec615",
       "task_key": "11_gold_customer_360"
     },
     {
@@ -245,7 +250,7 @@
         "10_silver_ownership_quality"
       ],
       "file": "12_gold_service_portfolio.ipynb",
-      "sha256": "8a0e541ca0da126985c1bb07f7022bed08688a754eecb0202e3436dd5747e08f",
+      "sha256": "c4b2796319b11fe810e7bed8bb848db2bb965c0b91ad654a9253236c2ff98cdd",
       "task_key": "12_gold_service_portfolio"
     },
     {
@@ -254,7 +259,7 @@
         "12_gold_service_portfolio"
       ],
       "file": "13_gold_geographic_summary.ipynb",
-      "sha256": "0a31b4507cefd9ebb963a52050a8c7c8b6248423e71cc04572ee476219a91722",
+      "sha256": "6423eacfb387ececacebf2fb319bcfa79a297d072920ce0c4cb610b133a25d5a",
       "task_key": "13_gold_geographic_summary"
     },
     {
@@ -262,12 +267,12 @@
         "13_gold_geographic_summary"
       ],
       "file": "14_validate_lineage.ipynb",
-      "sha256": "fb93fdf25f3970be6d65d04145b0321c510e0fc9d7cf65a15ea5310ed4b22809",
+      "sha256": "03a3e692be5ab4b32ff998d35bb744c18597b227c2d227be295a933d15c84e46",
       "task_key": "14_validate_lineage"
     }
   ],
-  "pack_sha256": "b3718984e4c967007cd623da195c72678b61406ec4d8db821cc4b5c0a80ed054",
-  "pack_version": "1.1.2",
+  "pack_sha256": "565af17168b8b4bc1278b0e016214ade9ce3d2f59ef6309e756910e7f56b3c15",
+  "pack_version": "2.0.0",
   "schema_version": 1,
   "status": "available",
   "table_storage": {

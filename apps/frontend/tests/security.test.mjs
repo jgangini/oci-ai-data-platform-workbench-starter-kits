@@ -153,6 +153,8 @@ test("laboratory manager derives only the requested assignment changes", () => {
   assert.match(source, /Confirm changes/);
   assert.match(source, /lab-assignment-check/);
   assert.match(source, /Redeploy \$\{lab\.display_name\} for \$\{user\.email\}/);
+  assert.match(source, /pendingLabAction\.lab\.lab_id === "agent"/);
+  assert.match(source, /replaces the participant's Agent customizations/);
   assert.match(source, /labPhaseLabel\(installed\.phase\)/);
   assert.match(source, /lab\.available \? "Pending" : "Planned"/);
   assert.match(styles, /\.lab-manager-modal \{[^}]*1120px/);

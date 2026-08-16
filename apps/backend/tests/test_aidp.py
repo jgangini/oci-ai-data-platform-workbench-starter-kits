@@ -44,7 +44,12 @@ def bare_client() -> AidpClient:
     client._session_lock = threading.Lock()
     client._locks = {}
     client.settings = SimpleNamespace(
-        bucket_name="bucket", objectstorage_namespace="namespace"
+        bucket_name="bucket",
+        objectstorage_namespace="namespace",
+        aidp_region="us-chicago-1",
+        agent_model_id="ocid1.generativeaimodel.oc1.us-chicago-1.example",
+        compartment_id="ocid1.compartment.oc1..example",
+        autonomous_database_id="ocid1.autonomousdatabase.oc1.us-chicago-1.example",
     )
     return client
 
@@ -189,11 +194,11 @@ def test_two_participants_upload_identical_pack_assets_with_isolated_job_identit
             )
             or False
         )
-        client._ensure_job = lambda _workspace, _compute, participant, _pack, job_root, **_kwargs: (
+        client._ensure_job = lambda _workspace, _compute, participant, _pack, job_root, _catalog, **_kwargs: (
             jobs.append((participant, job_root)) or (f"wf_{participant}_banking", "job", False)
         )
         client._ensure_participant_content(
-            "workspace", "compute", key, pack, root, True
+            "workspace", "compute", key, pack, root, f"{key}_aidp_lab", True
         )
         files.pop("/lab-manifest.json")
         return files, notebooks, jobs
@@ -204,7 +209,7 @@ def test_two_participants_upload_identical_pack_assets_with_isolated_job_identit
     assert first[2] != second[2]
 
 
-def test_v2_manifest_migrates_to_v3_without_updating_assets() -> None:
+def test_v2_manifest_migrates_to_v4_without_updating_assets() -> None:
     client = bare_client()
     key = participant_owner_key(USER_OCID)
     old_root = f"/Workspace/medallon/{participant_folder(EMAIL)}/banking"
@@ -219,7 +224,7 @@ def test_v2_manifest_migrates_to_v3_without_updating_assets() -> None:
     client._manifest = lambda _workspace, _key: manifest if not writes else writes[-1]
     client._write_manifest = lambda _workspace, _key, value: writes.append(json.loads(json.dumps(value)))
     migrated = client._ensure_manifest("workspace", key, EMAIL, 101, "banking")
-    assert migrated["layout_version"] == 3
+    assert migrated["layout_version"] == 4
     assert migrated["labs"]["banking"] == {
         "pack_version": "legacy-v2",
         "pack_hash": "",
@@ -227,6 +232,8 @@ def test_v2_manifest_migrates_to_v3_without_updating_assets() -> None:
         "job_name": f"wf_{key}_banking_medallion",
         "phase": "active",
         "operation": None,
+        "catalog_name": "aidp_lab",
+        "catalog_key": "",
     }
 
     client._workspace = lambda: {"key": "workspace"}
@@ -237,7 +244,7 @@ def test_v2_manifest_migrates_to_v3_without_updating_assets() -> None:
     assert client._provision_lab(USER_OCID, EMAIL, "banking", migrated).pack_version == "legacy-v2"
 
 
-def test_new_v3_manifest_uses_code_and_email_workspace_paths() -> None:
+def test_new_v4_manifest_uses_code_and_email_workspace_paths() -> None:
     client = bare_client()
     owner_key = participant_owner_key(USER_OCID)
     key = participant_key(101)
@@ -262,6 +269,8 @@ def test_new_v3_manifest_uses_code_and_email_workspace_paths() -> None:
     assert manifest["owner_key"] == owner_key
     assert manifest["participant_code"] == 101
     assert manifest["participant_email"] == "student+alias@example.com"
+    assert manifest["layout_version"] == 4
+    assert manifest["catalog"]["name"] == "u101_aidp_lab"
 
 
 def test_local_multi_lab_lifecycle_is_idempotent_and_protects_last_lab() -> None:
@@ -283,8 +292,8 @@ def test_local_multi_lab_lifecycle_is_idempotent_and_protects_last_lab() -> None
         await client.delete_lab(USER_OCID, "healthcare", operation_id)
         with pytest.raises(AidpProvisionConflict, match="last lab"):
             await client.delete_lab(USER_OCID, "banking", operation_id)
-        with pytest.raises(ValueError, match="available"):
-            await client.add_lab(USER_OCID, EMAIL, "agent")
+        agent = await client.add_lab(USER_OCID, EMAIL, "agent")
+        assert agent.job_name == "u101_agent_data_governance"
         await client.cleanup_user(USER_OCID)
         assert client.users == {}
 
@@ -304,7 +313,7 @@ def test_cleanup_lab_targets_only_declared_lab_resources() -> None:
     }
     calls: list[tuple[str, ...]] = []
     client._cleanup_lab_job = lambda workspace, job: calls.append(("job", workspace, job))
-    client._catalog = lambda: {"key": "catalog"}
+    client._catalog = lambda _name, **_kwargs: {"key": "catalog"}
     client._cleanup_lab_tables = lambda catalog, participant, lab: calls.append(
         ("tables", catalog, participant, lab)
     )
@@ -348,7 +357,7 @@ def test_redeploy_cleanup_preserves_workspace_container_for_in_place_repair() ->
     }
     calls: list[tuple[str, ...]] = []
     client._cleanup_lab_job = lambda workspace, job: calls.append(("job", workspace, job))
-    client._catalog = lambda: {"key": "catalog"}
+    client._catalog = lambda _name, **_kwargs: {"key": "catalog"}
     client._cleanup_lab_tables = lambda catalog, participant, lab: calls.append(
         ("tables", catalog, participant, lab)
     )
@@ -435,9 +444,10 @@ def test_full_cleanup_delegates_to_each_lab_without_cross_lab_discovery() -> Non
     client._cleanup_lab = lambda _workspace, _key, lab_id, state: calls.append(
         (lab_id, state["workspace_path"])
     )
-    client._catalog = lambda: {"key": "catalog"}
+    client._catalog = lambda _name, **_kwargs: {"key": "catalog"}
     client._cleanup_legacy_tables = lambda *_args: None
     client._cleanup_legacy_schemas = lambda *_args: None
+    client._cleanup_private_catalog = lambda *_args: None
     client._cleanup_participant_object_storage = lambda participant: calls.append(
         ("objects", participant)
     )

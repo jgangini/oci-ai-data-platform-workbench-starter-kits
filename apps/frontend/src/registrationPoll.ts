@@ -1,6 +1,7 @@
 export type RegistrationPhase =
   | "identity"
   | "workspace"
+  | "database"
   | "schemas"
   | "content"
   | "permissions";
@@ -10,6 +11,7 @@ export type RegistrationPhaseValue = RegistrationPhase | (string & {});
 export const registrationPhases: readonly RegistrationPhase[] = [
   "identity",
   "workspace",
+  "database",
   "schemas",
   "content",
   "permissions",

@@ -63,27 +63,27 @@ test("polling reconciles pending responses until active", async () => {
 test("registration progress counts completed provisioning phases", () => {
   assert.deepEqual(registrationProgress("identity"), {
     step: 1,
-    total: 5,
+    total: 6,
     percent: 0,
   });
   assert.deepEqual(registrationProgress("cleanup"), {
     step: 1,
-    total: 5,
+    total: 6,
     percent: 0,
   });
   assert.deepEqual(registrationProgress("schemas"), {
-    step: 3,
-    total: 5,
-    percent: 40,
+    step: 4,
+    total: 6,
+    percent: 50,
   });
   assert.deepEqual(registrationProgress("permissions"), {
-    step: 5,
-    total: 5,
-    percent: 80,
+    step: 6,
+    total: 6,
+    percent: 83,
   });
   assert.deepEqual(registrationProgress("future-phase"), {
     step: 1,
-    total: 5,
+    total: 6,
     percent: 0,
   });
 });

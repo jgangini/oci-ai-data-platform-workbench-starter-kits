@@ -1,12 +1,18 @@
 {
   "datasets": [],
-  "display_name": "Agent",
+  "display_name": "Data Governance Agent",
   "expected_results": {},
   "lab_id": "agent",
   "notebooks": [],
-  "pack_sha256": "f33b7be7351c0b064bb89dc322164fe5b5e49bd0e6a42d1e6def5ecd16e7af51",
-  "pack_version": "0.0.0",
+  "kind": "governance_agent",
+  "agent": {
+    "name_template": "{participant_key}_agent_data_governance",
+    "editable": true,
+    "tools": ["catalog_inventory", "lineage", "governed_sql"]
+  },
+  "pack_sha256": "e94645f8757aa29d166e9c2aba9f6cb18f9ea0f22da444eab8e7613e3fc7909f",
+  "pack_version": "1.0.0",
   "schema_version": 1,
-  "status": "planned",
+  "status": "available",
   "tables": {}
 }

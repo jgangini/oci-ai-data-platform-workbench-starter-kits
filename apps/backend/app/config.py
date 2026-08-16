@@ -22,6 +22,10 @@ class Settings:
     aidp_platform_id: str = ""
     aidp_workspace_name: str = ""
     aidp_region: str = ""
+    compartment_id: str = ""
+    autonomous_database_id: str = ""
+    autonomous_runtime_file: str = "/etc/aidp-lab/autonomous/runtime.json"
+    agent_model_id: str = ""
     oci_config_file: str = "/etc/aidp-lab/oci/config"
     objectstorage_namespace: str = ""
     bucket_name: str = ""
@@ -44,6 +48,13 @@ class Settings:
             aidp_platform_id=os.getenv("AIDP_PLATFORM_ID", ""),
             aidp_workspace_name=os.getenv("AIDP_WORKSPACE_NAME", ""),
             aidp_region=os.getenv("AIDP_REGION", ""),
+            compartment_id=os.getenv("COMPARTMENT_ID", ""),
+            autonomous_database_id=os.getenv("AUTONOMOUS_DATABASE_ID", ""),
+            autonomous_runtime_file=os.getenv(
+                "AUTONOMOUS_RUNTIME_FILE",
+                "/etc/aidp-lab/autonomous/runtime.json",
+            ),
+            agent_model_id=os.getenv("AGENT_MODEL_ID", ""),
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
             objectstorage_namespace=os.getenv("OBJECTSTORAGE_NAMESPACE", ""),
             bucket_name=os.getenv("BUCKET_NAME", ""),

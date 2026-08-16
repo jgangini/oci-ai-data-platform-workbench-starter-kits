@@ -38,13 +38,20 @@ def test_vm_receives_operator_credentials_through_one_use_encrypted_bootstrap() 
         compute,
     )
     assert 'OCI_DIR="/opt/aidp-lab/.oci"' in cloud_init
+    assert 'AUTONOMOUS_DIR="/opt/aidp-lab/autonomous"' in cloud_init
     assert 'BOOTSTRAP_DIR="/opt/aidp-lab/bootstrap"' in cloud_init
-    assert 'install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$OCI_DIR" "$BOOTSTRAP_DIR"' in cloud_init
+    assert 'install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$OCI_DIR" "$AUTONOMOUS_DIR" "$BOOTSTRAP_DIR"' in cloud_init
     assert 'openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072' in cloud_init
     assert '-m app.credential_bootstrap' in cloud_init
     assert 'OCI_EXPECTED_USER_OCID=${operator_user_ocid}' in cloud_init
     assert '"$OCI_DIR:/etc/aidp-lab/oci:rw,Z"' in cloud_init
     assert 'OCI_CONFIG_FILE=/etc/aidp-lab/oci/config' in cloud_init
+    assert "AGENT_RUNTIME_SECRET_FILE" not in cloud_init
+    assert "AIDP_RUNTIME_SECRET_FILE" not in cloud_init
+    assert "runtime-secrets.json" not in cloud_init
+    assert 'AUTONOMOUS_RUNTIME_FILE=/etc/aidp-lab/autonomous/runtime.json' in cloud_init
+    assert '"$AUTONOMOUS_DIR:/etc/aidp-lab/autonomous:ro,Z"' in cloud_init
+    assert "autonomous_database_admin_password" not in cloud_init
     assert 'rm -f "$BOOTSTRAP_DIR/key.pem" "$BOOTSTRAP_DIR/key_public.pem"' in cloud_init
     assert 'cat > /opt/aidp-lab/.env' in cloud_init
     assert '--env-file /opt/aidp-lab/.env' in cloud_init
@@ -63,9 +70,10 @@ def test_run_command_returns_only_public_material_or_the_ready_sentinel() -> Non
     assert "use instance-agent-command-execution-family" in compute
     assert "target.object.name = '.bootstrap/operator-credentials.json'" in compute
     helper = cloud_init.split("cat >/usr/local/sbin/aidp-lab-bootstrap-public-key <<'EOF'", 1)[1].split("\nEOF", 1)[0]
-    assert "AIDP_LAB_CREDENTIALS_READY" in helper
+    assert "AIDP_LAB_CREDENTIALS_V2_READY" in helper
     assert "[ -s /opt/aidp-lab/.oci/config ] && [ -s /opt/aidp-lab/.oci/key.pem ]" in helper
     assert "key_public.pem" in helper
+    assert "bootstrap_version" in helper
     assert "cat /opt/aidp-lab/.oci/key.pem" not in helper
     assert "cat /opt/aidp-lab/.oci/config" not in helper
     assert "cat /opt/aidp-lab/bootstrap/key.pem" not in helper
@@ -83,7 +91,8 @@ def test_vm_bootstrap_identity_is_authorized_before_instance_launch() -> None:
     assert "tag.${oci_identity_tag_namespace.vm_bootstrap.name}.${oci_identity_tag.vm_bootstrap.name}.value" in dynamic_group
     assert "use instance-agent-command-execution-family" in bootstrap_policy
     assert "target.object.name = '.bootstrap/operator-credentials.json'" in bootstrap_policy
-    assert 'depends_on = [oci_identity_policy.vm_bootstrap]' in instance
+    assert "oci_identity_policy.vm_bootstrap" in instance
+    assert "terraform_data.validate_existing_autonomous_database" in instance
     assert '"${oci_identity_tag_namespace.vm_bootstrap.name}.${oci_identity_tag.vm_bootstrap.name}" = local.suffix' in instance
 
 
@@ -91,7 +100,8 @@ def test_required_aidp_policy_has_no_optional_or_search_resources() -> None:
     aidp = (ROOT / "terraform/i_oci_ai_data_platform.tf").read_text(encoding="utf-8")
 
     policy = _resource(aidp, "oci_identity_policy", "aidp_service")
-    assert policy.count('"Allow any-user') == 9
+    assert policy.count('"Allow any-user') == 10
+    assert "use generative-ai-family" in policy
     assert "manage vnics" not in policy
     assert "use subnets" not in policy
     assert "use network-security-groups" not in policy

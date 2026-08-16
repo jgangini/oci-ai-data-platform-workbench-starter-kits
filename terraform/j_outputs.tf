@@ -51,6 +51,31 @@ output "ai_data_platform_id" {
   value = oci_ai_data_platform_ai_data_platform.lab.id
 }
 
+output "autonomous_database_id" {
+  description = "Autonomous AI Database used by participant governance agents."
+  value       = local.autonomous_database_id
+}
+
+output "autonomous_database_mode" {
+  value = var.autonomous_database_mode
+}
+
+output "autonomous_database_version" {
+  value = local.autonomous_database_version
+}
+
+output "autonomous_database_workload" {
+  value = local.autonomous_database_workload
+}
+
+output "autonomous_database_compute_count" {
+  value = var.autonomous_database_mode == "new" ? var.autonomous_database_compute_count : null
+}
+
+output "agent_model_id" {
+  value = var.agent_model_id
+}
+
 output "default_workspace_name" {
   value = oci_ai_data_platform_ai_data_platform.lab.default_workspace_name
 }
@@ -82,7 +107,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Fresh-only v2.0.0 contract: post-apply creates no external volumes."
+  description = "Fresh-only v3.0.0 contract: post-apply creates no external volumes."
   value       = 0
 }
 

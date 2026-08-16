@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import re
@@ -14,7 +15,9 @@ from urllib.parse import quote
 
 from oci._vendor import requests
 
+from .autonomous import AutonomousGovernanceClient, AutonomousProvisionError, ParticipantDatabase
 from .config import Settings
+from .governance import agent_source, database_names, external_catalog_name
 from .lab_packs import LabAsset, LabPack, available_lab_ids, load_lab_pack
 from .notebooks import (
     LAYER_PREFIXES,
@@ -27,12 +30,24 @@ from .notebooks import (
 )
 
 
-API_VERSION = "20240831"
+API_VERSION = "20260430"
 SHARED_COMPUTE_NAME = "aidp_lab_shared_compute"
-CATALOG_NAME = "aidp_lab"
+AGENT_COMPUTE_NAME = "aidp_agent_shared_compute"
+LEGACY_CATALOG_NAME = "aidp_lab"
+LAYOUT_VERSION = 4
 CONTROL_ROOT = f"{WORKSPACE_ROOT}/.control"
 LEGACY_WORKSPACE_ROOT = "/Workspace/lab-users"
 LEGACY_LAB_IDS = frozenset({"banking", "telecommunications", "retail", "healthcare"})
+
+
+def participant_catalog_name(key: str) -> str:
+    if re.fullmatch(r"u[1-9][0-9]*", key) is None or int(key[1:]) < 101:
+        raise ValueError("A participant key starting at u101 is required")
+    return f"{key}_aidp_lab"
+
+
+def catalog_name_for(key: str) -> str:
+    return participant_catalog_name(key) if re.fullmatch(r"u[1-9][0-9]*", key) else LEGACY_CATALOG_NAME
 
 
 class AidpProvisionPending(Exception):
@@ -97,12 +112,17 @@ class LocalAidpClient:
     def _material(user_ocid: str, email: str, lab_id: str, participant_code: int) -> UserMaterial:
         pack = load_lab_pack(lab_id)
         key = participant_key(participant_code)
+        resource_name = (
+            str(pack.agent["name_template"]).format(participant_key=key)
+            if pack.kind == "governance_agent"
+            else f"wf_{key}_{lab_id}"
+        )
         return UserMaterial(
             email,
             lab_id,
             key,
             workspace_root(key, lab_id, email),
-            f"wf_{key}_{lab_id}",
+            resource_name,
             pack.pack_version,
             participant_code=participant_code,
         )
@@ -194,6 +214,9 @@ class AidpClient:
             pass_phrase=config.get("pass_phrase"),
         )
         self.object_storage = oci.object_storage.ObjectStorageClient(config)
+        self.governance_database = AutonomousGovernanceClient(
+            settings.autonomous_runtime_file
+        )
         self.session = requests.Session()
         self._session_lock = threading.Lock()
         # ponytail: process-local locks serialize one participant; use a distributed lock if the API is replicated.
@@ -388,17 +411,96 @@ class AidpClient:
             workspaces[0], {"ACTIVE"}, "workspace", "workspace"
         )
 
-    def _catalog(self) -> dict[str, Any]:
+    def _catalog(self, name: str, *, allow_missing: bool = False) -> dict[str, Any] | None:
         catalogs = [
             item
             for item in self._list("/catalogs", phase="schemas")
-            if (item.get("displayName") or item.get("name")) == CATALOG_NAME
+            if (item.get("displayName") or item.get("name")) == name
         ]
+        if not catalogs and allow_missing:
+            return None
         if len(catalogs) != 1:
-            raise AidpProvisionPending("The aidp_lab catalog is not ready yet. Retry shortly.", "schemas")
+            raise AidpProvisionPending(f"The {name} catalog is not ready yet. Retry shortly.", "schemas")
         return self._require_operational_state(
             catalogs[0], {"ACTIVE"}, "catalog", "schemas"
         )
+
+    def _ensure_catalog(self, name: str) -> tuple[dict[str, Any], bool]:
+        current = self._catalog(name, allow_missing=True)
+        if current is not None:
+            return current, False
+        self._request(
+            "POST",
+            "/catalogs",
+            payload={
+                "displayName": name,
+                "description": f"Private participant medallion catalog {name}",
+                "catalogType": "INTERNAL",
+            },
+            phase="schemas",
+        )
+        published = self._catalog(name, allow_missing=True)
+        if published is None:
+            raise AidpProvisionPending(f"AIDP has not published catalog {name} yet.", "schemas")
+        return published, True
+
+    def _ensure_external_catalog(
+        self,
+        participant_key: str,
+        database: ParticipantDatabase,
+    ) -> tuple[dict[str, Any], bool]:
+        name = external_catalog_name(participant_key)
+        current = self._catalog(name, allow_missing=True)
+        if current is not None:
+            return current, False
+        self._request(
+            "POST",
+            "/catalogs",
+            payload={
+                "displayName": name,
+                "description": f"Read-only Autonomous governance catalog for {participant_key}",
+                "catalogType": "EXTERNAL",
+                "sourceType": "ADW",
+                "connectionDetails": {
+                    "connectionProperties": {
+                        "wallet.content": base64.b64encode(database.wallet_zip).decode("ascii"),
+                        "type": "ORACLE_ADW",
+                        "user.name": database.reader,
+                        "tns": database.dsn,
+                        "password": database.reader_password,
+                        "wallet.password": database.wallet_password,
+                    }
+                },
+            },
+            phase="database",
+        )
+        published = self._catalog(name, allow_missing=True)
+        if published is None:
+            raise AidpProvisionPending(
+                f"AIDP has not published external catalog {name} yet.", "database"
+            )
+        return published, True
+
+    def _cleanup_external_catalog(self, participant_key: str, state: dict[str, Any]) -> None:
+        name = str(state.get("external_catalog_name") or external_catalog_name(participant_key))
+        catalog = self._catalog(name, allow_missing=True)
+        if catalog is None:
+            return
+        catalog_key = str(catalog.get("key") or "")
+        if not catalog_key:
+            raise AidpProvisionPending(
+                "The participant external catalog identifier is not ready.", "cleanup"
+            )
+        self._request(
+            "DELETE",
+            f"/catalogs/{catalog_key}",
+            allow_not_found=True,
+            phase="cleanup",
+        )
+        if self._catalog(name, allow_missing=True) is not None:
+            raise AidpProvisionPending(
+                "Participant external catalog deletion is still in progress.", "cleanup"
+            )
 
     def _shared_compute(self, workspace_key: str) -> dict[str, Any]:
         clusters = [
@@ -412,6 +514,111 @@ class AidpClient:
         return self._require_operational_state(
             clusters[0], {"ACTIVE", "STOPPED"}, "compute", "workspace"
         )
+
+    def _ensure_agent_compute(self, workspace_key: str) -> tuple[dict[str, Any], bool]:
+        def matches() -> list[dict[str, Any]]:
+            return [
+                item
+                for item in self._list(
+                    f"/workspaces/{workspace_key}/clusters", phase="workspace"
+                )
+                if self._resource_name(item) == AGENT_COMPUTE_NAME
+                and str(item.get("type") or item.get("sourceApi") or "").upper()
+                in {"AI_COMPUTE"}
+            ]
+
+        current = matches()
+        if len(current) > 1:
+            raise AidpProvisionError(f"AIDP has duplicate AI compute named {AGENT_COMPUTE_NAME}.")
+        if not current:
+            self._request(
+                "POST",
+                f"/workspaces/{workspace_key}/clusters",
+                payload={
+                    "type": "AI_COMPUTE",
+                    "displayName": AGENT_COMPUTE_NAME,
+                    "description": "Shared least-privilege compute for participant governance agents",
+                    "driverConfig": {
+                        "driverShapeConfig": {"ocpus": 1, "memoryInGBs": 16, "gpus": 0}
+                    },
+                },
+                phase="workspace",
+            )
+            current = matches()
+            if len(current) != 1:
+                raise AidpProvisionPending(
+                    "AIDP has not published the shared AI compute yet.", "workspace"
+                )
+            created = True
+        else:
+            created = False
+        return (
+            self._require_operational_state(
+                current[0], {"ACTIVE", "STOPPED"}, "AI compute", "workspace"
+            ),
+            created,
+        )
+
+    def _agents(self, workspace_key: str, name: str) -> list[dict[str, Any]]:
+        return [
+            item
+            for item in self._list(
+                f"/workspaces/{workspace_key}/agents", phase="content"
+            )
+            if self._resource_name(item) == name
+        ]
+
+    def _ensure_agent(
+        self,
+        workspace_key: str,
+        compute_key: str,
+        name: str,
+        root: str,
+        source: bytes,
+        *,
+        repair_drift: bool,
+    ) -> tuple[str, bool]:
+        entry_path = f"{root}/governance_agent.py"
+        dependencies_path = f"{root}/requirements.txt"
+        changed = self._upload_file(
+            workspace_key, entry_path, source, repair_drift=repair_drift
+        )
+        changed = self._upload_file(
+            workspace_key,
+            dependencies_path,
+            b"# AIDP provides aidputils, LangGraph and OCI runtime libraries.\n",
+            repair_drift=repair_drift,
+        ) or changed
+        agents = self._agents(workspace_key, name)
+        if len(agents) > 1:
+            raise AidpProvisionError(f"AIDP has duplicate agents named {name}.")
+        if not agents:
+            self._request(
+                "POST",
+                f"/workspaces/{workspace_key}/agents",
+                payload={
+                    "displayName": name,
+                    "description": "Participant-editable data governance agent with predefined read-only tools",
+                    "pathInfo": root,
+                    "type": "CODE",
+                    "entryFilePath": entry_path,
+                    "dependenciesFilePath": dependencies_path,
+                    "computeKey": compute_key,
+                },
+                phase="content",
+            )
+            agents = self._agents(workspace_key, name)
+            if len(agents) != 1:
+                raise AidpProvisionPending(
+                    "AIDP has not published the participant Agent yet.", "content"
+                )
+            changed = True
+        agent_key = str(agents[0].get("key") or agents[0].get("id") or "")
+        if not agent_key:
+            raise AidpProvisionPending(
+                "AIDP has not published the participant Agent identifier yet.", "content"
+            )
+        return agent_key, changed
 
     @staticmethod
     def _require_operational_state(
@@ -764,7 +971,7 @@ class AidpClient:
             }
         labs = manifest.get("labs")
         if (
-            manifest.get("layout_version") != 3
+            manifest.get("layout_version") not in {3, LAYOUT_VERSION}
             or not isinstance(labs, dict)
         ):
             raise AidpProvisionError(
@@ -824,7 +1031,9 @@ class AidpClient:
                     break
                 if state.get("phase") != "active":
                     phase = str(state.get("phase") or phase)
-            if phase not in {"cleanup", "workspace", "schemas", "content", "permissions"}:
+            if phase not in {
+                "cleanup", "workspace", "database", "schemas", "content", "permissions"
+            }:
                 phase = "permissions"
             raise AidpProvisionPending(
                 "AIDP is still accepting the participant control manifest.", phase
@@ -836,12 +1045,31 @@ class AidpClient:
         key: str,
         manifest: dict[str, Any],
     ) -> dict[str, Any]:
-        if manifest.get("layout_version") != 2:
+        if manifest.get("layout_version") == LAYOUT_VERSION:
             return manifest
+        if manifest.get("layout_version") == 2:
+            manifest = {
+                "layout_version": 3,
+                "participant_key": key,
+                "labs": self._manifest_labs(manifest, key),
+            }
+        if manifest.get("layout_version") != 3:
+            return manifest
+        participant = self._manifest_participant_key(manifest, key)
+        labs = self._manifest_labs(manifest, key)
+        for state in labs.values():
+            state.setdefault("catalog_name", LEGACY_CATALOG_NAME)
+            state.setdefault("catalog_key", "")
         migrated = {
-            "layout_version": 3,
-            "participant_key": key,
-            "labs": self._manifest_labs(manifest, key),
+            **manifest,
+            "layout_version": LAYOUT_VERSION,
+            "region": self.settings.aidp_region,
+            "model_id": self.settings.agent_model_id,
+            "catalog": {"name": catalog_name_for(participant), "key": ""},
+            "agent": None,
+            "external_catalog": None,
+            "sync_state": {},
+            "labs": labs,
         }
         self._write_manifest(workspace_key, key, migrated)
         return migrated
@@ -862,11 +1090,20 @@ class AidpClient:
             existing = self._migrate_manifest(workspace_key, owner_key, existing)
         if existing is None:
             existing = {
-                "layout_version": 3,
+                "layout_version": LAYOUT_VERSION,
                 "owner_key": owner_key,
                 "participant_key": participant_key(participant_code),
                 "participant_code": participant_code,
                 "participant_email": normalized_email,
+                "region": self.settings.aidp_region,
+                "model_id": self.settings.agent_model_id,
+                "catalog": {
+                    "name": participant_catalog_name(participant_key(participant_code)),
+                    "key": "",
+                },
+                "agent": None,
+                "external_catalog": None,
+                "sync_state": {},
                 "labs": {},
             }
         key = self._manifest_participant_key(existing, owner_key)
@@ -878,11 +1115,18 @@ class AidpClient:
             if lab_id in labs:
                 continue
             pack = load_lab_pack(lab_id)
+            resource_name = (
+                str(pack.agent["name_template"]).format(participant_key=key)
+                if pack.kind == "governance_agent"
+                else f"wf_{key}_{lab_id}"
+            )
             labs[lab_id] = {
                 "pack_version": pack.pack_version,
                 "pack_hash": pack.pack_sha256,
                 "workspace_path": workspace_root(key, lab_id, normalized_email if existing.get("owner_key") else None),
-                "job_name": f"wf_{key}_{lab_id}",
+                "job_name": resource_name,
+                "catalog_name": participant_catalog_name(key) if pack.kind == "data_pipeline" else "",
+                "catalog_key": "",
                 "phase": "workspace",
                 "operation": None,
             }
@@ -916,6 +1160,7 @@ class AidpClient:
     def _ensure_schema(
         self,
         catalog_key: str,
+        catalog_name: str,
         layer: str,
     ) -> tuple[dict[str, Any], bool]:
         name = schema_name(layer)
@@ -945,7 +1190,7 @@ class AidpClient:
             payload={
                 "displayName": name,
                 "description": f"Shared collaborative {layer.title()} schema for the AIDP lab",
-                "catalogName": CATALOG_NAME,
+                "catalogName": catalog_name,
             },
             phase="schemas",
         )
@@ -964,11 +1209,12 @@ class AidpClient:
     def _ensure_catalog_contract(
         self,
         catalog_key: str,
+        catalog_name: str,
     ) -> tuple[dict[str, dict[str, Any]], bool]:
         schemas: dict[str, dict[str, Any]] = {}
         changed = False
         for layer in LAYER_PREFIXES:
-            schemas[layer], created = self._ensure_schema(catalog_key, layer)
+            schemas[layer], created = self._ensure_schema(catalog_key, catalog_name, layer)
             changed = changed or created
         return schemas, changed
 
@@ -1117,6 +1363,7 @@ class AidpClient:
         key: str,
         pack: LabPack,
         root: str,
+        catalog_name: str,
         *,
         repair_drift: bool = True,
     ) -> tuple[str, str, bool]:
@@ -1127,6 +1374,7 @@ class AidpClient:
             "workspace_root": root,
             "bucket_name": self.settings.bucket_name,
             "objectstorage_namespace": self.settings.objectstorage_namespace,
+            "catalog_name": catalog_name,
         }
         tasks = self._job_tasks(root, compute_key, pack.notebooks, parameters)
         payload = {
@@ -1272,6 +1520,7 @@ class AidpClient:
         user_ocid: str,
         participant_root: str,
         job_key: str,
+        catalog_key: str,
     ) -> bool:
         root_key = self._workspace_object_key(workspace_key, WORKSPACE_ROOT)
         participant_object_key = self._workspace_object_key(workspace_key, participant_root)
@@ -1288,6 +1537,12 @@ class AidpClient:
             user_ocid,
             "ADMIN",
             inheritable=True,
+        ) or changed
+        changed = self._ensure_permission(
+            f"/catalogs/{catalog_key}",
+            "assignCatalogPermissionDetails",
+            user_ocid,
+            "SELECT",
         ) or changed
         changed = self._ensure_permission(
             f"/workspaces/{workspace_key}/jobs/{job_key}",
@@ -1330,6 +1585,7 @@ class AidpClient:
         key: str,
         pack: LabPack,
         root: str,
+        catalog_name: str,
         repair_drift: bool,
     ) -> tuple[str, str, bool]:
         content_changed = self._upload_file(
@@ -1368,9 +1624,167 @@ class AidpClient:
             key,
             pack,
             root,
+            catalog_name,
             repair_drift=repair_drift,
         )
         return job_name, job_key, content_changed or job_changed
+
+    def _provision_agent(
+        self,
+        user_ocid: str,
+        email: str,
+        manifest: dict[str, Any],
+        state: dict[str, Any],
+        pack: LabPack,
+    ) -> UserMaterial:
+        owner_key = participant_owner_key(user_ocid)
+        key = self._manifest_participant_key(manifest, owner_key)
+        participant_code = manifest.get("participant_code")
+        workspace_key = str(self._workspace()["key"])
+        root = str(state["workspace_path"])
+        participant_root = root.rsplit("/", 1)[0]
+        agent_name = str(pack.agent["name_template"]).format(participant_key=key)
+        if state.get("phase") == "active":
+            return UserMaterial(
+                email,
+                pack.lab_id,
+                key,
+                root,
+                agent_name,
+                str(state.get("pack_version") or pack.pack_version),
+                participant_code=participant_code if isinstance(participant_code, int) else None,
+            )
+
+        external_catalog = manifest.get("external_catalog")
+        external_catalog_key = (
+            str(external_catalog.get("key") or "")
+            if isinstance(external_catalog, dict)
+            else ""
+        )
+        if not external_catalog_key:
+            if not self.governance_database.ready():
+                state["phase"] = "database"
+                self._write_manifest(workspace_key, owner_key, manifest)
+                raise AidpProvisionPending(
+                    "The Autonomous wallet and EXECUTE-only operator are not ready on the registration VM.",
+                    "database",
+                )
+            try:
+                participant_database = self.governance_database.ensure_participant(key)
+            except AutonomousProvisionError as exc:
+                raise AidpProvisionError(str(exc)) from exc
+            catalog, catalog_changed = self._ensure_external_catalog(
+                key, participant_database
+            )
+            external_catalog_key = str(catalog.get("key") or "")
+            if not external_catalog_key:
+                raise AidpProvisionPending(
+                    "The participant external catalog has no published identifier yet.",
+                    "database",
+                )
+            external_catalog = {
+                "key": external_catalog_key,
+                "name": external_catalog_name(key),
+                "database_schema": participant_database.owner,
+            }
+            manifest["external_catalog"] = external_catalog
+            state.update(
+                phase="database",
+                external_catalog_key=external_catalog_key,
+                external_catalog_name=external_catalog["name"],
+            )
+            self._write_manifest(workspace_key, owner_key, manifest)
+            if catalog_changed:
+                raise AidpProvisionPending(
+                    "The participant Autonomous schemas and external catalog are ready; Agent content is next.",
+                    "database",
+                )
+        if not all(
+            (
+                self.settings.agent_model_id,
+                self.settings.aidp_region,
+                self.settings.compartment_id,
+            )
+        ):
+            raise AidpProvisionError("The selected Agent model and regional runtime are incomplete.")
+
+        layout_changed = self._ensure_workspace_layout(
+            workspace_key, (WORKSPACE_ROOT, CONTROL_ROOT, participant_root, root)
+        )
+        compute, compute_changed = self._ensure_agent_compute(workspace_key)
+        self._pending_after_change(
+            layout_changed or compute_changed,
+            False,
+            workspace_key,
+            manifest,
+            pack.lab_id,
+            "content",
+            "The Agent workspace and shared AI compute are ready; content is next.",
+        )
+        database_schema = str(
+            external_catalog.get("database_schema")
+            if isinstance(external_catalog, dict)
+            else database_names(key)[0]
+        )
+        source = agent_source(
+            model_id=self.settings.agent_model_id,
+            region=self.settings.aidp_region,
+            compartment_id=self.settings.compartment_id,
+            external_catalog_key=external_catalog_key,
+            database_schema=database_schema,
+        )
+        agent_key, content_changed = self._ensure_agent(
+            workspace_key,
+            str(compute["key"]),
+            agent_name,
+            root,
+            source,
+            repair_drift=True,
+        )
+        state.update(agent_key=agent_key, compute_key=str(compute["key"]), job_name=agent_name)
+        self._pending_after_change(
+            content_changed,
+            False,
+            workspace_key,
+            manifest,
+            pack.lab_id,
+            "permissions",
+            "The participant Agent is ready; permissions are next.",
+        )
+        permissions_changed = self._ensure_permission(
+            f"/workspaces/{workspace_key}/clusters/{compute['key']}",
+            "assignClusterPermissionDetails",
+            user_ocid,
+            "USE",
+        )
+        permissions_changed = self._ensure_permission(
+            f"/workspaces/{workspace_key}/agents/{agent_key}",
+            "assignAgentPermissionDetails",
+            user_ocid,
+            "MANAGE",
+        ) or permissions_changed
+        if permissions_changed:
+            raise AidpProvisionPending(
+                "The participant Agent permissions were applied; final verification is next.",
+                "permissions",
+            )
+        self._advance_lab_manifest(workspace_key, manifest, pack.lab_id, "active")
+        manifest["agent"] = {
+            "key": agent_key,
+            "name": agent_name,
+            "compute_key": str(compute["key"]),
+            "model_id": self.settings.agent_model_id,
+        }
+        self._write_manifest(workspace_key, owner_key, manifest)
+        return UserMaterial(
+            email,
+            pack.lab_id,
+            key,
+            root,
+            agent_name,
+            pack.pack_version,
+            participant_code=participant_code if isinstance(participant_code, int) else None,
+        )
 
     def _provision_lab(
         self,
@@ -1390,6 +1804,8 @@ class AidpClient:
             (WORKSPACE_ROOT, CONTROL_ROOT),
         )
         state = self._manifest_labs(manifest, owner_key)[lab_id]
+        if pack.kind == "governance_agent":
+            return self._provision_agent(user_ocid, email, manifest, state, pack)
         previous_phase = str(state.get("phase") or "workspace")
         was_active = previous_phase == "active"
         root = str(state["workspace_path"])
@@ -1422,10 +1838,15 @@ class AidpClient:
             "Participant workspace is ready; schemas are next.",
         )
 
-        catalog_key = str(self._catalog()["key"])
-        _schemas, schemas_changed = self._ensure_catalog_contract(catalog_key)
+        catalog_name = str(state.get("catalog_name") or catalog_name_for(key))
+        catalog, catalog_changed = self._ensure_catalog(catalog_name)
+        catalog_key = str(catalog["key"])
+        if state.get("catalog_key") != catalog_key:
+            state["catalog_key"] = catalog_key
+            self._write_manifest(workspace_key, owner_key, manifest)
+        _schemas, schemas_changed = self._ensure_catalog_contract(catalog_key, catalog_name)
         self._pending_after_change(
-            schemas_changed,
+            catalog_changed or schemas_changed,
             was_active,
             workspace_key,
             manifest,
@@ -1435,7 +1856,7 @@ class AidpClient:
         )
 
         job_name, job_key, content_changed = self._ensure_participant_content(
-            workspace_key, compute_key, key, pack, root, repair_drift
+            workspace_key, compute_key, key, pack, root, catalog_name, repair_drift
         )
         self._pending_after_change(
             content_changed,
@@ -1452,6 +1873,7 @@ class AidpClient:
             user_ocid,
             participant_root,
             job_key,
+            catalog_key,
         )
         if permissions_changed and was_active:
             raise AidpProvisionPending(
@@ -1589,13 +2011,20 @@ class AidpClient:
                 workspace_key, key, lab_id, state, preserve_workspace=True
             )
             pack = load_lab_pack(lab_id)
+            resource_name = (
+                str(pack.agent["name_template"]).format(participant_key=key)
+                if pack.kind == "governance_agent"
+                else f"wf_{key}_{lab_id}"
+            )
             state.update(
                 pack_version=pack.pack_version,
                 pack_hash=pack.pack_sha256,
                 workspace_path=workspace_root(
                     key, lab_id, str(manifest.get("participant_email") or "") or None
                 ),
-                job_name=f"wf_{key}_{lab_id}",
+                job_name=resource_name,
+                catalog_name=(participant_catalog_name(key) if pack.kind == "data_pipeline" else ""),
+                catalog_key="",
                 phase="workspace",
             )
             operation["phase"] = "provision"
@@ -1702,6 +2131,19 @@ class AidpClient:
             raise AidpProvisionPending(
                 "Lab workflow deletion is still in progress.", "cleanup"
             )
+
+    def _cleanup_agent(self, workspace_key: str, agent_name: str) -> None:
+        for agent in self._agents(workspace_key, agent_name):
+            agent_key = str(agent.get("key") or agent.get("id") or "")
+            if agent_key:
+                self._request(
+                    "DELETE",
+                    f"/workspaces/{workspace_key}/agents/{agent_key}",
+                    allow_not_found=True,
+                    phase="content",
+                )
+        if self._agents(workspace_key, agent_name):
+            raise AidpProvisionPending("Agent deletion is still in progress.", "cleanup")
 
     def _shared_schemas(
         self,
@@ -1824,6 +2266,26 @@ class AidpClient:
                 "Legacy participant schema deletion is still in progress.", "schemas"
             )
 
+    def _cleanup_private_catalog(self, key: str) -> None:
+        if re.fullmatch(r"u[1-9][0-9]*", key) is None:
+            return
+        name = participant_catalog_name(key)
+        catalog = self._catalog(name, allow_missing=True)
+        if catalog is None:
+            return
+        catalog_key = str(catalog.get("key") or "")
+        if not catalog_key:
+            raise AidpProvisionPending(
+                "The participant catalog identifier is not ready.", "cleanup"
+            )
+        self._request(
+            "DELETE", f"/catalogs/{catalog_key}", allow_not_found=True, phase="schemas"
+        )
+        if self._catalog(name, allow_missing=True) is not None:
+            raise AidpProvisionPending(
+                "Participant catalog deletion is still in progress.", "cleanup"
+            )
+
     def _cleanup_lab_object_storage(self, key: str, lab_id: str) -> None:
         prefixes = [
             f"{prefix}/users/{key}/{lab_id}/"
@@ -1885,14 +2347,34 @@ class AidpClient:
     ) -> None:
         workspace_path = str(state.get("workspace_path") or "")
         validated = {
-            "layout_version": 3,
+            "layout_version": LAYOUT_VERSION,
             "participant_key": key,
             "labs": {lab_id: state},
         }
         self._manifest_labs(validated, key)
+        pack = load_lab_pack(lab_id)
+        if pack.kind == "governance_agent":
+            self._cleanup_agent(
+                workspace_key,
+                str(state.get("job_name") or f"{key}_agent_data_governance"),
+            )
+            self._cleanup_external_catalog(key, state)
+            try:
+                self.governance_database.drop_participant(key)
+            except AutonomousProvisionError as exc:
+                raise AidpProvisionError(str(exc)) from exc
+            if not preserve_workspace:
+                self._delete_workspace_path(
+                    workspace_key,
+                    workspace_path,
+                    "Agent workspace deletion is still in progress.",
+                )
+            return
         self._cleanup_lab_job(workspace_key, str(state.get("job_name") or f"wf_{key}_{lab_id}"))
-        catalog_key = str(self._catalog()["key"])
-        self._cleanup_lab_tables(catalog_key, key, lab_id)
+        catalog_name = str(state.get("catalog_name") or catalog_name_for(key))
+        catalog = self._catalog(catalog_name, allow_missing=True)
+        if catalog is not None:
+            self._cleanup_lab_tables(str(catalog["key"]), key, lab_id)
         self._cleanup_lab_object_storage(key, lab_id)
         if not preserve_workspace:
             self._delete_workspace_path(
@@ -1913,9 +2395,12 @@ class AidpClient:
                 self._cleanup_lab(workspace_key, key, lab_id, state)
         else:
             key = owner_key
-        catalog_key = str(self._catalog()["key"])
-        self._cleanup_legacy_tables(catalog_key, key)
-        self._cleanup_legacy_schemas(catalog_key, key)
+        legacy_catalog = self._catalog(LEGACY_CATALOG_NAME, allow_missing=True)
+        if legacy_catalog is not None:
+            catalog_key = str(legacy_catalog["key"])
+            self._cleanup_legacy_tables(catalog_key, key)
+            self._cleanup_legacy_schemas(catalog_key, key)
+        self._cleanup_private_catalog(key)
         self._cleanup_participant_object_storage(key)
         for participant_root in participant_roots:
             self._delete_workspace_path(
@@ -1949,7 +2434,6 @@ class AidpClient:
     def _healthcheck(self) -> None:
         workspace = self._workspace()
         self._shared_compute(str(workspace["key"]))
-        self._catalog()
         self.object_storage.head_bucket(
             self.settings.objectstorage_namespace,
             self.settings.bucket_name,

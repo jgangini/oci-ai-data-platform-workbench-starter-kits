@@ -103,6 +103,9 @@ resource "oci_core_instance" "lab" {
       aidp_platform_id        = oci_ai_data_platform_ai_data_platform.lab.id
       aidp_workspace_name     = oci_ai_data_platform_ai_data_platform.lab.default_workspace_name
       aidp_region             = var.region
+      compartment_id          = local.target_compartment
+      autonomous_database_id  = local.autonomous_database_id
+      agent_model_id          = var.agent_model_id
       lab_marker              = local.name_prefix
       source_repo_url         = var.source_repository_url
       source_commit_sha       = var.source_commit_sha
@@ -111,7 +114,7 @@ resource "oci_core_instance" "lab" {
 
   preserve_boot_volume = false
 
-  depends_on = [oci_identity_policy.vm_bootstrap]
+  depends_on = [oci_identity_policy.vm_bootstrap, terraform_data.validate_existing_autonomous_database]
 
   lifecycle {
     replace_triggered_by = [terraform_data.vm_release]

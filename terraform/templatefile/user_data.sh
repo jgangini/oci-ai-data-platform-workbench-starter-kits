@@ -11,6 +11,7 @@ SOURCE_DIR="/opt/aidp-lab/source"
 STATE_DIR="/opt/aidp-lab/state"
 TLS_DIR="/opt/aidp-lab/tls"
 OCI_DIR="/opt/aidp-lab/.oci"
+AUTONOMOUS_DIR="/opt/aidp-lab/autonomous"
 BOOTSTRAP_DIR="/opt/aidp-lab/bootstrap"
 BOOTSTRAP_OBJECT=".bootstrap/operator-credentials.json"
 LOCAL_IMAGE="aidp-lab:${source_commit_sha}"
@@ -46,7 +47,7 @@ use_reachable_base_images() {
 dnf -y makecache
 dnf -y install dnf-plugins-core firewalld curl git openssl python3 sudo
 
-install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$OCI_DIR" "$BOOTSTRAP_DIR"
+install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$OCI_DIR" "$AUTONOMOUS_DIR" "$BOOTSTRAP_DIR"
 umask 077
 if [ ! -s "$BOOTSTRAP_DIR/key.pem" ]; then
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$BOOTSTRAP_DIR/key.pem"
@@ -58,8 +59,10 @@ chmod 0644 "$BOOTSTRAP_DIR/key_public.pem"
 cat >/usr/local/sbin/aidp-lab-bootstrap-public-key <<'EOF'
 #!/bin/bash
 set -euo pipefail
-if [ -s /opt/aidp-lab/.oci/config ] && [ -s /opt/aidp-lab/.oci/key.pem ]; then
-  printf '%s\n' AIDP_LAB_CREDENTIALS_READY
+if [ -s /opt/aidp-lab/.oci/config ] && [ -s /opt/aidp-lab/.oci/key.pem ] && \
+  [ -s /opt/aidp-lab/autonomous/wallet.zip ] && \
+  python3 -c 'import json; assert json.load(open("/opt/aidp-lab/autonomous/runtime.json"))["bootstrap_version"] == 2' 2>/dev/null; then
+  printf '%s\n' AIDP_LAB_CREDENTIALS_V2_READY
 else
   cat /opt/aidp-lab/bootstrap/key_public.pem
 fi
@@ -141,6 +144,10 @@ AIDP_WORKBENCH_URL=${aidp_workbench_url}
 AIDP_PLATFORM_ID=${aidp_platform_id}
 AIDP_WORKSPACE_NAME=${aidp_workspace_name}
 AIDP_REGION=${aidp_region}
+COMPARTMENT_ID=${compartment_id}
+AUTONOMOUS_DATABASE_ID=${autonomous_database_id}
+AUTONOMOUS_RUNTIME_FILE=/etc/aidp-lab/autonomous/runtime.json
+AGENT_MODEL_ID=${agent_model_id}
 OCI_CONFIG_FILE=/etc/aidp-lab/oci/config
 OBJECTSTORAGE_NAMESPACE=${objectstorage_namespace}
 BUCKET_NAME=${bucket_name}
@@ -161,9 +168,11 @@ retry 60 docker run --rm \
   -e OCI_BOOTSTRAP_PRIVATE_KEY=/etc/aidp-lab/bootstrap/key.pem \
   -e OCI_EXPECTED_USER_OCID=${operator_user_ocid} \
   -e OCI_CONFIG_DIR=/etc/aidp-lab/oci \
+  -e AUTONOMOUS_RUNTIME_DIR=/etc/aidp-lab/autonomous \
   -e OCI_REGION=${aidp_region} \
   -v "$BOOTSTRAP_DIR:/etc/aidp-lab/bootstrap:ro,Z" \
   -v "$OCI_DIR:/etc/aidp-lab/oci:rw,Z" \
+  -v "$AUTONOMOUS_DIR:/etc/aidp-lab/autonomous:rw,Z" \
   "$LOCAL_IMAGE" -m app.credential_bootstrap
 rm -f "$BOOTSTRAP_DIR/key.pem" "$BOOTSTRAP_DIR/key_public.pem"
 docker rm -f "$APP_NAME" >/dev/null 2>&1 || true
@@ -175,6 +184,7 @@ docker run -d \
   -p 443:443 \
   -v "$TLS_DIR:/etc/aidp-lab/tls:ro,Z" \
   -v "$OCI_DIR:/etc/aidp-lab/oci:ro,Z" \
+  -v "$AUTONOMOUS_DIR:/etc/aidp-lab/autonomous:ro,Z" \
   -v "$STATE_DIR:/var/lib/aidp-lab:Z" \
   "$LOCAL_IMAGE"
 

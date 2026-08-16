@@ -4,6 +4,12 @@ mock_provider "oci" {
 }
 mock_provider "random" {}
 
+variables {
+  agent_model_id                      = "ocid1.generativeaimodel.oc1.us-ashburn-1.test"
+  autonomous_database_admin_password  = "TestAdminPassword123"
+  autonomous_database_wallet_password = "TestWalletPassword123"
+}
+
 override_resource {
   target = random_string.suffix
   values = { result = "test1234" }
@@ -151,8 +157,8 @@ run "resolved_compartment_contract" {
   }
 
   assert {
-    condition     = length(oci_identity_policy.aidp_service.statements) == 9
-    error_message = "The stable nine-statement required AIDP Advanced policy must remain complete."
+    condition     = length(oci_identity_policy.aidp_service.statements) == 10
+    error_message = "The required AIDP Advanced policy plus regional Generative AI use must remain complete."
   }
 
   assert {

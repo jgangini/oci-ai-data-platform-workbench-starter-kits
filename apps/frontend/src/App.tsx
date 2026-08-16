@@ -59,12 +59,12 @@ type AdminSettingsResponse = {
   registration_code_configured: boolean;
 };
 const fallbackCatalog: CatalogLab[] = [
-  { lab_id: "banking", display_name: "Banking", description: "Explore customer accounts, branches and transactions through a governed medallion pipeline.", pack_version: "1.0.3", status: "available", available: true },
-  { lab_id: "telecommunications", display_name: "Telecommunications", description: "Analyze subscribers, plans, network sites and usage events for service and network insights.", pack_version: "1.0.3", status: "available", available: true },
-  { lab_id: "telco_lineage", display_name: "Telco Customer 360 Lineage", description: "Test end-to-end data lineage for prepaid, postpaid and home services, from Landing through Gold with entity and column relationships.", pack_version: "1.1.2", status: "available", available: true },
-  { lab_id: "retail", display_name: "Retail", description: "Transform customers, products, orders and order items into sales and customer analytics.", pack_version: "1.0.3", status: "available", available: true },
-  { lab_id: "healthcare", display_name: "Healthcare", description: "Prepare patients, providers, appointments and encounters for operational healthcare analysis.", pack_version: "1.0.3", status: "available", available: true },
-  { lab_id: "agent", display_name: "Agent", description: "Planned agentic AI laboratory; content and required AI infrastructure are not yet available.", pack_version: "0.0.0", status: "planned", available: false },
+  { lab_id: "banking", display_name: "Banking", description: "Explore customer accounts, branches and transactions through a governed medallion pipeline.", pack_version: "2.0.0", status: "available", available: true },
+  { lab_id: "telecommunications", display_name: "Telecommunications", description: "Analyze subscribers, plans, network sites and usage events for service and network insights.", pack_version: "2.0.0", status: "available", available: true },
+  { lab_id: "telco_lineage", display_name: "Telco Customer 360 Lineage", description: "Test end-to-end data lineage for prepaid, postpaid and home services, from Landing through Gold with entity and column relationships.", pack_version: "2.0.0", status: "available", available: true },
+  { lab_id: "retail", display_name: "Retail", description: "Transform customers, products, orders and order items into sales and customer analytics.", pack_version: "2.0.0", status: "available", available: true },
+  { lab_id: "healthcare", display_name: "Healthcare", description: "Prepare patients, providers, appointments and encounters for operational healthcare analysis.", pack_version: "2.0.0", status: "available", available: true },
+  { lab_id: "agent", display_name: "Data Governance Agent", description: "Use an editable participant-scoped agent for catalog inventory, lineage and governed metrics.", pack_version: "1.0.0", status: "available", available: true },
 ];
 
 function labLabel(catalog: CatalogLab[], labId: string) {
@@ -82,6 +82,7 @@ function labPhaseLabel(phase: string) {
 const registrationPhaseLabels: Record<RegistrationPhase, string> = {
   identity: "Identity account",
   workspace: "Workspace",
+  database: "Governed database",
   schemas: "Shared schemas",
   content: "Lab content",
   permissions: "Permissions",
@@ -1819,7 +1820,9 @@ function AdminUsers() {
         open={Boolean(pendingLabAction) && !operating}
         kind={pendingLabAction?.kind === "remove" ? "delete" : "reset"}
         title={pendingLabAction?.kind === "remove" ? "Remove laboratory?" : "Redeploy laboratory?"}
-        description={`${pendingLabAction?.kind === "remove" ? "Remove" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this lab"} for ${pendingLabAction?.user.email ?? "this participant"}. Other laboratories and Identity access are preserved.`}
+        description={pendingLabAction?.kind === "redeploy" && pendingLabAction.lab.lab_id === "agent"
+          ? `Reinstall ${labLabel(catalog, "agent")} for ${pendingLabAction.user.email}. This replaces the participant's Agent customizations. Data laboratories and Identity access are preserved.`
+          : `${pendingLabAction?.kind === "remove" ? "Remove" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this lab"} for ${pendingLabAction?.user.email ?? "this participant"}. Other laboratories and Identity access are preserved.`}
         error={operationError}
         confirmLabel={pendingLabAction?.kind === "remove" ? "Remove lab" : "Redeploy lab"}
         onClose={() => {

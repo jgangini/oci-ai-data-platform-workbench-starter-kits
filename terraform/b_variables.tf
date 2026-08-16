@@ -77,6 +77,69 @@ variable "registration_code_hash" {
   }
 }
 
+variable "agent_model_id" {
+  description = "ACTIVE on-demand OCI Generative AI CHAT model selected in Deploy Studio for participant governance agents."
+  type        = string
+  validation {
+    condition     = length(trimspace(var.agent_model_id)) > 0
+    error_message = "agent_model_id must identify the selected regional CHAT model."
+  }
+}
+
+variable "autonomous_database_mode" {
+  description = "Whether this deployment creates or reuses its Autonomous AI Database."
+  type        = string
+  default     = "new"
+  validation {
+    condition     = contains(["new", "existing"], var.autonomous_database_mode)
+    error_message = "autonomous_database_mode must be new or existing."
+  }
+}
+
+variable "autonomous_database_version" {
+  description = "Autonomous AI Database version."
+  type        = string
+  default     = "26ai"
+}
+
+variable "autonomous_database_workload" {
+  description = "Autonomous AI Database workload."
+  type        = string
+  default     = "DW"
+}
+
+variable "autonomous_database_compute_count" {
+  description = "ECPU count for a new Autonomous AI Database; Deploy Studio starts at four."
+  type        = number
+  default     = 4
+}
+
+variable "existing_autonomous_database_ocid" {
+  description = "OCID of the existing Autonomous AI Database when database mode is existing."
+  type        = string
+  default     = ""
+}
+
+variable "autonomous_database_admin_password" {
+  description = "ADMIN password supplied to Autonomous and the idempotent post-apply hook."
+  type        = string
+  sensitive   = true
+  validation {
+    condition     = length(var.autonomous_database_admin_password) >= 12
+    error_message = "autonomous_database_admin_password must contain at least 12 characters."
+  }
+}
+
+variable "autonomous_database_wallet_password" {
+  description = "Password used to create or open the Autonomous wallet."
+  type        = string
+  sensitive   = true
+  validation {
+    condition     = length(var.autonomous_database_wallet_password) >= 12
+    error_message = "autonomous_database_wallet_password must contain at least 12 characters."
+  }
+}
+
 variable "preferred_vm_shape" {
   description = "Server-selected E5/E4/E3 Flex shape from the trusted capacity preflight."
   type        = string

@@ -41,12 +41,14 @@ class LabPack:
     display_name: str
     pack_version: str
     status: str
+    kind: str
     pack_sha256: str
     datasets: tuple[LabAsset, ...]
     notebooks: tuple[LabAsset, ...]
     tables: dict[str, tuple[str, ...]]
     formats: dict[str, str]
     expected_results: dict[str, Any]
+    agent: dict[str, Any]
 
     @property
     def available(self) -> bool:
@@ -140,7 +142,7 @@ def _pack_hash(metadata: dict[str, Any]) -> str:
 
 def _pack_contract(
     metadata: dict[str, Any], lab_id: str, require_available: bool
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     if metadata.get("schema_version") != 1 or metadata.get("lab_id") != lab_id:
         raise LabPackError(f"Invalid lab identity: {lab_id}")
     status = str(metadata.get("status") or "")
@@ -148,17 +150,20 @@ def _pack_contract(
         raise LabPackError(f"Invalid lab status: {lab_id}")
     if require_available and status != "available":
         raise LabPackError(f"Lab {lab_id} is not available yet")
+    kind = str(metadata.get("kind") or "data_pipeline")
+    if kind not in {"data_pipeline", "governance_agent"}:
+        raise LabPackError(f"Invalid lab kind: {lab_id}")
     pack_version = str(metadata.get("pack_version") or "")
     if PACK_VERSION_PATTERN.fullmatch(pack_version) is None:
         raise LabPackError(f"Invalid pack version: {lab_id}")
     digest = str(metadata.get("pack_sha256") or "")
     if not re.fullmatch(r"[0-9a-f]{64}", digest) or digest != _pack_hash(metadata):
         raise LabPackError(f"Pack hash mismatch: {lab_id}")
-    return status, pack_version, digest
+    return status, kind, pack_version, digest
 
 
 def _pack_assets(
-    root: Path, metadata: dict[str, Any], status: str, lab_id: str
+    root: Path, metadata: dict[str, Any], status: str, kind: str, lab_id: str
 ) -> tuple[tuple[LabAsset, ...], tuple[LabAsset, ...]]:
     datasets = tuple(
         _declared_asset(root / "source", item, "dataset")
@@ -168,8 +173,10 @@ def _pack_assets(
         _declared_asset(root / "notebooks", item, "notebook")
         for item in metadata.get("notebooks", [])
     )
-    if status == "available" and (not datasets or not notebooks):
+    if status == "available" and kind == "data_pipeline" and (not datasets or not notebooks):
         raise LabPackError(f"Available lab has no assets: {lab_id}")
+    if kind == "governance_agent" and (datasets or notebooks):
+        raise LabPackError(f"Governance agent must not declare data assets: {lab_id}")
     if len({item.name for item in datasets}) != len(datasets):
         raise LabPackError(f"Duplicate dataset file: {lab_id}")
     if len({item.name for item in notebooks}) != len(notebooks):
@@ -186,11 +193,11 @@ def _pack_assets(
 
 
 def _pack_tables(
-    metadata: dict[str, Any], status: str, lab_id: str
+    metadata: dict[str, Any], status: str, kind: str, lab_id: str
 ) -> dict[str, tuple[str, ...]]:
     raw_tables = metadata.get("tables", {})
     if not isinstance(raw_tables, dict) or (
-        status == "available" and set(raw_tables) != MEDALLION_LAYERS
+        status == "available" and kind == "data_pipeline" and set(raw_tables) != MEDALLION_LAYERS
     ):
         raise LabPackError(f"Invalid table inventory: {lab_id}")
     return {
@@ -201,11 +208,11 @@ def _pack_tables(
 
 
 def _pack_expected_results(
-    metadata: dict[str, Any], status: str, lab_id: str
+    metadata: dict[str, Any], status: str, kind: str, lab_id: str
 ) -> dict[str, Any]:
     expected = metadata.get("expected_results", {})
     if not isinstance(expected, dict) or (
-        status == "available"
+        status == "available" and kind == "data_pipeline"
         and set(expected)
         != {"source_row_counts", "business_aggregates", "quality", "lineage"}
     ):
@@ -214,7 +221,7 @@ def _pack_expected_results(
 
 
 def _pack_formats(
-    metadata: dict[str, Any], status: str, lab_id: str
+    metadata: dict[str, Any], status: str, kind: str, lab_id: str
 ) -> dict[str, str]:
     raw_formats = metadata.get("formats", {})
     if not isinstance(raw_formats, dict):
@@ -223,7 +230,7 @@ def _pack_formats(
         return {}
     formats = {str(layer): str(value).upper() for layer, value in raw_formats.items()}
     if (
-        status == "available"
+        status == "available" and kind == "data_pipeline"
         and set(formats) != MEDALLION_LAYERS
         or any(value not in {"CSV", "DELTA", "ICEBERG"} for value in formats.values())
     ):
@@ -236,21 +243,31 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
         raise LabPackError("Invalid lab_id")
     root = LABS_ROOT / lab_id
     metadata = _object(root / "lab.json")
-    status, pack_version, digest = _pack_contract(
+    status, kind, pack_version, digest = _pack_contract(
         metadata, lab_id, require_available
     )
-    datasets, notebooks = _pack_assets(root, metadata, status, lab_id)
+    datasets, notebooks = _pack_assets(root, metadata, status, kind, lab_id)
+    agent = metadata.get("agent", {})
+    if kind == "governance_agent" and (
+        not isinstance(agent, dict)
+        or agent.get("name_template") != "{participant_key}_agent_data_governance"
+        or agent.get("editable") is not True
+        or set(agent.get("tools") or []) != {"catalog_inventory", "lineage", "governed_sql"}
+    ):
+        raise LabPackError(f"Invalid governance Agent contract: {lab_id}")
     return LabPack(
         lab_id=lab_id,
         display_name=str(metadata.get("display_name") or lab_id.title()),
         pack_version=pack_version,
         status=status,
+        kind=kind,
         pack_sha256=digest,
         datasets=datasets,
         notebooks=notebooks,
-        tables=_pack_tables(metadata, status, lab_id),
-        formats=_pack_formats(metadata, status, lab_id),
-        expected_results=_pack_expected_results(metadata, status, lab_id),
+        tables=_pack_tables(metadata, status, kind, lab_id),
+        formats=_pack_formats(metadata, status, kind, lab_id),
+        expected_results=_pack_expected_results(metadata, status, kind, lab_id),
+        agent=dict(agent) if isinstance(agent, dict) else {},
     )
 
 

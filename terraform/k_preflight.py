@@ -17,6 +17,7 @@ E4_SHAPE = "VM.Standard.E4.Flex"
 E3_SHAPE = "VM.Standard.E3.Flex"
 SUPPORTED_SHAPES = (E5_SHAPE, E4_SHAPE, E3_SHAPE)
 ACTIVE_WORK_REQUEST_STATES = {"ACCEPTED", "IN_PROGRESS", "WAITING", "NEEDS_ATTENTION", "CANCELING"}
+MODEL_TYPE_BASE = "BASE"
 
 
 def _safe_error_message(exc: Exception) -> str:
@@ -35,6 +36,78 @@ def _home_region(identity: Any, tenancy_id: str) -> str:
     if len(matches) != 1 or not matches[0].region_name:
         raise RuntimeError("OCI did not return one unambiguous tenancy home region")
     return str(matches[0].region_name)
+
+
+def _require_ready_region(identity: Any, tenancy_id: str, region: str) -> None:
+    subscriptions = identity.list_region_subscriptions(tenancy_id).data
+    match = next(
+        (item for item in subscriptions if str(getattr(item, "region_name", "")) == region),
+        None,
+    )
+    if match is None:
+        raise RuntimeError(f"region {region} is not subscribed by this tenancy")
+    status = str(getattr(match, "status", "READY") or "READY").upper()
+    if status != "READY":
+        raise RuntimeError(f"region {region} subscription is {status}, not READY")
+
+
+def _model_is_selectable(model: Any) -> bool:
+    capabilities = {str(value).upper() for value in (getattr(model, "capabilities", None) or [])}
+    return (
+        str(getattr(model, "lifecycle_state", "")).upper() == "ACTIVE"
+        and "CHAT" in capabilities
+        and str(getattr(model, "type", "")).upper() == MODEL_TYPE_BASE
+        and not getattr(model, "base_model_id", None)
+        and not getattr(model, "compartment_id", None)
+        and not getattr(model, "time_deprecated", None)
+        and not getattr(model, "time_on_demand_retired", None)
+    )
+
+
+def _require_agent_model(genai: Any, tenancy_id: str, model_id: str) -> str:
+    models = _list_all(
+        genai.list_models,
+        compartment_id=tenancy_id,
+        capability=["CHAT"],
+        lifecycle_state="ACTIVE",
+    )
+    selected = next((model for model in models if str(getattr(model, "id", "")) == model_id), None)
+    if selected is None or not _model_is_selectable(selected):
+        raise RuntimeError("the selected Agent LLM is no longer an ACTIVE on-demand CHAT model in this region")
+    return str(getattr(selected, "display_name", None) or model_id)
+
+
+def _require_autonomous(
+    database: Any,
+    tenancy_id: str,
+    inputs: dict[str, Any],
+) -> str:
+    mode = str(inputs.get("autonomous_database_mode") or "new")
+    if mode == "existing":
+        database_id = str(inputs.get("existing_autonomous_database_ocid") or "")
+        if not database_id.startswith("ocid1.autonomousdatabase."):
+            raise ValueError("existing Autonomous database OCID is required")
+        item = database.get_autonomous_database(database_id).data
+        if str(getattr(item, "db_version", "")) != "26ai":
+            raise RuntimeError("the existing Autonomous database must use version 26ai")
+        if str(getattr(item, "db_workload", "")).upper() != "DW":
+            raise RuntimeError("the existing Autonomous database must use the Data Warehouse workload")
+        state = str(getattr(item, "lifecycle_state", "")).upper()
+        if state not in {"AVAILABLE", "STOPPED"}:
+            raise RuntimeError(f"the existing Autonomous database is {state or 'not available'}")
+        return f"existing Oracle AI Database 26ai DW is {state}"
+
+    count = inputs.get("autonomous_database_compute_count", 4)
+    if isinstance(count, bool) or not isinstance(count, (int, float)) or int(count) != count or not 2 <= int(count) <= 512:
+        raise ValueError("new Autonomous database ECPU count must be an integer between 2 and 512")
+    versions = _list_all(
+        database.list_autonomous_db_versions,
+        compartment_id=tenancy_id,
+        db_workload="DW",
+    )
+    if not any(str(getattr(item, "db_version", "")) == "26ai" for item in versions):
+        raise RuntimeError("Oracle AI Database 26ai DW is not available in the selected region")
+    return f"new Oracle AI Database 26ai DW will use {int(count)} ECPU"
 
 
 def _candidate_shapes(preferred: str) -> list[str]:
@@ -95,6 +168,8 @@ def select_inputs(
     identity_factory: Callable[[dict[str, Any]], Any] = oci.identity.IdentityClient,
     compute_factory: Callable[[dict[str, Any]], Any] = oci.core.ComputeClient,
     aidp_factory: Callable[[dict[str, Any]], Any] = oci.ai_data_platform.AiDataPlatformClient,
+    database_factory: Callable[[dict[str, Any]], Any] = oci.database.DatabaseClient,
+    genai_factory: Callable[[dict[str, Any]], Any] = oci.generative_ai.GenerativeAiClient,
 ) -> dict[str, Any]:
     target, mode = compartment_target(context)
     region = str(context.get("region") or sdk_config.get("region") or "").strip()
@@ -109,6 +184,13 @@ def select_inputs(
     regional_config = dict(sdk_config)
     regional_config["region"] = region
     identity = identity_factory(regional_config)
+    _require_ready_region(identity, tenancy_id, region)
+    inputs = context.get("inputs") if isinstance(context.get("inputs"), dict) else {}
+    model_id = str(inputs.get("agent_model_id") or "").strip()
+    if not model_id:
+        raise ValueError("agent_model_id is required")
+    model_name = _require_agent_model(genai_factory(regional_config), tenancy_id, model_id)
+    database_message = _require_autonomous(database_factory(regional_config), tenancy_id, inputs)
     compartment_message = _require_compartment_target(
         identity,
         aidp_factory(regional_config),
@@ -160,9 +242,9 @@ def select_inputs(
                 },
                 "events": [
                     {
-                        "name": "Immutable v2.0.0 source",
+                        "name": "Immutable v3.0.0 source",
                         "status": "passed",
-                        "message": "v2.0.0 source context and deployment source passed",
+                        "message": "v3.0.0 source context and deployment source passed",
                     },
                     {
                         "name": "Compartment availability",
@@ -170,6 +252,8 @@ def select_inputs(
                         "message": compartment_message,
                     },
                     {"name": "OCI tenancy home region", "status": "passed", "message": home_region},
+                    {"name": "Regional Agent LLM", "status": "passed", "message": model_name},
+                    {"name": "Autonomous AI Database 26ai", "status": "passed", "message": database_message},
                     {
                         "name": "Compute capacity preflight",
                         "status": "passed",

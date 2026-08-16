@@ -4,11 +4,11 @@ OCI AI Data Platform Cloud Migration Lab is a hands-on data engineering environm
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more laboratories without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current project release: **v2.0.0**.
+Current stable release: **v2.0.0**. The `main` branch is preparing **v3.0.0-rc.1**; do not use it as a validated release until the regional, lineage, Autonomous, and Agent acceptance gates pass.
 
 ## What the project provides
 
-- A shared AIDP workspace, Spark compute, catalog, and four medallion schemas.
+- A shared AIDP workspace and Spark compute, plus a private catalog with four medallion schemas per participant.
 - A private Object Storage bucket organized as `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/`.
 - A registration and administration web application hosted on an OCI Compute VM.
 - Identity Domains onboarding with pending and active participant groups.
@@ -35,12 +35,12 @@ The standard laboratories contain five notebooks, one for each stage. The Telco 
 
 | Laboratory | Package | Sources | Workflow | Main outcome |
 | --- | ---: | ---: | ---: | --- |
-| Banking | 1.0.3 | 4 CSV files | 5 tasks | Customer value, branch activity, transaction quality, and lineage |
-| Telecommunications | 1.0.3 | 4 CSV files | 5 tasks | Subscriber usage, network-site activity, service quality, and lineage |
-| Telco Customer 360 Lineage | 1.1.2 | 10 CSV files | 14 tasks | Cross-domain Customer 360, service ownership, geographic summaries, and detailed lineage |
-| Retail | 1.0.3 | 4 CSV files | 5 tasks | Customer value, product sales, order quality, and lineage |
-| Healthcare | 1.0.3 | 4 CSV files | 5 tasks | Patient utilization, provider activity, encounter quality, and lineage |
-| Agent | 0.0.0 | — | — | Planned; visible in the catalog but not assignable |
+| Banking | 2.0.0 | 4 CSV files | 5 tasks | Customer value, branch activity, transaction quality, and full medallion lineage |
+| Telecommunications | 2.0.0 | 4 CSV files | 5 tasks | Subscriber usage, network-site activity, service quality, and full medallion lineage |
+| Telco Customer 360 Lineage | 2.0.0 | 10 CSV files | 14 tasks | Cross-domain Customer 360, service ownership, geographic summaries, and detailed lineage |
+| Retail | 2.0.0 | 4 CSV files | 5 tasks | Customer value, product sales, order quality, and full medallion lineage |
+| Healthcare | 2.0.0 | 4 CSV files | 5 tasks | Patient utilization, provider activity, encounter quality, and full medallion lineage |
+| Data Governance Agent | 1.0.0 | — | — | Participant-editable Agent for catalog inventory, entity/column lineage, and allowlisted governance metrics; release remains gated on live isolation testing |
 
 Laboratory order, descriptions, versions, and availability come from [`apps/backend/app/labs/catalog.json`](apps/backend/app/labs/catalog.json) and each package's `lab.json`. Adding a future package does not require hard-coded changes to the registration interface.
 
@@ -50,7 +50,7 @@ Banking introduces a governed pipeline for branches, customers, accounts, and tr
 
 - Source rows: 20 branches, 200 customers, 320 accounts, and 4,000 transactions.
 - Silver work: standardize records, preserve valid relationships, and isolate quality issues.
-- Gold tables: `banking_customer_value`, `banking_branch_daily`, and `lineage_demo`.
+- Gold tables: `banking_customer_value` and `banking_branch_daily`; the final notebook validates the real pipeline lineage.
 - Reproducible check: transaction amount total `600066.50`.
 
 ### Telecommunications
@@ -59,7 +59,7 @@ Telecommunications analyzes plans, network sites, subscribers, and usage events.
 
 - Source rows: 12 plans, 30 network sites, 250 subscribers, and 6,000 usage events.
 - Silver work: curate subscriber, plan, site, and usage data and record quality issues.
-- Gold tables: `telecommunications_subscriber_monthly`, `telecommunications_site_daily`, and `lineage_demo`.
+- Gold tables: `telecommunications_subscriber_monthly` and `telecommunications_site_daily`; the final notebook validates the real pipeline lineage.
 - Reproducible check: usage charge total `15026.56`.
 
 ### Telco Customer 360 Lineage
@@ -90,7 +90,7 @@ Retail transforms customers, products, orders, and order items into sales analyt
 
 - Source rows: 300 customers, 150 products, 1,200 orders, and 3,000 order items.
 - Silver work: validate customer, product, order, and item relationships and quarantine quality issues.
-- Gold tables: `retail_customer_value`, `retail_product_daily`, and `lineage_demo`.
+- Gold tables: `retail_customer_value` and `retail_product_daily`; the final notebook validates the real pipeline lineage.
 - Reproducible check: item quantity total `7487`.
 
 ### Healthcare
@@ -99,14 +99,20 @@ Healthcare prepares patient, provider, appointment, and encounter data for opera
 
 - Source rows: 240 patients, 48 providers, 900 appointments, and 700 encounters.
 - Silver work: standardize operational records, validate references, and isolate quality issues.
-- Gold tables: `healthcare_patient_utilization`, `healthcare_provider_daily`, and `lineage_demo`.
+- Gold tables: `healthcare_patient_utilization` and `healthcare_provider_daily`; the final notebook validates the real pipeline lineage.
 - Reproducible check: encounter cost total `557597.00`.
+
+### Data Governance Agent
+
+The optional Agent laboratory creates `u101_agent_data_governance` for participant `u101`. It can describe that participant's Master Catalog, inspect entity and column lineage, and run only the predefined read queries shipped with the package. It does not accept arbitrary SQL.
+
+The deployment uses one shared Autonomous AI Database 26ai DW, but creates isolated `U101_AGENT` and `U101_AGENT_RO` database users for each participant. A participant deletion removes the AIDP Agent and external catalog, drops only that participant's Autonomous users, removes the participant workspace and data, and finally deletes the Identity Domains user.
 
 ## End-to-end user guide
 
 ### 1. Deploy the shared environment
 
-Use OCI Deploy Studio with the `v2.0.0` release. Deploy Studio provisions the network, private data bucket, registration VM, Identity Domains groups and policies, AIDP workspace, catalog, shared compute, medallion schemas, and permissions.
+Use OCI Deploy Studio with an immutable validated release. Deploy Studio discovers subscribed regions and compatible AIDP, Autonomous AI Database 26ai DW, and OCI Generative AI Chat capabilities before provisioning the network, private data bucket, registration VM, Identity Domains groups and policies, AIDP workspace, compute, and permissions.
 
 When the deployment completes, retain these outputs:
 
@@ -156,7 +162,7 @@ Notebooks receive `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, 
 
 ### 5. Inspect tables and lineage
 
-All participants share the governed `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas. Table names include the participant key and laboratory ID, for example:
+Each participant receives a private catalog such as `u101_aidp_lab`, containing governed `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas. Table names include the participant key and laboratory ID, for example:
 
 ```text
 u101_telco_lineage_customer_360
@@ -279,7 +285,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 - **A request returns 502 or 504:** the application treats transient upstream and gateway timeouts as retryable. Keep the same operation rather than creating a duplicate user or laboratory.
 - **A workflow says the cluster cannot be started:** start the shared AIDP compute manually before running the workflow. A cluster explicitly stopped by a user cannot be started by the workflow.
 - **Lineage is incomplete:** confirm the workflow completed, the compute configuration does not set `spark.aidp.lineage.enabled=false`, and the four medallion layers use managed catalog tables. Telco Customer 360 Lineage keeps Landing in CSV and Bronze, Silver, and Gold in Delta; managed tables preserve the governed `oci_landing -> oci_bronze -> oci_silver -> oci_gold` entity and column paths in this environment.
-- **Agent cannot be selected:** Agent is intentionally marked as planned until its content and AI infrastructure are available.
+- **Agent remains in Database/Pending:** the release fails closed until the participant Autonomous schema, read-only external catalog, and approved least-privilege bootstrap exist. The ADMIN password is used only by the post-apply process and is never delivered to the registration VM.
 
 ## Security essentials
 
@@ -287,12 +293,14 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 - Upload an unencrypted RSA OCI API key only through the deployment workflow. Preflight rejects unreadable, encrypted, or non-RSA keys.
 - Deploy Studio does not package OCI credentials in the Terraform source or state.
 - The VM receives the operator profile once through an encrypted bootstrap object, validates it, installs it with restrictive permissions, and deletes the bootstrap object.
+- The Autonomous wallet is stored only on the registration VM at `/opt/aidp-lab/autonomous` with owner-only permissions and is mounted read-only into the application container. The ADMIN password stays in the post-apply process; the VM receives only a rotated `EXECUTE`-only database operator and the wallet credentials required for participant lifecycle operations.
+- Participant database credentials are generated per `u101`-style identifier and stored in the persistent application state volume with owner-only permissions. Deletion calls an ADMIN-owned allowlisted package that can drop only the exact participant owner and reader users.
 - Participants receive access only to their folder, workflow, namespaced objects, and namespaced tables.
 - The data bucket uses Oracle-managed encryption and remains private.
 
 ## OCI Deploy Studio compatibility
 
-Release **v2.0.0** is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1.
+The **v3.0.0** candidate remains compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery extensions.
 
 Deploy Studio support includes:
 
@@ -301,10 +309,12 @@ Deploy Studio support includes:
 - Administrator username, hashed administrator password, and hashed registration code inputs.
 - Preflight validation for compartment selection, tenancy home region, operator identity, supported VM capacity, and release source.
 - Terraform plan and apply through OCI Resource Manager.
-- Post-apply reconciliation of the AIDP workspace, catalog, shared compute, medallion schemas, Identity roles, participant application, and final access artifact.
+- A selectable effective region from compatible `READY` subscriptions and a dynamically discovered active Chat model in that same region.
+- New or existing Autonomous AI Database 26ai Data Warehouse, with ECPU model and a default of 4 ECPUs for a new database.
+- Post-apply reconciliation of the AIDP workspace, catalog, shared compute, AI feature enablement, Identity roles, participant application, and final access artifact.
 - Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
 
-The package does not require a database profile or a Generative AI region. The validated v2.0.0 release targets `us-chicago-1` and preserves Deploy Studio's schema-v1 contract. Select the immutable `v2.0.0` release in Deploy Studio rather than an untagged development commit.
+The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Do not deploy from an untagged development commit; wait for `v3.0.0-rc.1` and its acceptance evidence.
 
 Deploy Studio currently applies the Resource Manager plan automatically after planning and does not expose a repository hook between those stages. For controlled deployments, review the generated plan or run `python terraform/release_gate.py --plan-json <plan.json>` in CI before starting the final apply.
 

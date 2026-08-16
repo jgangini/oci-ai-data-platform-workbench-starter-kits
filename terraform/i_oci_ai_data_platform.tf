@@ -14,7 +14,8 @@ resource "oci_identity_policy" "aidp_service" {
     "Allow any-user to {TAG_NAMESPACE_USE} in tenancy where all {request.principal.type='aidataplatform'}",
     "Allow any-user to manage buckets in compartment id ${local.target_compartment} where all {request.principal.id=target.resource.tag.orcl-aidp.governingAidpId, any {request.permission='BUCKET_DELETE', request.permission='PAR_MANAGE', request.permission='RETENTION_RULE_LOCK', request.permission='RETENTION_RULE_MANAGE'}}",
     "Allow any-user to read objectstorage-namespaces in compartment id ${local.target_compartment} where all {request.principal.type='aidataplatform', request.permission='OBJECTSTORAGE_NAMESPACE_READ'}",
-    "Allow any-user to manage objects in compartment id ${local.target_compartment} where all {request.principal.id=target.bucket.system-tag.orcl-aidp.governingAidpId}"
+    "Allow any-user to manage objects in compartment id ${local.target_compartment} where all {request.principal.id=target.bucket.system-tag.orcl-aidp.governingAidpId}",
+    "Allow any-user to use generative-ai-family in compartment id ${local.target_compartment} where all {request.principal.type='aidataplatform'}"
   ]
 }
 

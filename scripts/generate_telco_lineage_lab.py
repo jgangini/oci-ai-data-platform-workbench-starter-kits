@@ -404,6 +404,7 @@ lab_id = required_parameter("lab_id")
 workspace_root = required_parameter("workspace_root")
 bucket_name = required_parameter("bucket_name")
 objectstorage_namespace = required_parameter("objectstorage_namespace")
+catalog_name = required_parameter("catalog_name")
 
 participant_match = re.fullmatch(r"u([1-9][0-9]*)", participant_key)
 if participant_match is None or int(participant_match.group(1)) < 101:
@@ -412,11 +413,14 @@ if lab_id != "telco_lineage":
     raise ValueError("This notebook belongs to a different lab")
 if not workspace_root.startswith("/Workspace/medallon/"):
     raise ValueError("Invalid workspace_root")
+if catalog_name != f"{participant_key}_aidp_lab":
+    raise ValueError("Invalid participant catalog")
+spark.conf.set("spark.aidp.lineage.enabled", "true")
 
 layer_prefixes = {"landing": "01_landing", "bronze": "02_bronze", "silver": "03_silver", "gold": "04_gold"}
 
 def table(layer, logical_name):
-    return f"aidp_lab.oci_{layer}.{participant_key}_{lab_id}_{logical_name}"
+    return f"{catalog_name}.oci_{layer}.{participant_key}_{lab_id}_{logical_name}"
 
 def location(layer, logical_name):
     return f"oci://{bucket_name}@{objectstorage_namespace}/{layer_prefixes[layer]}/users/{participant_key}/{lab_id}/{logical_name}/"
@@ -466,10 +470,10 @@ for dataset, columns in dataset_columns.items():
         .select("participant_key", *columns))
     assert source.count() == expected_counts[dataset]
     target = table("landing", dataset)
-    (source.write.format("csv").mode("overwrite")
-        .option("header", "true").saveAsTable(target))
+    (source.write.format("delta").mode("overwrite")
+        .option("overwriteSchema", "true").saveAsTable(target))
     assert spark.table(table("landing", dataset)).count() == expected_counts[dataset]
-    print(f"CSV landing.{{dataset}}: {{expected_counts[dataset]}} rows")
+    print(f"Delta landing.{{dataset}}: {{expected_counts[dataset]}} rows")
 '''
 
     customer = '''customers = spark.table(table("bronze", "crm_customers"))
@@ -718,7 +722,7 @@ for layer, logical_names in {TABLES!r}.items():
             str(row["col_name"]).strip().lower(): str(row["data_type"]).strip().lower()
             for row in details.collect()
         }}
-        expected_provider = "csv" if layer == "landing" else "delta"
+        expected_provider = "delta"
         assert formatted.get("provider") == expected_provider, f"{{table(layer, logical_name)}} provider mismatch: {{formatted.get('provider')}}"
         assert formatted.get("type") == "managed", f"{{table(layer, logical_name)}} must be managed: {{formatted.get('type')}}"
         if layer != "landing":
@@ -801,24 +805,29 @@ def _business_aggregates(data: dict[str, list[dict[str, object]]]) -> dict[str, 
     return result
 
 
-def _write_if_changed(path: Path, content: bytes) -> None:
+def _write_if_changed(path: Path, content: bytes, *, write: bool) -> bool:
     if path.is_file() and path.read_bytes() == content:
-        return
-    path.write_bytes(content)
+        return False
+    if write:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    return True
 
 
-def generate() -> None:
+def generate(*, check: bool = False) -> bool:
     data = _source_data()
     assert {name: len(rows) for name, rows in data.items()} == EXPECTED_SOURCE_COUNTS
     _validate_source_contract(data)
-    SOURCE_ROOT.mkdir(parents=True, exist_ok=True)
-    NOTEBOOK_ROOT.mkdir(parents=True, exist_ok=True)
+    changed = False
+    if not check:
+        SOURCE_ROOT.mkdir(parents=True, exist_ok=True)
+        NOTEBOOK_ROOT.mkdir(parents=True, exist_ok=True)
 
     datasets = []
     for name, rows in data.items():
         content = _csv_bytes(DATASET_COLUMNS[name], rows)
         path = SOURCE_ROOT / f"{name}.csv"
-        _write_if_changed(path, content)
+        changed = _write_if_changed(path, content, write=not check) or changed
         datasets.append({"file": path.name, "name": name, "row_count": len(rows), "sha256": _sha256(content)})
 
     task_code = _task_code()
@@ -826,7 +835,7 @@ def generate() -> None:
     for task_key, depends_on, title in TASKS:
         content = _notebook(title, task_code[task_key])
         path = NOTEBOOK_ROOT / f"{task_key}.ipynb"
-        _write_if_changed(path, content)
+        changed = _write_if_changed(path, content, write=not check) or changed
         notebooks.append({"task_key": task_key, "file": path.name, "depends_on": depends_on, "sha256": _sha256(content)})
 
     expected_entity_edges = [
@@ -856,12 +865,12 @@ def generate() -> None:
         "schema_version": 1,
         "lab_id": LAB_ID,
         "display_name": "Telco Customer 360 Lineage",
-        "pack_version": "1.1.2",
+        "pack_version": "2.0.0",
         "status": "available",
         "datasets": datasets,
         "notebooks": notebooks,
         "tables": TABLES,
-        "formats": {"landing": "CSV", "bronze": "DELTA", "silver": "DELTA", "gold": "DELTA"},
+        "formats": {"landing": "DELTA", "bronze": "DELTA", "silver": "DELTA", "gold": "DELTA"},
         "table_storage": {"landing": "MANAGED", "bronze": "MANAGED", "silver": "MANAGED", "gold": "MANAGED"},
         "expected_results": {
             "source_row_counts": EXPECTED_SOURCE_COUNTS,
@@ -872,34 +881,33 @@ def generate() -> None:
                 "expected_table_rows": EXPECTED_TABLE_COUNTS,
                 "expected_entity_edges": expected_entity_edges,
                 "expected_column_edges": expected_column_edges,
-                "qualified_node_template": "aidp_lab.oci_{layer}.{participant_key}_telco_lineage_{table}",
+                "qualified_node_template": "{participant_key}_aidp_lab.oci_{layer}.{participant_key}_telco_lineage_{table}",
                 "required_schema_paths": [
-                    "aidp_lab.oci_landing.", "aidp_lab.oci_bronze.",
-                    "aidp_lab.oci_silver.", "aidp_lab.oci_gold.",
+                    "{participant_key}_aidp_lab.oci_landing.", "{participant_key}_aidp_lab.oci_bronze.",
+                    "{participant_key}_aidp_lab.oci_silver.", "{participant_key}_aidp_lab.oci_gold.",
                 ],
                 "forbidden_schema_paths": ["aidp_lab.telco_lineage."],
-                "direction": "BOTH", "max_depth": 8,
+                "levels": ["ENTITY", "COLUMN"], "direction": "BOTH", "max_depth": 8,
+                "should_include_edges": True,
             },
         },
     }
     unsigned = json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode("utf-8")
     metadata["pack_sha256"] = _sha256(unsigned)
-    _write_if_changed(
+    changed = _write_if_changed(
         LAB_ROOT / "lab.json",
         (json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8"),
-    )
+        write=not check,
+    ) or changed
+    return changed
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Verify that regeneration produces no package diff")
     args = parser.parse_args()
-    before = {path.relative_to(LAB_ROOT): path.read_bytes() for path in LAB_ROOT.rglob("*") if path.is_file()} if LAB_ROOT.exists() else {}
-    generate()
-    if args.check:
-        after = {path.relative_to(LAB_ROOT): path.read_bytes() for path in LAB_ROOT.rglob("*") if path.is_file()}
-        if before != after:
-            raise SystemExit("telco_lineage package is not deterministic or is stale")
+    if generate(check=args.check) and args.check:
+        raise SystemExit("telco_lineage package is not deterministic or is stale")
 
 
 if __name__ == "__main__":

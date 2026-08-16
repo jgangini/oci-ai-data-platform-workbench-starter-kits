@@ -187,15 +187,15 @@ def login(client: TestClient) -> None:
     assert LOCAL_COOKIE_NAME in response.cookies
 
 
-def test_public_catalog_exposes_five_available_labs_and_planned_agent(tmp_path: Path) -> None:
+def test_public_catalog_exposes_five_lineage_labs_and_available_agent(tmp_path: Path) -> None:
     payload = make_client(tmp_path).get("/api/config").json()
     assert [lab["lab_id"] for lab in payload["labs"]] == [
         "banking", "telecommunications", "telco_lineage", "retail", "healthcare", "agent"
     ]
-    assert all(lab["available"] for lab in payload["labs"][:5])
+    assert all(lab["available"] for lab in payload["labs"])
     assert all(lab["description"].strip() for lab in payload["labs"])
-    assert payload["labs"][-1]["status"] == "planned"
-    assert payload["labs"][-1]["available"] is False
+    assert payload["labs"][-1]["status"] == "available"
+    assert payload["labs"][-1]["pack_version"] == "1.0.0"
     assert "industries" not in payload
 
 
@@ -236,12 +236,12 @@ def test_public_registration_can_retry_the_same_existing_assignment(tmp_path: Pa
     assert client.app.state.test_identity.activated == ["user-id"]
 
 
-def test_registration_rejects_duplicates_planned_empty_and_legacy_industry(tmp_path: Path) -> None:
+def test_registration_rejects_duplicates_unknown_empty_and_legacy_industry(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     cases = [
         register_payload(lab_ids=[]),
         register_payload(lab_ids=["banking", "banking"]),
-        register_payload(lab_ids=["agent"]),
+        register_payload(lab_ids=["unknown"]),
         {"name": "Ada", "email": "ada@example.com", "industry": "banking", "code": "ABCD-1234"},
         register_payload(password="must-not-be-accepted"),
     ]

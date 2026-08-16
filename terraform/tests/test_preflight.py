@@ -34,8 +34,8 @@ class Identity:
     def list_region_subscriptions(self, _tenancy_id: str) -> Any:
         return SimpleNamespace(
             data=[
-                SimpleNamespace(region_key="ORD", region_name="us-chicago-1", is_home_region=False),
-                SimpleNamespace(region_key="IAD", region_name="us-ashburn-1", is_home_region=True),
+                SimpleNamespace(region_key="ORD", region_name="us-chicago-1", is_home_region=False, status="READY"),
+                SimpleNamespace(region_key="IAD", region_name="us-ashburn-1", is_home_region=True, status="READY"),
             ]
         )
 
@@ -71,6 +71,36 @@ class Aidp:
         return SimpleNamespace(data=SimpleNamespace(items=self.work_requests), headers={})
 
 
+class Database:
+    def list_autonomous_db_versions(self, **_kwargs: Any) -> Any:
+        return SimpleNamespace(data=[SimpleNamespace(db_version="26ai")], headers={})
+
+    def get_autonomous_database(self, _database_id: str) -> Any:
+        return SimpleNamespace(
+            data=SimpleNamespace(db_version="26ai", db_workload="DW", lifecycle_state="AVAILABLE")
+        )
+
+
+class Genai:
+    def __init__(self, models: list[Any] | None = None) -> None:
+        self.models = models or [
+            SimpleNamespace(
+                id="ocid1.generativeaimodel.oc1..chat",
+                display_name="Test Chat",
+                lifecycle_state="ACTIVE",
+                capabilities=["CHAT"],
+                type="BASE",
+                base_model_id=None,
+                compartment_id=None,
+                time_deprecated=None,
+                time_on_demand_retired=None,
+            )
+        ]
+
+    def list_models(self, **_kwargs: Any) -> Any:
+        return SimpleNamespace(data=SimpleNamespace(items=self.models), headers={})
+
+
 def _select(
     statuses: dict[str, tuple[str, str]],
     *,
@@ -87,12 +117,18 @@ def _select(
             "region": "us-chicago-1",
             "compartment": compartment,
             "compartment_mode": compartment_mode,
-            "inputs": {},
+            "inputs": {
+                "agent_model_id": "ocid1.generativeaimodel.oc1..chat",
+                "autonomous_database_mode": "new",
+                "autonomous_database_compute_count": 4,
+            },
         },
         {"tenancy": "ocid1.tenancy.oc1..test", "user": "ocid1.user.oc1..operator", "region": "us-chicago-1"},
         identity_factory=lambda _config: identity,
         compute_factory=lambda _config: compute,
         aidp_factory=lambda _config: aidp,
+        database_factory=lambda _config: Database(),
+        genai_factory=lambda _config: Genai(),
     )
     return result, compute
 
@@ -235,11 +271,22 @@ def test_preflight_checks_all_availability_domains_for_standard_shape() -> None:
             )
 
     result = preflight.select_inputs(
-        {"region": "us-chicago-1", "compartment": "aidp-lab", "compartment_mode": "new", "inputs": {}},
+        {
+            "region": "us-chicago-1",
+            "compartment": "aidp-lab",
+            "compartment_mode": "new",
+            "inputs": {
+                "agent_model_id": "ocid1.generativeaimodel.oc1..chat",
+                "autonomous_database_mode": "new",
+                "autonomous_database_compute_count": 4,
+            },
+        },
         {"tenancy": "ocid1.tenancy.oc1..test", "user": "ocid1.user.oc1..operator", "region": "us-chicago-1"},
         identity_factory=lambda _config: MultiAdIdentity(),
         compute_factory=lambda _config: MultiAdCompute(),
         aidp_factory=lambda _config: Aidp(),
+        database_factory=lambda _config: Database(),
+        genai_factory=lambda _config: Genai(),
     )
     assert result["inputs"]["availability_domain_index"] == 1
 
@@ -275,11 +322,22 @@ def test_preflight_accepts_any_available_fault_domain() -> None:
             )
 
     result = preflight.select_inputs(
-        {"region": "us-chicago-1", "compartment": "aidp-lab", "compartment_mode": "new", "inputs": {}},
+        {
+            "region": "us-chicago-1",
+            "compartment": "aidp-lab",
+            "compartment_mode": "new",
+            "inputs": {
+                "agent_model_id": "ocid1.generativeaimodel.oc1..chat",
+                "autonomous_database_mode": "new",
+                "autonomous_database_compute_count": 4,
+            },
+        },
         {"tenancy": "ocid1.tenancy.oc1..test", "user": "ocid1.user.oc1..operator", "region": "us-chicago-1"},
         identity_factory=lambda _config: Identity(),
         compute_factory=lambda _config: FaultDomainCompute(),
         aidp_factory=lambda _config: Aidp(),
+        database_factory=lambda _config: Database(),
+        genai_factory=lambda _config: Genai(),
     )
     assert result["inputs"]["preferred_vm_shape"] == preflight.E5_SHAPE
 

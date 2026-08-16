@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.lab_packs import LabPackError, lab_catalog, load_lab_pack, public_lab_catalog
+from app.lab_packs import lab_catalog, load_lab_pack, public_lab_catalog
 from scripts.generate_telco_lineage_lab import _source_data, _validate_source_contract
 
 
@@ -14,21 +14,21 @@ LEGACY_LABS = ("banking", "telecommunications", "retail", "healthcare")
 ACTIVE_LABS = ("banking", "telecommunications", "telco_lineage", "retail", "healthcare")
 
 
-def test_catalog_has_five_versioned_labs_and_disabled_agent() -> None:
+def test_catalog_has_five_lineage_labs_and_available_governance_agent() -> None:
     packs = lab_catalog()
     public = public_lab_catalog()
     assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "agent")
     assert all(pack.available for pack in packs[:5])
-    assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == {
-        "banking": "1.0.3", "telecommunications": "1.0.3",
-        "telco_lineage": "1.1.2", "retail": "1.0.3", "healthcare": "1.0.3",
-    }
+    assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == dict.fromkeys(
+        ACTIVE_LABS, "2.0.0"
+    )
     assert all(item["description"].strip() for item in public)
     assert "transactions" in public[0]["description"]
-    assert packs[-1].status == "planned"
+    assert packs[-1].status == "available"
+    assert packs[-1].pack_version == "1.0.0"
+    assert packs[-1].kind == "governance_agent"
     assert not packs[-1].datasets and not packs[-1].notebooks
-    with pytest.raises(LabPackError, match="not available"):
-        load_lab_pack("agent")
+    assert load_lab_pack("agent").agent["editable"] is True
 
 
 @pytest.mark.parametrize("lab_id", LEGACY_LABS)
@@ -40,10 +40,17 @@ def test_pack_hashes_rows_notebooks_parameters_and_lineage_contract(lab_id: str)
         "01", "02", "03", "04", "05"
     ]
     assert pack.notebooks[-1].task_key == f"05_lineage_{lab_id}"
-    assert pack.tables["gold"][-1] == "lineage_demo"
-    assert pack.expected_results["lineage"] == {
-        "target_table": "lineage_demo", "expected_rows": 1
-    }
+    assert "lineage_demo" not in pack.tables["gold"]
+    assert pack.formats == dict.fromkeys(
+        ("landing", "bronze", "silver", "gold"), "DELTA"
+    )
+    lineage = pack.expected_results["lineage"]
+    assert lineage["target_tables"] == list(pack.tables["gold"])
+    assert lineage["levels"] == ["ENTITY", "COLUMN"]
+    assert lineage["direction"] == "BOTH"
+    assert lineage["max_depth"] == 8
+    assert lineage["should_include_edges"] is True
+    assert lineage["expected_entity_edges"] and lineage["expected_column_edges"]
     for asset in pack.datasets:
         rows = list(csv.reader(io.StringIO(asset.read_bytes().decode("utf-8"))))
         assert "participant_key" not in rows[0]
@@ -70,16 +77,19 @@ def test_pack_hashes_rows_notebooks_parameters_and_lineage_contract(lab_id: str)
                 rendered += source
     for parameter in (
         "participant_key", "lab_id", "workspace_root", "bucket_name",
-        "objectstorage_namespace",
+        "objectstorage_namespace", "catalog_name",
     ):
         assert f'required_parameter("{parameter}")' in rendered
     assert 'oidlUtils.parameters.getParameter(name, "")' in rendered
     assert "import oidlUtils" not in rendered
     assert all(b"\r\n" not in asset.read_bytes() for asset in pack.notebooks)
     assert "spark.aidp.lineage.enabled=false" not in rendered
-    assert "lineage_demo" in rendered
-    assert "source = spark.table(source_table)" in rendered
-    assert "saveAsTable(target_table)" in rendered
+    assert "lineage_demo" not in rendered
+    assert "CREATE EXTERNAL TABLE" not in rendered
+    assert 'saveAsTable(table("landing", dataset))' in rendered
+    assert 'saveAsTable(table("bronze", dataset))' in rendered
+    assert 'saveAsTable(table("silver", dataset))' in rendered
+    assert 'saveAsTable(table("gold",' in rendered
 
 
 def test_telco_lineage_pack_has_variable_dag_delta_lineage_and_tutorials() -> None:
@@ -89,7 +99,7 @@ def test_telco_lineage_pack_has_variable_dag_delta_lineage_and_tutorials() -> No
     assert len(pack.notebooks) == 14
     assert sum(len(names) for names in pack.tables.values()) == 31
     assert pack.formats == {
-        "landing": "CSV", "bronze": "DELTA", "silver": "DELTA", "gold": "DELTA",
+        "landing": "DELTA", "bronze": "DELTA", "silver": "DELTA", "gold": "DELTA",
     }
     assert pack.tables["silver"] == (
         "customer_master", "customer_addresses", "product_catalog",
@@ -131,12 +141,12 @@ def test_telco_lineage_pack_has_variable_dag_delta_lineage_and_tutorials() -> No
                 rendered += source
     for parameter in (
         "participant_key", "lab_id", "workspace_root", "bucket_name",
-        "objectstorage_namespace",
+        "objectstorage_namespace", "catalog_name",
     ):
         assert rendered.count(f'required_parameter("{parameter}")') == 14
     assert "CREATE EXTERNAL TABLE IF NOT EXISTS" not in rendered
     assert "USING ICEBERG" not in rendered
-    assert 'source.write.format("csv")' in rendered
+    assert 'source.write.format("delta")' in rendered
     assert 'frame.write.format("delta")' in rendered
     assert ".saveAsTable(target)" in rendered
     assert '.option("path", target_location)' not in rendered
@@ -150,12 +160,12 @@ def test_telco_lineage_pack_has_variable_dag_delta_lineage_and_tutorials() -> No
     )
     lineage = metadata["expected_results"]["lineage"]
     assert lineage["required_schema_paths"] == [
-        "aidp_lab.oci_landing.", "aidp_lab.oci_bronze.",
-        "aidp_lab.oci_silver.", "aidp_lab.oci_gold.",
+        "{participant_key}_aidp_lab.oci_landing.", "{participant_key}_aidp_lab.oci_bronze.",
+        "{participant_key}_aidp_lab.oci_silver.", "{participant_key}_aidp_lab.oci_gold.",
     ]
     assert lineage["forbidden_schema_paths"] == ["aidp_lab.telco_lineage."]
     assert lineage["qualified_node_template"] == (
-        "aidp_lab.oci_{layer}.{participant_key}_telco_lineage_{table}"
+        "{participant_key}_aidp_lab.oci_{layer}.{participant_key}_telco_lineage_{table}"
     )
 
 

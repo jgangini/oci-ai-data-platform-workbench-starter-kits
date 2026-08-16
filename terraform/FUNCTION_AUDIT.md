@@ -4,6 +4,17 @@ This ledger maps the two operational stages. It is deliberately conservative: au
 coverage can justify retaining a deployment contract, but deletion requires both baseline
 and candidate evidence. Deploy Studio recorded the Resource Manager identifiers, plan/apply,
 outputs, post-apply events, AIDP inventory and app health for the first two live runs. The
+`v3.0.0-rc.1` candidate adds subscribed-region and Chat-model selection, Autonomous AI
+Database 26ai DW, private participant catalogs, five real medallion-lineage packages and the
+participant Agent contract. Local coverage is recorded below, but the candidate is not a
+release yet: live regional, full-lineage and two-participant Agent isolation evidence is still
+required. The ADMIN database secret is consumed only by `post_apply` for AI enablement and for
+installing the allowlisted `ADMIN.AIDP_LAB_GOVERNANCE` package; it is never delivered to the VM.
+The VM stores the Autonomous wallet and a rotated operator that has only `CREATE SESSION` plus
+`EXECUTE` on that package. The package validates `u101`-style identifiers and can create or drop
+only the matching participant owner and read-only users.
+
+Historical baseline evidence follows. The
 `v1.0.0` baseline reached the AIDP create operation but exceeded the provider request deadline
 after 59 minutes; its exact Resource Manager stack was then destroyed successfully (`17
 destroyed`). `v2.0.0-rc.2` completed AIDP creation after `1h44m43s`, Resource Manager APPLY,
@@ -36,10 +47,14 @@ Final workflow and lineage acceptance remains pending.
 | Release | `deploy-studio.json`, source context, plan JSON | `release_gate.main → validate_context → validate_source → validate_plan` | `tests/test_release_gate.py`, `tests/test_manifest.py` | Pending baseline/candidate artifacts | Keep: schema-v1/fresh-only trust boundary. |
 | Preflight | OCI config/key paths and Deploy Studio context | `k_preflight.main → _load_sdk_config → select_inputs → compartment/capacity/key validators` | `tests/test_preflight.py` | Pending preflight events | Keep: validates compartment, home region, capacity and unencrypted key before apply. |
 | Terraform | runtime inputs | naming → network → bucket → VM/bootstrap → Identity/IAM → AIDP → outputs | Terraform validate/test and the HCL tests listed below | RC2 APPLY succeeded; AIDP ACTIVE after `1h44m43s`; outputs recorded | Keep addresses unchanged; replacement is not justified. |
+| Regional discovery | uploaded OCI profile and effective region | `CloudTechNext.oci_inventory → list_region_subscriptions → regional probes → model filter → deployment revalidation` | CloudTechNext `test_oci_inventory.py`, `test_deployment_dependencies.py`, frontend build | v3 live evidence pending | Keep: config region is an initial choice; only compatible READY subscriptions and active Chat models are selectable. |
+| Autonomous and AI | database mode/profile, ECPU count, model | `k_preflight._require_ready_region → _require_agent_model → _require_autonomous → Terraform → post_apply.ensure_ai_features` | `test_preflight.py`, `test_manifest.py`, `test_post_apply.py`, Terraform contract | v3 live evidence pending | Keep: one-region contract, 26ai DW validation and default 4 ECPU. |
 | Bootstrap VM | commit-pinned source and Terraform outputs | `user_data.sh → retry/use_reachable_base_images → release download → Docker → one-use credential → health` | `tests/test_local_bootstrap.py`, `tests/test_identity_runtime.py`, `tests/test_manifest.py` | RC2 encrypted object consumed and deleted; HTTPS health succeeded | Keep: application and credential-consumption boundary. |
 | Post-apply | Terraform outputs and operator credential files | `post_apply.main → reconcile → resources/roles/permissions → deliver_operator_credentials → health → build_success_result` | `tests/test_post_apply.py` | RC2 hook completed; catalog, schemas, compute, workspace and roles created | Keep: idempotent data-plane reconciliation and final artifact. |
 | Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | RC5 participant A activated Banking, Telecommunications, Retail and Healthcare after a safe retry; B activated Banking and Retail; Agent stayed disabled | Keep: multi-lab assignment, partial-failure recovery and activation boundary proven live. |
 | Lab administration | user, lab, operation UUID | `add_lab/redeploy_lab/delete_lab → per-lab journal → _provision_lab/_cleanup_lab` | `apps/backend/tests/test_api.py`, `test_aidp.py` | RC5 add Telecommunications succeeded; Banking redeploy isolated an AIDP same-path tombstone while other labs stayed active | Keep: isolated journals proven; RC6 preserves the lab container during redeploy and retains exact-root deletion semantics for remove/full cleanup. |
+| Governance Agent | participant code, selected model, external catalog | `_provision_agent → AutonomousGovernanceClient.ensure_participant → _ensure_external_catalog → shared AI compute → Agent source → USE/MANAGE grants` | `apps/backend/tests/test_autonomous.py`, `test_governance.py`, `test_aidp.py`, `test_lab_packs.py` | v3 live evidence pending | Keep candidate: approved allowlisted schema lifecycle, predefined read queries and early database boundary are covered locally; cross-participant isolation remains to be live-validated. |
+| Participant deletion | exact Identity user and layout-v4 manifest | `main.admin_delete_user → AidpClient.cleanup_user → _cleanup_lab → Agent/catalog/Autonomous + data resources → IdentityClient.delete_lab_user` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_autonomous.py`, `test_governance.py` | v3 live evidence pending | Keep: Identity deletion occurs only after exact AIDP and Autonomous cleanup completes; pending cleanup is retryable. |
 | Notebook parameters | task parameters in each canonical notebook | AIDP-injected `oidlUtils → parameters.getParameter → required_parameter` | `apps/backend/tests/test_lab_packs.py` | RC6 Banking Landing failed before parameter lookup because `import oidlUtils` searched for a wheel that the live PySpark runtime does not expose; Oracle examples use the injected global without importing it | Keep native parameterization; RC7 removes only the invalid import from all 20 notebooks and pins the corrected bytes in every package hash. |
 
 ## Terraform resources and data sources
@@ -70,6 +85,10 @@ Final workflow and lineage acceptance remains pending.
 | `oci_identity_policy.developer_console` | participant console access | `tests/test_identity_runtime.py` | Pending policy statements | Keep: required console entry. |
 | `oci_identity_policy.aidp_service` | AIDP control/data plane | `tests/test_identity_runtime.py` | Pending policy statements | Keep: required service permissions, optional policies rejected. |
 | `oci_ai_data_platform_ai_data_platform.lab` | post-apply workspace/catalog/compute | `tests/test_post_apply.py` | Pending platform OCID/state | Keep: shared stage-1 platform. |
+| `oci_database_autonomous_database.agent` | AI enablement and participant Agent metrics | `tests/test_manifest.py`, `tests/test_preflight.py`, `contract.tftest.hcl` | v3 live evidence pending | Keep candidate: 26ai DW, ECPU, default 4, no autoscaling. |
+| `data.oci_database_autonomous_database.existing_agent` | existing-database validation | `tests/test_manifest.py`, `tests/test_preflight.py`, Terraform validate | v3 live evidence pending | Keep candidate: reads only the explicitly selected OCID. |
+| `terraform_data.validate_autonomous_inputs` | new/existing database input contract | Terraform 1.5.7/1.15.7 validate and `contract.tftest.hcl` | v3 live evidence pending | Keep candidate: cross-variable preconditions remain compatible with Terraform 1.5.7. |
+| `terraform_data.validate_existing_autonomous_database` | VM precondition | `tests/test_identity_runtime.py`, Terraform validate | v3 live evidence pending | Keep: rejects a non-26ai or non-DW existing database before VM bootstrap. |
 | `data.oci_identity_tenancy.current` | tenancy output/artifact | Terraform validate | Pending tenancy name | Keep: auditable result metadata. |
 
 ## Outputs
@@ -91,6 +110,8 @@ artifact consumes them. Live values must be stored only in the sanitized deploym
 | `objectstorage_namespace` | app/notebook job parameters | `tests/test_manifest.py`, `apps/backend/tests/test_lab_packs.py` | Pending | Keep. |
 | `medallion_prefixes` | artifact/validation | `tests/test_manifest.py` | Pending | Keep. |
 | `ai_data_platform_id` | app/post-apply | `tests/test_post_apply.py` | Pending | Keep. |
+| `autonomous_database_id`, `autonomous_database_mode`, `autonomous_database_version`, `autonomous_database_workload`, `autonomous_database_compute_count` | post-apply/app/audit | `tests/test_manifest.py`, Terraform contract | v3 live evidence pending | Keep candidate: exact database contract without secret values. |
+| `agent_model_id` | participant Agent source | `tests/test_manifest.py`, `tests/test_preflight.py`, `apps/backend/tests/test_governance.py` | v3 live evidence pending | Keep candidate: selected active regional Chat model. |
 | `default_workspace_name` | app/post-apply | `tests/test_post_apply.py` | Pending | Keep. |
 | `developer_group_ocid` | post-apply/app Identity | `tests/test_post_apply.py` | Pending | Keep. |
 | `pending_group_ocid` | app Identity transaction | `tests/test_identity_runtime.py` | Pending | Keep. |
@@ -128,6 +149,10 @@ and are not independent deployment entrypoints.
 | `release_gate.main` | CLI/Deploy Studio | `test_release_gate.py` | Pending | Keep: entrypoint. |
 | `k_preflight._safe_error_message` | `main` | `test_preflight.py` | Pending | Keep: prevents secret leakage. |
 | `k_preflight._home_region` | `select_inputs` | `test_preflight.py` | Pending | Keep. |
+| `k_preflight._require_ready_region` | `select_inputs` | `test_preflight.py` | v3 live evidence pending | Keep: effective region must remain subscribed and READY. |
+| `k_preflight._model_is_selectable` | `_require_agent_model` | `test_preflight.py` | v3 live evidence pending | Keep: rejects inactive, non-Chat, deprecated or retired models. |
+| `k_preflight._require_agent_model` | `select_inputs` | `test_preflight.py` | v3 live evidence pending | Keep: revalidates the selected model in the effective region. |
+| `k_preflight._require_autonomous` | `select_inputs` | `test_preflight.py` | v3 live evidence pending | Keep: validates 26ai DW availability or the selected existing database. |
 | `k_preflight._candidate_shapes` | `select_inputs` | `test_preflight.py` | Pending | Keep: E5/E4/E3 fallback. |
 | `k_preflight._list_all` | compartment/work-request discovery | `test_preflight.py` | Pending | Keep: pagination. |
 | `k_preflight._has_active_aidp_work_request` | compartment validator | `test_preflight.py` | Pending | Keep: recovery/idempotence. |
@@ -176,6 +201,13 @@ and are not independent deployment entrypoints.
 | `post_apply.delete_bootstrap_object` | bootstrap completion | `test_post_apply.py` | Pending | Keep: secret cleanup. |
 | `post_apply.wait_for_bootstrap_consumed` | `main` | `test_post_apply.py` | Pending | Keep: consumption proof. |
 | `post_apply.build_success_result` | `main` | `test_manifest.py` | Pending | Keep: sanitized artifact. |
+| `post_apply._wait_for_autonomous_available` | `main` | `test_post_apply.py` | v3 live evidence pending | Keep: prevents wallet and AI operations before AVAILABLE. |
+| `post_apply._response_bytes` | wallet preparation | `test_post_apply.py` | v3 live evidence pending | Keep: normalizes SDK wallet responses. |
+| `post_apply._validate_wallet` | wallet preparation | `test_post_apply.py` | v3 live evidence pending | Keep: ZIP path and size boundary. |
+| `post_apply.prepare_autonomous_wallet` | `main` | `test_post_apply.py` | v3 live evidence pending | Keep: generated wallet for new DB or exact uploaded wallet for existing DB. |
+| `post_apply.ensure_ai_features` | `main` | `test_post_apply.py` | v3 live evidence pending | Keep: idempotent AI enablement and work-request wait; ADMIN remains post-apply-only. |
+| `post_apply.bootstrap_autonomous_governance` | `deliver_operator_credentials` | `test_post_apply.py`, `apps/backend/tests/test_autonomous.py` | v3 live evidence pending | Keep candidate: installs an ADMIN-owned allowlisted package and rotates an EXECUTE-only operator without persisting ADMIN. |
+| `autonomous.AutonomousGovernanceClient.ensure_participant/drop_participant` | Agent provision/cleanup | `apps/backend/tests/test_autonomous.py`, `test_governance.py` | v3 live evidence pending | Keep candidate: persistent per-participant credential journal and exact `u101` isolation boundary. |
 | `post_apply.main` | Deploy Studio | `test_post_apply.py` | Pending | Keep: entrypoint. |
 | `user_data.retry` | all network/bootstrap commands | `test_local_bootstrap.py` | Pending | Keep: transient recovery. |
 | `user_data.use_reachable_base_images` | Docker build bootstrap | `test_local_bootstrap.py` | Pending | Keep: registry fallback. |

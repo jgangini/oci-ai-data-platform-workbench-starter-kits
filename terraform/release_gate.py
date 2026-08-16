@@ -13,11 +13,11 @@ EXPECTED_REPOSITORIES = {
     "https://github.com/jgangini/oci-aidp-cloud-migration-lab",
     "https://github.com/jgangini/oci-aidp-cloud-migration-lab.git",
 }
-EXPECTED_REFS = frozenset({"v2.0.0-rc.1", "v2.0.0-rc.2", "v2.0.0-rc.3", "v2.0.0-rc.4", "v2.0.0-rc.5", "v2.0.0-rc.6", "v2.0.0-rc.7", "v2.0.0"})
-EXPECTED_REGION = "us-chicago-1"
+EXPECTED_REFS = frozenset({"v3.0.0-rc.1", "v3.0.0"})
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _COMPARTMENT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+_OCI_REGION = re.compile(r"^[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*$")
 _ALLOWED_IDENTITY_DOMAIN_GROUPS = frozenset({"developers", "pending"})
 _IDENTITY_DOMAIN_RESOURCE = re.compile(
     r'resource\s+"oci_identity_domains_(user|group|grant)"\s+"([^"]+)"',
@@ -90,12 +90,12 @@ def validate_context(context: dict[str, Any]) -> None:
         raise ValueError("release requires the trusted GitHub repository")
     if source.get("ref") not in EXPECTED_REFS:
         raise ValueError(
-            "release requires source ref v2.0.0-rc.1 through v2.0.0-rc.7, or v2.0.0"
+            "release requires source ref v3.0.0-rc.1 or v3.0.0"
         )
     if not _SHA.fullmatch(str(source.get("commit_sha") or "")):
         raise ValueError("release requires a full lowercase 40-character source SHA")
-    if context.get("region") != EXPECTED_REGION:
-        raise ValueError(f"release requires region {EXPECTED_REGION}")
+    if _OCI_REGION.fullmatch(str(context.get("region") or "")) is None:
+        raise ValueError("release requires a valid effective OCI region")
     compartment_target(context)
 
 
@@ -192,7 +192,7 @@ def validate_plan(plan: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate the immutable fresh-only v2.0.0 AIDP lab release contract.")
+    parser = argparse.ArgumentParser(description="Validate the immutable fresh-only v3.0.0 AIDP lab release contract.")
     parser.add_argument("--source-root", type=Path, default=Path(__file__).parent)
     parser.add_argument("--context-json", type=Path)
     parser.add_argument("--plan-json", type=Path)

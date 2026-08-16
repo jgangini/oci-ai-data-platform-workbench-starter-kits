@@ -31,8 +31,37 @@
       "encounters.cost_amount.sum": "557597.00"
     },
     "lineage": {
-      "expected_rows": 1,
-      "target_table": "lineage_demo"
+      "direction": "BOTH",
+      "expected_column_edges": [
+        "landing.patients.patient_id->bronze.patients.patient_id->silver.patients.patient_id->gold.healthcare_patient_utilization.patient_id",
+        "landing.encounters.cost_amount->bronze.encounters.cost_amount->silver.encounters.cost_amount->gold.healthcare_provider_daily.total_cost"
+      ],
+      "expected_entity_edges": [
+        "landing.patients->bronze.patients->silver.patients->gold.healthcare_patient_utilization",
+        "landing.appointments->bronze.appointments->silver.appointments->gold.healthcare_provider_daily",
+        "landing.encounters->bronze.encounters->silver.encounters->gold.healthcare_patient_utilization",
+        "landing.providers->bronze.providers->silver.providers->gold.healthcare_provider_daily"
+      ],
+      "forbidden_table_suffixes": [
+        "lineage_demo"
+      ],
+      "levels": [
+        "ENTITY",
+        "COLUMN"
+      ],
+      "max_depth": 8,
+      "qualified_node_template": "{participant_key}_aidp_lab.oci_{layer}.{table_name}",
+      "required_schema_paths": [
+        "{participant_key}_aidp_lab.oci_landing.",
+        "{participant_key}_aidp_lab.oci_bronze.",
+        "{participant_key}_aidp_lab.oci_silver.",
+        "{participant_key}_aidp_lab.oci_gold."
+      ],
+      "should_include_edges": true,
+      "target_tables": [
+        "healthcare_patient_utilization",
+        "healthcare_provider_daily"
+      ]
     },
     "quality": {
       "minimum_quarantined_rows": 1
@@ -44,12 +73,18 @@
       "providers": 48
     }
   },
+  "formats": {
+    "bronze": "DELTA",
+    "gold": "DELTA",
+    "landing": "DELTA",
+    "silver": "DELTA"
+  },
   "lab_id": "healthcare",
   "notebooks": [
     {
       "depends_on": [],
       "file": "01_landing_healthcare.ipynb",
-      "sha256": "bac1b36cf70a8b8f21f4d309ed69efc79c26bc7d30bd1674f071bae9a38d0deb",
+      "sha256": "f55c278e6052352fed896dffd6531b12d4e5f0e97aa3bf97994f9cb40ab5f5e2",
       "task_key": "01_landing_healthcare"
     },
     {
@@ -57,7 +92,7 @@
         "01_landing_healthcare"
       ],
       "file": "02_bronze_healthcare.ipynb",
-      "sha256": "46cd825985d1ea58cb3a9399f6b55bc1ea210ddcff1dfc679d4b4e1a39037438",
+      "sha256": "3709c27f139193c0d16492beb7605c242f5446eb2aefb522988a2089ba7b9c7d",
       "task_key": "02_bronze_healthcare"
     },
     {
@@ -65,7 +100,7 @@
         "02_bronze_healthcare"
       ],
       "file": "03_silver_healthcare.ipynb",
-      "sha256": "a8d4e6f27517d5ee6636a8b032df392c91572ec3162c3a112ef64b7335407a44",
+      "sha256": "e278afb095f132bb6da0cbbbfd57f54bb8d2f811c0efb8b7c11933ad4e735140",
       "task_key": "03_silver_healthcare"
     },
     {
@@ -73,7 +108,7 @@
         "03_silver_healthcare"
       ],
       "file": "04_gold_healthcare.ipynb",
-      "sha256": "a2dc515785ca2c2052537ff9c326746d1192bf8ff68d14fd1ef9ab74df559f7c",
+      "sha256": "a6e28d2667d4d4c0ed4df2f3870d58e1959f2ea5588afc0ec8e9182ae699cfe0",
       "task_key": "04_gold_healthcare"
     },
     {
@@ -81,14 +116,20 @@
         "04_gold_healthcare"
       ],
       "file": "05_lineage_healthcare.ipynb",
-      "sha256": "dc34d7f0186399cb19fde15469397833cf2a334b128ee36da4a32297e9ed8e2f",
+      "sha256": "bc5fe8624540b663c950e97403e1f79c44be755b357bda4881256dcc6166516f",
       "task_key": "05_lineage_healthcare"
     }
   ],
-  "pack_sha256": "e14f583dd9a18362caeab2d5309b11af4936cc4587ef26ffdc4fd1d66d401a22",
-  "pack_version": "1.0.3",
+  "pack_sha256": "ec8d3949b21602531f55f4208b1f6363f34b701e8470561f40ddb6ef89c17604",
+  "pack_version": "2.0.0",
   "schema_version": 1,
   "status": "available",
+  "table_storage": {
+    "bronze": "MANAGED",
+    "gold": "MANAGED",
+    "landing": "MANAGED",
+    "silver": "MANAGED"
+  },
   "tables": {
     "bronze": [
       "patients",
@@ -98,8 +139,7 @@
     ],
     "gold": [
       "healthcare_patient_utilization",
-      "healthcare_provider_daily",
-      "lineage_demo"
+      "healthcare_provider_daily"
     ],
     "landing": [
       "patients",

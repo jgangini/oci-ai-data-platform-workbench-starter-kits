@@ -31,8 +31,36 @@
       "usage_events.charge_amount.sum": "15026.56"
     },
     "lineage": {
-      "expected_rows": 1,
-      "target_table": "lineage_demo"
+      "direction": "BOTH",
+      "expected_column_edges": [
+        "landing.subscribers.subscriber_id->bronze.subscribers.subscriber_id->silver.subscribers.subscriber_id->gold.telecommunications_subscriber_monthly.subscriber_id",
+        "landing.usage_events.usage_value->bronze.usage_events.usage_value->silver.usage_events.usage_value->gold.telecommunications_site_daily.data_mb"
+      ],
+      "expected_entity_edges": [
+        "landing.subscribers->bronze.subscribers->silver.subscribers->gold.telecommunications_subscriber_monthly",
+        "landing.usage_events->bronze.usage_events->silver.usage_events->gold.telecommunications_subscriber_monthly",
+        "landing.network_sites->bronze.network_sites->silver.network_sites->gold.telecommunications_site_daily"
+      ],
+      "forbidden_table_suffixes": [
+        "lineage_demo"
+      ],
+      "levels": [
+        "ENTITY",
+        "COLUMN"
+      ],
+      "max_depth": 8,
+      "qualified_node_template": "{participant_key}_aidp_lab.oci_{layer}.{table_name}",
+      "required_schema_paths": [
+        "{participant_key}_aidp_lab.oci_landing.",
+        "{participant_key}_aidp_lab.oci_bronze.",
+        "{participant_key}_aidp_lab.oci_silver.",
+        "{participant_key}_aidp_lab.oci_gold."
+      ],
+      "should_include_edges": true,
+      "target_tables": [
+        "telecommunications_subscriber_monthly",
+        "telecommunications_site_daily"
+      ]
     },
     "quality": {
       "minimum_quarantined_rows": 1
@@ -44,12 +72,18 @@
       "usage_events": 6000
     }
   },
+  "formats": {
+    "bronze": "DELTA",
+    "gold": "DELTA",
+    "landing": "DELTA",
+    "silver": "DELTA"
+  },
   "lab_id": "telecommunications",
   "notebooks": [
     {
       "depends_on": [],
       "file": "01_landing_telecommunications.ipynb",
-      "sha256": "9cba2fd4e0f7c0cd46d7dcaa1ecde1cf3327cc12d167f6e8d59d7d3932938ff3",
+      "sha256": "f9b790bae36236a2987311654e0783462c8556330ad0e4dd89611c0129259cfb",
       "task_key": "01_landing_telecommunications"
     },
     {
@@ -57,7 +91,7 @@
         "01_landing_telecommunications"
       ],
       "file": "02_bronze_telecommunications.ipynb",
-      "sha256": "870fb325d79d451eedd5883821e71e167ec4145f052e6c9b47821f486794fbc7",
+      "sha256": "a185821928caad869eb22c179ea5c581b1a7fdd251b0baca2c05583e75240b86",
       "task_key": "02_bronze_telecommunications"
     },
     {
@@ -65,7 +99,7 @@
         "02_bronze_telecommunications"
       ],
       "file": "03_silver_telecommunications.ipynb",
-      "sha256": "2934476162d328c803c22db1981cd96779ad82790d6cc60558de2e8e2e8005ee",
+      "sha256": "3c030e901bd6d5c3f71870a8a8a7b0d9ed81e74839ffffffa21ba3952f3701a2",
       "task_key": "03_silver_telecommunications"
     },
     {
@@ -73,7 +107,7 @@
         "03_silver_telecommunications"
       ],
       "file": "04_gold_telecommunications.ipynb",
-      "sha256": "71187242c86cacc9e7514e929911b6cc48282c69aa6577ec4e63599635cb55fe",
+      "sha256": "4c59b863923eb75873f5d2e63b10dd95dcfed8bd7ff5f69027985b86f4e771f9",
       "task_key": "04_gold_telecommunications"
     },
     {
@@ -81,14 +115,20 @@
         "04_gold_telecommunications"
       ],
       "file": "05_lineage_telecommunications.ipynb",
-      "sha256": "021b143ef5f014c1584c13abb3551267f2a8422d5f1f31f09b7ad2e6f2ae18b3",
+      "sha256": "2eb02f6c8db0f97d7040f6258898413c5c9440d1016bccc1a27b29179f88dc6c",
       "task_key": "05_lineage_telecommunications"
     }
   ],
-  "pack_sha256": "c3d8520b5ab2794232b80e112af4acff97a472a66b8e2620853442a6d9a20341",
-  "pack_version": "1.0.3",
+  "pack_sha256": "c515f242fcb0f008a214cfa50b6647b07fcaed4b36ac03ad1e0868a3897376b0",
+  "pack_version": "2.0.0",
   "schema_version": 1,
   "status": "available",
+  "table_storage": {
+    "bronze": "MANAGED",
+    "gold": "MANAGED",
+    "landing": "MANAGED",
+    "silver": "MANAGED"
+  },
   "tables": {
     "bronze": [
       "plans",
@@ -98,8 +138,7 @@
     ],
     "gold": [
       "telecommunications_subscriber_monthly",
-      "telecommunications_site_daily",
-      "lineage_demo"
+      "telecommunications_site_daily"
     ],
     "landing": [
       "plans",

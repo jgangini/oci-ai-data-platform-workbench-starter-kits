@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import io
 import json
 import sys
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import unquote
@@ -742,7 +744,16 @@ def test_bootstrap_envelope_uses_rsa_oaep_sha256_and_aes_gcm() -> None:
         serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode("ascii")
     envelope = json.loads(
-        post_apply.encrypt_bootstrap_credentials(public_key, "[DEFAULT]\nuser=operator\n", "private-key")
+        post_apply.encrypt_bootstrap_credentials(
+            public_key,
+            "[DEFAULT]\nuser=operator\n",
+            "private-key",
+            b"wallet",
+            "wallet-password",
+            "AIDP_LAB_OPERATOR",
+            "operator-password",
+            "aidp_low",
+        )
     )
 
     assert set(envelope) == {
@@ -751,7 +762,7 @@ def test_bootstrap_envelope_uses_rsa_oaep_sha256_and_aes_gcm() -> None:
         "nonce_b64",
         "ciphertext_b64",
     }
-    assert envelope["schema_version"] == 1
+    assert envelope["schema_version"] == 2
     nonce = base64.b64decode(envelope["nonce_b64"], validate=True)
     assert len(nonce) == 12
     data_key = private_key.decrypt(
@@ -770,7 +781,68 @@ def test_bootstrap_envelope_uses_rsa_oaep_sha256_and_aes_gcm() -> None:
     assert json.loads(plaintext) == {
         "config_text": "[DEFAULT]\nuser=operator\n",
         "key_text": "private-key",
+        "wallet_zip_b64": base64.b64encode(b"wallet").decode("ascii"),
+        "wallet_password": "wallet-password",
+        "operator_username": "AIDP_LAB_OPERATOR",
+        "operator_password": "operator-password",
+        "dsn": "aidp_low",
     }
+
+
+def test_autonomous_governance_bootstrap_installs_allowlisted_operator(monkeypatch) -> None:
+    statements: list[tuple[str, dict[str, str]]] = []
+    connections: list[dict[str, str]] = []
+
+    class Cursor:
+        def execute(self, statement: str, **parameters: str) -> None:
+            statements.append((statement, parameters))
+
+        @staticmethod
+        def fetchone() -> tuple[int]:
+            return (0,)
+
+    class Connection:
+        def __enter__(self) -> "Connection":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        @staticmethod
+        def cursor() -> Cursor:
+            return Cursor()
+
+        @staticmethod
+        def commit() -> None:
+            return None
+
+    def connect(**kwargs: str) -> Connection:
+        connections.append(kwargs)
+        return Connection()
+
+    monkeypatch.setitem(sys.modules, "oracledb", SimpleNamespace(connect=connect))
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("tnsnames.ora", "aidp_high=(DESCRIPTION=high)\naidp_low=(DESCRIPTION=low)\n")
+        archive.writestr("sqlnet.ora", "SSL_SERVER_DN_MATCH=yes\n")
+
+    username, password, dsn = post_apply.bootstrap_autonomous_governance(
+        stream.getvalue(), "wallet-password", "admin-password"
+    )
+
+    assert username == "AIDP_LAB_OPERATOR"
+    assert len(password) == 32
+    assert dsn == "aidp_low"
+    assert connections[0]["user"] == "ADMIN"
+    assert connections[0]["password"] == "admin-password"
+    executed = [statement for statement, _parameters in statements]
+    assert post_apply.GOVERNANCE_PACKAGE_SPEC in executed
+    assert post_apply.GOVERNANCE_PACKAGE_BODY in executed
+    assert any("CREATE USER AIDP_LAB_OPERATOR" in statement for statement in executed)
+    assert executed[-2:] == [
+        "GRANT CREATE SESSION TO AIDP_LAB_OPERATOR",
+        "GRANT EXECUTE ON ADMIN.AIDP_LAB_GOVERNANCE TO AIDP_LAB_OPERATOR",
+    ]
 
 
 def test_runtime_oci_config_is_unencrypted_verified_and_sanitized(tmp_path: Path) -> None:
@@ -853,6 +925,12 @@ def test_operator_credentials_are_delivered_to_exact_bootstrap_object(monkeypatc
 
     monkeypatch.setattr(post_apply, "fetch_bootstrap_public_key", lambda *args: "public-key")
     monkeypatch.setattr(post_apply, "encrypt_bootstrap_credentials", lambda *args: b"encrypted-envelope")
+    monkeypatch.setattr(post_apply, "delete_bootstrap_object", lambda *args: None)
+    monkeypatch.setattr(
+        post_apply,
+        "bootstrap_autonomous_governance",
+        lambda *args: ("AIDP_LAB_OPERATOR", "operator-password", "aidp_low"),
+    )
     outputs = {
         "operator_user_ocid": "ocid1.user.oc1..operator",
         "compartment_ocid": "ocid1.compartment.oc1..lab",
@@ -870,6 +948,9 @@ def test_operator_credentials_are_delivered_to_exact_bootstrap_object(monkeypatc
         ObjectStorage(),
         "config-text",
         "key-text",
+        b"wallet",
+        "wallet-password",
+        "admin-password",
     ) is True
 
     assert uploaded == [
@@ -920,6 +1001,9 @@ def test_operator_credential_delivery_is_idempotent_after_vm_ready(monkeypatch) 
         object(),
         "config-text",
         "key-text",
+        b"wallet",
+        "wallet-password",
+        "admin-password",
     ) is False
     assert deleted == [post_apply.BOOTSTRAP_OBJECT_NAME]
 
@@ -941,6 +1025,9 @@ def test_operator_credential_delivery_rejects_a_different_config_user() -> None:
             object(),
             "config-text",
             "key-text",
+            b"wallet",
+            "wallet-password",
+            "admin-password",
         )
 
 

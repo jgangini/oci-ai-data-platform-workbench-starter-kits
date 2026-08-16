@@ -14,6 +14,6 @@
     "telco_lineage": "Test end-to-end data lineage for prepaid, postpaid and home services, from Landing through Gold with entity and column relationships.",
     "retail": "Transform customers, products, orders and order items into sales and customer analytics.",
     "healthcare": "Prepare patients, providers, appointments and encounters for operational healthcare analysis.",
-    "agent": "Planned agentic AI laboratory; content and required AI infrastructure are not yet available."
+    "agent": "Create an editable participant-scoped governance agent for catalog inventory, entity and column lineage, and approved database metrics."
   }
 }
