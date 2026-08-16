@@ -205,6 +205,37 @@ def test_preflight_accepts_one_active_existing_compartment() -> None:
     assert event["message"] == "Shared_Lab.2026 exists and is ACTIVE"
 
 
+def test_preflight_accepts_active_existing_compartment_ocid() -> None:
+    compartment_id = "ocid1.compartment.oc1..existing"
+
+    class ExistingIdentity(Identity):
+        def list_compartments(self, **_kwargs: Any) -> Any:
+            return SimpleNamespace(
+                data=[SimpleNamespace(id=compartment_id, name="Shared_Lab.2026", lifecycle_state="ACTIVE")],
+                headers={},
+            )
+
+    available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
+    result, _ = _select(
+        {preflight.E5_SHAPE: (available, "1")},
+        identity=ExistingIdentity(),
+        compartment=compartment_id,
+        compartment_mode="existing",
+    )
+    event = next(item for item in result["events"] if item["name"] == "Compartment availability")
+    assert event["message"] == "selected compartment exists and is ACTIVE"
+
+
+def test_preflight_rejects_ocid_as_new_compartment_name() -> None:
+    available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
+    with pytest.raises(ValueError, match="must use a name"):
+        _select(
+            {preflight.E5_SHAPE: (available, "1")},
+            compartment="ocid1.compartment.oc1..new",
+            compartment_mode="new",
+        )
+
+
 def test_preflight_reports_selected_new_name_is_available() -> None:
     available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
     result, _ = _select({preflight.E5_SHAPE: (available, "1")}, compartment="custom.lab_2026")

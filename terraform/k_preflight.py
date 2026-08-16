@@ -137,6 +137,9 @@ def _has_active_aidp_work_request(aidp: Any, compartment_ids: set[str]) -> bool:
 
 
 def _require_compartment_target(identity: Any, aidp: Any, tenancy_id: str, target: str, mode: str) -> str:
+    target_is_ocid = target.startswith("ocid1.compartment.")
+    if mode == "new" and target_is_ocid:
+        raise ValueError("new compartment must use a name, not an OCID")
     compartments = _list_all(
         identity.list_compartments,
         compartment_id=tenancy_id,
@@ -146,13 +149,17 @@ def _require_compartment_target(identity: Any, aidp: Any, tenancy_id: str, targe
     matches = [
         item
         for item in compartments
-        if str(getattr(item, "name", "")).casefold() == target.casefold()
+        if (
+            str(getattr(item, "id", "")) == target
+            if target_is_ocid
+            else str(getattr(item, "name", "")).casefold() == target.casefold()
+        )
     ]
     active = [item for item in matches if str(getattr(item, "lifecycle_state", "")).upper() == "ACTIVE"]
     if mode == "existing":
         if len(active) != 1:
             raise RuntimeError(f"existing compartment {target} was not found or is ambiguous")
-        return f"{target} exists and is ACTIVE"
+        return f"{target if not target_is_ocid else 'selected compartment'} exists and is ACTIVE"
     occupied = [item for item in matches if str(getattr(item, "lifecycle_state", "")).upper() != "DELETED"]
     if occupied:
         raise RuntimeError(f"compartment {target} is not available to create")
