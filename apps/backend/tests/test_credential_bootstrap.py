@@ -148,8 +148,11 @@ def _settings(tmp_path: Path, bootstrap_key: rsa.RSAPrivateKey) -> BootstrapSett
 def _wallet() -> bytes:
     stream = BytesIO()
     with zipfile.ZipFile(stream, "w") as archive:
-        archive.writestr("tnsnames.ora", "aidp_low = (DESCRIPTION=(ADDRESS=(PROTOCOL=TCPS)))\n")
-        archive.writestr("sqlnet.ora", "WALLET_LOCATION=(SOURCE=(METHOD=file))\n")
+        for name, content in (
+            ("tnsnames.ora", "aidp_low = (DESCRIPTION=(ADDRESS=(PROTOCOL=TCPS)))\n"),
+            ("sqlnet.ora", "WALLET_LOCATION=(SOURCE=(METHOD=file))\n"),
+        ):
+            archive.writestr(zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0)), content)
     return stream.getvalue()
 
 
