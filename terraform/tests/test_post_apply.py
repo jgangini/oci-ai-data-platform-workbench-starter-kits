@@ -193,6 +193,9 @@ def test_reconcile_builds_shared_medallion_schemas_without_external_volumes(monk
     assert cluster_payloads[0]["type"] == "USER"
     assert cluster_payloads[0]["driverConfig"]["driverShape"] == "amd.generic"
     assert cluster_payloads[0]["workerConfig"]["maxWorkerCount"] == 10
+    assert cluster_payloads[0]["clusterRuntimeConfig"]["sparkAdvancedConfigurations"] == {
+        "spark.aidp.lineage.enabled": "true"
+    }
     assert reconciled["shared_compute_key"] == "aidp_lab_shared_compute-key"
     assert reconciled["root_object_key"] == "medallon-key"
     assert set(reconciled["shared_schema_keys"]) == set(post_apply.LAYERS)

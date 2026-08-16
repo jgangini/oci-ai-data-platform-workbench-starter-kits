@@ -863,7 +863,7 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
             "clusterRuntimeConfig": {
                 "type": "SPARK",
                 "sparkVersion": "3.5.0",
-                "sparkAdvancedConfigurations": {},
+                "sparkAdvancedConfigurations": {"spark.aidp.lineage.enabled": "true"},
                 "sparkEnvVariables": {},
                 "initScripts": [],
             },
