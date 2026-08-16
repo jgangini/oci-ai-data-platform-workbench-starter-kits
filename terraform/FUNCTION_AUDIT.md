@@ -4,11 +4,11 @@ This ledger maps the two operational stages. It is deliberately conservative: au
 coverage can justify retaining a deployment contract, but deletion requires both baseline
 and candidate evidence. Deploy Studio recorded the Resource Manager identifiers, plan/apply,
 outputs, post-apply events, AIDP inventory and app health for the first two live runs. The
-`v3.0.0-rc.1` candidate adds subscribed-region and Chat-model selection, Autonomous AI
+The `v2.0.0` release adds subscribed-region and Chat-model selection, Autonomous AI
 Database 26ai DW, private participant catalogs, five real medallion-lineage packages and the
-participant Agent contract. Local coverage is recorded below, but the candidate is not a
-release yet: live regional, full-lineage and two-participant Agent isolation evidence is still
-required. The ADMIN database secret is consumed only by `post_apply` for AI enablement and for
+participant Agent contract. Local coverage is recorded below; live regional, full-lineage and
+two-participant Agent isolation evidence is refreshed during release acceptance. The ADMIN
+database secret is consumed only by `post_apply` for AI enablement and for
 installing the allowlisted `ADMIN.AIDP_LAB_GOVERNANCE` package; it is never delivered to the VM.
 The VM stores the Autonomous wallet and a rotated operator that has only `CREATE SESSION` plus
 `EXECUTE` on that package. The package validates `u101`-style identifiers and can create or drop
