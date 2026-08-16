@@ -4,7 +4,7 @@ OCI AI Data Platform Cloud Migration Lab is a hands-on data engineering environm
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more laboratories without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current stable release: **v2.0.0**. The `main` branch is preparing **v3.0.0-rc.1**; do not use it as a validated release until the regional, lineage, Autonomous, and Agent acceptance gates pass.
+Current stable release: **v2.0.0**. The `main` branch is preparing **v3.0.0-rc.2**; do not use it as a validated release until the regional, lineage, Autonomous, and Agent acceptance gates pass.
 
 ## What the project provides
 
@@ -40,7 +40,7 @@ The standard laboratories contain five notebooks, one for each stage. The Telco 
 | Telco Customer 360 Lineage | 2.0.0 | 10 CSV files | 14 tasks | Cross-domain Customer 360, service ownership, geographic summaries, and detailed lineage |
 | Retail | 2.0.0 | 4 CSV files | 5 tasks | Customer value, product sales, order quality, and full medallion lineage |
 | Healthcare | 2.0.0 | 4 CSV files | 5 tasks | Patient utilization, provider activity, encounter quality, and full medallion lineage |
-| Data Governance Agent | 1.0.0 | — | — | Participant-editable Agent for catalog inventory, entity/column lineage, and allowlisted governance metrics; release remains gated on live isolation testing |
+| Data Governance Agent | 1.1.0 | — | — | Participant-editable DAMA-DMBOK Agent for catalog inventory, entity/column lineage, and allowlisted governance metrics; release remains gated on live accuracy and isolation testing |
 
 Laboratory order, descriptions, versions, and availability come from [`apps/backend/app/labs/catalog.json`](apps/backend/app/labs/catalog.json) and each package's `lab.json`. Adding a future package does not require hard-coded changes to the registration interface.
 
@@ -104,7 +104,9 @@ Healthcare prepares patient, provider, appointment, and encounter data for opera
 
 ### Data Governance Agent
 
-The optional Agent laboratory creates `u101_agent_data_governance` for participant `u101`. It can describe that participant's Master Catalog, inspect entity and column lineage, and run only the predefined read queries shipped with the package. It does not accept arbitrary SQL.
+The optional Agent laboratory creates `u101_agent_data_governance` for participant `u101`. It acts as a DAMA-DMBOK data-governance specialist: it can describe that participant's Master Catalog, inspect entity and column lineage, and run only the predefined read queries shipped with the package. Answers must separate observed evidence from explanation, governance implications, and recommendations or limitations. The Agent does not accept arbitrary SQL and does not infer missing owners, stewards, controls, or lineage.
+
+The package includes a versioned acceptance matrix covering catalog scope, quality, entity and column lineage, stewardship gaps, DAMA control mapping, participant isolation, unsupported certification claims, and arbitrary-SQL refusal. Candidate releases execute these questions live and retain the tool trace and response text as structured evidence without participant data from another catalog.
 
 The deployment uses one shared Autonomous AI Database 26ai DW, but creates isolated `U101_AGENT` and `U101_AGENT_RO` database users for each participant. A participant deletion removes the AIDP Agent and external catalog, drops only that participant's Autonomous users, removes the participant workspace and data, and finally deletes the Identity Domains user.
 

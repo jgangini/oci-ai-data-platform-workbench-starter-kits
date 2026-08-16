@@ -195,7 +195,7 @@ def test_public_catalog_exposes_five_lineage_labs_and_available_agent(tmp_path: 
     assert all(lab["available"] for lab in payload["labs"])
     assert all(lab["description"].strip() for lab in payload["labs"])
     assert payload["labs"][-1]["status"] == "available"
-    assert payload["labs"][-1]["pack_version"] == "1.0.0"
+    assert payload["labs"][-1]["pack_version"] == "1.1.0"
     assert "industries" not in payload
 
 

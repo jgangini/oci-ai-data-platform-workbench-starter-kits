@@ -9,6 +9,7 @@ import pytest
 from app.aidp import AidpClient, AidpProvisionPending, participant_owner_key
 from app.autonomous import ParticipantDatabase
 from app.governance import (
+    DAMA_SYSTEM_PROMPT,
     agent_source,
     credential_name,
     database_names,
@@ -76,6 +77,44 @@ def test_agent_source_contains_only_predefined_read_queries() -> None:
     assert "{{lab_id}}" in source and "{{lineage_level}}" in source
     encoded_config = source.split("CONFIG = ", 1)[1].splitlines()[0]
     assert json.loads(encoded_config)["schema"] == "U101_AGENT"
+
+
+def test_agent_prompt_is_dama_grounded_and_explainable() -> None:
+    source = agent_source(
+        model_id="ocid1.generativeaimodel.oc1.us-chicago-1.chat",
+        region="us-chicago-1",
+        compartment_id="ocid1.compartment.oc1..participant",
+        external_catalog_key="u101-catalog-key",
+        database_schema="U101_AGENT",
+    ).decode("utf-8")
+
+    assert "DAMA-DMBOK" in DAMA_SYSTEM_PROMPT
+    assert all(
+        heading in DAMA_SYSTEM_PROMPT
+        for heading in ("Evidence", "Explanation", "Governance implication", "Recommendation or limitation")
+    )
+    assert "another participant" in DAMA_SYSTEM_PROMPT
+    assert "If evidence is unavailable" in DAMA_SYSTEM_PROMPT
+    assert repr(DAMA_SYSTEM_PROMPT) in source
+
+
+def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
+    cases = load_lab_pack("agent").agent["evaluation_cases"]
+    assert len(cases) >= 10
+    assert {tool for case in cases for tool in case["expected_tools"]} == {
+        "catalog_inventory",
+        "catalog_metrics",
+        "catalog_lineage",
+    }
+    assert {case["category"] for case in cases} >= {
+        "catalog",
+        "quality",
+        "entity_lineage",
+        "column_lineage",
+        "stewardship",
+        "security",
+    }
+    assert all(case["required_concepts"] for case in cases)
 
 
 def test_agent_stays_pending_before_database_bootstrap_without_creating_compute() -> None:

@@ -238,6 +238,40 @@ def _pack_formats(
     return formats
 
 
+def _agent_evaluation_case_valid(case: Any) -> bool:
+    if not isinstance(case, dict):
+        return False
+    if re.fullmatch(r"[a-z0-9_]{3,60}", str(case.get("case_id") or "")) is None:
+        return False
+    if not str(case.get("question") or "").strip():
+        return False
+    expected_tools = case.get("expected_tools")
+    if not isinstance(expected_tools, list):
+        return False
+    if not set(expected_tools) <= {"catalog_inventory", "catalog_metrics", "catalog_lineage"}:
+        return False
+    required_concepts = case.get("required_concepts")
+    return isinstance(required_concepts, list) and bool(required_concepts)
+
+
+def _governance_agent_contract_valid(agent: Any) -> bool:
+    if not isinstance(agent, dict):
+        return False
+    if agent.get("name_template") != "{participant_key}_agent_data_governance":
+        return False
+    if agent.get("editable") is not True or agent.get("expertise") != "DAMA-DMBOK":
+        return False
+    if set(agent.get("tools") or []) != {"catalog_inventory", "lineage", "governed_sql"}:
+        return False
+    cases = agent.get("evaluation_cases")
+    if not isinstance(cases, list) or len(cases) < 10:
+        return False
+    identifiers = [case.get("case_id") for case in cases if isinstance(case, dict)]
+    if len(identifiers) != len(cases) or len(set(identifiers)) != len(cases):
+        return False
+    return all(_agent_evaluation_case_valid(case) for case in cases)
+
+
 def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
     if LAB_ID_PATTERN.fullmatch(lab_id) is None:
         raise LabPackError("Invalid lab_id")
@@ -248,12 +282,7 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
     )
     datasets, notebooks = _pack_assets(root, metadata, status, kind, lab_id)
     agent = metadata.get("agent", {})
-    if kind == "governance_agent" and (
-        not isinstance(agent, dict)
-        or agent.get("name_template") != "{participant_key}_agent_data_governance"
-        or agent.get("editable") is not True
-        or set(agent.get("tools") or []) != {"catalog_inventory", "lineage", "governed_sql"}
-    ):
+    if kind == "governance_agent" and not _governance_agent_contract_valid(agent):
         raise LabPackError(f"Invalid governance Agent contract: {lab_id}")
     return LabPack(
         lab_id=lab_id,

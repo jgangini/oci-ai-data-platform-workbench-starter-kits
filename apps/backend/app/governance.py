@@ -8,6 +8,8 @@ import re
 
 PARTICIPANT_KEY = re.compile(r"u[1-9][0-9]*")
 
+DAMA_SYSTEM_PROMPT = """You are a senior data governance specialist grounded in DAMA-DMBOK. Use only the provided participant-scoped tools and never invent SQL, identifiers, owners, metrics, lineage, or data. Match the user's language. For factual questions, call the tool that supplies the evidence before answering: catalog_inventory for scope, catalog_metrics for governed values, and catalog_lineage for ENTITY or COLUMN traceability. Explain the result in four concise parts: Evidence, Explanation, Governance implication, and Recommendation or limitation. Clearly separate observed facts from DAMA-based recommendations. If evidence is unavailable, say so and identify the metadata or control needed; do not guess. Refuse arbitrary SQL, mutations, and requests for another participant's information. When lineage is requested, name the observed source-to-target path and distinguish entity lineage from column lineage."""
+
 
 def database_names(participant_key: str) -> tuple[str, str]:
     if PARTICIPANT_KEY.fullmatch(participant_key) is None or int(participant_key[1:]) < 101:
@@ -75,18 +77,18 @@ def sql_tool(name, description, query, params=None):
 TOOLS = [
     sql_tool(
         "catalog_inventory",
-        "List the participant laboratories represented in the governed metric catalog.",
+        "List only this participant's laboratories represented in the governed metric catalog. Use it to establish scope before cross-laboratory governance answers.",
         "SELECT DISTINCT LAB_ID FROM LAB_METRICS ORDER BY LAB_ID",
     ),
     sql_tool(
         "catalog_metrics",
-        "Read predefined governed metrics for one assigned laboratory.",
+        "Read predefined, participant-scoped governed metrics for one assigned laboratory. Use only returned values as factual evidence.",
         "SELECT METRIC_NAME, METRIC_VALUE FROM LAB_METRICS WHERE LAB_ID = {{{{lab_id}}}} ORDER BY METRIC_NAME",
         [{{"name": "lab_id", "type": "string", "description": "Assigned laboratory identifier"}}],
     ),
     sql_tool(
         "catalog_lineage",
-        "Read entity or column lineage limited to the participant catalog.",
+        "Read observed entity or column lineage limited to the participant catalog. ENTITY traces datasets and tables; COLUMN traces field-level derivations.",
         "SELECT RELATION_PATH FROM LINEAGE_RELATIONS WHERE LAB_ID = {{{{lab_id}}}} AND LINEAGE_LEVEL = {{{{lineage_level}}}} ORDER BY RELATION_PATH",
         [
             {{"name": "lab_id", "type": "string", "description": "Assigned laboratory identifier"}},
@@ -109,10 +111,7 @@ class DataGovernanceAgent:
             model_args={{}},
             guardrails_config={{"name": "Data governance", "description": "Participant isolation", "policies": []}},
         ))
-        prompt = (
-            "You are a data-governance assistant. Use only the provided predefined tools. "
-            "Never invent SQL, identifiers, metrics, lineage, or data from another participant."
-        )
+        prompt = {DAMA_SYSTEM_PROMPT!r}
         kwargs = {{"model": llm, "tools": TOOLS, "prompt": prompt, "debug": False}}
         if checkpointer:
             kwargs["checkpointer"] = checkpointer
