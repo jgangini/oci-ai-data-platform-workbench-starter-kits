@@ -463,12 +463,13 @@ class AidpClient:
                 "sourceType": "ADW",
                 "connectionDetails": {
                     "connectionProperties": {
-                        "wallet.content": base64.b64encode(database.wallet_zip).decode("ascii"),
-                        "type": "ORACLE_ADW",
-                        "user.name": database.reader,
-                        "tns": database.dsn,
-                        "password": database.reader_password,
-                        "wallet.password": database.wallet_password,
+                        "ADW_WALLET_CONTENT_BASE64": base64.b64encode(
+                            database.wallet_zip
+                        ).decode("ascii"),
+                        "ADW_WALLET_PASSWORD": database.wallet_password,
+                        "ADW_USERNAME": database.reader,
+                        "ADW_PASSWORD": database.reader_password,
+                        "ADW_TNS_ALIAS": database.dsn,
                     }
                 },
             },

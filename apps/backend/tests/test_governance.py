@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.aidp import AidpClient, AidpProvisionPending, participant_owner_key
+from app.aidp import API_VERSION, AidpClient, AidpProvisionPending, participant_owner_key
 from app.autonomous import ParticipantDatabase
 from app.governance import (
     DAMA_SYSTEM_PROMPT,
@@ -24,7 +24,7 @@ EMAIL = "ada@example.com"
 
 def bare_client() -> AidpClient:
     client = object.__new__(AidpClient)
-    client.base = "https://aidp.example.invalid/20260430/aiDataPlatforms/platform"
+    client.base = f"https://aidp.example.invalid/{API_VERSION}/aiDataPlatforms/platform"
     client.signer = object()
     client._session_lock = threading.Lock()
     client._locks = {}
@@ -216,6 +216,34 @@ def test_agent_creates_participant_database_before_any_compute() -> None:
         "database_schema": "U101_AGENT",
     }
     assert writes[-1]["labs"]["agent"]["external_catalog_key"] == "u101-external-catalog"
+
+
+def test_external_catalog_uses_the_live_adw_connection_contract() -> None:
+    client = bare_client()
+    database = ParticipantDatabase(
+        owner="U101_AGENT",
+        reader="U101_AGENT_RO",
+        reader_password="ReaderPassword1234567890",
+        dsn="aidp_low",
+        wallet_password="WalletPassword123",
+        wallet_zip=b"wallet",
+    )
+    catalogs = iter((None, {"key": "u101-external-catalog"}))
+    requests: list[dict] = []
+    client._catalog = lambda *_args, **_kwargs: next(catalogs)
+    client._request = lambda *_args, **kwargs: requests.append(kwargs["payload"])
+
+    catalog, created = client._ensure_external_catalog("u101", database)
+
+    properties = requests[0]["connectionDetails"]["connectionProperties"]
+    assert created and catalog["key"] == "u101-external-catalog"
+    assert set(properties) == {
+        "ADW_WALLET_CONTENT_BASE64",
+        "ADW_WALLET_PASSWORD",
+        "ADW_USERNAME",
+        "ADW_PASSWORD",
+        "ADW_TNS_ALIAS",
+    }
 
 
 def test_agent_cleanup_removes_aidp_then_autonomous_then_workspace() -> None:
