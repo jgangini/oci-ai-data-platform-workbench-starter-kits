@@ -73,7 +73,7 @@ class Aidp:
 
 class Database:
     def list_autonomous_db_versions(self, **_kwargs: Any) -> Any:
-        return SimpleNamespace(data=[SimpleNamespace(db_version="26ai")], headers={})
+        return SimpleNamespace(data=[SimpleNamespace(version="26ai")], headers={})
 
     def get_autonomous_database(self, _database_id: str) -> Any:
         return SimpleNamespace(

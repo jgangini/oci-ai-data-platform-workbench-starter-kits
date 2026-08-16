@@ -105,7 +105,7 @@ def _require_autonomous(
         compartment_id=tenancy_id,
         db_workload="DW",
     )
-    if not any(str(getattr(item, "db_version", "")) == "26ai" for item in versions):
+    if not any(str(getattr(item, "version", "")) == "26ai" for item in versions):
         raise RuntimeError("Oracle AI Database 26ai DW is not available in the selected region")
     return f"new Oracle AI Database 26ai DW will use {int(count)} ECPU"
 
