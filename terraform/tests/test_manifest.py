@@ -9,6 +9,7 @@ from pathlib import Path
 def test_deploy_studio_manifest_contract() -> None:
     root = Path(__file__).parents[2]
     manifest = json.loads((root / "terraform" / "deploy-studio.json").read_text(encoding="utf-8"))
+    variables = (root / "terraform" / "b_variables.tf").read_text(encoding="utf-8")
     assert manifest["schema_version"] == 1
     assert manifest["project_id"] == "oci-aidp-cloud-migration-lab"
     assert manifest["terraform"] == {"path": "terraform", "package_oci_credentials": False}
@@ -33,10 +34,18 @@ def test_deploy_studio_manifest_contract() -> None:
     assert fields["registration_code"]["pattern"] == "^[A-Z]{4}-[0-9]{4}$"
     assert fields["registration_code"]["transform"] == "uppercase_pbkdf2_sha256"
     assert fields["agent_model_id"]["options_source"] == "oci_genai_chat_models"
+    assert fields["agent_model_id"]["group"] == "enterprise_ai"
     assert fields["autonomous_database_version"]["options"] == [
         {"value": "26ai:DW", "label": "Oracle AI Database 26ai — Data Warehouse"}
     ]
-    assert fields["autonomous_database_compute_count"]["default"] == 4
+    assert "autonomous_database_compute_count" not in fields
+    assert re.search(
+        r'variable\s+"autonomous_database_compute_count"\s*\{.*?default\s*=\s*4\s*\}',
+        variables,
+        re.DOTALL,
+    )
+    assert fields["autonomous_database_mode"]["group"] == "database"
+    assert fields["admin_username"]["group"] == "application_vm"
     assert fields["existing_autonomous_database_ocid"]["visible_when"] == {
         "field": "autonomous_database_mode",
         "equals": "existing",

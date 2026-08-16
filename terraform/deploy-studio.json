@@ -30,7 +30,7 @@
     {"key": "apply", "label": "Terraform apply"},
     {"key": "network", "label": "VCN and public subnet"},
     {"key": "bucket", "label": "Medallion Object Storage"},
-    {"key": "compute", "label": "Registration VM"},
+    {"key": "compute", "label": "Lab Application VM"},
     {"key": "database", "label": "Autonomous AI Database 26ai"},
     {"key": "wallet", "label": "Database wallet and AI features"},
     {"key": "application", "label": "AIDP workspace, catalog and RBAC"},
@@ -47,7 +47,8 @@
         "required": true,
         "default": "admin",
         "min_length": 3,
-        "max_length": 64
+        "max_length": 64,
+        "group": "application_vm"
       },
       {
         "name": "admin_password",
@@ -57,7 +58,8 @@
         "secret": true,
         "min_length": 12,
         "max_length": 128,
-        "transform": "pbkdf2_sha256"
+        "transform": "pbkdf2_sha256",
+        "group": "application_vm"
       },
       {
         "name": "registration_code",
@@ -68,7 +70,8 @@
         "pattern": "^[A-Z]{4}-[0-9]{4}$",
         "min_length": 9,
         "max_length": 9,
-        "transform": "uppercase_pbkdf2_sha256"
+        "transform": "uppercase_pbkdf2_sha256",
+        "group": "application_vm"
       },
       {
         "name": "agent_model_id",
@@ -76,7 +79,7 @@
         "type": "select",
         "required": true,
         "options_source": "oci_genai_chat_models",
-        "span": 2
+        "group": "enterprise_ai"
       },
       {
         "name": "autonomous_database_mode",
@@ -84,6 +87,7 @@
         "type": "select",
         "required": true,
         "default": "new",
+        "group": "database",
         "options": [
           {"value": "new", "label": "Create new database"},
           {"value": "existing", "label": "Use existing database"}
@@ -96,20 +100,11 @@
         "required": true,
         "default": "26ai:DW",
         "transform": "database_profile",
+        "group": "database",
         "visible_when": {"field": "autonomous_database_mode", "equals": "new"},
         "options": [
           {"value": "26ai:DW", "label": "Oracle AI Database 26ai — Data Warehouse"}
         ]
-      },
-      {
-        "name": "autonomous_database_compute_count",
-        "label": "Database ECPU count",
-        "type": "number",
-        "required": true,
-        "default": 4,
-        "min_length": 1,
-        "max_length": 3,
-        "visible_when": {"field": "autonomous_database_mode", "equals": "new"}
       },
       {
         "name": "existing_autonomous_database_ocid",
@@ -120,7 +115,8 @@
         "min_length": 30,
         "max_length": 255,
         "visible_when": {"field": "autonomous_database_mode", "equals": "existing"},
-        "span": 2
+        "span": 2,
+        "group": "database"
       },
       {
         "name": "autonomous_database_admin_password",
@@ -129,7 +125,8 @@
         "required": true,
         "secret": true,
         "min_length": 12,
-        "max_length": 128
+        "max_length": 128,
+        "group": "database"
       },
       {
         "name": "autonomous_database_wallet_password",
@@ -138,7 +135,8 @@
         "required": true,
         "secret": true,
         "min_length": 12,
-        "max_length": 128
+        "max_length": 128,
+        "group": "database"
       }
     ],
     "email_access_fields": ["admin_username", "admin_password", "registration_code"]
