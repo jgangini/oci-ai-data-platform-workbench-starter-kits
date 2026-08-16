@@ -272,6 +272,8 @@ def test_agent_compute_rotates_retry_token_after_terminal_attempt() -> None:
         client._ensure_agent_compute(workspace_key)
 
     assert post_kwargs["retry_scope"] == "agent-compute:failed-operation"
+    assert "gpus" not in post_kwargs["payload"]["driverConfig"]["driverShapeConfig"]
+    assert post_kwargs["payload"]["replicaConfig"] == {"minReplica": 1, "maxReplica": 1}
 
 
 def test_job_contract_is_derived_from_pack_and_accepts_a_sixth_notebook() -> None:
