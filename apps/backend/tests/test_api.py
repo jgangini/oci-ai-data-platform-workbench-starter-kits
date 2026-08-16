@@ -15,6 +15,7 @@ class FakeIdentity:
         self.mode = mode
         self.activated: list[str] = []
         self.deleted: list[str] = []
+        self.closed = False
 
     async def prepare_registration(self, name: str, email: str) -> RegistrationResult:
         if self.mode == "conflict":
@@ -62,7 +63,7 @@ class FakeIdentity:
             raise RuntimeError("upstream secret detail must not escape")
 
     async def close(self) -> None:
-        return None
+        self.closed = True
 
 
 class FakeAidp:
@@ -197,6 +198,30 @@ def test_public_catalog_exposes_five_lineage_labs_and_available_agent(tmp_path: 
     assert payload["labs"][-1]["status"] == "available"
     assert payload["labs"][-1]["pack_version"] == "1.1.0"
     assert "industries" not in payload
+
+
+def test_health_reports_safe_failure_and_recreates_cached_client(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    failing = FakeIdentity("health-fail")
+    recovered = FakeIdentity()
+    client.app.state.identity_client = failing
+
+    def identity_factory() -> FakeIdentity:
+        if client.app.state.identity_client is None:
+            client.app.state.identity_client = recovered
+        return client.app.state.identity_client
+
+    client.app.state.identity_factory = identity_factory
+    response = client.get("/api/health")
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Lab control services are unavailable"}
+    assert response.headers["x-lab-health-failures"] == "identity:RuntimeError"
+    assert "secret" not in response.text
+    assert failing.closed
+
+    client.app.state.health_expires_at = 0.0
+    assert client.get("/api/health").status_code == 200
+    assert client.app.state.identity_client is recovered
 
 
 def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:

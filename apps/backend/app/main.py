@@ -168,7 +168,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if client is not None:
                 await client.close()
 
-    app = FastAPI(title="OCI AIDP Lab", version="3.0.0", docs_url=None, redoc_url=None, lifespan=lifespan)
+    app = FastAPI(title="OCI AIDP Lab", version="2.0.0", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.settings = settings
     app.state.settings_store = SettingsStore(settings)
     app.state.session_key = load_or_create_session_key(settings.session_secret_file)
@@ -180,6 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.health_lock = asyncio.Lock()
     app.state.health_expires_at = 0.0
     app.state.health_error = False
+    app.state.health_failures = ""
 
     def default_factory() -> IdentityClient | LocalIdentityClient:
         if app.state.identity_client is None:
@@ -194,6 +195,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return app.state.aidp_client
 
     app.state.aidp_factory = default_aidp_factory
+
+    async def reset_health_client(component: str) -> None:
+        attribute = f"{component}_client"
+        client = getattr(app.state, attribute, None)
+        if client is None:
+            return
+        try:
+            await client.close()
+        except Exception:
+            logger.warning("Failed to close unhealthy %s client", component)
+        finally:
+            setattr(app.state, attribute, None)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next: Callable):
@@ -322,6 +335,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if isinstance(result, BaseException)
                 ]
                 app.state.health_error = bool(failures)
+                app.state.health_failures = ",".join(
+                    f"{component}:{type(failure).__name__}"
+                    for component, failure in failures
+                )
                 app.state.health_expires_at = now + (
                     HEALTH_FAILURE_TTL_SECONDS if failures else HEALTH_SUCCESS_TTL_SECONDS
                 )
@@ -331,10 +348,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         component,
                         type(failure).__name__,
                     )
+                    await reset_health_client(component)
             if app.state.health_error:
                 raise HTTPException(
                     status.HTTP_503_SERVICE_UNAVAILABLE,
                     "Lab control services are unavailable",
+                    headers={"X-Lab-Health-Failures": app.state.health_failures},
                 )
         return {"status": "ok"}
 
