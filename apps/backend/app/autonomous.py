@@ -24,6 +24,46 @@ def _database_error_marker(exc: Exception) -> str:
     return match.group(0).upper() if match else type(exc).__name__
 
 
+def _governance_metric_valid(record: tuple[str, str, str]) -> bool:
+    lab_id, metric_name, metric_value = record
+    return bool(
+        lab_id
+        and len(lab_id) <= 64
+        and metric_name
+        and len(metric_name) <= 128
+        and len(metric_value) <= 4000
+    )
+
+
+def _governance_lineage_valid(record: tuple[str, str, str]) -> bool:
+    lab_id, level, relation_path = record
+    return bool(
+        lab_id
+        and len(lab_id) <= 64
+        and level in {"ENTITY", "COLUMN"}
+        and relation_path
+        and len(relation_path) <= 4000
+    )
+
+
+def _merge_governance_records(
+    cursor: object,
+    participant_key: str,
+    metrics: list[tuple[str, str, str]],
+    lineage: list[tuple[str, str, str]],
+) -> None:
+    for record in metrics:
+        cursor.callproc(
+            "ADMIN.AIDP_LAB_GOVERNANCE.PUT_METRIC",  # type: ignore[attr-defined]
+            [participant_key, *record],
+        )
+    for record in lineage:
+        cursor.callproc(
+            "ADMIN.AIDP_LAB_GOVERNANCE.PUT_LINEAGE",  # type: ignore[attr-defined]
+            [participant_key, *record],
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ParticipantDatabase:
     owner: str
@@ -110,6 +150,31 @@ class AutonomousGovernanceClient:
             users = self._users()
             users.pop(participant_key, None)
             self._write_users(users)
+
+    def merge_governance(
+        self,
+        participant_key: str,
+        metrics: list[tuple[str, str, str]],
+        lineage: list[tuple[str, str, str]],
+    ) -> None:
+        database_names(participant_key)
+        if not all(map(_governance_metric_valid, metrics)):
+            raise AutonomousProvisionError("Governance metric evidence is invalid")
+        if not all(map(_governance_lineage_valid, lineage)):
+            raise AutonomousProvisionError("Governance lineage evidence is invalid")
+        with self._lock:
+            try:
+                with self._connect(self._runtime()) as connection:
+                    cursor = connection.cursor()
+                    _merge_governance_records(cursor, participant_key, metrics, lineage)
+                    connection.commit()
+            except AutonomousProvisionError:
+                raise
+            except Exception as exc:
+                raise AutonomousProvisionError(
+                    "Autonomous rejected the participant governance evidence sync "
+                    f"({_database_error_marker(exc)})"
+                ) from exc
 
     def _runtime(self) -> dict[str, str | int]:
         try:

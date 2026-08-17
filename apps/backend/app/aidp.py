@@ -17,12 +17,7 @@ from oci._vendor import requests
 
 from .autonomous import AutonomousGovernanceClient, AutonomousProvisionError, ParticipantDatabase
 from .config import Settings
-from .governance import (
-    agent_source,
-    credential_name,
-    database_names,
-    external_catalog_name,
-)
+from .governance import agent_source, database_names, external_catalog_name
 from .lab_packs import LabAsset, LabPack, available_lab_ids, load_lab_pack
 from .notebooks import (
     LAYER_PREFIXES,
@@ -461,10 +456,7 @@ class AidpClient:
         self,
         participant_key: str,
         database: ParticipantDatabase,
-    ) -> tuple[dict[str, Any], dict[str, Any], bool]:
-        credential = self._ensure_database_credential(
-            participant_key, database.reader_password
-        )
+    ) -> tuple[dict[str, Any], bool]:
         name = external_catalog_name(participant_key)
         current = self._catalog(name, allow_missing=True)
         created = current is None
@@ -497,78 +489,23 @@ class AidpClient:
                 f"AIDP has not published external catalog {name} yet.", "database"
             )
         catalog_key = str(published.get("key") or "")
-        credential_key = str(credential.get("key") or "")
-        if not catalog_key or not credential_key:
+        if not catalog_key:
             raise AidpProvisionPending(
-                "AIDP has not published the external catalog credentials yet.", "database"
+                "AIDP has not published the external catalog identifier yet.", "database"
             )
-        detail = self._request("GET", f"/catalogs/{catalog_key}", phase="database")
-        connection = dict((detail or {}).get("connectionDetails") or {})
-        properties = dict(connection.get("connectionProperties") or {})
-        if properties.get("credential_id") != credential_key:
-            properties["credential_id"] = credential_key
-            self._request(
-                "PUT",
-                f"/catalogs/{catalog_key}",
-                payload={"connectionDetails": {"connectionProperties": properties}},
-                phase="database",
-            )
-            created = True
-        return published, credential, created
-
-    def _database_credential(
-        self, participant_key: str, *, allow_missing: bool = False
-    ) -> dict[str, Any] | None:
-        name = credential_name(participant_key)
-        matches = [
-            item
-            for item in self._list("/credentials", phase="database")
-            if self._resource_name(item) == name
-        ]
-        if not matches and allow_missing:
-            return None
-        if len(matches) != 1:
-            raise AidpProvisionError(f"AIDP has duplicate credentials named {name}.")
-        return matches[0]
-
-    def _ensure_database_credential(
-        self, participant_key: str, password: str
-    ) -> dict[str, Any]:
-        name = credential_name(participant_key)
-        payload = {
-            "displayName": name,
-            "credentialDescription": f"Read-only Autonomous password for {participant_key}",
-            "type": "SECRET_TOKEN",
-            "credentialDetails": {
-                "credentialType": "SECRET_TOKEN",
-                "secretTokenPair": [
-                    {"secretKey": "password", "secretValue": password}
-                ],
-            },
-        }
-        current = self._database_credential(participant_key, allow_missing=True)
-        if current is None:
-            self._request("POST", "/credentials", payload=payload, phase="database")
-            current = self._database_credential(participant_key, allow_missing=True)
-            if current is None:
-                raise AidpProvisionPending(
-                    f"AIDP has not published credential {name} yet.", "database"
-                )
-            return current
-        credential_key = str(current.get("key") or "")
-        if not credential_key:
-            raise AidpProvisionPending(
-                f"AIDP has not published credential {name} yet.", "database"
-            )
-        # Credential secrets are never returned, so an idempotent PUT also rotates a
-        # reader password after a registration VM replacement.
+        # AIDP intentionally stores the password only through its dedicated catalog
+        # update contract; the password included in CREATE is used for discovery only.
         self._request(
             "PUT",
-            f"/credentials/{credential_key}",
-            payload=payload,
+            f"/catalogs/{catalog_key}",
+            payload={
+                "connectionDetails": {
+                    "connectionProperties": {"ALH_PASSWORD": database.reader_password}
+                }
+            },
             phase="database",
         )
-        return current
+        return published, created
 
     def _external_schema(self, catalog_key: str, database_owner: str) -> dict[str, Any]:
         matches = [
@@ -593,43 +530,26 @@ class AidpClient:
     def _cleanup_external_catalog(self, participant_key: str, state: dict[str, Any]) -> None:
         name = str(state.get("external_catalog_name") or external_catalog_name(participant_key))
         catalog = self._catalog(name, allow_missing=True, allow_deleting=True)
-        if catalog is not None:
-            if str(catalog.get("lifecycleState") or catalog.get("state") or "").upper() == "DELETING":
-                raise AidpProvisionPending(
-                    "Participant external catalog deletion is still in progress.", "cleanup"
-                )
-            catalog_key = str(catalog.get("key") or "")
-            if not catalog_key:
-                raise AidpProvisionPending(
-                    "The participant external catalog identifier is not ready.", "cleanup"
-                )
-            self._request(
-                "DELETE",
-                f"/catalogs/{catalog_key}",
-                allow_not_found=True,
-                phase="cleanup",
-            )
-            if self._catalog(name, allow_missing=True, allow_deleting=True) is not None:
-                raise AidpProvisionPending(
-                    "Participant external catalog deletion is still in progress.", "cleanup"
-                )
-        credential = self._database_credential(participant_key, allow_missing=True)
-        if credential is None:
+        if catalog is None:
             return
-        credential_key = str(credential.get("key") or "")
-        if not credential_key:
+        if str(catalog.get("lifecycleState") or catalog.get("state") or "").upper() == "DELETING":
             raise AidpProvisionPending(
-                "The participant database credential identifier is not ready.", "cleanup"
+                "Participant external catalog deletion is still in progress.", "cleanup"
+            )
+        catalog_key = str(catalog.get("key") or "")
+        if not catalog_key:
+            raise AidpProvisionPending(
+                "The participant external catalog identifier is not ready.", "cleanup"
             )
         self._request(
             "DELETE",
-            f"/credentials/{credential_key}",
+            f"/catalogs/{catalog_key}",
             allow_not_found=True,
             phase="cleanup",
         )
-        if self._database_credential(participant_key, allow_missing=True) is not None:
+        if self._catalog(name, allow_missing=True, allow_deleting=True) is not None:
             raise AidpProvisionPending(
-                "Participant database credential deletion is still in progress.", "cleanup"
+                "Participant external catalog deletion is still in progress.", "cleanup"
             )
 
     def _shared_compute(self, workspace_key: str) -> dict[str, Any]:
@@ -1880,7 +1800,7 @@ class AidpClient:
         )
         return job_name, job_key, content_changed or job_changed
 
-    def _provision_agent(
+    def _active_agent_material(
         self,
         user_ocid: str,
         email: str,
@@ -1893,11 +1813,59 @@ class AidpClient:
         participant_code = manifest.get("participant_code")
         workspace_key = str(self._workspace()["key"])
         root = str(state["workspace_path"])
+        agent_name = str(pack.agent["name_template"]).format(participant_key=key)
+        self._merge_governance_contract(key, manifest, owner_key)
+        agent = manifest.get("agent") if isinstance(manifest.get("agent"), dict) else {}
+        agent_key = str(state.get("agent_key") or agent.get("key") or "")
+        compute_key = str(state.get("compute_key") or agent.get("compute_key") or "")
+        if not agent_key or not compute_key:
+            raise AidpProvisionError(
+                "The active Agent manifest is incomplete; redeploy the Agent laboratory."
+            )
+        deployment, deployment_changed = self._ensure_agent_deployment(
+            workspace_key, agent_key, compute_key, agent_name
+        )
+        deployment_key = str(deployment.get("key") or deployment.get("id") or "")
+        if deployment_changed:
+            raise AidpProvisionPending(
+                "The participant Agent deployment is starting; final verification is next.",
+                "deployment",
+            )
+        if deployment_key and state.get("deployment_key") != deployment_key:
+            state["deployment_key"] = deployment_key
+            agent["deployment_key"] = deployment_key
+            manifest["agent"] = agent
+            self._write_manifest(workspace_key, owner_key, manifest)
+        return UserMaterial(
+            email,
+            pack.lab_id,
+            key,
+            root,
+            agent_name,
+            str(state.get("pack_version") or pack.pack_version),
+            participant_code=participant_code if isinstance(participant_code, int) else None,
+        )
+
+    def _provision_agent(
+        self,
+        user_ocid: str,
+        email: str,
+        manifest: dict[str, Any],
+        state: dict[str, Any],
+        pack: LabPack,
+    ) -> UserMaterial:
+        if state.get("phase") == "active":
+            return self._active_agent_material(user_ocid, email, manifest, state, pack)
+        owner_key = participant_owner_key(user_ocid)
+        key = self._manifest_participant_key(manifest, owner_key)
+        participant_code = manifest.get("participant_code")
+        workspace_key = str(self._workspace()["key"])
+        root = str(state["workspace_path"])
         participant_root = root.rsplit("/", 1)[0]
         agent_name = str(pack.agent["name_template"]).format(participant_key=key)
-        was_active = state.get("phase") == "active"
+        was_active = False
         external_catalog_key, external_catalog = self._reconcile_agent_database(
-            workspace_key, owner_key, key, manifest, state, was_active
+            workspace_key, owner_key, key, manifest, state
         )
         if not all(
             (
@@ -2001,6 +1969,97 @@ class AidpClient:
             participant_code=participant_code if isinstance(participant_code, int) else None,
         )
 
+    @staticmethod
+    def _pack_governance_contract(
+        pack: LabPack,
+    ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]:
+        metrics: list[tuple[str, str, str]] = []
+        metrics.append((pack.lab_id, "contract.assignment_status", "active"))
+        metrics.append((pack.lab_id, "contract.pack_version", pack.pack_version))
+        for group, prefix in (
+            (pack.expected_results["source_row_counts"], "contract.source_row_count"),
+            (pack.expected_results["business_aggregates"], "contract.business"),
+            (pack.expected_results["quality"], "contract.quality"),
+            (pack.expected_results["lineage"].get("expected_table_rows", {}), "contract.table_row_count"),
+        ):
+            for name, value in sorted(group.items()):
+                rendered = (
+                    value
+                    if isinstance(value, str)
+                    else json.dumps(value, sort_keys=True, separators=(",", ":"))
+                )
+                metrics.append((pack.lab_id, f"{prefix}.{name}", rendered))
+        lineage_contract = pack.expected_results["lineage"]
+        lineage = [
+            (pack.lab_id, level, f"CONTRACT:{path}")
+            for level, field in (
+                ("ENTITY", "expected_entity_edges"),
+                ("COLUMN", "expected_column_edges"),
+            )
+            for path in lineage_contract[field]
+        ]
+        return metrics, lineage
+
+    def _governance_contract(
+        self, manifest: dict[str, Any], owner_key: str
+    ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]:
+        metrics: list[tuple[str, str, str]] = []
+        lineage: list[tuple[str, str, str]] = []
+        for lab_id, lab_state in sorted(self._manifest_labs(manifest, owner_key).items()):
+            if lab_state.get("phase") != "active":
+                continue
+            pack = load_lab_pack(lab_id)
+            if pack.kind != "data_pipeline":
+                continue
+            pack_metrics, pack_lineage = self._pack_governance_contract(pack)
+            metrics.extend(pack_metrics)
+            lineage.extend(pack_lineage)
+        return metrics, lineage
+
+    def _merge_governance_contract(
+        self,
+        participant_key: str,
+        manifest: dict[str, Any],
+        owner_key: str,
+        *,
+        force: bool = False,
+    ) -> None:
+        labs = self._manifest_labs(manifest, owner_key)
+        if not force and (not isinstance(labs.get("agent"), dict) or labs["agent"].get("phase") != "active"):
+            return
+        metrics, lineage = self._governance_contract(manifest, owner_key)
+        if not metrics and not lineage:
+            return
+        if not self.governance_database.ready():
+            raise AidpProvisionPending(
+                "The Agent governance evidence sync is waiting for Autonomous.",
+                "database",
+            )
+        try:
+            self.governance_database.merge_governance(participant_key, metrics, lineage)
+        except AutonomousProvisionError as exc:
+            raise AidpProvisionError(str(exc)) from exc
+
+    def _mark_governance_lab_removed(
+        self, participant_key: str, manifest: dict[str, Any], owner_key: str, lab_id: str
+    ) -> None:
+        labs = self._manifest_labs(manifest, owner_key)
+        if not isinstance(labs.get("agent"), dict) or labs["agent"].get("phase") != "active":
+            return
+        if not self.governance_database.ready():
+            raise AidpProvisionPending(
+                "The Agent governance evidence sync is waiting for Autonomous.",
+                "database",
+            )
+        try:
+            self.governance_database.merge_governance(
+                participant_key,
+                [(lab_id, "contract.assignment_status", "removed")],
+                [],
+            )
+        except AutonomousProvisionError as exc:
+            raise AidpProvisionError(str(exc)) from exc
+
     def _reconcile_agent_database(
         self,
         workspace_key: str,
@@ -2008,11 +2067,9 @@ class AidpClient:
         key: str,
         manifest: dict[str, Any],
         state: dict[str, Any],
-        was_active: bool,
     ) -> tuple[str, dict[str, Any]]:
         if not self.governance_database.ready():
-            if not was_active:
-                state["phase"] = "database"
+            state["phase"] = "database"
             self._write_manifest(workspace_key, owner_key, manifest)
             raise AidpProvisionPending(
                 "The Autonomous wallet and EXECUTE-only operator are not ready on the registration VM.",
@@ -2022,9 +2079,8 @@ class AidpClient:
             participant_database = self.governance_database.ensure_participant(key)
         except AutonomousProvisionError as exc:
             raise AidpProvisionError(str(exc)) from exc
-        catalog, credential, catalog_changed = self._ensure_external_catalog(
-            key, participant_database
-        )
+        self._merge_governance_contract(key, manifest, owner_key, force=True)
+        catalog, catalog_changed = self._ensure_external_catalog(key, participant_database)
         external_catalog_key = str(catalog.get("key") or "")
         if not external_catalog_key:
             raise AidpProvisionPending(
@@ -2038,15 +2094,13 @@ class AidpClient:
             "key": external_catalog_key,
             "name": external_catalog_name(key),
             "database_schema": str(external_schema["key"]),
-            "credential_key": str(credential.get("key") or ""),
         }
         manifest["external_catalog"] = external_catalog
         state.update(
             external_catalog_key=external_catalog_key,
             external_catalog_name=external_catalog["name"],
         )
-        if not was_active:
-            state["phase"] = "database"
+        state["phase"] = "database"
         self._write_manifest(workspace_key, owner_key, manifest)
         if catalog_changed:
             raise AidpProvisionPending(
@@ -2081,6 +2135,7 @@ class AidpClient:
         participant_root = root.rsplit("/", 1)[0]
         job_name = str(state["job_name"])
         if was_active:
+            self._merge_governance_contract(key, manifest, owner_key)
             return UserMaterial(
                 email,
                 lab_id,
@@ -2150,6 +2205,7 @@ class AidpClient:
                 "permissions",
             )
         self._advance_lab_manifest(workspace_key, manifest, lab_id, "active")
+        self._merge_governance_contract(key, manifest, owner_key)
         return UserMaterial(
             email, lab_id, key, root, job_name, pack.pack_version,
             participant_code=participant_code if isinstance(participant_code, int) else None,
@@ -2341,6 +2397,8 @@ class AidpClient:
         if load_lab_pack(lab_id).kind == "governance_agent":
             self._forget_agent_resources(manifest)
         labs.pop(lab_id)
+        self._mark_governance_lab_removed(key, manifest, owner_key, lab_id)
+        self._merge_governance_contract(key, manifest, owner_key)
         self._write_manifest(workspace_key, owner_key, manifest)
 
     async def delete_lab(

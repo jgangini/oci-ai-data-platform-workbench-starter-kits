@@ -102,6 +102,51 @@ def test_participant_autonomous_lifecycle_is_exact_and_idempotent(
     assert all(item["user"] == "AIDP_LAB_OPERATOR" for item in connections)
 
 
+def test_governance_evidence_is_merged_through_the_allowlisted_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, calls, _connections = _client(tmp_path, monkeypatch)
+
+    client.merge_governance(
+        "u101",
+        [("banking", "contract.source_row_count.customers", "200")],
+        [
+            (
+                "banking",
+                "ENTITY",
+                "CONTRACT:landing.customers->bronze.customers->silver.customers",
+            )
+        ],
+    )
+
+    assert calls == [
+        (
+            "ADMIN.AIDP_LAB_GOVERNANCE.PUT_METRIC",
+            ["u101", "banking", "contract.source_row_count.customers", "200"],
+        ),
+        (
+            "ADMIN.AIDP_LAB_GOVERNANCE.PUT_LINEAGE",
+            [
+                "u101",
+                "banking",
+                "ENTITY",
+                "CONTRACT:landing.customers->bronze.customers->silver.customers",
+            ],
+        ),
+    ]
+
+
+def test_governance_evidence_rejects_unbounded_values_before_database_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, calls, _connections = _client(tmp_path, monkeypatch)
+
+    with pytest.raises(AutonomousProvisionError, match="metric evidence"):
+        client.merge_governance("u101", [("banking", "x" * 129, "1")], [])
+
+    assert calls == []
+
+
 def test_autonomous_runtime_fails_closed_on_unknown_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

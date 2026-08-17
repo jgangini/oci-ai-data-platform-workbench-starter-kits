@@ -8,7 +8,7 @@ import re
 
 PARTICIPANT_KEY = re.compile(r"u[1-9][0-9]*")
 
-DAMA_SYSTEM_PROMPT = """You are a senior data governance specialist grounded in DAMA-DMBOK. Use only the provided participant-scoped tools and never invent SQL, identifiers, owners, metrics, lineage, or data. Match the user's language. For factual questions, call the tool that supplies the evidence before answering: catalog_inventory for scope, catalog_metrics for governed values, and catalog_lineage for ENTITY or COLUMN traceability. Explain the result in four concise parts: Evidence, Explanation, Governance implication, and Recommendation or limitation. Clearly separate observed facts from DAMA-based recommendations. If evidence is unavailable, say so and identify the metadata or control needed; do not guess. Refuse arbitrary SQL, mutations, and requests for another participant's information. When lineage is requested, name the observed source-to-target path and distinguish entity lineage from column lineage."""
+DAMA_SYSTEM_PROMPT = """You are a senior data governance specialist grounded in DAMA-DMBOK. Use only the provided participant-scoped tools and never invent SQL, identifiers, owners, metrics, lineage, or data. Match the user's language. For factual questions, call the tool that supplies the evidence before answering: catalog_inventory for scope, catalog_metrics for governed values, and catalog_lineage for ENTITY or COLUMN traceability. Explain the result in four concise parts: Evidence, Explanation, Governance implication, and Recommendation or limitation. Clearly separate observed facts from DAMA-based recommendations. Metric names prefixed contract. and lineage paths prefixed CONTRACT: are versioned laboratory contracts, not observed runtime results; always identify that limitation. If evidence is unavailable, say so and identify the metadata or control needed; do not guess. Refuse arbitrary SQL, mutations, and requests for another participant's information. When lineage is requested, name the source-to-target path and distinguish entity lineage from column lineage."""
 
 
 def database_names(participant_key: str) -> tuple[str, str]:
@@ -16,11 +16,6 @@ def database_names(participant_key: str) -> tuple[str, str]:
         raise ValueError("A participant key starting at u101 is required")
     stem = participant_key.upper()
     return f"{stem}_AGENT", f"{stem}_AGENT_RO"
-
-
-def credential_name(participant_key: str) -> str:
-    database_names(participant_key)
-    return f"{participant_key}_agent_database"
 
 
 def external_catalog_name(participant_key: str) -> str:
@@ -78,18 +73,18 @@ TOOLS = [
     sql_tool(
         "catalog_inventory",
         "List only this participant's laboratories represented in the governed metric catalog. Use it to establish scope before cross-laboratory governance answers.",
-        "SELECT DISTINCT LAB_ID FROM LAB_METRICS ORDER BY LAB_ID",
+        "SELECT LAB_ID FROM LAB_METRICS WHERE METRIC_NAME = 'contract.assignment_status' AND METRIC_VALUE = 'active' ORDER BY LAB_ID",
     ),
     sql_tool(
         "catalog_metrics",
-        "Read predefined, participant-scoped governed metrics for one assigned laboratory. Use only returned values as factual evidence.",
-        "SELECT METRIC_NAME, METRIC_VALUE FROM LAB_METRICS WHERE LAB_ID = {{{{lab_id}}}} ORDER BY METRIC_NAME",
+        "Read predefined, participant-scoped governance evidence for one assigned laboratory. A contract. prefix means declared expected evidence, not an observed runtime result.",
+        "SELECT METRIC_NAME, METRIC_VALUE FROM LAB_METRICS WHERE LAB_ID = {{{{lab_id}}}} AND EXISTS (SELECT 1 FROM LAB_METRICS S WHERE S.LAB_ID = LAB_METRICS.LAB_ID AND S.METRIC_NAME = 'contract.assignment_status' AND S.METRIC_VALUE = 'active') ORDER BY METRIC_NAME",
         [{{"name": "lab_id", "type": "string", "description": "Assigned laboratory identifier"}}],
     ),
     sql_tool(
         "catalog_lineage",
-        "Read observed entity or column lineage limited to the participant catalog. ENTITY traces datasets and tables; COLUMN traces field-level derivations.",
-        "SELECT RELATION_PATH FROM LINEAGE_RELATIONS WHERE LAB_ID = {{{{lab_id}}}} AND LINEAGE_LEVEL = {{{{lineage_level}}}} ORDER BY RELATION_PATH",
+        "Read entity or column lineage evidence limited to the participant catalog. A CONTRACT: prefix means a declared versioned path, not an observed runtime path.",
+        "SELECT RELATION_PATH FROM LINEAGE_RELATIONS WHERE LAB_ID = {{{{lab_id}}}} AND LINEAGE_LEVEL = {{{{lineage_level}}}} AND EXISTS (SELECT 1 FROM LAB_METRICS S WHERE S.LAB_ID = LINEAGE_RELATIONS.LAB_ID AND S.METRIC_NAME = 'contract.assignment_status' AND S.METRIC_VALUE = 'active') ORDER BY RELATION_PATH",
         [
             {{"name": "lab_id", "type": "string", "description": "Assigned laboratory identifier"}},
             {{"name": "lineage_level", "type": "string", "description": "ENTITY or COLUMN"}},

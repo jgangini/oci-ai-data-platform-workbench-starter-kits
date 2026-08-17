@@ -11,7 +11,6 @@ from app.autonomous import ParticipantDatabase
 from app.governance import (
     DAMA_SYSTEM_PROMPT,
     agent_source,
-    credential_name,
     database_names,
     external_catalog_name,
 )
@@ -52,7 +51,6 @@ def test_database_names_are_participant_scoped(
     participant_key: str, expected: tuple[str, str]
 ) -> None:
     assert database_names(participant_key) == expected
-    assert credential_name(participant_key).startswith(participant_key)
     assert external_catalog_name(participant_key).startswith(participant_key)
 
 
@@ -96,6 +94,8 @@ def test_agent_prompt_is_dama_grounded_and_explainable() -> None:
     assert "another participant" in DAMA_SYSTEM_PROMPT
     assert "If evidence is unavailable" in DAMA_SYSTEM_PROMPT
     assert repr(DAMA_SYSTEM_PROMPT) in source
+    assert "contract.assignment_status" in source
+    assert "METRIC_VALUE = 'active'" in source
 
 
 def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
@@ -115,6 +115,39 @@ def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
         "security",
     }
     assert all(case["required_concepts"] for case in cases)
+
+
+def test_governance_contract_contains_only_active_data_labs() -> None:
+    client = bare_client()
+    manifest = {
+        "layout_version": 4,
+        "owner_key": "owner",
+        "participant_key": "u101",
+        "participant_code": 101,
+        "participant_email": EMAIL,
+        "labs": {
+            "banking": {
+                "phase": "active",
+                "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/banking",
+            },
+            "telecommunications": {
+                "phase": "content",
+                "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/telecommunications",
+            },
+            "agent": {
+                "phase": "active",
+                "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/agent",
+            },
+        },
+    }
+
+    metrics, lineage = client._governance_contract(manifest, "owner")
+
+    assert {lab_id for lab_id, _name, _value in metrics} == {"banking"}
+    assert ("banking", "contract.assignment_status", "active") in metrics
+    assert ("banking", "contract.source_row_count.customers", "200") in metrics
+    assert {level for _lab_id, level, _path in lineage} == {"ENTITY", "COLUMN"}
+    assert all(path.startswith("CONTRACT:") for _lab_id, _level, path in lineage)
 
 
 def test_agent_stays_pending_before_database_bootstrap_without_creating_compute() -> None:
@@ -195,7 +228,6 @@ def test_agent_creates_participant_database_before_any_compute() -> None:
     )
     client._ensure_external_catalog = lambda key, value: (
         {"key": "u101-external-catalog"},
-        {"key": "u101-database-credential"},
         True,
     ) if key == "u101" and value == database else (_ for _ in ()).throw(
         AssertionError("unexpected participant database")
@@ -221,7 +253,6 @@ def test_agent_creates_participant_database_before_any_compute() -> None:
         "key": "u101-external-catalog",
         "name": external_catalog_name("u101"),
         "database_schema": "u101-agent-schema-key",
-        "credential_key": "u101-database-credential",
     }
     assert writes[-1]["labs"]["agent"]["external_catalog_key"] == "u101-external-catalog"
 
@@ -239,31 +270,14 @@ def test_external_catalog_uses_the_live_adw_connection_contract() -> None:
     catalogs = iter((None, {"key": "u101-external-catalog"}))
     requests: list[tuple[str, str, dict]] = []
     client._catalog = lambda *_args, **_kwargs: next(catalogs)
-    client._ensure_database_credential = lambda *_args: {
-        "key": "u101-database-credential"
-    }
+    client._request = lambda method, path, **kwargs: requests.append(
+        (method, path, kwargs["payload"])
+    )
 
-    def request(method: str, path: str, **kwargs):
-        if method == "GET":
-            return {
-                "connectionDetails": {
-                    "connectionProperties": {
-                        "type": "ORACLE_ADW",
-                        "tns": "aidp_low",
-                        "user.name": "U101_AGENT_RO",
-                        "credential_id": "memory-credential",
-                    }
-                }
-            }
-        requests.append((method, path, kwargs["payload"]))
-
-    client._request = request
-
-    catalog, credential, created = client._ensure_external_catalog("u101", database)
+    catalog, created = client._ensure_external_catalog("u101", database)
 
     properties = requests[0][2]["connectionDetails"]["connectionProperties"]
     assert created and catalog["key"] == "u101-external-catalog"
-    assert credential["key"] == "u101-database-credential"
     assert set(properties) == {
         "ADW_WALLET_CONTENT_BASE64",
         "ADW_WALLET_PASSWORD",
@@ -271,34 +285,126 @@ def test_external_catalog_uses_the_live_adw_connection_contract() -> None:
         "ADW_PASSWORD",
         "ADW_TNS_ALIAS",
     }
-    rebound = requests[1][2]["connectionDetails"]["connectionProperties"]
-    assert requests[1][:2] == ("PUT", "/catalogs/u101-external-catalog")
-    assert rebound["credential_id"] == "u101-database-credential"
-    assert rebound["tns"] == "aidp_low"
+    assert requests[1] == (
+        "PUT",
+        "/catalogs/u101-external-catalog",
+        {
+            "connectionDetails": {
+                "connectionProperties": {"ALH_PASSWORD": database.reader_password}
+            }
+        },
+    )
 
 
-def test_database_credential_is_persistent_and_rotatable() -> None:
+def test_existing_external_catalog_refreshes_the_aidp_password_contract() -> None:
     client = bare_client()
-    current = {"key": "credential-key", "displayName": credential_name("u101")}
-    credentials = iter((None, current, current))
-    client._database_credential = lambda *_args, **_kwargs: next(credentials)
+    database = ParticipantDatabase(
+        owner="U101_AGENT",
+        reader="U101_AGENT_RO",
+        reader_password="ReaderPassword1234567890",
+        dsn="aidp_low",
+        wallet_password="WalletPassword123",
+        wallet_zip=b"wallet",
+    )
+    client._catalog = lambda *_args, **_kwargs: {"key": "catalog-key"}
     requests: list[tuple[str, str, dict]] = []
     client._request = lambda method, path, **kwargs: requests.append(
         (method, path, kwargs["payload"])
     )
 
-    created = client._ensure_database_credential("u101", "first-password")
-    rotated = client._ensure_database_credential("u101", "second-password")
+    catalog, created = client._ensure_external_catalog("u101", database)
 
-    assert created == rotated == current
-    assert requests[0][:2] == ("POST", "/credentials")
-    assert requests[1][:2] == ("PUT", "/credentials/credential-key")
-    assert requests[0][2]["credentialDetails"]["secretTokenPair"] == [
-        {"secretKey": "password", "secretValue": "first-password"}
+    assert catalog["key"] == "catalog-key" and created is False
+    assert requests == [
+        (
+            "PUT",
+            "/catalogs/catalog-key",
+            {
+                "connectionDetails": {
+                    "connectionProperties": {"ALH_PASSWORD": database.reader_password}
+                }
+            },
+        )
     ]
-    assert requests[1][2]["credentialDetails"]["secretTokenPair"] == [
-        {"secretKey": "password", "secretValue": "second-password"}
+
+
+def test_removed_lab_is_hidden_from_the_agent_without_deleting_evidence() -> None:
+    client = bare_client()
+    merged: list[tuple[str, list[tuple[str, str, str]], list]] = []
+    client.governance_database = SimpleNamespace(
+        ready=lambda: True,
+        merge_governance=lambda participant, metrics, lineage: merged.append(
+            (participant, metrics, lineage)
+        ),
+    )
+    manifest = {
+        "layout_version": 4,
+        "owner_key": "owner",
+        "participant_key": "u101",
+        "participant_code": 101,
+        "participant_email": EMAIL,
+        "labs": {
+            "agent": {
+                "phase": "active",
+                "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/agent",
+            }
+        },
+    }
+
+    client._mark_governance_lab_removed("u101", manifest, "owner", "banking")
+
+    assert merged == [
+        (
+            "u101",
+            [("banking", "contract.assignment_status", "removed")],
+            [],
+        )
     ]
+
+
+def test_active_agent_verifies_deployment_without_rotating_database_credentials() -> None:
+    client = bare_client()
+    pack = load_lab_pack("agent")
+    state = {
+        "pack_version": pack.pack_version,
+        "pack_hash": pack.pack_sha256,
+        "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/agent",
+        "job_name": "u101_agent_data_governance",
+        "phase": "active",
+        "operation": None,
+        "agent_key": "agent-key",
+        "compute_key": "compute-key",
+    }
+    manifest = {
+        "layout_version": 4,
+        "owner_key": participant_owner_key(USER_OCID),
+        "participant_key": "u101",
+        "participant_code": 101,
+        "participant_email": EMAIL,
+        "external_catalog": {"key": "catalog-key"},
+        "agent": {"key": "agent-key", "compute_key": "compute-key"},
+        "labs": {"agent": state},
+    }
+    client._workspace = lambda: {"key": "workspace"}
+    client._write_manifest = lambda *_args: None
+    client.governance_database = SimpleNamespace(
+        ready=lambda: (_ for _ in ()).throw(AssertionError("database must not be touched")),
+        ensure_participant=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("credentials must not rotate")
+        ),
+    )
+    client._ensure_agent_deployment = lambda *args: (
+        {"key": "deployment-key", "lifecycleState": "ACTIVE"},
+        False,
+    ) if args == (
+        "workspace", "agent-key", "compute-key", "u101_agent_data_governance"
+    ) else (_ for _ in ()).throw(AssertionError("unexpected deployment lookup"))
+
+    material = client._provision_agent(USER_OCID, EMAIL, manifest, state, pack)
+
+    assert material.participant_key == "u101"
+    assert state["deployment_key"] == "deployment-key"
+    assert manifest["agent"]["deployment_key"] == "deployment-key"
 
 
 def test_active_agent_deployment_is_reused() -> None:
@@ -385,20 +491,6 @@ def test_external_catalog_cleanup_waits_while_aidp_is_deleting() -> None:
         client._cleanup_external_catalog("u101", {})
 
     assert raised.value.phase == "cleanup"
-
-
-def test_external_catalog_cleanup_deletes_the_exact_database_credential() -> None:
-    client = bare_client()
-    credential = {"key": "u101-database-credential"}
-    credentials = iter((credential, None))
-    client._catalog = lambda *_args, **_kwargs: None
-    client._database_credential = lambda *_args, **_kwargs: next(credentials)
-    requests: list[tuple[str, str]] = []
-    client._request = lambda method, path, **_kwargs: requests.append((method, path))
-
-    client._cleanup_external_catalog("u101", {})
-
-    assert requests == [("DELETE", "/credentials/u101-database-credential")]
 
 
 def test_agent_cleanup_forgets_deleted_manifest_resources() -> None:
