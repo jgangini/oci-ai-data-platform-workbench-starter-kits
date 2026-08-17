@@ -27,6 +27,14 @@ def test_operator_identity_is_reused_without_a_technical_user() -> None:
     assert "secret-bundles" not in compute
 
 
+def test_identity_groups_ignore_service_managed_schema_extensions() -> None:
+    identity = (ROOT / "terraform/h_oci_identity.tf").read_text(encoding="utf-8")
+
+    for group in ("developers", "pending"):
+        block = _resource(identity, "oci_identity_domains_group", group)
+        assert "ignore_changes = [schemas]" in block
+
+
 def test_vm_receives_operator_credentials_through_one_use_encrypted_bootstrap() -> None:
     compute = (ROOT / "terraform/g_oci_core_instance.tf").read_text(encoding="utf-8")
     cloud_init = (ROOT / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")

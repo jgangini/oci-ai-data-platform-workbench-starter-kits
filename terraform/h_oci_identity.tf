@@ -16,6 +16,10 @@ resource "oci_identity_domains_group" "developers" {
   display_name  = "aidp-lab-developers-${local.suffix}"
   external_id   = "${local.name_prefix}:developers"
   force_delete  = true
+
+  lifecycle {
+    ignore_changes = [schemas]
+  }
 }
 
 resource "oci_identity_domains_group" "pending" {
@@ -25,6 +29,10 @@ resource "oci_identity_domains_group" "pending" {
   display_name  = "aidp-lab-pending-${local.suffix}"
   external_id   = "${local.name_prefix}:pending"
   force_delete  = true
+
+  lifecycle {
+    ignore_changes = [schemas]
+  }
 }
 
 resource "oci_identity_policy" "developer_console" {
