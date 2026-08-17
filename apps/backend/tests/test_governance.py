@@ -195,6 +195,7 @@ def test_agent_creates_participant_database_before_any_compute() -> None:
     )
     client._ensure_external_catalog = lambda key, value: (
         {"key": "u101-external-catalog"},
+        {"key": "u101-database-credential"},
         True,
     ) if key == "u101" and value == database else (_ for _ in ()).throw(
         AssertionError("unexpected participant database")
@@ -220,6 +221,7 @@ def test_agent_creates_participant_database_before_any_compute() -> None:
         "key": "u101-external-catalog",
         "name": external_catalog_name("u101"),
         "database_schema": "u101-agent-schema-key",
+        "credential_key": "u101-database-credential",
     }
     assert writes[-1]["labs"]["agent"]["external_catalog_key"] == "u101-external-catalog"
 
@@ -235,14 +237,33 @@ def test_external_catalog_uses_the_live_adw_connection_contract() -> None:
         wallet_zip=b"wallet",
     )
     catalogs = iter((None, {"key": "u101-external-catalog"}))
-    requests: list[dict] = []
+    requests: list[tuple[str, str, dict]] = []
     client._catalog = lambda *_args, **_kwargs: next(catalogs)
-    client._request = lambda *_args, **kwargs: requests.append(kwargs["payload"])
+    client._ensure_database_credential = lambda *_args: {
+        "key": "u101-database-credential"
+    }
 
-    catalog, created = client._ensure_external_catalog("u101", database)
+    def request(method: str, path: str, **kwargs):
+        if method == "GET":
+            return {
+                "connectionDetails": {
+                    "connectionProperties": {
+                        "type": "ORACLE_ADW",
+                        "tns": "aidp_low",
+                        "user.name": "U101_AGENT_RO",
+                        "credential_id": "memory-credential",
+                    }
+                }
+            }
+        requests.append((method, path, kwargs["payload"]))
 
-    properties = requests[0]["connectionDetails"]["connectionProperties"]
+    client._request = request
+
+    catalog, credential, created = client._ensure_external_catalog("u101", database)
+
+    properties = requests[0][2]["connectionDetails"]["connectionProperties"]
     assert created and catalog["key"] == "u101-external-catalog"
+    assert credential["key"] == "u101-database-credential"
     assert set(properties) == {
         "ADW_WALLET_CONTENT_BASE64",
         "ADW_WALLET_PASSWORD",
@@ -250,6 +271,79 @@ def test_external_catalog_uses_the_live_adw_connection_contract() -> None:
         "ADW_PASSWORD",
         "ADW_TNS_ALIAS",
     }
+    rebound = requests[1][2]["connectionDetails"]["connectionProperties"]
+    assert requests[1][:2] == ("PUT", "/catalogs/u101-external-catalog")
+    assert rebound["credential_id"] == "u101-database-credential"
+    assert rebound["tns"] == "aidp_low"
+
+
+def test_database_credential_is_persistent_and_rotatable() -> None:
+    client = bare_client()
+    current = {"key": "credential-key", "displayName": credential_name("u101")}
+    credentials = iter((None, current, current))
+    client._database_credential = lambda *_args, **_kwargs: next(credentials)
+    requests: list[tuple[str, str, dict]] = []
+    client._request = lambda method, path, **kwargs: requests.append(
+        (method, path, kwargs["payload"])
+    )
+
+    created = client._ensure_database_credential("u101", "first-password")
+    rotated = client._ensure_database_credential("u101", "second-password")
+
+    assert created == rotated == current
+    assert requests[0][:2] == ("POST", "/credentials")
+    assert requests[1][:2] == ("PUT", "/credentials/credential-key")
+    assert requests[0][2]["credentialDetails"]["secretTokenPair"] == [
+        {"secretKey": "password", "secretValue": "first-password"}
+    ]
+    assert requests[1][2]["credentialDetails"]["secretTokenPair"] == [
+        {"secretKey": "password", "secretValue": "second-password"}
+    ]
+
+
+def test_active_agent_deployment_is_reused() -> None:
+    client = bare_client()
+    client._list = lambda *_args, **_kwargs: [
+        {"key": "deployment-key", "lifecycleState": "ACTIVE"}
+    ]
+    client._request = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("an active deployment must be reused")
+    )
+
+    deployment, created = client._ensure_agent_deployment(
+        "workspace", "agent-key", "compute-key", "u101_agent_data_governance"
+    )
+
+    assert deployment["key"] == "deployment-key"
+    assert created is False
+
+
+def test_missing_agent_deployment_is_created_on_shared_ai_compute() -> None:
+    client = bare_client()
+    client._list = lambda *_args, **_kwargs: []
+    requests: list[tuple[str, str, dict]] = []
+    client._request = lambda method, path, **kwargs: (
+        requests.append((method, path, kwargs["payload"]))
+        or {"key": "deployment-key", "lifecycleState": "CREATING"}
+    )
+
+    deployment, created = client._ensure_agent_deployment(
+        "workspace", "agent-key", "compute-key", "u101_agent_data_governance"
+    )
+
+    assert created and deployment["key"] == "deployment-key"
+    assert requests == [
+        (
+            "POST",
+            "/workspaces/workspace/agents/agent-key/deployments/actions/deploy",
+            {
+                "displayName": "u101_agent_data_governance_deployment",
+                "description": "Production deployment for the participant governance Agent",
+                "agentComputeKey": "compute-key",
+                "agentKey": "agent-key",
+            },
+        )
+    ]
 
 
 def test_external_schema_uses_the_published_schema_key() -> None:
@@ -291,6 +385,20 @@ def test_external_catalog_cleanup_waits_while_aidp_is_deleting() -> None:
         client._cleanup_external_catalog("u101", {})
 
     assert raised.value.phase == "cleanup"
+
+
+def test_external_catalog_cleanup_deletes_the_exact_database_credential() -> None:
+    client = bare_client()
+    credential = {"key": "u101-database-credential"}
+    credentials = iter((credential, None))
+    client._catalog = lambda *_args, **_kwargs: None
+    client._database_credential = lambda *_args, **_kwargs: next(credentials)
+    requests: list[tuple[str, str]] = []
+    client._request = lambda method, path, **_kwargs: requests.append((method, path))
+
+    client._cleanup_external_catalog("u101", {})
+
+    assert requests == [("DELETE", "/credentials/u101-database-credential")]
 
 
 def test_agent_cleanup_forgets_deleted_manifest_resources() -> None:
