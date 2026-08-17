@@ -103,7 +103,7 @@ output "aidp_catalog_name" {
 }
 
 output "aidp_shared_compute_name" {
-  value = "aidp_lab_shared_compute"
+  value = "aidp_cluster_shared_compute"
 }
 
 output "aidp_external_volume_count" {

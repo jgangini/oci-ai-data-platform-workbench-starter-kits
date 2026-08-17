@@ -248,7 +248,11 @@ def _agent_evaluation_case_valid(case: Any) -> bool:
     expected_tools = case.get("expected_tools")
     if not isinstance(expected_tools, list):
         return False
-    if not set(expected_tools) <= {"catalog_inventory", "catalog_metrics", "catalog_lineage"}:
+    if any(
+        tool not in {"catalog_inventory", "catalog_lineage"}
+        and re.fullmatch(r"catalog_metrics_[a-z0-9_]+", str(tool)) is None
+        for tool in expected_tools
+    ):
         return False
     required_concepts = case.get("required_concepts")
     return isinstance(required_concepts, list) and bool(required_concepts)

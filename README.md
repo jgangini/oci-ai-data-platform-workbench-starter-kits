@@ -8,7 +8,8 @@ Current stable release: **v2.0.0**. The `main` branch and Deploy Studio release 
 
 ## What the project provides
 
-- A shared AIDP workspace and Spark compute, plus a private catalog with four medallion schemas per participant.
+- A shared AIDP workspace with `aidp_cluster_shared_compute` for Spark workflows, plus a private catalog with four medallion schemas per participant.
+- A shared `aidp_agent_shared_compute` AI Compute runtime for participant-specific governance Agents.
 - A private Object Storage bucket organized as `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/`.
 - A registration and administration web application hosted on an OCI Compute VM.
 - Identity Domains onboarding with pending and active participant groups.
@@ -40,7 +41,7 @@ The standard laboratories contain five notebooks, one for each stage. The Telco 
 | Telco Customer 360 Lineage | 2.0.0 | 10 CSV files | 14 tasks | Cross-domain Customer 360, service ownership, geographic summaries, and detailed lineage |
 | Retail | 2.0.0 | 4 CSV files | 5 tasks | Customer value, product sales, order quality, and full medallion lineage |
 | Healthcare | 2.0.0 | 4 CSV files | 5 tasks | Patient utilization, provider activity, encounter quality, and full medallion lineage |
-| Data Governance Agent | 1.1.0 | — | — | Participant-editable DAMA-DMBOK Agent for catalog inventory, entity/column lineage, and allowlisted governance metrics; release remains gated on live accuracy and isolation testing |
+| Data Governance Agent | 1.2.0 | — | — | Participant-editable DAMA-DMBOK Agent for live catalog inventory, entity/column lineage, and allowlisted Spark metrics; release remains gated on live accuracy and isolation testing |
 
 Laboratory order, descriptions, versions, and availability come from [`apps/backend/app/labs/catalog.json`](apps/backend/app/labs/catalog.json) and each package's `lab.json`. Adding a future package does not require hard-coded changes to the registration interface.
 
@@ -108,7 +109,7 @@ The optional Agent laboratory creates `u101_agent_data_governance` for participa
 
 The package includes a versioned acceptance matrix covering catalog scope, quality, entity and column lineage, stewardship gaps, DAMA control mapping, participant isolation, unsupported certification claims, and arbitrary-SQL refusal. Candidate releases execute these questions live and retain the tool trace and response text as structured evidence without participant data from another catalog.
 
-The deployment uses one shared Autonomous AI Database 26ai DW, but creates isolated `U101_AGENT` and `U101_AGENT_RO` database users for each participant. A participant deletion removes the AIDP Agent and external catalog, drops only that participant's Autonomous users, removes the participant workspace and data, and finally deletes the Identity Domains user.
+Each participant receives an independent Agent definition, but all participant Agents reuse `aidp_agent_shared_compute`. Their predefined Spark SQL tools reuse `aidp_cluster_shared_compute` and query only fully qualified tables in the participant's private Master Catalog. The Agent does not mirror table metadata or laboratory metrics into Autonomous. A participant deletion removes the exact Agent, catalog, workspace, data, and Identity Domains user; deployments upgraded from the earlier Autonomous-mirror design also clean up only that participant's legacy database users and external catalog.
 
 ## End-to-end user guide
 
@@ -287,7 +288,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 - **A request returns 502 or 504:** the application treats transient upstream and gateway timeouts as retryable. Keep the same operation rather than creating a duplicate user or laboratory.
 - **A workflow says the cluster cannot be started:** start the shared AIDP compute manually before running the workflow. A cluster explicitly stopped by a user cannot be started by the workflow.
 - **Lineage is incomplete:** confirm the workflow completed, the compute configuration does not set `spark.aidp.lineage.enabled=false`, and the four medallion layers use managed catalog tables. Telco Customer 360 Lineage keeps Landing in CSV and Bronze, Silver, and Gold in Delta; managed tables preserve the governed `oci_landing -> oci_bronze -> oci_silver -> oci_gold` entity and column paths in this environment.
-- **Agent remains in Database/Pending:** the release fails closed until the participant Autonomous schema, read-only external catalog, and approved least-privilege bootstrap exist. The ADMIN password is used only by the post-apply process and is never delivered to the registration VM.
+- **Agent remains Pending:** confirm `aidp_agent_shared_compute` is available, `aidp_cluster_shared_compute` is running with duration **Forever**, the participant catalog has all four medallion schemas, and the selected regional Chat model is still active. Agent SQL tools cannot start a stopped Spark cluster.
 
 ## Security essentials
 
@@ -296,7 +297,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 - Deploy Studio does not package OCI credentials in the Terraform source or state.
 - The VM receives the operator profile once through an encrypted bootstrap object, validates it, installs it with restrictive permissions, and deletes the bootstrap object.
 - The Autonomous wallet is stored only on the registration VM at `/opt/aidp-lab/autonomous` with owner-only permissions and is mounted read-only into the application container. The ADMIN password stays in the post-apply process; the VM receives only a rotated `EXECUTE`-only database operator and the wallet credentials required for participant lifecycle operations.
-- Participant database credentials are generated per `u101`-style identifier and stored in the persistent application state volume with owner-only permissions. Deletion calls an ADMIN-owned allowlisted package that can drop only the exact participant owner and reader users.
+- New Agent assignments do not create participant database users or copy Master Catalog metadata into Autonomous. The VM retains the allowlisted database operator only to support platform AI bootstrap and exact cleanup of legacy mirrored Agent deployments.
 - Participants receive access only to their folder, workflow, namespaced objects, and namespaced tables.
 - The data bucket uses Oracle-managed encryption and remains private.
 
@@ -313,7 +314,7 @@ Deploy Studio support includes:
 - Terraform plan and apply through OCI Resource Manager.
 - A selectable effective region from compatible `READY` subscriptions and a dynamically discovered active Chat model in that same region.
 - New or existing Autonomous AI Database 26ai Data Warehouse, with ECPU model and a default of 4 ECPUs for a new database.
-- Post-apply reconciliation of the AIDP workspace, catalog, shared compute, AI feature enablement, Identity roles, participant application, and final access artifact.
+- Post-apply reconciliation of the AIDP workspace, catalog, `aidp_cluster_shared_compute`, AI feature enablement, Identity roles, participant application, and final access artifact. The first Agent assignment reuses the shared `aidp_agent_shared_compute` runtime.
 - Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
 
 The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.0.0` tag rather than an untagged development commit.

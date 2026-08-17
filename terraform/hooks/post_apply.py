@@ -29,7 +29,7 @@ API_VERSION = "20240831"
 CATALOG_NAME = "aidp_lab"
 DEVELOPER_ROLE_NAME = "AIDP_LAB_DEVELOPER"
 PENDING_ROLE_NAME = "AIDP_LAB_PENDING"
-SHARED_COMPUTE_NAME = "aidp_lab_shared_compute"
+SHARED_COMPUTE_NAME = "aidp_cluster_shared_compute"
 BOOTSTRAP_OBJECT_NAME = ".bootstrap/operator-credentials.json"
 BOOTSTRAP_VERSION = 2
 BOOTSTRAP_READY = "AIDP_LAB_CREDENTIALS_V2_READY"
@@ -848,7 +848,7 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
         {
             "type": "USER",
             "displayName": SHARED_COMPUTE_NAME,
-            "description": "Quickstart-equivalent shared Spark compute for AIDP lab workflows",
+            "description": "Shared Spark compute for lab workflows and governed Agent SQL tools",
             "driverConfig": {
                 "driverShape": "amd.generic",
                 "driverShapeConfig": {"ocpus": 2, "memoryInGBs": 32},
@@ -859,7 +859,6 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
                 "minWorkerCount": 1,
                 "maxWorkerCount": 10,
             },
-            "autoTerminationMinutes": 60,
             "clusterRuntimeConfig": {
                 "type": "SPARK",
                 "sparkVersion": "3.5.0",

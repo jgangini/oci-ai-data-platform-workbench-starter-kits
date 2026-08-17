@@ -106,7 +106,7 @@ class FakeApi:
                     ]
                 )
                 if "/clusters/" in base_path:
-                    resource_type, resource_key = "CLUSTER", "ws/aidp_lab_shared_compute"
+                    resource_type, resource_key = "CLUSTER", "ws/aidp_cluster_shared_compute"
                 elif base_path.startswith("/schemas/"):
                     schema_key = base_path.removeprefix("/schemas/")
                     resource_type, resource_key = "SCHEMA", schema_key
@@ -189,14 +189,15 @@ def test_reconcile_builds_shared_medallion_schemas_without_external_volumes(monk
     }
     assert any("zero legacy schemas and zero external volumes" in event for event in events)
     cluster_payloads = [payload for method, path, payload, _ in api.calls if method == "POST" and path.endswith("/clusters")]
-    assert cluster_payloads[0]["displayName"] == "aidp_lab_shared_compute"
+    assert cluster_payloads[0]["displayName"] == "aidp_cluster_shared_compute"
     assert cluster_payloads[0]["type"] == "USER"
     assert cluster_payloads[0]["driverConfig"]["driverShape"] == "amd.generic"
     assert cluster_payloads[0]["workerConfig"]["maxWorkerCount"] == 10
+    assert "autoTerminationMinutes" not in cluster_payloads[0]
     assert cluster_payloads[0]["clusterRuntimeConfig"]["sparkAdvancedConfigurations"] == {
         "spark.aidp.lineage.enabled": "true"
     }
-    assert reconciled["shared_compute_key"] == "aidp_lab_shared_compute-key"
+    assert reconciled["shared_compute_key"] == "aidp_cluster_shared_compute-key"
     assert reconciled["root_object_key"] == "medallon-key"
     assert set(reconciled["shared_schema_keys"]) == set(post_apply.LAYERS)
     workspace_permissions = api.actions["/workspaces/ws-key/permissions"]
@@ -215,7 +216,7 @@ def test_reconcile_builds_shared_medallion_schemas_without_external_volumes(monk
         ("AIDP_LAB_DEVELOPER", ("SELECT",)),
     }
     compute_permissions = api.actions[
-        "/workspaces/ws-key/clusters/aidp_lab_shared_compute-key/permissions"
+        "/workspaces/ws-key/clusters/aidp_cluster_shared_compute-key/permissions"
     ]
     assert {item["grantee"] for item in compute_permissions} == {"AIDP_LAB_DEVELOPER"}
     assert "/workspaces/ws-key/objects/medallon-key/permissions" not in api.actions

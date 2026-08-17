@@ -13,6 +13,7 @@ from app.governance import (
     agent_source,
     database_names,
     external_catalog_name,
+    governed_metric_queries,
 )
 from app.lab_packs import load_lab_pack
 
@@ -32,11 +33,37 @@ def bare_client() -> AidpClient:
         objectstorage_namespace="namespace",
         aidp_region="us-chicago-1",
         agent_model_id="ocid1.generativeaimodel.oc1.us-chicago-1.example",
+        aidp_platform_id="ocid1.aidataplatform.oc1.us-chicago-1.example",
         compartment_id="ocid1.compartment.oc1..example",
         autonomous_database_id="ocid1.autonomousdatabase.oc1.us-chicago-1.example",
     )
     client.governance_database = SimpleNamespace(ready=lambda: False)
     return client
+
+
+def rendered_agent_source() -> str:
+    queries = governed_metric_queries(
+        "u101",
+        "u101_aidp_lab",
+        {"telco_lineage": {"gold": ("customer_360",)}},
+    )
+    return agent_source(
+        model_id="ocid1.generativeaimodel.oc1.us-chicago-1.chat",
+        region="us-chicago-1",
+        compartment_id="ocid1.compartment.oc1..participant",
+        platform_id="ocid1.aidataplatform.oc1.us-chicago-1.participant",
+        participant_key="u101",
+        catalog_key="u101-catalog-key",
+        catalog_name="u101_aidp_lab",
+        schema_keys={
+            "landing": "landing-key",
+            "bronze": "bronze-key",
+            "silver": "silver-key",
+            "gold": "gold-key",
+        },
+        spark_compute_key="shared-spark-key",
+        metric_queries=queries,
+    ).decode("utf-8")
 
 
 @pytest.mark.parametrize(
@@ -60,31 +87,28 @@ def test_database_names_reject_non_participant_identifiers(participant_key: str)
         database_names(participant_key)
 
 
-def test_agent_source_contains_only_predefined_read_queries() -> None:
-    source = agent_source(
-        model_id="ocid1.generativeaimodel.oc1.us-chicago-1.chat",
-        region="us-chicago-1",
-        compartment_id="ocid1.compartment.oc1..participant",
-        external_catalog_key="u101-catalog-key",
-        database_schema="U101_AGENT",
-    ).decode("utf-8")
+def test_agent_source_reads_live_master_catalog_and_predefined_spark_queries() -> None:
+    source = rendered_agent_source()
 
-    assert source.count('"SELECT ') == 3
+    assert source.count("SELECT ") == 1
     assert all(keyword not in source.upper() for keyword in (" INSERT ", " UPDATE ", " DELETE ", " MERGE ", " DROP ", " ALTER "))
     assert "u102" not in source.casefold()
-    assert "{{lab_id}}" in source and "{{lineage_level}}" in source
+    assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
+    assert '"queryType": "SPARK"' in source
+    assert 'CONFIG["spark_compute_key"]' in source
+    assert '"/actions/fetchLineage"' in source
+    assert "get_resource_principals_signer" in source
+    assert "TABLE_NAME.fullmatch" in source
     encoded_config = source.split("CONFIG = ", 1)[1].splitlines()[0]
-    assert json.loads(encoded_config)["schema"] == "U101_AGENT"
+    config = json.loads(encoded_config)
+    assert config["catalog_name"] == "u101_aidp_lab"
+    assert config["participant_key"] == "u101"
+    assert config["table_prefix"] == "u101_"
+    compile(source, "governance_agent.py", "exec")
 
 
 def test_agent_prompt_is_dama_grounded_and_explainable() -> None:
-    source = agent_source(
-        model_id="ocid1.generativeaimodel.oc1.us-chicago-1.chat",
-        region="us-chicago-1",
-        compartment_id="ocid1.compartment.oc1..participant",
-        external_catalog_key="u101-catalog-key",
-        database_schema="U101_AGENT",
-    ).decode("utf-8")
+    source = rendered_agent_source()
 
     assert "DAMA-DMBOK" in DAMA_SYSTEM_PROMPT
     assert all(
@@ -94,8 +118,8 @@ def test_agent_prompt_is_dama_grounded_and_explainable() -> None:
     assert "another participant" in DAMA_SYSTEM_PROMPT
     assert "If evidence is unavailable" in DAMA_SYSTEM_PROMPT
     assert repr(DAMA_SYSTEM_PROMPT) in source
-    assert "contract.assignment_status" in source
-    assert "METRIC_VALUE = 'active'" in source
+    assert "live Master Catalog scope" in source
+    assert "observed table row counts" in source
 
 
 def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
@@ -103,7 +127,7 @@ def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
     assert len(cases) >= 10
     assert {tool for case in cases for tool in case["expected_tools"]} == {
         "catalog_inventory",
-        "catalog_metrics",
+        "catalog_metrics_telco_lineage",
         "catalog_lineage",
     }
     assert {case["category"] for case in cases} >= {
@@ -150,7 +174,7 @@ def test_governance_contract_contains_only_active_data_labs() -> None:
     assert all(path.startswith("CONTRACT:") for _lab_id, _level, path in lineage)
 
 
-def test_agent_stays_pending_before_database_bootstrap_without_creating_compute() -> None:
+def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror() -> None:
     client = bare_client()
     pack = load_lab_pack("agent")
     manifest = {
@@ -171,90 +195,79 @@ def test_agent_stays_pending_before_database_bootstrap_without_creating_compute(
             }
         },
     }
+    captured: dict[str, object] = {}
     writes: list[dict] = []
     client._workspace = lambda: {"key": "workspace"}
-    client._write_manifest = lambda _workspace, _owner, value: writes.append(
-        json.loads(json.dumps(value))
+    client._ensure_workspace_layout = lambda *_args: False
+    client._shared_compute = lambda workspace: (
+        {"key": "shared-spark-key"}
+        if workspace == "workspace"
+        else (_ for _ in ()).throw(AssertionError("unexpected workspace"))
     )
-    client._ensure_workspace_layout = lambda *_args: (_ for _ in ()).throw(
-        AssertionError("workspace must not be created before the database boundary")
+    client._ensure_catalog = lambda name: (
+        ({"key": "u101-catalog-key"}, False)
+        if name == "u101_aidp_lab"
+        else (_ for _ in ()).throw(AssertionError("unexpected catalog"))
     )
-    client._ensure_agent_compute = lambda *_args: (_ for _ in ()).throw(
-        AssertionError("compute must not be created before the database boundary")
+    client._ensure_catalog_contract = lambda key, name: (
+        (
+            {
+                "landing": {"key": "landing-key"},
+                "bronze": {"key": "bronze-key"},
+                "silver": {"key": "silver-key"},
+                "gold": {"key": "gold-key"},
+            },
+            False,
+        )
+        if (key, name) == ("u101-catalog-key", "u101_aidp_lab")
+        else (_ for _ in ()).throw(AssertionError("unexpected schema contract"))
     )
-
-    with pytest.raises(AidpProvisionPending) as raised:
-        client._provision_agent(USER_OCID, EMAIL, manifest, manifest["labs"]["agent"], pack)
-
-    assert raised.value.phase == "database"
-    assert manifest["labs"]["agent"]["phase"] == "database"
-    assert writes[-1]["external_catalog"] is None
-
-
-def test_agent_creates_participant_database_before_any_compute() -> None:
-    client = bare_client()
-    pack = load_lab_pack("agent")
-    manifest = {
-        "layout_version": 4,
-        "owner_key": participant_owner_key(USER_OCID),
-        "participant_key": "u101",
-        "participant_code": 101,
-        "participant_email": EMAIL,
-        "external_catalog": None,
-        "labs": {
-            "agent": {
-                "pack_version": pack.pack_version,
-                "pack_hash": pack.pack_sha256,
-                "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/agent",
-                "job_name": "u101_agent_data_governance",
-                "phase": "workspace",
-                "operation": None,
-            }
-        },
-    }
-    database = ParticipantDatabase(
-        owner="U101_AGENT",
-        reader="U101_AGENT_RO",
-        reader_password="ReaderPassword1234567890",
-        dsn="aidp_low",
-        wallet_password="WalletPassword123",
-        wallet_zip=b"wallet",
+    client._ensure_agent_compute = lambda workspace: ({"key": "ai-compute-key"}, False)
+    client._ensure_agent = lambda workspace, compute, name, root, source, **_kwargs: (
+        captured.update(
+            workspace=workspace,
+            compute=compute,
+            name=name,
+            root=root,
+            source=source.decode("utf-8"),
+        )
+        or ("agent-key", False)
     )
-    writes: list[dict] = []
-    client._workspace = lambda: {"key": "workspace"}
+    permission_paths: list[str] = []
+    client._ensure_permission = lambda path, *_args, **_kwargs: (
+        permission_paths.append(path) or False
+    )
+    client._ensure_agent_deployment = lambda *_args: (
+        {"key": "deployment-key", "lifecycleState": "ACTIVE"},
+        False,
+    )
+    client._advance_lab_manifest = lambda _workspace, value, lab_id, phase: value[
+        "labs"
+    ][lab_id].update(phase=phase)
     client.governance_database = SimpleNamespace(
-        ready=lambda: True,
-        ensure_participant=lambda key: database if key == "u101" else None,
+        ready=lambda: (_ for _ in ()).throw(AssertionError("Autonomous must not be read")),
+        ensure_participant=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("Autonomous participant users must not be created")
+        ),
     )
-    client._ensure_external_catalog = lambda key, value: (
-        {"key": "u101-external-catalog"},
-        True,
-    ) if key == "u101" and value == database else (_ for _ in ()).throw(
-        AssertionError("unexpected participant database")
-    )
-    client._external_schema = lambda catalog, owner: {
-        "key": "u101-agent-schema-key",
-        "displayName": owner,
-    } if catalog == "u101-external-catalog" and owner == "U101_AGENT" else (
-        _ for _ in ()
-    ).throw(AssertionError("unexpected external schema lookup"))
     client._write_manifest = lambda _workspace, _owner, value: writes.append(
         json.loads(json.dumps(value))
     )
-    client._ensure_agent_compute = lambda *_args: (_ for _ in ()).throw(
-        AssertionError("compute must wait for the external catalog boundary")
+
+    material = client._provision_agent(
+        USER_OCID, EMAIL, manifest, manifest["labs"]["agent"], pack
     )
 
-    with pytest.raises(AidpProvisionPending) as raised:
-        client._provision_agent(USER_OCID, EMAIL, manifest, manifest["labs"]["agent"], pack)
-
-    assert raised.value.phase == "database"
-    assert writes[-1]["external_catalog"] == {
-        "key": "u101-external-catalog",
-        "name": external_catalog_name("u101"),
-        "database_schema": "u101-agent-schema-key",
-    }
-    assert writes[-1]["labs"]["agent"]["external_catalog_key"] == "u101-external-catalog"
+    assert material.participant_key == "u101"
+    assert manifest["labs"]["agent"]["phase"] == "active"
+    assert manifest["external_catalog"] is None
+    assert {"/workspaces/workspace/clusters/shared-spark-key", "/catalogs/u101-catalog-key"} <= set(
+        permission_paths
+    )
+    source = str(captured["source"])
+    assert "u101_aidp_lab" in source and "shared-spark-key" in source
+    assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
+    assert writes[-1]["agent"]["catalog_name"] == "u101_aidp_lab"
 
 
 def test_external_catalog_uses_the_live_adw_connection_contract() -> None:

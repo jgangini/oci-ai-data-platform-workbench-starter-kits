@@ -133,7 +133,7 @@ def test_hook_result_matches_runner_and_manifest_contract() -> None:
     resources = {
         "catalog_key": "catalog",
         "catalog_name": "aidp_lab",
-        "shared_compute_name": "aidp_lab_shared_compute",
+        "shared_compute_name": "aidp_cluster_shared_compute",
         "external_volume_count": 0,
         "runtime_ready": True,
     }
@@ -144,7 +144,7 @@ def test_hook_result_matches_runner_and_manifest_contract() -> None:
     assert result["outputs"] == {
         "aidp_workbench_url": "https://aidp.example.test",
         "aidp_catalog_name": "aidp_lab",
-        "aidp_shared_compute_name": "aidp_lab_shared_compute",
+        "aidp_shared_compute_name": "aidp_cluster_shared_compute",
         "aidp_runtime_ready": True,
         "aidp_external_volume_count": 0,
     }

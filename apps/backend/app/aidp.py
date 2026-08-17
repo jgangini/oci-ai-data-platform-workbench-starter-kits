@@ -17,7 +17,7 @@ from oci._vendor import requests
 
 from .autonomous import AutonomousGovernanceClient, AutonomousProvisionError, ParticipantDatabase
 from .config import Settings
-from .governance import agent_source, database_names, external_catalog_name
+from .governance import agent_source, external_catalog_name, governed_metric_queries
 from .lab_packs import LabAsset, LabPack, available_lab_ids, load_lab_pack
 from .notebooks import (
     LAYER_PREFIXES,
@@ -31,7 +31,7 @@ from .notebooks import (
 
 
 API_VERSION = "20260430"
-SHARED_COMPUTE_NAME = "aidp_lab_shared_compute"
+SHARED_COMPUTE_NAME = "aidp_cluster_shared_compute"
 AGENT_COMPUTE_NAME = "aidp_agent_shared_compute"
 LEGACY_CATALOG_NAME = "aidp_lab"
 LAYOUT_VERSION = 4
@@ -1814,7 +1814,6 @@ class AidpClient:
         workspace_key = str(self._workspace()["key"])
         root = str(state["workspace_path"])
         agent_name = str(pack.agent["name_template"]).format(participant_key=key)
-        self._merge_governance_contract(key, manifest, owner_key)
         agent = manifest.get("agent") if isinstance(manifest.get("agent"), dict) else {}
         agent_key = str(state.get("agent_key") or agent.get("key") or "")
         compute_key = str(state.get("compute_key") or agent.get("compute_key") or "")
@@ -1864,14 +1863,12 @@ class AidpClient:
         participant_root = root.rsplit("/", 1)[0]
         agent_name = str(pack.agent["name_template"]).format(participant_key=key)
         was_active = False
-        external_catalog_key, external_catalog = self._reconcile_agent_database(
-            workspace_key, owner_key, key, manifest, state
-        )
         if not all(
             (
                 self.settings.agent_model_id,
                 self.settings.aidp_region,
                 self.settings.compartment_id,
+                self.settings.aidp_platform_id,
             )
         ):
             raise AidpProvisionError("The selected Agent model and regional runtime are incomplete.")
@@ -1879,9 +1876,13 @@ class AidpClient:
         layout_changed = self._ensure_workspace_layout(
             workspace_key, (WORKSPACE_ROOT, CONTROL_ROOT, participant_root, root)
         )
+        spark_compute = self._shared_compute(workspace_key)
+        catalog_name, catalog_key, schema_keys, catalog_changed = (
+            self._agent_catalog_contract(key)
+        )
         compute, compute_changed = self._ensure_agent_compute(workspace_key)
         self._pending_after_change(
-            layout_changed or compute_changed,
+            any((layout_changed, catalog_changed, compute_changed)),
             was_active,
             workspace_key,
             manifest,
@@ -1889,13 +1890,27 @@ class AidpClient:
             "content",
             "The Agent workspace and shared AI compute are ready; content is next.",
         )
-        database_schema = str(external_catalog["database_schema"])
+        data_packs = tuple(
+            lab_pack
+            for lab_id in available_lab_ids()
+            if (lab_pack := load_lab_pack(lab_id)).kind == "data_pipeline"
+        )
+        metric_queries = governed_metric_queries(
+            key,
+            catalog_name,
+            {lab_pack.lab_id: lab_pack.tables for lab_pack in data_packs},
+        )
         source = agent_source(
             model_id=self.settings.agent_model_id,
             region=self.settings.aidp_region,
             compartment_id=self.settings.compartment_id,
-            external_catalog_key=external_catalog_key,
-            database_schema=database_schema,
+            platform_id=self.settings.aidp_platform_id,
+            participant_key=key,
+            catalog_key=catalog_key,
+            catalog_name=catalog_name,
+            schema_keys=schema_keys,
+            spark_compute_key=str(spark_compute["key"]),
+            metric_queries=metric_queries,
         )
         agent_key, content_changed = self._ensure_agent(
             workspace_key,
@@ -1905,7 +1920,14 @@ class AidpClient:
             source,
             repair_drift=True,
         )
-        state.update(agent_key=agent_key, compute_key=str(compute["key"]), job_name=agent_name)
+        state.update(
+            agent_key=agent_key,
+            compute_key=str(compute["key"]),
+            job_name=agent_name,
+            catalog_key=catalog_key,
+            catalog_name=catalog_name,
+            spark_compute_key=str(spark_compute["key"]),
+        )
         self._pending_after_change(
             content_changed,
             was_active,
@@ -1915,19 +1937,14 @@ class AidpClient:
             "permissions",
             "The participant Agent is ready; permissions are next.",
         )
-        permissions_changed = self._ensure_permission(
-            f"/workspaces/{workspace_key}/clusters/{compute['key']}",
-            "assignClusterPermissionDetails",
+        if self._ensure_agent_permissions(
+            workspace_key,
+            str(compute["key"]),
+            str(spark_compute["key"]),
+            catalog_key,
+            agent_key,
             user_ocid,
-            "USE",
-        )
-        permissions_changed = self._ensure_permission(
-            f"/workspaces/{workspace_key}/agents/{agent_key}",
-            "assignAgentPermissionDetails",
-            user_ocid,
-            "MANAGE",
-        ) or permissions_changed
-        if permissions_changed:
+        ):
             raise AidpProvisionPending(
                 "The participant Agent permissions were applied; final verification is next.",
                 "permissions",
@@ -1957,6 +1974,9 @@ class AidpClient:
             "compute_key": str(compute["key"]),
             "deployment_key": deployment_key,
             "model_id": self.settings.agent_model_id,
+            "catalog_key": catalog_key,
+            "catalog_name": catalog_name,
+            "spark_compute_key": str(spark_compute["key"]),
         }
         self._write_manifest(workspace_key, owner_key, manifest)
         return UserMaterial(
@@ -1968,6 +1988,58 @@ class AidpClient:
             pack.pack_version,
             participant_code=participant_code if isinstance(participant_code, int) else None,
         )
+
+    def _agent_catalog_contract(
+        self, key: str
+    ) -> tuple[str, str, dict[str, str], bool]:
+        catalog_name = participant_catalog_name(key)
+        catalog, catalog_changed = self._ensure_catalog(catalog_name)
+        catalog_key = str(catalog.get("key") or "")
+        if not catalog_key:
+            raise AidpProvisionPending(
+                "The participant Master Catalog identifier is not published yet.", "schemas"
+            )
+        schemas, schemas_changed = self._ensure_catalog_contract(catalog_key, catalog_name)
+        schema_keys = {
+            layer: str(schema.get("key") or "")
+            for layer, schema in schemas.items()
+        }
+        if any(not schema_key for schema_key in schema_keys.values()):
+            raise AidpProvisionPending(
+                "The participant medallion schemas are not published yet.", "schemas"
+            )
+        return catalog_name, catalog_key, schema_keys, catalog_changed or schemas_changed
+
+    def _ensure_agent_permissions(
+        self,
+        workspace_key: str,
+        agent_compute_key: str,
+        spark_compute_key: str,
+        catalog_key: str,
+        agent_key: str,
+        user_ocid: str,
+    ) -> bool:
+        changed = False
+        for path, action, permission in (
+            (
+                f"/workspaces/{workspace_key}/clusters/{agent_compute_key}",
+                "assignClusterPermissionDetails",
+                "USE",
+            ),
+            (
+                f"/workspaces/{workspace_key}/clusters/{spark_compute_key}",
+                "assignClusterPermissionDetails",
+                "USE",
+            ),
+            (f"/catalogs/{catalog_key}", "assignCatalogPermissionDetails", "SELECT"),
+            (
+                f"/workspaces/{workspace_key}/agents/{agent_key}",
+                "assignAgentPermissionDetails",
+                "MANAGE",
+            ),
+        ):
+            changed = self._ensure_permission(path, action, user_ocid, permission) or changed
+        return changed
 
     @staticmethod
     def _pack_governance_contract(
@@ -2135,7 +2207,6 @@ class AidpClient:
         participant_root = root.rsplit("/", 1)[0]
         job_name = str(state["job_name"])
         if was_active:
-            self._merge_governance_contract(key, manifest, owner_key)
             return UserMaterial(
                 email,
                 lab_id,
@@ -2205,7 +2276,6 @@ class AidpClient:
                 "permissions",
             )
         self._advance_lab_manifest(workspace_key, manifest, lab_id, "active")
-        self._merge_governance_contract(key, manifest, owner_key)
         return UserMaterial(
             email, lab_id, key, root, job_name, pack.pack_version,
             participant_code=participant_code if isinstance(participant_code, int) else None,
@@ -2397,8 +2467,6 @@ class AidpClient:
         if load_lab_pack(lab_id).kind == "governance_agent":
             self._forget_agent_resources(manifest)
         labs.pop(lab_id)
-        self._mark_governance_lab_removed(key, manifest, owner_key, lab_id)
-        self._merge_governance_contract(key, manifest, owner_key)
         self._write_manifest(workspace_key, owner_key, manifest)
 
     async def delete_lab(
@@ -2689,11 +2757,14 @@ class AidpClient:
                 workspace_key,
                 str(state.get("job_name") or f"{key}_agent_data_governance"),
             )
-            self._cleanup_external_catalog(key, state)
-            try:
-                self.governance_database.drop_participant(key)
-            except AutonomousProvisionError as exc:
-                raise AidpProvisionError(str(exc)) from exc
+            # Legacy v4 Agents used an Autonomous mirror. New Agents are backed by
+            # Master Catalog, but an old mirror must still be removed during upgrade.
+            if state.get("external_catalog_key") or state.get("external_catalog_name"):
+                self._cleanup_external_catalog(key, state)
+                try:
+                    self.governance_database.drop_participant(key)
+                except AutonomousProvisionError as exc:
+                    raise AidpProvisionError(str(exc)) from exc
             if not preserve_workspace:
                 self._delete_workspace_path(
                     workspace_key,
