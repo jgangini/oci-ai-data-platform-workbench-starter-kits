@@ -1,20 +1,19 @@
 from __future__ import annotations
 
+import ast
 import json
+import re
 import threading
 from types import SimpleNamespace
 
 import pytest
 
 from app.aidp import API_VERSION, AidpClient, AidpProvisionPending, participant_owner_key
-from app.autonomous import ParticipantDatabase
 from app.governance import (
     DAMA_SYSTEM_PROMPT,
     agent_source,
     database_names,
     external_catalog_name,
-    governed_lineage_contracts,
-    governed_metric_queries,
 )
 from app.lab_packs import load_lab_pack
 
@@ -43,41 +42,26 @@ def bare_client() -> AidpClient:
 
 
 def rendered_agent_source() -> str:
-    queries = governed_metric_queries(
-        "u101",
-        "u101_aidp_lab",
-        {"telco_lineage": {"gold": ("customer_360",)}},
-    )
-    lineage = governed_lineage_contracts(
-        "u101",
-        "u101_aidp_lab",
-        {
-            "telco_lineage": {
-                "ENTITY": ("landing.crm_customers->bronze.crm_customers",),
-                "COLUMN": (
-                    "bronze.crm_customers.document_number->"
-                    "silver.customer_master.document_number",
-                ),
-            }
-        },
-    )
     return agent_source(
         model_id="ocid1.generativeaimodel.oc1.us-chicago-1.chat",
         region="us-chicago-1",
         compartment_id="ocid1.compartment.oc1..participant",
+        platform_id="ocid1.aidataplatform.oc1.us-chicago-1.participant",
         participant_key="u101",
-        catalog_key="u101-catalog-key",
         catalog_name="u101_aidp_lab",
-        schema_keys={
-            "landing": "landing-key",
-            "bronze": "bronze-key",
-            "silver": "silver-key",
-            "gold": "gold-key",
-        },
-        spark_compute_key="shared-spark-key",
-        metric_queries=queries,
-        lineage_contracts=lineage,
     ).decode("utf-8")
+
+
+def rendered_agent_function(name: str):
+    module = ast.parse(rendered_agent_source())
+    function = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+    namespace: dict[str, object] = {}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), "governance_agent.py", "exec"), namespace)
+    return namespace[name]
 
 
 @pytest.mark.parametrize(
@@ -101,38 +85,63 @@ def test_database_names_reject_non_participant_identifiers(participant_key: str)
         database_names(participant_key)
 
 
-def test_agent_source_reads_live_master_catalog_and_predefined_spark_queries() -> None:
+def test_agent_source_reads_live_master_catalog_without_sql_connections() -> None:
     source = rendered_agent_source()
 
-    assert source.count("SELECT ") == 1
-    assert all(keyword not in source.upper() for keyword in (" INSERT ", " UPDATE ", " DELETE ", " MERGE ", " DROP ", " ALTER "))
+    assert "AIDPToolConf" not in source and "SQLTool" not in source
+    assert re.search(
+        r"\b(?:INSERT|UPDATE|DELETE|MERGE|DROP|ALTER)\s+(?:INTO|TABLE|FROM)\b",
+        source,
+        re.IGNORECASE,
+    ) is None
     assert "u102" not in source.casefold()
     assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
-    assert '"queryType": "SPARK"' in source
-    assert 'CONFIG["spark_compute_key"]' in source
-    assert "SHOW TABLES LIKE 'u101_*'" in source
-    assert "catalog_inventory_{layer}" in source
-    assert "canonical_package_contract" in source
-    assert "fetchLineage" not in source
+    assert "Call at most one tool per model turn" in source
+    assert "def catalog_inventory(" in source
+    assert "search_term: str = \"\"" in source
+    assert '"time_updated"' in source
+    assert '"counts_by_layer"' in source
+    assert 'column.get("fieldType")' in source
+    assert '"observed_master_catalog"' in source
+    assert "fetchLineage" in source
+    assert "def _lineage_summary(" in source
+    assert "def _column_lineage_component(" in source
+    assert '"process_task"' in source
+    assert '"notebook_path"' in source
+    assert '/jobs/{quote(job_key, safe=\'\')}' in source
+    assert 'defaults.get("processNodeId")' in source
+    assert 'run.get("processRunEventTime")' in source
+    assert 'anchor = f"{anchor}/' not in source
+    assert '"limit": "25"' in source
+    assert 'detail.get("tableFields")' in source
+    assert 'managed.get("managedTableDataFormat")' in source
+    assert 'f"aidp://catalogs@{CONFIG[\'platform_id\']}/o/"' in source
     assert "get_resource_principals_signer" not in source
-    assert "Credential Store" not in source
-    assert "LAB_ID.fullmatch" in source
+    assert "get_resource_principal_delegation_token_signer" not in source
+    assert 'aidputils.secrets.get(name=CONFIG["credential_name"], key=key)' in source
+    assert "private_key_content=values[\"private_key\"]" in source
+    assert "The shared OCI credential is unavailable or invalid" in source
+    assert "TABLE_NAME.fullmatch" in source
+    assert "_contains_foreign_participant" in source
+    assert "def _catalog_contract(" in source
+    assert 'if _name(item) == CONFIG["catalog_name"]' in source
+    assert 'if _name(item) == f"oci_{layer}"' in source
     assert "Checkpointer initialization failed; using a stateless graph" in source
-    assert "return [_inventory_tool(layer) for layer in LAYERS] + [catalog_lineage]" in source
-    assert "Metric tools are unavailable; catalog tools remain active" in source
     assert '"stage": stage' in source
     assert 'getattr(response, "status_code", None)' in source
     assert 'return _error_response(self.setup_error)' in source
     assert "input=message" in source
+    assert "Learning map:" in source
+    assert "no table or lineage is hard-coded" in source
     encoded_config = source.split("CONFIG = ", 1)[1].splitlines()[0]
     config = json.loads(encoded_config)
     assert config["catalog_name"] == "u101_aidp_lab"
+    assert config["credential_name"] == "AidpGovernanceOperator"
     assert config["participant_key"] == "u101"
     assert config["table_prefix"] == "u101_"
-    assert config["lineage_contracts"]["telco_lineage"]["ENTITY"] == [
-        "u101_aidp_lab.oci_landing.u101_telco_lineage_crm_customers->"
-        "u101_aidp_lab.oci_bronze.u101_telco_lineage_crm_customers"
-    ]
+    assert config["platform_id"].startswith("ocid1.aidataplatform.")
+    assert "spark_compute_key" not in config
+    assert "catalog_key" not in config and "schema_keys" not in config
     compile(source, "governance_agent.py", "exec")
 
 
@@ -146,24 +155,68 @@ def test_agent_prompt_is_dama_grounded_and_explainable() -> None:
     )
     assert "another participant" in DAMA_SYSTEM_PROMPT
     assert "If evidence is unavailable" in DAMA_SYSTEM_PROMPT
-    assert repr(DAMA_SYSTEM_PROMPT) in source
-    assert "live Master Catalog scope" in source
-    assert "observed table row counts" in source
+    assert "Use match_count and counts_by_layer exactly as returned" in DAMA_SYSTEM_PROMPT
+    assert "timeUpdated as the last Master Catalog metadata update" in DAMA_SYSTEM_PROMPT
+    assert "job metadata provides notebook_path" in DAMA_SYSTEM_PROMPT
+    assert "search_term and include_columns=true" in DAMA_SYSTEM_PROMPT
+    expected_prompt = (
+        DAMA_SYSTEM_PROMPT
+        + "\nThe only allowed participant is u101. A different participant "
+        "identifier in the request requires an immediate refusal without a tool call."
+    )
+    assert repr(expected_prompt) in source
+    assert "complete live scope" in source
+    assert "observed Master Catalog metadata and lineage" in source
+
+
+def test_column_lineage_selects_only_the_connected_field_component() -> None:
+    component = rendered_agent_function("_column_lineage_component")
+    graph = {
+        "nodes": [
+            {
+                "id": "gold-document",
+                "displayName": "document_number",
+                "properties": {"default": {"tableName": "u101_lab_customer_360"}},
+            },
+            {
+                "id": "silver-document",
+                "displayName": "document_number",
+                "properties": {"default": {"tableName": "u101_lab_customer_master"}},
+            },
+            {
+                "id": "gold-customer",
+                "displayName": "customer_id",
+                "properties": {"default": {"tableName": "u101_lab_customer_360"}},
+            },
+        ],
+        "links": [
+            {"fromNodeId": "silver-document", "toNodeId": "gold-document"},
+            {"fromNodeId": "gold-customer", "toNodeId": "unrelated-customer"},
+        ],
+    }
+
+    selected = component(graph, "u101_lab_customer_360", "document_number")
+
+    assert {node["id"] for node in selected["nodes"]} == {
+        "gold-document",
+        "silver-document",
+    }
+    assert selected["links"] == [
+        {"fromNodeId": "silver-document", "toNodeId": "gold-document"}
+    ]
 
 
 def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
     cases = load_lab_pack("agent").agent["evaluation_cases"]
     assert len(cases) >= 10
     assert {tool for case in cases for tool in case["expected_tools"]} == {
-        "catalog_inventory_landing",
-        "catalog_inventory_bronze",
-        "catalog_inventory_silver",
-        "catalog_inventory_gold",
-        "catalog_metrics_telco_lineage",
+        "catalog_inventory",
         "catalog_lineage",
     }
     assert {case["category"] for case in cases} >= {
         "catalog",
+        "metadata",
+        "discovery",
         "quality",
         "entity_lineage",
         "column_lineage",
@@ -171,39 +224,6 @@ def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
         "security",
     }
     assert all(case["required_concepts"] for case in cases)
-
-
-def test_governance_contract_contains_only_active_data_labs() -> None:
-    client = bare_client()
-    manifest = {
-        "layout_version": 4,
-        "owner_key": "owner",
-        "participant_key": "u101",
-        "participant_code": 101,
-        "participant_email": EMAIL,
-        "labs": {
-            "banking": {
-                "phase": "active",
-                "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/banking",
-            },
-            "telecommunications": {
-                "phase": "content",
-                "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/telecommunications",
-            },
-            "agent": {
-                "phase": "active",
-                "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/agent",
-            },
-        },
-    }
-
-    metrics, lineage = client._governance_contract(manifest, "owner")
-
-    assert {lab_id for lab_id, _name, _value in metrics} == {"banking"}
-    assert ("banking", "contract.assignment_status", "active") in metrics
-    assert ("banking", "contract.source_row_count.customers", "200") in metrics
-    assert {level for _lab_id, level, _path in lineage} == {"ENTITY", "COLUMN"}
-    assert all(path.startswith("CONTRACT:") for _lab_id, _level, path in lineage)
 
 
 def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror() -> None:
@@ -231,11 +251,6 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
     writes: list[dict] = []
     client._workspace = lambda: {"key": "workspace"}
     client._ensure_workspace_layout = lambda *_args: False
-    client._shared_compute = lambda workspace: (
-        {"key": "shared-spark-key"}
-        if workspace == "workspace"
-        else (_ for _ in ()).throw(AssertionError("unexpected workspace"))
-    )
     client._ensure_catalog = lambda name: (
         ({"key": "u101-catalog-key"}, False)
         if name == "u101_aidp_lab"
@@ -270,7 +285,7 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
     client._ensure_permission = lambda path, *_args, **_kwargs: (
         permission_paths.append(path) or False
     )
-    client._ensure_agent_deployment = lambda *_args: (
+    client._ensure_agent_deployment = lambda *_args, **_kwargs: (
         {"key": "deployment-key", "lifecycleState": "ACTIVE"},
         False,
     )
@@ -294,120 +309,18 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
     assert material.participant_key == "u101"
     assert manifest["labs"]["agent"]["phase"] == "active"
     assert manifest["external_catalog"] is None
-    assert {"/workspaces/workspace/clusters/shared-spark-key", "/catalogs/u101-catalog-key"} <= set(
+    assert {"/workspaces/workspace/clusters/ai-compute-key", "/catalogs/u101-catalog-key"} <= set(
         permission_paths
     )
     source = str(captured["source"])
-    assert "u101_aidp_lab" in source and "shared-spark-key" in source
+    assert "u101_aidp_lab" in source and "shared-spark-key" not in source
     assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
     assert captured["descriptor"]["participant_key"] == "u101"
     assert captured["descriptor"]["entry_file"] == "governance_agent.py"
+    assert manifest["labs"]["agent"]["deployment_source_hash"] == captured[
+        "descriptor"
+    ]["entry_sha256"]
     assert writes[-1]["agent"]["catalog_name"] == "u101_aidp_lab"
-
-
-def test_external_catalog_uses_the_live_adw_connection_contract() -> None:
-    client = bare_client()
-    database = ParticipantDatabase(
-        owner="U101_AGENT",
-        reader="U101_AGENT_RO",
-        reader_password="ReaderPassword1234567890",
-        dsn="aidp_low",
-        wallet_password="WalletPassword123",
-        wallet_zip=b"wallet",
-    )
-    catalogs = iter((None, {"key": "u101-external-catalog"}))
-    requests: list[tuple[str, str, dict]] = []
-    client._catalog = lambda *_args, **_kwargs: next(catalogs)
-    client._request = lambda method, path, **kwargs: requests.append(
-        (method, path, kwargs["payload"])
-    )
-
-    catalog, created = client._ensure_external_catalog("u101", database)
-
-    properties = requests[0][2]["connectionDetails"]["connectionProperties"]
-    assert created and catalog["key"] == "u101-external-catalog"
-    assert set(properties) == {
-        "ADW_WALLET_CONTENT_BASE64",
-        "ADW_WALLET_PASSWORD",
-        "ADW_USERNAME",
-        "ADW_PASSWORD",
-        "ADW_TNS_ALIAS",
-    }
-    assert requests[1] == (
-        "PUT",
-        "/catalogs/u101-external-catalog",
-        {
-            "connectionDetails": {
-                "connectionProperties": {"ALH_PASSWORD": database.reader_password}
-            }
-        },
-    )
-
-
-def test_existing_external_catalog_refreshes_the_aidp_password_contract() -> None:
-    client = bare_client()
-    database = ParticipantDatabase(
-        owner="U101_AGENT",
-        reader="U101_AGENT_RO",
-        reader_password="ReaderPassword1234567890",
-        dsn="aidp_low",
-        wallet_password="WalletPassword123",
-        wallet_zip=b"wallet",
-    )
-    client._catalog = lambda *_args, **_kwargs: {"key": "catalog-key"}
-    requests: list[tuple[str, str, dict]] = []
-    client._request = lambda method, path, **kwargs: requests.append(
-        (method, path, kwargs["payload"])
-    )
-
-    catalog, created = client._ensure_external_catalog("u101", database)
-
-    assert catalog["key"] == "catalog-key" and created is False
-    assert requests == [
-        (
-            "PUT",
-            "/catalogs/catalog-key",
-            {
-                "connectionDetails": {
-                    "connectionProperties": {"ALH_PASSWORD": database.reader_password}
-                }
-            },
-        )
-    ]
-
-
-def test_removed_lab_is_hidden_from_the_agent_without_deleting_evidence() -> None:
-    client = bare_client()
-    merged: list[tuple[str, list[tuple[str, str, str]], list]] = []
-    client.governance_database = SimpleNamespace(
-        ready=lambda: True,
-        merge_governance=lambda participant, metrics, lineage: merged.append(
-            (participant, metrics, lineage)
-        ),
-    )
-    manifest = {
-        "layout_version": 4,
-        "owner_key": "owner",
-        "participant_key": "u101",
-        "participant_code": 101,
-        "participant_email": EMAIL,
-        "labs": {
-            "agent": {
-                "phase": "active",
-                "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/agent",
-            }
-        },
-    }
-
-    client._mark_governance_lab_removed("u101", manifest, "owner", "banking")
-
-    assert merged == [
-        (
-            "u101",
-            [("banking", "contract.assignment_status", "removed")],
-            [],
-        )
-    ]
 
 
 def test_active_agent_verifies_deployment_without_rotating_database_credentials() -> None:
@@ -472,6 +385,77 @@ def test_active_agent_deployment_is_reused() -> None:
     assert created is False
 
 
+def test_existing_agent_is_updated_after_workspace_source_changes() -> None:
+    client = bare_client()
+    uploads = iter((True, False, False))
+    client._upload_file = lambda *_args, **_kwargs: next(uploads)
+    client._agents = lambda *_args: [{"key": "agent-key"}]
+    requests: list[tuple[str, str, dict, str]] = []
+    client._request = lambda method, path, **kwargs: requests.append(
+        (method, path, kwargs["payload"], kwargs["retry_scope"])
+    )
+
+    agent_key, changed = client._ensure_agent(
+        "workspace",
+        "compute-key",
+        "u101_agent_data_governance",
+        "/Workspace/medallon/u101_person@example.com/agent",
+        b"print('revision')\n",
+        b"{}",
+        repair_drift=True,
+    )
+
+    assert changed and agent_key == "agent-key"
+    assert requests[0][0:2] == (
+        "PUT",
+        "/workspaces/workspace/agents/agent-key",
+    )
+    assert requests[0][2]["entryFilePath"].endswith("/governance_agent.py")
+    assert requests[0][2]["computeKey"] == "compute-key"
+    assert requests[0][3].startswith("agent-update:")
+
+
+def test_active_agent_deployment_is_redeployed_for_new_source_revision() -> None:
+    client = bare_client()
+    client._list = lambda *_args, **_kwargs: [
+        {
+            "key": "deployment-key",
+            "displayName": "u101_agent_data_governance_deployment",
+            "lifecycleState": "ACTIVE",
+        }
+    ]
+    requests: list[tuple[str, str, dict, str]] = []
+    client._request = lambda method, path, **kwargs: (
+        requests.append(
+            (method, path, kwargs["payload"], kwargs["retry_scope"])
+        )
+        or {"key": "deployment-key", "lifecycleState": "CREATING"}
+    )
+
+    deployment, changed = client._ensure_agent_deployment(
+        "workspace",
+        "agent-key",
+        "compute-key",
+        "u101_agent_data_governance",
+        redeploy_revision="abc123",
+    )
+
+    assert changed and deployment["key"] == "deployment-key"
+    assert requests == [
+        (
+            "POST",
+            "/workspaces/workspace/agents/agent-key/deployments/actions/redeploy",
+            {
+                "displayName": "u101_agent_data_governance_deployment",
+                "description": "Production deployment for the participant governance Agent",
+                "agentComputeKey": "compute-key",
+                "agentKey": "agent-key",
+            },
+            "agent-redeploy:agent-key:abc123",
+        )
+    ]
+
+
 def test_missing_agent_deployment_is_created_on_shared_ai_compute(monkeypatch) -> None:
     client = bare_client()
     monkeypatch.setattr(
@@ -501,31 +485,6 @@ def test_missing_agent_deployment_is_created_on_shared_ai_compute(monkeypatch) -
             },
         )
     ]
-
-
-def test_external_schema_uses_the_published_schema_key() -> None:
-    client = bare_client()
-    client._list = lambda *_args, **_kwargs: [
-        {
-            "key": "u101-agent-schema-key",
-            "displayName": "u101_agent",
-            "lifecycleState": "ACTIVE",
-        }
-    ]
-
-    schema = client._external_schema("catalog-key", "U101_AGENT")
-
-    assert schema["key"] == "u101-agent-schema-key"
-
-
-def test_external_schema_waits_for_catalog_import() -> None:
-    client = bare_client()
-    client._list = lambda *_args, **_kwargs: []
-
-    with pytest.raises(AidpProvisionPending) as raised:
-        client._external_schema("catalog-key", "U101_AGENT")
-
-    assert raised.value.phase == "database"
 
 
 def test_external_catalog_cleanup_waits_while_aidp_is_deleting() -> None:

@@ -238,6 +238,40 @@ def test_agent_compute_removes_failed_hidden_resource_before_retry() -> None:
     ]
 
 
+def test_agent_compute_removes_failed_restart_before_retry() -> None:
+    client = bare_client()
+    workspace_key = "workspace"
+    compute_key = "failed-restart-ai-compute"
+    calls: list[tuple[str, str]] = []
+
+    def list_items(path: str, **_kwargs):
+        assert path.endswith("/clusters")
+        return [
+            {
+                "key": compute_key,
+                "displayName": AGENT_COMPUTE_NAME,
+                "type": "AI_COMPUTE",
+                "state": "FAILED",
+                "_async_operation_action": "RESTART_CLUSTER",
+                "_async_operation_status": "FAILED",
+            }
+        ]
+
+    def request(method: str, path: str, **_kwargs):
+        calls.append((method, path))
+        return None
+
+    client._list = list_items
+    client._request = request
+
+    with pytest.raises(AidpProvisionPending, match="being removed before a safe retry"):
+        client._ensure_agent_compute(workspace_key)
+
+    assert calls == [
+        ("DELETE", f"/workspaces/{workspace_key}/clusters/{compute_key}"),
+    ]
+
+
 def test_agent_compute_rotates_retry_token_after_terminal_attempt() -> None:
     client = bare_client()
     workspace_key = "workspace"

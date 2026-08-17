@@ -45,6 +45,7 @@ class FakeApi:
             "/volumes": [],
             "/roles": [{"displayName": "AI_DATA_PLATFORM_ADMIN", "key": "platform-admin-key"}],
             "/workspaces/ws-key/clusters": [],
+            "/credentials": [],
         }
 
     def list_all(self, path: str, *, params=None) -> list[dict]:
@@ -82,6 +83,13 @@ class FakeApi:
                 item["lifecycleState"] = "ACTIVE"
             self.resources[path].append(item)
             return post_apply.ApiResponse(201, item, {})
+        if method == "PUT" and path.startswith("/credentials/"):
+            key = path.removeprefix("/credentials/")
+            current = next(
+                item for item in self.resources["/credentials"] if item["key"] == key
+            )
+            current.update(payload)
+            return post_apply.ApiResponse(200, current, {})
         if method in {"POST", "PUT"} and "/actions/" in path:
             base_path = path.split("/actions/", 1)[0]
             if path.endswith("/addMember"):
@@ -558,6 +566,75 @@ def test_post_retry_token_uses_canonical_payload_hash() -> None:
     assert observed[0] == observed[1]
     assert observed[0] != observed[2]
     assert observed[2] != observed[3]
+
+
+def test_governance_api_uses_current_ai_data_platform_contract() -> None:
+    api = post_apply.AidpApi(
+        "us-chicago-1",
+        "platform",
+        object(),
+        "deployment",
+        api_version=post_apply.GOVERNANCE_API_VERSION,
+        resource_segment="aiDataPlatforms",
+    )
+
+    assert api.base == (
+        "https://datalake.us-chicago-1.oci.oraclecloud.com/20260430/"
+        "aiDataPlatforms/platform"
+    )
+
+
+def test_governance_operator_credential_is_created_and_rotated() -> None:
+    api = FakeApi()
+    config = {
+        "tenancy": "ocid1.tenancy.oc1..test",
+        "user": "ocid1.user.oc1..operator",
+        "fingerprint": "aa:bb:cc",
+    }
+
+    assert post_apply.ensure_governance_operator_credential(
+        api, config, "private-key", "us-chicago-1"
+    ) is True
+    credential = api.resources["/credentials"][0]
+    pairs = credential["credentialDetails"]["secretTokenPair"]
+    assert credential["displayName"] == post_apply.GOVERNANCE_CREDENTIAL_NAME
+    assert credential["type"] == "SECRET_TOKEN"
+    assert [pair["secretKey"] for pair in pairs] == [
+        "tenancy",
+        "user",
+        "fingerprint",
+        "region",
+        "private_key",
+    ]
+    credential["credentialType"] = credential.pop("type")
+
+    assert post_apply.ensure_governance_operator_credential(
+        api, config, "rotated-private-key", "us-chicago-1"
+    ) is False
+    assert api.resources["/credentials"][0]["credentialDetails"]["secretTokenPair"][-1] == {
+        "secretKey": "private_key",
+        "secretValue": "rotated-private-key",
+    }
+
+
+def test_governance_operator_credential_rejects_duplicates() -> None:
+    api = FakeApi()
+    api.resources["/credentials"] = [
+        {"displayName": post_apply.GOVERNANCE_CREDENTIAL_NAME, "key": "one"},
+        {"displayName": post_apply.GOVERNANCE_CREDENTIAL_NAME, "key": "two"},
+    ]
+
+    with pytest.raises(post_apply.ReconcileError, match="multiple resources"):
+        post_apply.ensure_governance_operator_credential(
+            api,
+            {
+                "tenancy": "ocid1.tenancy.oc1..test",
+                "user": "ocid1.user.oc1..operator",
+                "fingerprint": "aa:bb:cc",
+            },
+            "private-key",
+            "us-chicago-1",
+        )
 
 
 def test_stopped_shared_compute_is_reusable_after_auto_termination() -> None:

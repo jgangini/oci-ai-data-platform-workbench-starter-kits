@@ -248,13 +248,7 @@ def _agent_evaluation_case_valid(case: Any) -> bool:
     expected_tools = case.get("expected_tools")
     if not isinstance(expected_tools, list):
         return False
-    if any(
-        tool != "catalog_lineage"
-        and re.fullmatch(r"catalog_inventory_(landing|bronze|silver|gold)", str(tool))
-        is None
-        and re.fullmatch(r"catalog_metrics_[a-z0-9_]+", str(tool)) is None
-        for tool in expected_tools
-    ):
+    if any(tool not in {"catalog_inventory", "catalog_lineage"} for tool in expected_tools):
         return False
     required_concepts = case.get("required_concepts")
     return isinstance(required_concepts, list) and bool(required_concepts)
@@ -267,7 +261,7 @@ def _governance_agent_contract_valid(agent: Any) -> bool:
         return False
     if agent.get("editable") is not True or agent.get("expertise") != "DAMA-DMBOK":
         return False
-    if set(agent.get("tools") or []) != {"catalog_inventory", "lineage", "governed_sql"}:
+    if set(agent.get("tools") or []) != {"catalog_inventory", "catalog_lineage"}:
         return False
     cases = agent.get("evaluation_cases")
     if not isinstance(cases, list) or len(cases) < 10:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import json
 import re
@@ -15,13 +14,11 @@ from urllib.parse import quote
 
 from oci._vendor import requests
 
-from .autonomous import AutonomousGovernanceClient, AutonomousProvisionError, ParticipantDatabase
+from .autonomous import AutonomousGovernanceClient, AutonomousProvisionError
 from .config import Settings
 from .governance import (
     agent_source,
     external_catalog_name,
-    governed_lineage_contracts,
-    governed_metric_queries,
 )
 from .lab_packs import LabAsset, LabPack, available_lab_ids, load_lab_pack
 from .notebooks import (
@@ -456,81 +453,6 @@ class AidpClient:
             raise AidpProvisionPending(f"AIDP has not published catalog {name} yet.", "schemas")
         return published, True
 
-    def _ensure_external_catalog(
-        self,
-        participant_key: str,
-        database: ParticipantDatabase,
-    ) -> tuple[dict[str, Any], bool]:
-        name = external_catalog_name(participant_key)
-        current = self._catalog(name, allow_missing=True)
-        created = current is None
-        if created:
-            self._request(
-                "POST",
-                "/catalogs",
-                payload={
-                    "displayName": name,
-                    "description": f"Read-only Autonomous governance catalog for {participant_key}",
-                    "catalogType": "EXTERNAL",
-                    "sourceType": "ADW",
-                    "connectionDetails": {
-                        "connectionProperties": {
-                            "ADW_WALLET_CONTENT_BASE64": base64.b64encode(
-                                database.wallet_zip
-                            ).decode("ascii"),
-                            "ADW_WALLET_PASSWORD": database.wallet_password,
-                            "ADW_USERNAME": database.reader,
-                            "ADW_PASSWORD": database.reader_password,
-                            "ADW_TNS_ALIAS": database.dsn,
-                        }
-                    }
-                },
-                phase="database",
-            )
-        published = self._catalog(name, allow_missing=True) if created else current
-        if published is None:
-            raise AidpProvisionPending(
-                f"AIDP has not published external catalog {name} yet.", "database"
-            )
-        catalog_key = str(published.get("key") or "")
-        if not catalog_key:
-            raise AidpProvisionPending(
-                "AIDP has not published the external catalog identifier yet.", "database"
-            )
-        # AIDP intentionally stores the password only through its dedicated catalog
-        # update contract; the password included in CREATE is used for discovery only.
-        self._request(
-            "PUT",
-            f"/catalogs/{catalog_key}",
-            payload={
-                "connectionDetails": {
-                    "connectionProperties": {"ALH_PASSWORD": database.reader_password}
-                }
-            },
-            phase="database",
-        )
-        return published, created
-
-    def _external_schema(self, catalog_key: str, database_owner: str) -> dict[str, Any]:
-        matches = [
-            schema
-            for schema in self._list(
-                "/schemas", params={"catalogKey": catalog_key}, phase="database"
-            )
-            if self._resource_name(schema).casefold() == database_owner.casefold()
-        ]
-        if len(matches) > 1:
-            raise AidpProvisionError(
-                f"AIDP has duplicate external schemas named {database_owner}."
-            )
-        if not matches or not matches[0].get("key"):
-            raise AidpProvisionPending(
-                "AIDP is still importing the participant Autonomous schema.", "database"
-            )
-        return self._require_operational_state(
-            matches[0], {"ACTIVE"}, "external schema", "database"
-        )
-
     def _cleanup_external_catalog(self, participant_key: str, state: dict[str, Any]) -> None:
         name = str(state.get("external_catalog_name") or external_catalog_name(participant_key))
         catalog = self._catalog(name, allow_missing=True, allow_deleting=True)
@@ -624,7 +546,13 @@ class AidpClient:
             str(compute.get("_async_operation_action") or "").upper() == "CREATE_CLUSTER"
             and str(compute.get("_async_operation_status") or "").upper() == "FAILED"
         )
-        if not failed_create or resource_state in {"ACTIVE", "STOPPED"}:
+        failed_resource = resource_state == "FAILED" or resource_state.endswith(
+            "_FAILED"
+        )
+        if (not failed_create and not failed_resource) or resource_state in {
+            "ACTIVE",
+            "STOPPED",
+        }:
             return
         cluster_key = str(compute.get("key") or compute.get("id") or "")
         if not cluster_key:
@@ -734,6 +662,7 @@ class AidpClient:
         agents = self._agents(workspace_key, name)
         if len(agents) > 1:
             raise AidpProvisionError(f"AIDP has duplicate agents named {name}.")
+        created = False
         if not agents:
             self._request(
                 "POST",
@@ -754,11 +683,29 @@ class AidpClient:
                 raise AidpProvisionPending(
                     "AIDP has not published the participant Agent yet.", "content"
                 )
+            created = True
             changed = True
         agent_key = str(agents[0].get("key") or agents[0].get("id") or "")
         if not agent_key:
             raise AidpProvisionPending(
                 "AIDP has not published the participant Agent identifier yet.", "content"
+            )
+        if changed and not created:
+            self._request(
+                "PUT",
+                f"/workspaces/{workspace_key}/agents/{agent_key}",
+                payload={
+                    "displayName": name,
+                    "description": (
+                        "Participant-editable data governance agent with predefined "
+                        "read-only tools"
+                    ),
+                    "entryFilePath": entry_path,
+                    "dependenciesFilePath": dependencies_path,
+                    "computeKey": compute_key,
+                },
+                phase="content",
+                retry_scope=f"agent-update:{hashlib.sha256(source).hexdigest()}",
             )
         return agent_key, changed
 
@@ -768,6 +715,8 @@ class AidpClient:
         agent_key: str,
         compute_key: str,
         agent_name: str,
+        *,
+        redeploy_revision: str = "",
     ) -> tuple[dict[str, Any], bool]:
         path = f"/workspaces/{workspace_key}/agents/{agent_key}/deployments"
         deployments = self._list(path, phase="deployment")
@@ -776,6 +725,28 @@ class AidpClient:
                 deployment.get("lifecycleState") or deployment.get("state") or ""
             ).upper()
             if state == "ACTIVE":
+                if redeploy_revision:
+                    updated = self._request(
+                        "POST",
+                        f"{path}/actions/redeploy",
+                        payload={
+                            "displayName": (
+                                self._resource_name(deployment)
+                                or f"{agent_name}_deployment"
+                            ),
+                            "description": (
+                                "Production deployment for the participant "
+                                "governance Agent"
+                            ),
+                            "agentComputeKey": compute_key,
+                            "agentKey": agent_key,
+                        },
+                        phase="deployment",
+                        retry_scope=(
+                            f"agent-redeploy:{agent_key}:{redeploy_revision}"
+                        ),
+                    )
+                    return updated if isinstance(updated, dict) else {}, True
                 return deployment, False
             if state in {"CREATING", "DEPLOYING", "UPDATING"}:
                 raise AidpProvisionPending(
@@ -1890,7 +1861,6 @@ class AidpClient:
         layout_changed = self._ensure_workspace_layout(
             workspace_key, (WORKSPACE_ROOT, CONTROL_ROOT, participant_root, root)
         )
-        spark_compute = self._shared_compute(workspace_key)
         catalog_name, catalog_key, schema_keys, catalog_changed = (
             self._agent_catalog_contract(key)
         )
@@ -1904,42 +1874,13 @@ class AidpClient:
             "content",
             "The Agent workspace and shared AI compute are ready; content is next.",
         )
-        data_packs = tuple(
-            lab_pack
-            for lab_id in available_lab_ids()
-            if (lab_pack := load_lab_pack(lab_id)).kind == "data_pipeline"
-        )
-        metric_queries = governed_metric_queries(
-            key,
-            catalog_name,
-            {lab_pack.lab_id: lab_pack.tables for lab_pack in data_packs},
-        )
-        lineage_contracts = governed_lineage_contracts(
-            key,
-            catalog_name,
-            {
-                lab_pack.lab_id: {
-                    "ENTITY": lab_pack.expected_results["lineage"][
-                        "expected_entity_edges"
-                    ],
-                    "COLUMN": lab_pack.expected_results["lineage"][
-                        "expected_column_edges"
-                    ],
-                }
-                for lab_pack in data_packs
-            },
-        )
         source = agent_source(
             model_id=self.settings.agent_model_id,
             region=self.settings.aidp_region,
             compartment_id=self.settings.compartment_id,
+            platform_id=self.settings.aidp_platform_id,
             participant_key=key,
-            catalog_key=catalog_key,
             catalog_name=catalog_name,
-            schema_keys=schema_keys,
-            spark_compute_key=str(spark_compute["key"]),
-            metric_queries=metric_queries,
-            lineage_contracts=lineage_contracts,
         )
         descriptor = json.dumps(
             {
@@ -1955,6 +1896,7 @@ class AidpClient:
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
+        source_hash = hashlib.sha256(source).hexdigest()
         agent_key, content_changed = self._ensure_agent(
             workspace_key,
             str(compute["key"]),
@@ -1970,7 +1912,7 @@ class AidpClient:
             job_name=agent_name,
             catalog_key=catalog_key,
             catalog_name=catalog_name,
-            spark_compute_key=str(spark_compute["key"]),
+            source_hash=source_hash,
         )
         self._pending_after_change(
             content_changed,
@@ -1984,7 +1926,6 @@ class AidpClient:
         if self._ensure_agent_permissions(
             workspace_key,
             str(compute["key"]),
-            str(spark_compute["key"]),
             catalog_key,
             agent_key,
             user_ocid,
@@ -1998,10 +1939,17 @@ class AidpClient:
             agent_key,
             str(compute["key"]),
             agent_name,
+            redeploy_revision=(
+                source_hash
+                if state.get("deployment_source_hash") != source_hash
+                else ""
+            ),
         )
         deployment_key = str(deployment.get("key") or deployment.get("id") or "")
         if deployment_key:
             state["deployment_key"] = deployment_key
+        if deployment_changed:
+            state["deployment_source_hash"] = source_hash
         self._pending_after_change(
             deployment_changed,
             was_active,
@@ -2011,6 +1959,7 @@ class AidpClient:
             "deployment",
             "The participant Agent deployment is starting; final verification is next.",
         )
+        state["deployment_source_hash"] = source_hash
         self._advance_lab_manifest(workspace_key, manifest, pack.lab_id, "active")
         manifest["agent"] = {
             "key": agent_key,
@@ -2020,7 +1969,6 @@ class AidpClient:
             "model_id": self.settings.agent_model_id,
             "catalog_key": catalog_key,
             "catalog_name": catalog_name,
-            "spark_compute_key": str(spark_compute["key"]),
         }
         self._write_manifest(workspace_key, owner_key, manifest)
         return UserMaterial(
@@ -2058,7 +2006,6 @@ class AidpClient:
         self,
         workspace_key: str,
         agent_compute_key: str,
-        spark_compute_key: str,
         catalog_key: str,
         agent_key: str,
         user_ocid: str,
@@ -2067,11 +2014,6 @@ class AidpClient:
         for path, action, permission in (
             (
                 f"/workspaces/{workspace_key}/clusters/{agent_compute_key}",
-                "assignClusterPermissionDetails",
-                "USE",
-            ),
-            (
-                f"/workspaces/{workspace_key}/clusters/{spark_compute_key}",
                 "assignClusterPermissionDetails",
                 "USE",
             ),
@@ -2084,146 +2026,6 @@ class AidpClient:
         ):
             changed = self._ensure_permission(path, action, user_ocid, permission) or changed
         return changed
-
-    @staticmethod
-    def _pack_governance_contract(
-        pack: LabPack,
-    ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]:
-        metrics: list[tuple[str, str, str]] = []
-        metrics.append((pack.lab_id, "contract.assignment_status", "active"))
-        metrics.append((pack.lab_id, "contract.pack_version", pack.pack_version))
-        for group, prefix in (
-            (pack.expected_results["source_row_counts"], "contract.source_row_count"),
-            (pack.expected_results["business_aggregates"], "contract.business"),
-            (pack.expected_results["quality"], "contract.quality"),
-            (pack.expected_results["lineage"].get("expected_table_rows", {}), "contract.table_row_count"),
-        ):
-            for name, value in sorted(group.items()):
-                rendered = (
-                    value
-                    if isinstance(value, str)
-                    else json.dumps(value, sort_keys=True, separators=(",", ":"))
-                )
-                metrics.append((pack.lab_id, f"{prefix}.{name}", rendered))
-        lineage_contract = pack.expected_results["lineage"]
-        lineage = [
-            (pack.lab_id, level, f"CONTRACT:{path}")
-            for level, field in (
-                ("ENTITY", "expected_entity_edges"),
-                ("COLUMN", "expected_column_edges"),
-            )
-            for path in lineage_contract[field]
-        ]
-        return metrics, lineage
-
-    def _governance_contract(
-        self, manifest: dict[str, Any], owner_key: str
-    ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]:
-        metrics: list[tuple[str, str, str]] = []
-        lineage: list[tuple[str, str, str]] = []
-        for lab_id, lab_state in sorted(self._manifest_labs(manifest, owner_key).items()):
-            if lab_state.get("phase") != "active":
-                continue
-            pack = load_lab_pack(lab_id)
-            if pack.kind != "data_pipeline":
-                continue
-            pack_metrics, pack_lineage = self._pack_governance_contract(pack)
-            metrics.extend(pack_metrics)
-            lineage.extend(pack_lineage)
-        return metrics, lineage
-
-    def _merge_governance_contract(
-        self,
-        participant_key: str,
-        manifest: dict[str, Any],
-        owner_key: str,
-        *,
-        force: bool = False,
-    ) -> None:
-        labs = self._manifest_labs(manifest, owner_key)
-        if not force and (not isinstance(labs.get("agent"), dict) or labs["agent"].get("phase") != "active"):
-            return
-        metrics, lineage = self._governance_contract(manifest, owner_key)
-        if not metrics and not lineage:
-            return
-        if not self.governance_database.ready():
-            raise AidpProvisionPending(
-                "The Agent governance evidence sync is waiting for Autonomous.",
-                "database",
-            )
-        try:
-            self.governance_database.merge_governance(participant_key, metrics, lineage)
-        except AutonomousProvisionError as exc:
-            raise AidpProvisionError(str(exc)) from exc
-
-    def _mark_governance_lab_removed(
-        self, participant_key: str, manifest: dict[str, Any], owner_key: str, lab_id: str
-    ) -> None:
-        labs = self._manifest_labs(manifest, owner_key)
-        if not isinstance(labs.get("agent"), dict) or labs["agent"].get("phase") != "active":
-            return
-        if not self.governance_database.ready():
-            raise AidpProvisionPending(
-                "The Agent governance evidence sync is waiting for Autonomous.",
-                "database",
-            )
-        try:
-            self.governance_database.merge_governance(
-                participant_key,
-                [(lab_id, "contract.assignment_status", "removed")],
-                [],
-            )
-        except AutonomousProvisionError as exc:
-            raise AidpProvisionError(str(exc)) from exc
-
-    def _reconcile_agent_database(
-        self,
-        workspace_key: str,
-        owner_key: str,
-        key: str,
-        manifest: dict[str, Any],
-        state: dict[str, Any],
-    ) -> tuple[str, dict[str, Any]]:
-        if not self.governance_database.ready():
-            state["phase"] = "database"
-            self._write_manifest(workspace_key, owner_key, manifest)
-            raise AidpProvisionPending(
-                "The Autonomous wallet and EXECUTE-only operator are not ready on the registration VM.",
-                "database",
-            )
-        try:
-            participant_database = self.governance_database.ensure_participant(key)
-        except AutonomousProvisionError as exc:
-            raise AidpProvisionError(str(exc)) from exc
-        self._merge_governance_contract(key, manifest, owner_key, force=True)
-        catalog, catalog_changed = self._ensure_external_catalog(key, participant_database)
-        external_catalog_key = str(catalog.get("key") or "")
-        if not external_catalog_key:
-            raise AidpProvisionPending(
-                "The participant external catalog has no published identifier yet.",
-                "database",
-            )
-        external_schema = self._external_schema(
-            external_catalog_key, participant_database.owner
-        )
-        external_catalog = {
-            "key": external_catalog_key,
-            "name": external_catalog_name(key),
-            "database_schema": str(external_schema["key"]),
-        }
-        manifest["external_catalog"] = external_catalog
-        state.update(
-            external_catalog_key=external_catalog_key,
-            external_catalog_name=external_catalog["name"],
-        )
-        state["phase"] = "database"
-        self._write_manifest(workspace_key, owner_key, manifest)
-        if catalog_changed:
-            raise AidpProvisionPending(
-                "The participant Autonomous schemas and external catalog are ready; Agent content is next.",
-                "database",
-            )
-        return external_catalog_key, external_catalog
 
     def _provision_lab(
         self,

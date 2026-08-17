@@ -26,6 +26,7 @@ from oci._vendor import requests
 
 
 API_VERSION = "20240831"
+GOVERNANCE_API_VERSION = "20260430"
 CATALOG_NAME = "aidp_lab"
 DEVELOPER_ROLE_NAME = "AIDP_LAB_DEVELOPER"
 PENDING_ROLE_NAME = "AIDP_LAB_PENDING"
@@ -34,6 +35,7 @@ BOOTSTRAP_OBJECT_NAME = ".bootstrap/operator-credentials.json"
 BOOTSTRAP_VERSION = 2
 BOOTSTRAP_READY = "AIDP_LAB_CREDENTIALS_V2_READY"
 DATABASE_OPERATOR = "AIDP_LAB_OPERATOR"
+GOVERNANCE_CREDENTIAL_NAME = "AidpGovernanceOperator"
 LAYERS = ("landing", "bronze", "silver", "gold")
 SHARED_SCHEMA_NAMES = {layer: f"oci_{layer}" for layer in LAYERS}
 RESOURCE_WAIT_ATTEMPTS = 120
@@ -88,10 +90,19 @@ class ApiResponse:
 
 
 class AidpApi:
-    def __init__(self, region: str, platform_id: str, signer: Any, deployment_id: str) -> None:
+    def __init__(
+        self,
+        region: str,
+        platform_id: str,
+        signer: Any,
+        deployment_id: str,
+        *,
+        api_version: str = API_VERSION,
+        resource_segment: str = "dataLakes",
+    ) -> None:
         self.base = (
-            f"https://datalake.{region}.oci.oraclecloud.com/{API_VERSION}/"
-            f"dataLakes/{platform_id}"
+            f"https://datalake.{region}.oci.oraclecloud.com/{api_version}/"
+            f"{resource_segment}/{platform_id}"
         )
         self.signer = signer
         self.deployment_id = deployment_id
@@ -189,6 +200,56 @@ def exact_one(items: list[dict[str, Any]], name: str, kind: str) -> dict[str, An
     if len(matches) > 1:
         raise ReconcileError(f"Ambiguous {kind}: multiple resources named {name}")
     return matches[0] if matches else None
+
+
+def ensure_governance_operator_credential(
+    api: AidpApi,
+    config: dict[str, Any],
+    key_text: str,
+    region: str,
+) -> bool:
+    missing = [
+        name
+        for name in ("tenancy", "user", "fingerprint")
+        if not str(config.get(name) or "")
+    ]
+    if missing or not region or not key_text.strip():
+        raise ReconcileError("The uploaded OCI operator credential is incomplete")
+    payload = {
+        "displayName": GOVERNANCE_CREDENTIAL_NAME,
+        "credentialDescription": (
+            "Shared OCI API credential for participant governance agents in this trial deployment"
+        ),
+        "type": "SECRET_TOKEN",
+        "credentialDetails": {
+            "credentialType": "SECRET_TOKEN",
+            "secretTokenPair": [
+                {"secretKey": "tenancy", "secretValue": str(config["tenancy"])},
+                {"secretKey": "user", "secretValue": str(config["user"])},
+                {"secretKey": "fingerprint", "secretValue": str(config["fingerprint"])},
+                {"secretKey": "region", "secretValue": region},
+                {"secretKey": "private_key", "secretValue": key_text},
+            ],
+        },
+    }
+    current = exact_one(
+        api.list_all("/credentials", params={"displayName": GOVERNANCE_CREDENTIAL_NAME}),
+        GOVERNANCE_CREDENTIAL_NAME,
+        "governance operator credential",
+    )
+    if current is None:
+        api.request("POST", "/credentials", payload=payload)
+        return True
+    credential_type = str(current.get("type") or current.get("credentialType") or "")
+    if credential_type != "SECRET_TOKEN":
+        raise ReconcileError(
+            "Existing governance operator credential has incompatible type"
+        )
+    credential_key = str(current.get("key") or current.get("id") or "")
+    if not credential_key:
+        raise ReconcileError("The governance operator credential has no identifier")
+    api.request("PUT", f"/credentials/{quote(credential_key, safe='')}", payload=payload)
+    return False
 
 
 def assert_fields(resource: dict[str, Any], expected: dict[str, Any], kind: str) -> None:
@@ -1567,6 +1628,26 @@ def main() -> int:
         api = AidpApi(context["region"], outputs["ai_data_platform_id"], signer, context["deployment_id"])
         reconciled, reconcile_messages = reconcile(api, outputs)
         messages.extend(reconcile_messages)
+        key_text = Path(key_path).read_text(encoding="utf-8")
+        credential_api = AidpApi(
+            context["region"],
+            outputs["ai_data_platform_id"],
+            signer,
+            context["deployment_id"],
+            api_version=GOVERNANCE_API_VERSION,
+            resource_segment="aiDataPlatforms",
+        )
+        credential_created = ensure_governance_operator_credential(
+            credential_api,
+            oci_config,
+            key_text,
+            str(context["region"]),
+        )
+        messages.append(
+            "AIDP governance operator credential created"
+            if credential_created
+            else "AIDP governance operator credential rotated"
+        )
         aidp_url = resolve_workbench_url(outputs, oci_config, signer)
         if not aidp_url:
             raise ReconcileError("AIDP Workbench direct URL is not published yet")
@@ -1600,7 +1681,7 @@ def main() -> int:
             str(context["region"]),
             object_storage,
             render_runtime_oci_config(oci_config),
-            Path(key_path).read_text(encoding="utf-8"),
+            key_text,
             wallet,
             wallet_password,
             admin_password,
