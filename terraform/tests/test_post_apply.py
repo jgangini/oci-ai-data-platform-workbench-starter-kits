@@ -841,6 +841,8 @@ def test_autonomous_governance_bootstrap_installs_allowlisted_operator(monkeypat
     executed = [statement for statement, _parameters in statements]
     assert post_apply.GOVERNANCE_PACKAGE_SPEC in executed
     assert post_apply.GOVERNANCE_PACKAGE_BODY in executed
+    assert "IF SQLCODE != -28007 THEN" in post_apply.GOVERNANCE_PACKAGE_BODY
+    assert "RAISE;" in post_apply.GOVERNANCE_PACKAGE_BODY
     assert any("CREATE USER AIDP_LAB_OPERATOR" in statement for statement in executed)
     assert executed[-2:] == [
         "GRANT CREATE SESSION TO AIDP_LAB_OPERATOR",
