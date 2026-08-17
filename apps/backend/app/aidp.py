@@ -411,7 +411,13 @@ class AidpClient:
             workspaces[0], {"ACTIVE"}, "workspace", "workspace"
         )
 
-    def _catalog(self, name: str, *, allow_missing: bool = False) -> dict[str, Any] | None:
+    def _catalog(
+        self,
+        name: str,
+        *,
+        allow_missing: bool = False,
+        allow_deleting: bool = False,
+    ) -> dict[str, Any] | None:
         catalogs = [
             item
             for item in self._list("/catalogs", phase="schemas")
@@ -421,9 +427,11 @@ class AidpClient:
             return None
         if len(catalogs) != 1:
             raise AidpProvisionPending(f"The {name} catalog is not ready yet. Retry shortly.", "schemas")
-        return self._require_operational_state(
-            catalogs[0], {"ACTIVE"}, "catalog", "schemas"
-        )
+        catalog = catalogs[0]
+        state = str(catalog.get("lifecycleState") or catalog.get("state") or "").upper()
+        if allow_deleting and state == "DELETING":
+            return catalog
+        return self._require_operational_state(catalog, {"ACTIVE"}, "catalog", "schemas")
 
     def _ensure_catalog(self, name: str) -> tuple[dict[str, Any], bool]:
         current = self._catalog(name, allow_missing=True)
@@ -482,11 +490,35 @@ class AidpClient:
             )
         return published, True
 
+    def _external_schema(self, catalog_key: str, database_owner: str) -> dict[str, Any]:
+        matches = [
+            schema
+            for schema in self._list(
+                "/schemas", params={"catalogKey": catalog_key}, phase="database"
+            )
+            if self._resource_name(schema).casefold() == database_owner.casefold()
+        ]
+        if len(matches) > 1:
+            raise AidpProvisionError(
+                f"AIDP has duplicate external schemas named {database_owner}."
+            )
+        if not matches or not matches[0].get("key"):
+            raise AidpProvisionPending(
+                "AIDP is still importing the participant Autonomous schema.", "database"
+            )
+        return self._require_operational_state(
+            matches[0], {"ACTIVE"}, "external schema", "database"
+        )
+
     def _cleanup_external_catalog(self, participant_key: str, state: dict[str, Any]) -> None:
         name = str(state.get("external_catalog_name") or external_catalog_name(participant_key))
-        catalog = self._catalog(name, allow_missing=True)
+        catalog = self._catalog(name, allow_missing=True, allow_deleting=True)
         if catalog is None:
             return
+        if str(catalog.get("lifecycleState") or catalog.get("state") or "").upper() == "DELETING":
+            raise AidpProvisionPending(
+                "Participant external catalog deletion is still in progress.", "cleanup"
+            )
         catalog_key = str(catalog.get("key") or "")
         if not catalog_key:
             raise AidpProvisionPending(
@@ -498,7 +530,7 @@ class AidpClient:
             allow_not_found=True,
             phase="cleanup",
         )
-        if self._catalog(name, allow_missing=True) is not None:
+        if self._catalog(name, allow_missing=True, allow_deleting=True) is not None:
             raise AidpProvisionPending(
                 "Participant external catalog deletion is still in progress.", "cleanup"
             )
@@ -1763,10 +1795,13 @@ class AidpClient:
                     "The participant external catalog has no published identifier yet.",
                     "database",
                 )
+            external_schema = self._external_schema(
+                external_catalog_key, participant_database.owner
+            )
             external_catalog = {
                 "key": external_catalog_key,
                 "name": external_catalog_name(key),
-                "database_schema": participant_database.owner,
+                "database_schema": str(external_schema["key"]),
             }
             manifest["external_catalog"] = external_catalog
             state.update(
@@ -2092,6 +2127,8 @@ class AidpClient:
                 workspace_key, key, lab_id, state, preserve_workspace=True
             )
             pack = load_lab_pack(lab_id)
+            if pack.kind == "governance_agent":
+                self._forget_agent_resources(manifest)
             resource_name = (
                 str(pack.agent["name_template"]).format(participant_key=key)
                 if pack.kind == "governance_agent"
@@ -2148,6 +2185,8 @@ class AidpClient:
         state["operation"] = {"operation_id": operation_id, "type": "delete", "phase": "cleanup"}
         self._write_manifest(workspace_key, owner_key, manifest)
         self._cleanup_lab(workspace_key, key, lab_id, state)
+        if load_lab_pack(lab_id).kind == "governance_agent":
+            self._forget_agent_resources(manifest)
         labs.pop(lab_id)
         self._write_manifest(workspace_key, owner_key, manifest)
 
@@ -2463,6 +2502,11 @@ class AidpClient:
                 workspace_path,
                 "Lab workspace deletion is still in progress.",
             )
+
+    @staticmethod
+    def _forget_agent_resources(manifest: dict[str, Any]) -> None:
+        manifest["agent"] = None
+        manifest["external_catalog"] = None
 
     def _cleanup_user(self, owner_key: str, preserve_manifest: bool = False) -> None:
         workspace_key = str(self._workspace()["key"])

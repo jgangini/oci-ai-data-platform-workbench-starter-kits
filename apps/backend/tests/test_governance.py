@@ -199,6 +199,12 @@ def test_agent_creates_participant_database_before_any_compute() -> None:
     ) if key == "u101" and value == database else (_ for _ in ()).throw(
         AssertionError("unexpected participant database")
     )
+    client._external_schema = lambda catalog, owner: {
+        "key": "u101-agent-schema-key",
+        "displayName": owner,
+    } if catalog == "u101-external-catalog" and owner == "U101_AGENT" else (
+        _ for _ in ()
+    ).throw(AssertionError("unexpected external schema lookup"))
     client._write_manifest = lambda _workspace, _owner, value: writes.append(
         json.loads(json.dumps(value))
     )
@@ -213,7 +219,7 @@ def test_agent_creates_participant_database_before_any_compute() -> None:
     assert writes[-1]["external_catalog"] == {
         "key": "u101-external-catalog",
         "name": external_catalog_name("u101"),
-        "database_schema": "U101_AGENT",
+        "database_schema": "u101-agent-schema-key",
     }
     assert writes[-1]["labs"]["agent"]["external_catalog_key"] == "u101-external-catalog"
 
@@ -243,6 +249,63 @@ def test_external_catalog_uses_the_live_adw_connection_contract() -> None:
         "ADW_USERNAME",
         "ADW_PASSWORD",
         "ADW_TNS_ALIAS",
+    }
+
+
+def test_external_schema_uses_the_published_schema_key() -> None:
+    client = bare_client()
+    client._list = lambda *_args, **_kwargs: [
+        {
+            "key": "u101-agent-schema-key",
+            "displayName": "u101_agent",
+            "lifecycleState": "ACTIVE",
+        }
+    ]
+
+    schema = client._external_schema("catalog-key", "U101_AGENT")
+
+    assert schema["key"] == "u101-agent-schema-key"
+
+
+def test_external_schema_waits_for_catalog_import() -> None:
+    client = bare_client()
+    client._list = lambda *_args, **_kwargs: []
+
+    with pytest.raises(AidpProvisionPending) as raised:
+        client._external_schema("catalog-key", "U101_AGENT")
+
+    assert raised.value.phase == "database"
+
+
+def test_external_catalog_cleanup_waits_while_aidp_is_deleting() -> None:
+    client = bare_client()
+    client._catalog = lambda *_args, **_kwargs: {
+        "key": "u101-external-catalog",
+        "lifecycleState": "DELETING",
+    }
+    client._request = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("DELETE must not be repeated while AIDP is already deleting")
+    )
+
+    with pytest.raises(AidpProvisionPending) as raised:
+        client._cleanup_external_catalog("u101", {})
+
+    assert raised.value.phase == "cleanup"
+
+
+def test_agent_cleanup_forgets_deleted_manifest_resources() -> None:
+    manifest = {
+        "agent": {"key": "stale-agent"},
+        "external_catalog": {"key": "stale-catalog"},
+        "labs": {"agent": {"phase": "workspace"}},
+    }
+
+    AidpClient._forget_agent_resources(manifest)
+
+    assert manifest == {
+        "agent": None,
+        "external_catalog": None,
+        "labs": {"agent": {"phase": "workspace"}},
     }
 
 
