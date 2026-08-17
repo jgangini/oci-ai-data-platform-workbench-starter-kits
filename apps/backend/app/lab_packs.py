@@ -249,7 +249,9 @@ def _agent_evaluation_case_valid(case: Any) -> bool:
     if not isinstance(expected_tools, list):
         return False
     if any(
-        tool not in {"catalog_inventory", "catalog_lineage"}
+        tool != "catalog_lineage"
+        and re.fullmatch(r"catalog_inventory_(landing|bronze|silver|gold)", str(tool))
+        is None
         and re.fullmatch(r"catalog_metrics_[a-z0-9_]+", str(tool)) is None
         for tool in expected_tools
     ):

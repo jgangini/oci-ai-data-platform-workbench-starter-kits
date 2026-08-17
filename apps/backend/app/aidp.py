@@ -17,7 +17,12 @@ from oci._vendor import requests
 
 from .autonomous import AutonomousGovernanceClient, AutonomousProvisionError, ParticipantDatabase
 from .config import Settings
-from .governance import agent_source, external_catalog_name, governed_metric_queries
+from .governance import (
+    agent_source,
+    external_catalog_name,
+    governed_lineage_contracts,
+    governed_metric_queries,
+)
 from .lab_packs import LabAsset, LabPack, available_lab_ids, load_lab_pack
 from .notebooks import (
     LAYER_PREFIXES,
@@ -193,7 +198,6 @@ class LocalAidpClient:
             self.users.pop(owner_key, None)
             for operation_key in [item for item in self._operations if item[0] == owner_key]:
                 self._operations.pop(operation_key, None)
-
 
 class AidpClient:
     def __init__(self, settings: Settings) -> None:
@@ -705,11 +709,13 @@ class AidpClient:
         name: str,
         root: str,
         source: bytes,
+        descriptor: bytes,
         *,
         repair_drift: bool,
     ) -> tuple[str, bool]:
         entry_path = f"{root}/governance_agent.py"
         dependencies_path = f"{root}/requirements.txt"
+        descriptor_path = f"{root}/agent-manifest.json"
         changed = self._upload_file(
             workspace_key, entry_path, source, repair_drift=repair_drift
         )
@@ -717,6 +723,12 @@ class AidpClient:
             workspace_key,
             dependencies_path,
             b"# AIDP provides aidputils, LangGraph and OCI runtime libraries.\n",
+            repair_drift=repair_drift,
+        ) or changed
+        changed = self._upload_file(
+            workspace_key,
+            descriptor_path,
+            descriptor,
             repair_drift=repair_drift,
         ) or changed
         agents = self._agents(workspace_key, name)
@@ -781,7 +793,9 @@ class AidpClient:
             "POST",
             f"{path}/actions/deploy",
             payload={
-                "displayName": f"{agent_name}_deployment",
+                "displayName": (
+                    f"{agent_name}_{agent_key[:8]}_{uuid.uuid4().hex[:8]}_deployment"
+                ),
                 "description": "Production deployment for the participant governance Agent",
                 "agentComputeKey": compute_key,
                 "agentKey": agent_key,
@@ -1900,24 +1914,54 @@ class AidpClient:
             catalog_name,
             {lab_pack.lab_id: lab_pack.tables for lab_pack in data_packs},
         )
+        lineage_contracts = governed_lineage_contracts(
+            key,
+            catalog_name,
+            {
+                lab_pack.lab_id: {
+                    "ENTITY": lab_pack.expected_results["lineage"][
+                        "expected_entity_edges"
+                    ],
+                    "COLUMN": lab_pack.expected_results["lineage"][
+                        "expected_column_edges"
+                    ],
+                }
+                for lab_pack in data_packs
+            },
+        )
         source = agent_source(
             model_id=self.settings.agent_model_id,
             region=self.settings.aidp_region,
             compartment_id=self.settings.compartment_id,
-            platform_id=self.settings.aidp_platform_id,
             participant_key=key,
             catalog_key=catalog_key,
             catalog_name=catalog_name,
             schema_keys=schema_keys,
             spark_compute_key=str(spark_compute["key"]),
             metric_queries=metric_queries,
+            lineage_contracts=lineage_contracts,
         )
+        descriptor = json.dumps(
+            {
+                "schema_version": 1,
+                "lab_id": pack.lab_id,
+                "pack_version": pack.pack_version,
+                "pack_hash": pack.pack_sha256,
+                "participant_key": key,
+                "catalog_name": catalog_name,
+                "entry_file": "governance_agent.py",
+                "entry_sha256": hashlib.sha256(source).hexdigest(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
         agent_key, content_changed = self._ensure_agent(
             workspace_key,
             str(compute["key"]),
             agent_name,
             root,
             source,
+            descriptor,
             repair_drift=True,
         )
         state.update(

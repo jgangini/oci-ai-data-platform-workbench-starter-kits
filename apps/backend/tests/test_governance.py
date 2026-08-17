@@ -13,6 +13,7 @@ from app.governance import (
     agent_source,
     database_names,
     external_catalog_name,
+    governed_lineage_contracts,
     governed_metric_queries,
 )
 from app.lab_packs import load_lab_pack
@@ -47,11 +48,23 @@ def rendered_agent_source() -> str:
         "u101_aidp_lab",
         {"telco_lineage": {"gold": ("customer_360",)}},
     )
+    lineage = governed_lineage_contracts(
+        "u101",
+        "u101_aidp_lab",
+        {
+            "telco_lineage": {
+                "ENTITY": ("landing.crm_customers->bronze.crm_customers",),
+                "COLUMN": (
+                    "bronze.crm_customers.document_number->"
+                    "silver.customer_master.document_number",
+                ),
+            }
+        },
+    )
     return agent_source(
         model_id="ocid1.generativeaimodel.oc1.us-chicago-1.chat",
         region="us-chicago-1",
         compartment_id="ocid1.compartment.oc1..participant",
-        platform_id="ocid1.aidataplatform.oc1.us-chicago-1.participant",
         participant_key="u101",
         catalog_key="u101-catalog-key",
         catalog_name="u101_aidp_lab",
@@ -63,6 +76,7 @@ def rendered_agent_source() -> str:
         },
         spark_compute_key="shared-spark-key",
         metric_queries=queries,
+        lineage_contracts=lineage,
     ).decode("utf-8")
 
 
@@ -96,14 +110,29 @@ def test_agent_source_reads_live_master_catalog_and_predefined_spark_queries() -
     assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
     assert '"queryType": "SPARK"' in source
     assert 'CONFIG["spark_compute_key"]' in source
-    assert '"/actions/fetchLineage"' in source
-    assert "get_resource_principals_signer" in source
-    assert "TABLE_NAME.fullmatch" in source
+    assert "SHOW TABLES LIKE 'u101_*'" in source
+    assert "catalog_inventory_{layer}" in source
+    assert "canonical_package_contract" in source
+    assert "fetchLineage" not in source
+    assert "get_resource_principals_signer" not in source
+    assert "Credential Store" not in source
+    assert "LAB_ID.fullmatch" in source
+    assert "Checkpointer initialization failed; using a stateless graph" in source
+    assert "return [_inventory_tool(layer) for layer in LAYERS] + [catalog_lineage]" in source
+    assert "Metric tools are unavailable; catalog tools remain active" in source
+    assert '"stage": stage' in source
+    assert 'getattr(response, "status_code", None)' in source
+    assert 'return _error_response(self.setup_error)' in source
+    assert "input=message" in source
     encoded_config = source.split("CONFIG = ", 1)[1].splitlines()[0]
     config = json.loads(encoded_config)
     assert config["catalog_name"] == "u101_aidp_lab"
     assert config["participant_key"] == "u101"
     assert config["table_prefix"] == "u101_"
+    assert config["lineage_contracts"]["telco_lineage"]["ENTITY"] == [
+        "u101_aidp_lab.oci_landing.u101_telco_lineage_crm_customers->"
+        "u101_aidp_lab.oci_bronze.u101_telco_lineage_crm_customers"
+    ]
     compile(source, "governance_agent.py", "exec")
 
 
@@ -126,7 +155,10 @@ def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
     cases = load_lab_pack("agent").agent["evaluation_cases"]
     assert len(cases) >= 10
     assert {tool for case in cases for tool in case["expected_tools"]} == {
-        "catalog_inventory",
+        "catalog_inventory_landing",
+        "catalog_inventory_bronze",
+        "catalog_inventory_silver",
+        "catalog_inventory_gold",
         "catalog_metrics_telco_lineage",
         "catalog_lineage",
     }
@@ -223,13 +255,14 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
         else (_ for _ in ()).throw(AssertionError("unexpected schema contract"))
     )
     client._ensure_agent_compute = lambda workspace: ({"key": "ai-compute-key"}, False)
-    client._ensure_agent = lambda workspace, compute, name, root, source, **_kwargs: (
+    client._ensure_agent = lambda workspace, compute, name, root, source, descriptor, **_kwargs: (
         captured.update(
             workspace=workspace,
             compute=compute,
             name=name,
             root=root,
             source=source.decode("utf-8"),
+            descriptor=json.loads(descriptor),
         )
         or ("agent-key", False)
     )
@@ -267,6 +300,8 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
     source = str(captured["source"])
     assert "u101_aidp_lab" in source and "shared-spark-key" in source
     assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
+    assert captured["descriptor"]["participant_key"] == "u101"
+    assert captured["descriptor"]["entry_file"] == "governance_agent.py"
     assert writes[-1]["agent"]["catalog_name"] == "u101_aidp_lab"
 
 
@@ -437,8 +472,11 @@ def test_active_agent_deployment_is_reused() -> None:
     assert created is False
 
 
-def test_missing_agent_deployment_is_created_on_shared_ai_compute() -> None:
+def test_missing_agent_deployment_is_created_on_shared_ai_compute(monkeypatch) -> None:
     client = bare_client()
+    monkeypatch.setattr(
+        "app.aidp.uuid.uuid4", lambda: SimpleNamespace(hex="revision12345678")
+    )
     client._list = lambda *_args, **_kwargs: []
     requests: list[tuple[str, str, dict]] = []
     client._request = lambda method, path, **kwargs: (
@@ -456,7 +494,7 @@ def test_missing_agent_deployment_is_created_on_shared_ai_compute() -> None:
             "POST",
             "/workspaces/workspace/agents/agent-key/deployments/actions/deploy",
             {
-                "displayName": "u101_agent_data_governance_deployment",
+                "displayName": "u101_agent_data_governance_agent-ke_revision_deployment",
                 "description": "Production deployment for the participant governance Agent",
                 "agentComputeKey": "compute-key",
                 "agentKey": "agent-key",

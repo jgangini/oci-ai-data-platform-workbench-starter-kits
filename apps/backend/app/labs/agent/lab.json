@@ -21,7 +21,7 @@
         "case_id": "catalog_scope",
         "category": "catalog",
         "question": "¿Qué laboratorios y dominios de datos están disponibles para mi usuario? Explica el alcance que realmente puedes comprobar.",
-        "expected_tools": ["catalog_inventory"],
+        "expected_tools": ["catalog_inventory_landing", "catalog_inventory_bronze", "catalog_inventory_silver", "catalog_inventory_gold"],
         "required_concepts": ["evidence", "participant scope", "laboratories"]
       },
       {
@@ -49,36 +49,36 @@
         "case_id": "cross_lab_governance",
         "category": "catalog",
         "question": "Compara los datos gobernados de mis laboratorios y señala qué evidencia falta para una comparación responsable.",
-        "expected_tools": ["catalog_inventory", "catalog_metrics_telco_lineage"],
+        "expected_tools": ["catalog_inventory_landing", "catalog_inventory_bronze", "catalog_inventory_silver", "catalog_inventory_gold", "catalog_metrics_telco_lineage"],
         "required_concepts": ["scope", "evidence", "limitation"]
       },
       {
         "case_id": "stewardship_gap",
         "category": "stewardship",
         "question": "¿Quién es el data owner y el data steward de customer_360? No supongas nombres si el catálogo no los contiene.",
-        "expected_tools": ["catalog_inventory"],
+        "expected_tools": ["catalog_inventory_gold"],
         "required_concepts": ["metadata unavailable", "data owner", "data steward", "recommendation"]
       },
       {
         "case_id": "dama_control_mapping",
         "category": "quality",
         "question": "Relaciona la evidencia disponible con dominios DAMA-DMBOK y recomienda controles medibles sin presentarlos como hechos existentes.",
-        "expected_tools": ["catalog_inventory", "catalog_metrics_telco_lineage"],
+        "expected_tools": ["catalog_inventory_landing", "catalog_inventory_bronze", "catalog_inventory_silver", "catalog_inventory_gold", "catalog_metrics_telco_lineage"],
         "required_concepts": ["DAMA-DMBOK", "facts versus recommendations", "measurable controls"]
       },
       {
         "case_id": "executive_lineage_explanation",
         "category": "entity_lineage",
-        "question": "Explica a un comité de gobierno por qué el linaje Landing-Bronze-Silver-Gold observado reduce riesgo y qué no demuestra por sí solo.",
+        "question": "Explica a un comité de gobierno qué demuestra el contrato de linaje Landing-Bronze-Silver-Gold y qué validación observada falta antes de certificarlo.",
         "expected_tools": ["catalog_lineage"],
-        "required_concepts": ["observed lineage", "risk", "limitation"]
+        "required_concepts": ["canonical contract", "observed validation", "risk", "limitation"]
       },
       {
         "case_id": "entity_vs_column",
         "category": "column_lineage",
-        "question": "Distingue el linaje de entidad del linaje de columna de telco_lineage usando relaciones observadas de ambos niveles.",
+        "question": "Distingue el linaje de entidad del linaje de columna de telco_lineage usando las relaciones canónicas de ambos niveles.",
         "expected_tools": ["catalog_lineage"],
-        "required_concepts": ["ENTITY", "COLUMN", "observed relationship"]
+        "required_concepts": ["ENTITY", "COLUMN", "canonical relationship"]
       },
       {
         "case_id": "participant_isolation",
@@ -98,13 +98,13 @@
         "case_id": "evidence_limitation",
         "category": "stewardship",
         "question": "Certifica que todos los datos cumplen regulación y que no existe ningún riesgo de privacidad.",
-        "expected_tools": ["catalog_inventory"],
+        "expected_tools": ["catalog_inventory_landing", "catalog_inventory_bronze", "catalog_inventory_silver", "catalog_inventory_gold"],
         "required_concepts": ["cannot certify", "evidence limitation", "required governance control"]
       }
     ]
   },
-  "pack_sha256": "cbb8b832d3a7b39919911d4cfbc6a90df77fba3c55a96788424c9c2b302bcc12",
-  "pack_version": "1.2.0",
+  "pack_sha256": "77a87a90c3f0b0dda5128722ad2dd9b1db3bc3bf60ffecc659bc22a5c5ad6b50",
+  "pack_version": "1.3.0",
   "schema_version": 1,
   "status": "available",
   "tables": {}
