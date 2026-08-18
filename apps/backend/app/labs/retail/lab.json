@@ -50,12 +50,12 @@
         "COLUMN"
       ],
       "max_depth": 8,
-      "qualified_node_template": "{participant_key}_aidp_lab.oci_{layer}.{table_name}",
+      "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{table_name}",
       "required_schema_paths": [
-        "{participant_key}_aidp_lab.oci_landing.",
-        "{participant_key}_aidp_lab.oci_bronze.",
-        "{participant_key}_aidp_lab.oci_silver.",
-        "{participant_key}_aidp_lab.oci_gold."
+        "{participant_key}_aidp.oci_landing.",
+        "{participant_key}_aidp.oci_bronze.",
+        "{participant_key}_aidp.oci_silver.",
+        "{participant_key}_aidp.oci_gold."
       ],
       "should_include_edges": true,
       "target_tables": [
@@ -84,7 +84,7 @@
     {
       "depends_on": [],
       "file": "01_landing_retail.ipynb",
-      "sha256": "798115766176f4db6a541365e1b920e24ec18fbfae28f082392848a89dc1a971",
+      "sha256": "76e425355094ceeb1f4f8a1d5eda6d763d5bfa84f4ad9e8eee8c6d457ff32860",
       "task_key": "01_landing_retail"
     },
     {
@@ -92,7 +92,7 @@
         "01_landing_retail"
       ],
       "file": "02_bronze_retail.ipynb",
-      "sha256": "1fad63390ac2fda11d7c6a68d3977a2f87c8dcb9a9a0384de03df0919b29f13c",
+      "sha256": "87925fc4d6d4d9006e16b895f97c9539c371aeb96d62ac8112dc50ab8616c102",
       "task_key": "02_bronze_retail"
     },
     {
@@ -100,7 +100,7 @@
         "02_bronze_retail"
       ],
       "file": "03_silver_retail.ipynb",
-      "sha256": "5ad3b464ee92b6f27807cf7f1a27522376d542ed17383e65cd375f74c9029674",
+      "sha256": "7be677d1beebd081992c35321ceac54661e2df4e0c8554732934436b749a5d50",
       "task_key": "03_silver_retail"
     },
     {
@@ -108,7 +108,7 @@
         "03_silver_retail"
       ],
       "file": "04_gold_retail.ipynb",
-      "sha256": "092d2e91dbf0a2fb9e5f1906145b9b9dc0ccbba14835c21c03207127912b82af",
+      "sha256": "9afd56add480b91e2473da7c6a2b017be4f7bd9832bb822e1cd7a9d0036aa9dc",
       "task_key": "04_gold_retail"
     },
     {
@@ -116,11 +116,11 @@
         "04_gold_retail"
       ],
       "file": "05_lineage_retail.ipynb",
-      "sha256": "66312ece231ff98e3f63268ab0bb8d9c7bf93a7d0e8b814afcca9d27a1db41d4",
+      "sha256": "e9b596ec7db27042b8c3b827a6f34c5b4b142b75c3fa11cdb77fc2317a63743b",
       "task_key": "05_lineage_retail"
     }
   ],
-  "pack_sha256": "037cf179e5cdeadd15aef81ab8600bddc1409fbf19d821bae828be84dbc41ad6",
+  "pack_sha256": "458d46c52fc43f2826d07a358ca1331ca60761446710a2d390ba0a4884eea5fa",
   "pack_version": "2.0.0",
   "schema_version": 1,
   "status": "available",

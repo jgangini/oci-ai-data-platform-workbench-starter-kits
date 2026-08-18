@@ -161,12 +161,12 @@ def test_telco_lineage_pack_has_variable_dag_delta_lineage_and_tutorials() -> No
     )
     lineage = metadata["expected_results"]["lineage"]
     assert lineage["required_schema_paths"] == [
-        "{participant_key}_aidp_lab.oci_landing.", "{participant_key}_aidp_lab.oci_bronze.",
-        "{participant_key}_aidp_lab.oci_silver.", "{participant_key}_aidp_lab.oci_gold.",
+        "{participant_key}_aidp.oci_landing.", "{participant_key}_aidp.oci_bronze.",
+        "{participant_key}_aidp.oci_silver.", "{participant_key}_aidp.oci_gold.",
     ]
     assert lineage["forbidden_schema_paths"] == ["aidp_lab.telco_lineage."]
     assert lineage["qualified_node_template"] == (
-        "{participant_key}_aidp_lab.oci_{layer}.{participant_key}_telco_lineage_{table}"
+        "{participant_key}_aidp.oci_{layer}.{participant_key}_telco_lineage_{table}"
     )
 
 

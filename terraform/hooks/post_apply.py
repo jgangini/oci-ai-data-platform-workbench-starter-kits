@@ -37,7 +37,6 @@ BOOTSTRAP_READY = "AIDP_LAB_CREDENTIALS_V2_READY"
 DATABASE_OPERATOR = "AIDP_LAB_OPERATOR"
 GOVERNANCE_CREDENTIAL_NAME = "AidpGovernanceOperator"
 LAYERS = ("landing", "bronze", "silver", "gold")
-SHARED_SCHEMA_NAMES = {layer: f"oci_{layer}" for layer in LAYERS}
 RESOURCE_WAIT_ATTEMPTS = 120
 POST_APPLY_BUDGET_SECONDS = 3300
 _post_apply_deadline = 0.0
@@ -869,7 +868,11 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
         "/catalogs",
         "catalog",
         CATALOG_NAME,
-        {"displayName": CATALOG_NAME, "description": "AIDP lab medallion catalog", "catalogType": "INTERNAL"},
+        {
+            "displayName": CATALOG_NAME,
+            "description": "Legacy compatibility catalog; participant data uses private catalogs",
+            "catalogType": "INTERNAL",
+        },
         {"catalogType": "INTERNAL"},
         wait_for_active=True,
     )
@@ -881,25 +884,6 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
         api, catalog_key, namespace, bucket
     )
     events.append("Fresh-only catalog verified: zero legacy schemas and zero external volumes")
-    shared_schemas: dict[str, dict[str, Any]] = {}
-    for layer, schema_name in SHARED_SCHEMA_NAMES.items():
-        shared_schemas[layer], schema_created = ensure_resource(
-            api,
-            "/schemas",
-            "shared schema",
-            schema_name,
-            {
-                "displayName": schema_name,
-                "description": f"Shared collaborative {layer.title()} schema for the AIDP lab",
-                "catalogName": CATALOG_NAME,
-            },
-            {},
-            filters={"catalogKey": catalog_key},
-            wait_for_active=True,
-        )
-        events.append(
-            f"Shared schema {schema_name} {'created' if schema_created else 'reused'}"
-        )
     workspace_key = str(workspace["key"])
     shared_compute, compute_created = ensure_resource(
         api,
@@ -973,43 +957,19 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
         )
     ensure_role_permission(
         api,
-        f"/catalogs/{catalog_key}",
-        "assignCatalogPermissionDetails",
-        DEVELOPER_ROLE_NAME,
-        "SELECT",
-    )
-    ensure_role_permission(
-        api,
         f"/workspaces/{workspace_key}/clusters/{compute_key}",
         "assignClusterPermissionDetails",
         DEVELOPER_ROLE_NAME,
         "USE",
     )
-    for schema in shared_schemas.values():
-        ensure_role_permission(
-            api,
-            f"/schemas/{schema['key']}",
-            "assignSchemaPermissionDetails",
-            DEVELOPER_ROLE_NAME,
-            "ADMIN",
-        )
     expected_permissions = {
         DEVELOPER_ROLE_NAME: {
             ("WORKSPACE", str(workspace["displayName"]), frozenset({"USER"})),
-            ("CATALOG", CATALOG_NAME, frozenset({"SELECT"})),
             (
                 "CLUSTER",
                 f"{workspace['displayName']}/{SHARED_COMPUTE_NAME}",
                 frozenset({"USE"}),
             ),
-            *{
-                (
-                    "SCHEMA",
-                    f"{CATALOG_NAME}.{schema_name}",
-                    frozenset({"ADMIN"}),
-                )
-                for schema_name in SHARED_SCHEMA_NAMES.values()
-            },
         },
         PENDING_ROLE_NAME: {
             ("WORKSPACE", str(workspace["displayName"]), frozenset({"USER"})),
@@ -1031,9 +991,6 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
             "shared_compute_name": SHARED_COMPUTE_NAME,
             "catalog_key": catalog_key,
             "catalog_name": CATALOG_NAME,
-            "shared_schema_keys": {
-                layer: str(schema["key"]) for layer, schema in shared_schemas.items()
-            },
             "role_keys": role_keys,
             "root_object_key": root_object_key,
             "global_schema_count": global_schema_count,

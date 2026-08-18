@@ -413,7 +413,7 @@ if lab_id != "telco_lineage":
     raise ValueError("This notebook belongs to a different lab")
 if not workspace_root.startswith("/Workspace/medallon/"):
     raise ValueError("Invalid workspace_root")
-if catalog_name != f"{participant_key}_aidp_lab":
+if catalog_name != f"{participant_key}_aidp":
     raise ValueError("Invalid participant catalog")
 spark.conf.set("spark.aidp.lineage.enabled", "true")
 
@@ -881,10 +881,10 @@ def generate(*, check: bool = False) -> bool:
                 "expected_table_rows": EXPECTED_TABLE_COUNTS,
                 "expected_entity_edges": expected_entity_edges,
                 "expected_column_edges": expected_column_edges,
-                "qualified_node_template": "{participant_key}_aidp_lab.oci_{layer}.{participant_key}_telco_lineage_{table}",
+                "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{participant_key}_telco_lineage_{table}",
                 "required_schema_paths": [
-                    "{participant_key}_aidp_lab.oci_landing.", "{participant_key}_aidp_lab.oci_bronze.",
-                    "{participant_key}_aidp_lab.oci_silver.", "{participant_key}_aidp_lab.oci_gold.",
+                    "{participant_key}_aidp.oci_landing.", "{participant_key}_aidp.oci_bronze.",
+                    "{participant_key}_aidp.oci_silver.", "{participant_key}_aidp.oci_gold.",
                 ],
                 "forbidden_schema_paths": ["aidp_lab.telco_lineage."],
                 "levels": ["ENTITY", "COLUMN"], "direction": "BOTH", "max_depth": 8,

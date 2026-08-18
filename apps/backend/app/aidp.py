@@ -45,7 +45,7 @@ LEGACY_LAB_IDS = frozenset({"banking", "telecommunications", "retail", "healthca
 def participant_catalog_name(key: str) -> str:
     if re.fullmatch(r"u[1-9][0-9]*", key) is None or int(key[1:]) < 101:
         raise ValueError("A participant key starting at u101 is required")
-    return f"{key}_aidp_lab"
+    return f"{key}_aidp"
 
 
 def catalog_name_for(key: str) -> str:

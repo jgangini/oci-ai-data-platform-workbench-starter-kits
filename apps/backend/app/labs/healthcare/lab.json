@@ -50,12 +50,12 @@
         "COLUMN"
       ],
       "max_depth": 8,
-      "qualified_node_template": "{participant_key}_aidp_lab.oci_{layer}.{table_name}",
+      "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{table_name}",
       "required_schema_paths": [
-        "{participant_key}_aidp_lab.oci_landing.",
-        "{participant_key}_aidp_lab.oci_bronze.",
-        "{participant_key}_aidp_lab.oci_silver.",
-        "{participant_key}_aidp_lab.oci_gold."
+        "{participant_key}_aidp.oci_landing.",
+        "{participant_key}_aidp.oci_bronze.",
+        "{participant_key}_aidp.oci_silver.",
+        "{participant_key}_aidp.oci_gold."
       ],
       "should_include_edges": true,
       "target_tables": [
@@ -84,7 +84,7 @@
     {
       "depends_on": [],
       "file": "01_landing_healthcare.ipynb",
-      "sha256": "f55c278e6052352fed896dffd6531b12d4e5f0e97aa3bf97994f9cb40ab5f5e2",
+      "sha256": "63387ee0d3d7a7cb97d13e99aa9fab2e20dab28199300a0fbc1979cfa4844111",
       "task_key": "01_landing_healthcare"
     },
     {
@@ -92,7 +92,7 @@
         "01_landing_healthcare"
       ],
       "file": "02_bronze_healthcare.ipynb",
-      "sha256": "3709c27f139193c0d16492beb7605c242f5446eb2aefb522988a2089ba7b9c7d",
+      "sha256": "aa90296c4b20a93cb4566be991b89e294a3c2417241dfd66c904ec7a85abb0a2",
       "task_key": "02_bronze_healthcare"
     },
     {
@@ -100,7 +100,7 @@
         "02_bronze_healthcare"
       ],
       "file": "03_silver_healthcare.ipynb",
-      "sha256": "e278afb095f132bb6da0cbbbfd57f54bb8d2f811c0efb8b7c11933ad4e735140",
+      "sha256": "e84dd5ff92966b4b73d4c6481c1e235ef02aca32eb49803f6f8ac7021e0a4705",
       "task_key": "03_silver_healthcare"
     },
     {
@@ -108,7 +108,7 @@
         "03_silver_healthcare"
       ],
       "file": "04_gold_healthcare.ipynb",
-      "sha256": "a6e28d2667d4d4c0ed4df2f3870d58e1959f2ea5588afc0ec8e9182ae699cfe0",
+      "sha256": "405b397dc724c07287e14373a2605ace3a1f616ed2bb5b86b36ac64379cb209e",
       "task_key": "04_gold_healthcare"
     },
     {
@@ -116,11 +116,11 @@
         "04_gold_healthcare"
       ],
       "file": "05_lineage_healthcare.ipynb",
-      "sha256": "bc5fe8624540b663c950e97403e1f79c44be755b357bda4881256dcc6166516f",
+      "sha256": "c611fb68ec12ded83305906d92c4323d66d16c1907a933eac0e438182a6edc76",
       "task_key": "05_lineage_healthcare"
     }
   ],
-  "pack_sha256": "ec8d3949b21602531f55f4208b1f6363f34b701e8470561f40ddb6ef89c17604",
+  "pack_sha256": "a998886376a85234b7eac44b66cd7c7ddfa46a6759716084dd8e647be173589a",
   "pack_version": "2.0.0",
   "schema_version": 1,
   "status": "available",

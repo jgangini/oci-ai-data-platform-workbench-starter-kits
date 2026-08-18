@@ -48,7 +48,7 @@ def rendered_agent_source() -> str:
         compartment_id="ocid1.compartment.oc1..participant",
         platform_id="ocid1.aidataplatform.oc1.us-chicago-1.participant",
         participant_key="u101",
-        catalog_name="u101_aidp_lab",
+        catalog_name="u101_aidp",
     ).decode("utf-8")
 
 
@@ -135,7 +135,7 @@ def test_agent_source_reads_live_master_catalog_without_sql_connections() -> Non
     assert "no table or lineage is hard-coded" in source
     encoded_config = source.split("CONFIG = ", 1)[1].splitlines()[0]
     config = json.loads(encoded_config)
-    assert config["catalog_name"] == "u101_aidp_lab"
+    assert config["catalog_name"] == "u101_aidp"
     assert config["credential_name"] == "AidpGovernanceOperator"
     assert config["participant_key"] == "u101"
     assert config["table_prefix"] == "u101_"
@@ -253,7 +253,7 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
     client._ensure_workspace_layout = lambda *_args: False
     client._ensure_catalog = lambda name: (
         ({"key": "u101-catalog-key"}, False)
-        if name == "u101_aidp_lab"
+        if name == "u101_aidp"
         else (_ for _ in ()).throw(AssertionError("unexpected catalog"))
     )
     client._ensure_catalog_contract = lambda key, name: (
@@ -266,7 +266,7 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
             },
             False,
         )
-        if (key, name) == ("u101-catalog-key", "u101_aidp_lab")
+        if (key, name) == ("u101-catalog-key", "u101_aidp")
         else (_ for _ in ()).throw(AssertionError("unexpected schema contract"))
     )
     client._ensure_agent_compute = lambda workspace: ({"key": "ai-compute-key"}, False)
@@ -313,14 +313,14 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
         permission_paths
     )
     source = str(captured["source"])
-    assert "u101_aidp_lab" in source and "shared-spark-key" not in source
+    assert "u101_aidp" in source and "shared-spark-key" not in source
     assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
     assert captured["descriptor"]["participant_key"] == "u101"
     assert captured["descriptor"]["entry_file"] == "governance_agent.py"
     assert manifest["labs"]["agent"]["deployment_source_hash"] == captured[
         "descriptor"
     ]["entry_sha256"]
-    assert writes[-1]["agent"]["catalog_name"] == "u101_aidp_lab"
+    assert writes[-1]["agent"]["catalog_name"] == "u101_aidp"
 
 
 def test_active_agent_verifies_deployment_without_rotating_database_credentials() -> None:

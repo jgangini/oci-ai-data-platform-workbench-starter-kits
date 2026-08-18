@@ -63,6 +63,7 @@ def _sha256(content: bytes) -> str:
 
 
 def _common(code: str) -> str:
+    code = code.replace('_aidp_lab', '_aidp')
     if 'catalog_name = required_parameter("catalog_name")' not in code:
         code = code.replace(
             'objectstorage_namespace = required_parameter("objectstorage_namespace")\n',
@@ -70,7 +71,7 @@ def _common(code: str) -> str:
             'catalog_name = required_parameter("catalog_name")\n',
         )
     marker = 'if not workspace_root.startswith("/Workspace/medallon/"):\n    raise ValueError("Invalid workspace_root")\n'
-    addition = marker + '''if catalog_name != f"{participant_key}_aidp_lab":
+    addition = marker + '''if catalog_name != f"{participant_key}_aidp":
     raise ValueError("Invalid participant catalog")
 spark.conf.set("spark.aidp.lineage.enabled", "true")
 
@@ -182,7 +183,7 @@ def _upgrade_lab(lab_id: str, *, check: bool = False) -> bool:
         path = root / "notebooks" / item["file"]
         notebook = json.loads(path.read_text(encoding="utf-8"))
         code_cell = next(cell for cell in notebook["cells"] if cell["cell_type"] == "code")
-        code = "".join(code_cell["source"])
+        code = "".join(code_cell["source"]).replace("_aidp_lab", "_aidp")
         if position == len(metadata["notebooks"]):
             if "validated across governed Landing, Bronze, Silver and Gold tables" not in code:
                 code = _validation_code(code, lab_id, metadata["tables"])
@@ -210,12 +211,12 @@ def _upgrade_lab(lab_id: str, *, check: bool = False) -> bool:
         "target_tables": metadata["tables"]["gold"],
         "expected_entity_edges": ENTITY_EDGES[lab_id],
         "expected_column_edges": COLUMN_EDGES[lab_id],
-        "qualified_node_template": "{participant_key}_aidp_lab.oci_{layer}.{table_name}",
+        "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{table_name}",
         "required_schema_paths": [
-            "{participant_key}_aidp_lab.oci_landing.",
-            "{participant_key}_aidp_lab.oci_bronze.",
-            "{participant_key}_aidp_lab.oci_silver.",
-            "{participant_key}_aidp_lab.oci_gold.",
+            "{participant_key}_aidp.oci_landing.",
+            "{participant_key}_aidp.oci_bronze.",
+            "{participant_key}_aidp.oci_silver.",
+            "{participant_key}_aidp.oci_gold.",
         ],
         "forbidden_table_suffixes": ["lineage_demo"],
         "levels": ["ENTITY", "COLUMN"],

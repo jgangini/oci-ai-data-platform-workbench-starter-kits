@@ -160,7 +160,7 @@ class FakeApi:
         return post_apply.ApiResponse(200, {}, {})
 
 
-def test_reconcile_builds_shared_medallion_schemas_without_external_volumes(monkeypatch) -> None:
+def test_reconcile_leaves_legacy_catalog_empty_for_private_participant_catalogs(monkeypatch) -> None:
     monkeypatch.setattr(post_apply.time, "sleep", lambda _: None)
     api = FakeApi()
     outputs = {
@@ -181,13 +181,11 @@ def test_reconcile_builds_shared_medallion_schemas_without_external_volumes(monk
         for method, path, payload, _ in api.calls
         if method == "POST" and path == "/schemas"
     ]
-    assert {payload["displayName"] for payload in schema_posts} == {
-        "oci_landing", "oci_bronze", "oci_silver", "oci_gold"
-    }
+    assert schema_posts == []
     assert not any(method == "POST" and path == "/volumes" for method, path, _, _ in api.calls)
     schema_queries = [params for path, params in api.list_calls if path == "/schemas"]
     volume_queries = [params for path, params in api.list_calls if path == "/volumes"]
-    assert all(query["catalogKey"] == "aidp_lab-key" for query in schema_queries)
+    assert schema_queries == [{"catalogKey": "aidp_lab-key"}]
     assert volume_queries == []
     role_queries = [params for path, params in api.list_calls if path == "/roles"]
     assert {query["displayName"] for query in role_queries} == {
@@ -207,7 +205,7 @@ def test_reconcile_builds_shared_medallion_schemas_without_external_volumes(monk
     }
     assert reconciled["shared_compute_key"] == "aidp_cluster_shared_compute-key"
     assert reconciled["root_object_key"] == "medallon-key"
-    assert set(reconciled["shared_schema_keys"]) == set(post_apply.LAYERS)
+    assert "shared_schema_keys" not in reconciled
     workspace_permissions = api.actions["/workspaces/ws-key/permissions"]
     assert {
         (item["grantee"], tuple(item["granteePermissions"]))
@@ -216,26 +214,12 @@ def test_reconcile_builds_shared_medallion_schemas_without_external_volumes(monk
         ("AIDP_LAB_DEVELOPER", ("USER",)),
         ("AIDP_LAB_PENDING", ("USER",)),
     }
-    catalog_permissions = api.actions["/catalogs/aidp_lab-key/permissions"]
-    assert {
-        (item["grantee"], tuple(item["granteePermissions"]))
-        for item in catalog_permissions
-    } == {
-        ("AIDP_LAB_DEVELOPER", ("SELECT",)),
-    }
+    assert "/catalogs/aidp_lab-key/permissions" not in api.actions
     compute_permissions = api.actions[
         "/workspaces/ws-key/clusters/aidp_cluster_shared_compute-key/permissions"
     ]
     assert {item["grantee"] for item in compute_permissions} == {"AIDP_LAB_DEVELOPER"}
     assert "/workspaces/ws-key/objects/medallon-key/permissions" not in api.actions
-    for layer in post_apply.LAYERS:
-        permissions = api.actions[
-            f"/schemas/aidp_lab.oci_{layer}/permissions"
-        ]
-        assert {
-            (item["grantee"], tuple(item["granteePermissions"]))
-            for item in permissions
-        } == {("AIDP_LAB_DEVELOPER", ("ADMIN",))}
 
 
 def test_reconcile_rejects_operator_without_platform_admin_membership(monkeypatch) -> None:

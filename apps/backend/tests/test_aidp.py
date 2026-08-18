@@ -360,7 +360,7 @@ def test_two_participants_upload_identical_pack_assets_with_isolated_job_identit
             jobs.append((participant, job_root)) or (f"wf_{participant}_banking", "job", False)
         )
         client._ensure_participant_content(
-            "workspace", "compute", key, pack, root, f"{key}_aidp_lab", True
+            "workspace", "compute", key, pack, root, f"{key}_aidp", True
         )
         files.pop("/lab-manifest.json")
         return files, notebooks, jobs
@@ -432,7 +432,7 @@ def test_new_v4_manifest_uses_code_and_email_workspace_paths() -> None:
     assert manifest["participant_code"] == 101
     assert manifest["participant_email"] == "student+alias@example.com"
     assert manifest["layout_version"] == 4
-    assert manifest["catalog"]["name"] == "u101_aidp_lab"
+    assert manifest["catalog"]["name"] == "u101_aidp"
 
 
 def test_local_multi_lab_lifecycle_is_idempotent_and_protects_last_lab() -> None:

@@ -165,7 +165,7 @@ Notebooks receive `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, 
 
 ### 5. Inspect tables and lineage
 
-Each participant receives a private catalog such as `u101_aidp_lab`, containing governed `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas. Table names include the participant key and laboratory ID, for example:
+Each participant receives a private catalog such as `u101_aidp`, containing governed `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas. Table names include the participant key and laboratory ID, for example:
 
 ```text
 u101_telco_lineage_customer_360
