@@ -148,6 +148,7 @@ COMPARTMENT_ID=${compartment_id}
 AUTONOMOUS_DATABASE_ID=${autonomous_database_id}
 AUTONOMOUS_RUNTIME_FILE=/etc/aidp-lab/autonomous/runtime.json
 AGENT_MODEL_ID=${agent_model_id}
+ENFORCE_GOVERNED_DATA_ACCESS=${enforce_governed_data_access}
 OCI_CONFIG_FILE=/etc/aidp-lab/oci/config
 OBJECTSTORAGE_NAMESPACE=${objectstorage_namespace}
 BUCKET_NAME=${bucket_name}

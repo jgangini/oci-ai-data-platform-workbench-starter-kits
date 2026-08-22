@@ -72,6 +72,51 @@ output "autonomous_database_compute_count" {
   value = var.autonomous_database_mode == "new" ? var.autonomous_database_compute_count : null
 }
 
+output "enable_ai_data_governance" {
+  value = var.enable_ai_data_governance
+}
+
+output "governance_gateway_cluster_id" {
+  value = try(oci_containerengine_cluster.governance[0].id, null)
+}
+
+output "governance_gateway_private_endpoint" {
+  value = try(oci_containerengine_cluster.governance[0].endpoints[0].private_endpoint, null)
+}
+
+output "governance_gateway_deploy_pipeline_id" {
+  value = try(oci_devops_deploy_pipeline.governance[0].id, null)
+}
+
+output "governance_gateway_deployment_id" {
+  value = try(oci_devops_deployment.governance[0].id, null)
+}
+
+output "governance_gateway_jdbc_user_ocid" {
+  value = var.enable_ai_data_governance ? var.governance_gateway_jdbc_user_ocid : null
+}
+
+output "governance_gateway_oidc_authority" {
+  value = var.enable_ai_data_governance ? var.governance_gateway_oidc_authority : null
+}
+
+output "governance_gateway_oidc_client_id" {
+  value = var.enable_ai_data_governance ? var.governance_gateway_oidc_client_id : null
+}
+
+output "governance_gateway_oidc_issuer" {
+  value = var.enable_ai_data_governance ? var.governance_gateway_oidc_issuer : null
+}
+
+output "governance_gateway_oidc_audience" {
+  value = var.enable_ai_data_governance ? var.governance_gateway_oidc_audience : null
+}
+
+output "governance_gateway_url" {
+  description = "Private gateway service URL, populated after the Kubernetes service is installed."
+  value       = var.enable_ai_data_governance ? "https://ai-data-governance-gateway.aidp-governance.svc:8443" : null
+}
+
 output "agent_model_id" {
   value = var.agent_model_id
 }
@@ -107,7 +152,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Fresh-only v2.0.3 contract: post-apply creates no external volumes."
+  description = "Fresh-only v2.1.0 contract: post-apply creates no external volumes."
   value       = 0
 }
 

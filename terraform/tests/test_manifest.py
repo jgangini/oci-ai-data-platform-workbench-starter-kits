@@ -45,18 +45,31 @@ def test_deploy_studio_manifest_contract() -> None:
         re.DOTALL,
     )
     assert fields["autonomous_database_mode"]["group"] == "database"
-    assert fields["admin_username"]["group"] == "application_vm"
     assert fields["existing_autonomous_database_ocid"]["visible_when"] == {
         "field": "autonomous_database_mode",
         "equals": "existing",
     }
+    assert fields["enable_ai_data_governance"]["group"] == "optional_addons"
+    assert fields["governance_gateway_image"]["visible_when"] == {
+        "field": "enable_ai_data_governance",
+        "equals": "true",
+    }
+    assert fields["governance_gateway_jdbc_driver_bucket"]["visible_when"] == {
+        "field": "enable_ai_data_governance",
+        "equals": "true",
+    }
+    assert fields["governance_gateway_jdbc_user_ocid"]["visible_when"] == {
+        "field": "enable_ai_data_governance",
+        "equals": "true",
+    }
+    assert fields["admin_username"]["group"] == "application_vm"
     assert manifest["post_apply"]["secret_inputs"] == [
         "autonomous_database_admin_password",
         "autonomous_database_wallet_password",
     ]
     assert manifest["form"]["email_access_fields"] == ["admin_username", "admin_password", "registration_code"]
     assert manifest["presentation"]["title"] == "OCI AI Data Platform Cloud Migration Lab"
-    assert manifest["presentation"]["tags"] == ["VM", "VCN", "AI Data Platform", "Object Storage Bucket", "IAM Policies"]
+    assert manifest["presentation"]["tags"] == ["VM", "VCN", "OKE", "AI Data Platform", "Data Governance", "Object Storage", "IAM"]
     assert manifest["presentation"]["image"] == "/assets/oci-aidp-cloud-migration-lab.png"
     assert [step["key"] for step in manifest["run_steps"]] == [
         "queue",
@@ -111,6 +124,13 @@ def test_deploy_studio_manifest_contract() -> None:
         "autonomous_database_version",
         "autonomous_database_workload",
         "autonomous_database_compute_count",
+        "enable_ai_data_governance",
+        "governance_gateway_cluster_id",
+        "governance_gateway_private_endpoint",
+        "governance_gateway_deploy_pipeline_id",
+        "governance_gateway_deployment_id",
+        "governance_gateway_jdbc_user_ocid",
+        "governance_gateway_url",
         "agent_model_id",
     }.issubset(manifest["outputs"])
     assert "aidp_console_url" not in manifest["outputs"]
@@ -282,7 +302,7 @@ def test_terraform_files_follow_select_ai_order() -> None:
         "j_outputs.tf",
     }
     assert expected.issubset({path.name for path in root.glob("*.tf")})
-    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefghiij")
+    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefghiiiij")
     assert not {"main.tf", "network.tf", "compute.tf", "storage.tf", "identity.tf", "aidp.tf", "outputs.tf", "providers.tf"} & {
         path.name for path in root.glob("*.tf")
     }

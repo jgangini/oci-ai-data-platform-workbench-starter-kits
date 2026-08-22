@@ -4,12 +4,14 @@ OCI AI Data Platform Cloud Migration Lab is a hands-on data engineering environm
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more laboratories without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current stable release: **v2.0.3**. The `main` branch and Deploy Studio release contract are aligned with that immutable tag.
+Current published stable release: **v2.1.0**. This release adds the optional AI Data Governance Gateway while preserving Autonomous Database for AI Compute agent memory.
 
 ## What the project provides
 
 - A shared AIDP workspace with `aidp_cluster_shared_compute` for Spark workflows, plus a private catalog with four medallion schemas per participant.
 - A shared `aidp_agent_shared_compute` AI Compute runtime for participant-specific governance Agents.
+- An optional private AI Data Governance Gateway on OKE, backed by the generic `oci_control` Delta schema.
+- Autonomous AI Database 26ai for the AI Compute Agent memory/checkpointer contract.
 - A private Object Storage bucket organized as `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/`.
 - A registration and administration web application hosted on an OCI Compute VM.
 - Identity Domains onboarding with pending and active participant groups.
@@ -41,7 +43,7 @@ The standard laboratories contain five notebooks, one for each stage. The Telco 
 | Telco Customer 360 Lineage | 2.0.0 | 10 CSV files | 14 tasks | Cross-domain Customer 360, service ownership, geographic summaries, and detailed lineage |
 | Retail | 2.0.0 | 4 CSV files | 5 tasks | Customer value, product sales, order quality, and full medallion lineage |
 | Healthcare | 2.0.0 | 4 CSV files | 5 tasks | Patient utilization, provider activity, encounter quality, and full medallion lineage |
-| Data Governance Agent | 1.4.5 | — | — | Participant-editable DAMA-DMBOK Agent for live catalog inventory, table metadata, entity/column lineage, workflow tasks, notebook paths, and participant-isolated governance guidance |
+| Data Governance Agent | 2.0.0 | — | — | Participant-editable DAMA-DMBOK Agent for catalog/lineage evidence, effective-policy explanations, and registered governed queries |
 
 Laboratory order, descriptions, versions, and availability come from [`apps/backend/app/labs/catalog.json`](apps/backend/app/labs/catalog.json) and each package's `lab.json`. Adding a future package does not require hard-coded changes to the registration interface.
 
@@ -105,11 +107,38 @@ Healthcare prepares patient, provider, appointment, and encounter data for opera
 
 ### Data Governance Agent
 
-The optional Agent laboratory creates `u101_agent_data_governance` for participant `u101`. It acts as a DAMA-DMBOK data-governance specialist: it can describe that participant's Master Catalog, inspect entity and column lineage, and run only the predefined read queries shipped with the package. Answers must separate observed evidence from explanation, governance implications, and recommendations or limitations. The Agent does not accept arbitrary SQL and does not infer missing owners, stewards, controls, or lineage.
+The optional Agent laboratory creates or reconciles `u101_agent_data_governance` for participant `u101`. It acts as a DAMA-DMBOK data-governance specialist: it can describe that participant's Master Catalog, inspect entity and column lineage, explain the effective policy of a registered query, and execute only a registered `query_id` through the gateway. Answers must separate observed evidence from explanation, governance implications, and recommendations or limitations. The Agent rejects arbitrary SQL and does not infer missing owners, stewards, controls, or lineage.
 
 The package includes a versioned acceptance matrix covering catalog scope, quality, entity and column lineage, stewardship gaps, DAMA control mapping, participant isolation, unsupported certification claims, and arbitrary-SQL refusal. Candidate releases execute these questions live and retain the tool trace and response text as structured evidence without participant data from another catalog.
 
-Each participant receives an independent Agent definition, but all participant Agents reuse `aidp_agent_shared_compute`. Their predefined Spark SQL tools reuse `aidp_cluster_shared_compute` and query only fully qualified tables in the participant's private Master Catalog. The Agent does not mirror table metadata or laboratory metrics into Autonomous. A participant deletion removes the exact Agent, catalog, workspace, data, and Identity Domains user; deployments upgraded from the earlier Autonomous-mirror design also clean up only that participant's legacy database users and external catalog.
+Each participant receives an independent Agent definition, but all participant Agents reuse `aidp_agent_shared_compute`. AIDP injects the Agent `checkpointer`; Autonomous AI Database remains deployed because AI Compute uses it for persistent Agent memory. The governance gateway never replaces that memory path. It evaluates the effective user token supplied as a required, non-logged AIDP session variable and never gives the Agent direct access to `oci_control`.
+
+The package preserves `catalog_inventory` and `catalog_lineage` and adds `governance_policy_explain` and `governed_query`. A source, package, or tool-contract hash change causes one controlled redeploy; an unchanged Agent is reused. A participant deletion removes only that participant's Agent and legacy participant-scoped mirror artifacts. It does not remove the shared Autonomous deployment or shared AI Compute.
+
+### AI Data Governance Gateway
+
+The optional **Install AI Data Governance Gateway** add-on deploys a private, least-privilege service on OKE. It is the policy enforcement point for the VS Code SQL editor, governed notebooks, and Agent tools. The authoritative control plane is the `oci_control` Delta schema in the selected standard AIDP catalog:
+
+- `data_governance` stores catalog classification, sensitivity, ownership, and review state.
+- `access_policy` stores `ALLOW`, `DENY`, `NULL`, `MASK`, and `TOKENIZE` rules for existing users, groups, and roles.
+- `lineage_propagation` records deterministic propagation rules and conflicts.
+- `query_registry` stores approved parameterized query definitions.
+- `token_vault` stores token references, never plaintext source values.
+- `governance_audit` records policy changes and effective query decisions.
+- `sync_state` records versioned Master Catalog snapshots and tombstones.
+
+`AI_DATA_PLATFORM_ADMIN` can manage policies. `AIDP_DEVELOPER` cannot read `oci_control`; the Permissions UI is disabled and the API returns `403`. New or unclassified columns fail closed. `SELECT *` omits denied columns, while an explicit denied reference returns `403` and names the restricted columns. Masking and tokenization happen before results, previews, logs, or Agent responses leave the gateway.
+
+```mermaid
+flowchart LR
+  VS[VS Code extension] -->|OAuth user token| GW[Private governance gateway on OKE]
+  AG[AIDP governance Agent] -->|non-logged session token| GW
+  GW -->|registered query / JDBC| AIDP[AIDP compute and Master Catalog]
+  GW -->|policy and audit| CTRL[(Delta: oci_control)]
+  AG -->|AIDP checkpointer| ADB[(Autonomous AI Database 26ai)]
+```
+
+OKE uses Workload Identity for OCI access. If the AIDP JDBC driver requires a technical credential, it is a dedicated least-privilege identity stored in OCI Vault; the personal deployment key is never mounted in pods. The gateway endpoint is private and requires an approved AIDP workspace-to-OKE network path before live Agent execution. See [`docs/data-governance.md`](docs/data-governance.md) for the complete contract and acceptance gates.
 
 ## End-to-end user guide
 
@@ -297,13 +326,14 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 - Deploy Studio does not package OCI credentials in the Terraform source or state.
 - The VM receives the operator profile once through an encrypted bootstrap object, validates it, installs it with restrictive permissions, and deletes the bootstrap object.
 - The Autonomous wallet is stored only on the registration VM at `/opt/aidp-lab/autonomous` with owner-only permissions and is mounted read-only into the application container. The ADMIN password stays in the post-apply process; the VM receives only a rotated `EXECUTE`-only database operator and the wallet credentials required for participant lifecycle operations.
-- New Agent assignments do not create participant database users or copy Master Catalog metadata into Autonomous. The VM retains the allowlisted database operator only to support platform AI bootstrap and exact cleanup of legacy mirrored Agent deployments.
+- Autonomous AI Database remains part of every deployment that hosts AI Compute Agents: AIDP uses it for Agent memory/checkpointing. Governance policies and audit records live separately in Delta `oci_control`; neither store is a fallback for the other.
+- New Agent assignments do not copy Master Catalog metadata into Autonomous. The VM retains the allowlisted database operator for AI bootstrap and exact cleanup of legacy participant mirrors.
 - Participants receive access only to their folder, workflow, namespaced objects, and namespaced tables.
 - The data bucket uses Oracle-managed encryption and remains private.
 
 ## OCI Deploy Studio compatibility
 
-The **v2.0.3** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery extensions.
+The **v2.1.0** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery extensions.
 
 Deploy Studio support includes:
 
@@ -314,10 +344,11 @@ Deploy Studio support includes:
 - Terraform plan and apply through OCI Resource Manager.
 - A selectable effective region from compatible `READY` subscriptions and a dynamically discovered active Chat model in that same region.
 - New or existing Autonomous AI Database 26ai Data Warehouse, with ECPU model and a default of 4 ECPUs for a new database.
+- Optional private OKE governance gateway, deployed only when its checkbox is enabled and always alongside—not instead of—the Autonomous Agent-memory dependency.
 - Post-apply reconciliation of the AIDP workspace, catalog, `aidp_cluster_shared_compute`, AI feature enablement, Identity roles, participant application, and final access artifact. The first Agent assignment reuses the shared `aidp_agent_shared_compute` runtime.
 - Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
 
-The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.0.3` tag rather than an untagged development commit.
+The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.0` tag rather than an untagged development commit.
 
 Deploy Studio currently applies the Resource Manager plan automatically after planning and does not expose a repository hook between those stages. For controlled deployments, review the generated plan or run `python terraform/release_gate.py --plan-json <plan.json>` in CI before starting the final apply.
 

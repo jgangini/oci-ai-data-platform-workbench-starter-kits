@@ -76,6 +76,21 @@ def test_participant_code_names_technical_resources_and_email_names_workspace() 
         workspace_participant_root(EMAIL, EMAIL)
 
 
+def test_governed_access_fails_closed_when_direct_catalog_select_remains() -> None:
+    client = bare_client()
+    client._list = lambda *_args, **_kwargs: [{
+        "grantee": USER_OCID, "granteeType": "USER", "granteePermissions": ["SELECT"],
+    }]
+    with pytest.raises(AidpProvisionError, match="revoke that permission"):
+        client._assert_permission_absent("/catalogs/aidp-lab", USER_OCID, "SELECT")
+
+
+def test_governed_access_accepts_catalog_without_direct_select() -> None:
+    client = bare_client()
+    client._list = lambda *_args, **_kwargs: []
+    client._assert_permission_absent("/catalogs/aidp-lab", USER_OCID, "SELECT")
+
+
 def test_request_retry_token_covers_binary_content_and_identity_headers() -> None:
     client = bare_client()
     calls: list[dict] = []

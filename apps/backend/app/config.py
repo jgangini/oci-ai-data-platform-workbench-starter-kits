@@ -26,6 +26,8 @@ class Settings:
     autonomous_database_id: str = ""
     autonomous_runtime_file: str = "/etc/aidp-lab/autonomous/runtime.json"
     agent_model_id: str = ""
+    governance_gateway_url: str = ""
+    enforce_governed_data_access: bool = False
     oci_config_file: str = "/etc/aidp-lab/oci/config"
     objectstorage_namespace: str = ""
     bucket_name: str = ""
@@ -55,6 +57,9 @@ class Settings:
                 "/etc/aidp-lab/autonomous/runtime.json",
             ),
             agent_model_id=os.getenv("AGENT_MODEL_ID", ""),
+            governance_gateway_url=os.getenv("GOVERNANCE_GATEWAY_URL", "").rstrip("/"),
+            enforce_governed_data_access=os.getenv("ENFORCE_GOVERNED_DATA_ACCESS", "false").lower()
+            in {"1", "true", "yes"},
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
             objectstorage_namespace=os.getenv("OBJECTSTORAGE_NAMESPACE", ""),
             bucket_name=os.getenv("BUCKET_NAME", ""),

@@ -101,6 +101,7 @@ def test_vm_bootstrap_identity_is_authorized_before_instance_launch() -> None:
     assert "target.object.name = '.bootstrap/operator-credentials.json'" in bootstrap_policy
     assert "oci_identity_policy.vm_bootstrap" in instance
     assert "terraform_data.validate_existing_autonomous_database" in instance
+    assert "oci_containerengine_node_pool.governance" in instance
     assert '"${oci_identity_tag_namespace.vm_bootstrap.name}.${oci_identity_tag.vm_bootstrap.name}" = local.suffix' in instance
 
 

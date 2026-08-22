@@ -1,0 +1,22 @@
+name: aidp-governance-local
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: apps/governance_gateway/Dockerfile
+    environment:
+      GOVERNANCE_OIDC_ISSUER: https://identity.example.invalid
+      GOVERNANCE_OIDC_AUDIENCE: local-governance-tests
+      GOVERNANCE_CONTROL_CATALOG: aidp_lab
+      GOVERNANCE_CONTROL_SCHEMA: oci_control
+    ports:
+      - "127.0.0.1:18082:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1770
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: "no"

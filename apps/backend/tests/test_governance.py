@@ -33,6 +33,7 @@ def bare_client() -> AidpClient:
         objectstorage_namespace="namespace",
         aidp_region="us-chicago-1",
         agent_model_id="ocid1.generativeaimodel.oc1.us-chicago-1.example",
+        governance_gateway_url="https://governance.example.invalid",
         aidp_platform_id="ocid1.aidataplatform.oc1.us-chicago-1.example",
         compartment_id="ocid1.compartment.oc1..example",
         autonomous_database_id="ocid1.autonomousdatabase.oc1.us-chicago-1.example",
@@ -98,6 +99,10 @@ def test_agent_source_reads_live_master_catalog_without_sql_connections() -> Non
     assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
     assert "Call at most one tool per model turn" in source
     assert "def catalog_inventory(" in source
+    assert "def governance_policy_explain(" in source
+    assert "def governed_query(" in source
+    assert "chat_context.session_context_var.get()" in source
+    assert '"shouldLog"' not in source
     assert "search_term: str = \"\"" in source
     assert '"time_updated"' in source
     assert '"counts_by_layer"' in source
@@ -140,6 +145,7 @@ def test_agent_source_reads_live_master_catalog_without_sql_connections() -> Non
     assert config["participant_key"] == "u101"
     assert config["table_prefix"] == "u101_"
     assert config["platform_id"].startswith("ocid1.aidataplatform.")
+    assert config["gateway_url"] == ""
     assert "spark_compute_key" not in config
     assert "catalog_key" not in config and "schema_keys" not in config
     compile(source, "governance_agent.py", "exec")
@@ -212,6 +218,8 @@ def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
     assert {tool for case in cases for tool in case["expected_tools"]} == {
         "catalog_inventory",
         "catalog_lineage",
+        "governance_policy_explain",
+        "governed_query",
     }
     assert {case["category"] for case in cases} >= {
         "catalog",
@@ -317,6 +325,14 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
     assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
     assert captured["descriptor"]["participant_key"] == "u101"
     assert captured["descriptor"]["entry_file"] == "governance_agent.py"
+    assert captured["descriptor"]["schema_version"] == 2
+    assert captured["descriptor"]["tool_contract_version"] == "2.0.0"
+    assert set(captured["descriptor"]["tools"]) == {
+        "catalog_inventory",
+        "catalog_lineage",
+        "governance_policy_explain",
+        "governed_query",
+    }
     assert manifest["labs"]["agent"]["deployment_source_hash"] == captured[
         "descriptor"
     ]["entry_sha256"]
@@ -412,7 +428,51 @@ def test_existing_agent_is_updated_after_workspace_source_changes() -> None:
     )
     assert requests[0][2]["entryFilePath"].endswith("/governance_agent.py")
     assert requests[0][2]["computeKey"] == "compute-key"
+    assert requests[0][2]["sessionConfig"] == {
+        "variables": {
+            "governance_access_token": {
+                "name": "governance_access_token",
+                "description": (
+                    "Short-lived effective-user OAuth token for the private "
+                    "governance gateway"
+                ),
+                "isRequired": True,
+                "shouldLog": False,
+                "isSystem": False,
+            }
+        }
+    }
     assert requests[0][3].startswith("agent-update:")
+
+
+def test_agent_source_rejects_unsafe_governance_gateway_origins() -> None:
+    with pytest.raises(ValueError, match="credential-free HTTPS origin"):
+        agent_source(
+            model_id="model",
+            region="us-chicago-1",
+            compartment_id="compartment",
+            platform_id="platform",
+            participant_key="u101",
+            catalog_name="u101_aidp",
+            gateway_url="https://user:secret@example.invalid/path?token=secret",
+        )
+
+
+def test_agent_source_preserves_aidp_autonomous_checkpointer_contract() -> None:
+    source = agent_source(
+        model_id="model",
+        region="us-chicago-1",
+        compartment_id="compartment",
+        platform_id="platform",
+        participant_key="u101",
+        catalog_name="u101_aidp",
+        gateway_url="https://governance.example.invalid",
+    ).decode("utf-8")
+
+    assert 'checkpointer = globals().get("checkpointer")' in source
+    assert "create_react_agent(checkpointer=checkpointer" in source
+    assert '"gateway_url": "https://governance.example.invalid"' in source
+    assert "Authorization" in source and "governance_access_token" in source
 
 
 def test_active_agent_deployment_is_redeployed_for_new_source_revision() -> None:

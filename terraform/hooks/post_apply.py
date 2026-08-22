@@ -28,7 +28,8 @@ from oci._vendor import requests
 API_VERSION = "20240831"
 GOVERNANCE_API_VERSION = "20260430"
 CATALOG_NAME = "aidp_lab"
-DEVELOPER_ROLE_NAME = "AIDP_LAB_DEVELOPER"
+DEVELOPER_ROLE_NAME = "AIDP_DEVELOPER"
+LEGACY_DEVELOPER_ROLE_NAME = "AIDP_LAB_DEVELOPER"
 PENDING_ROLE_NAME = "AIDP_LAB_PENDING"
 SHARED_COMPUTE_NAME = "aidp_cluster_shared_compute"
 BOOTSTRAP_OBJECT_NAME = ".bootstrap/operator-credentials.json"
@@ -372,6 +373,7 @@ def assert_operator_platform_admin(
     operator_user_ocid: str,
     *,
     attempts: int = RESOURCE_WAIT_ATTEMPTS,
+    principal_label: str = "deployment operator",
 ) -> None:
     last_not_ready: ApiRequestError | None = None
     for attempt in range(attempts):
@@ -395,10 +397,10 @@ def assert_operator_platform_admin(
             _sleep(5)
     if last_not_ready:
         raise ReconcileError(
-            "AIDP Workbench did not authorize the deployment operator after the "
+            f"AIDP Workbench did not authorize the {principal_label} after the "
             f"readiness window; last request: {last_not_ready}"
         ) from last_not_ready
-    raise ReconcileError("OCI deployment operator is not an AI_DATA_PLATFORM_ADMIN member")
+    raise ReconcileError(f"OCI {principal_label} is not an AI_DATA_PLATFORM_ADMIN member")
 
 
 def _admin_permission_is_assigned(
@@ -678,6 +680,106 @@ def ensure_role_permission(
             inheritable,
         ),
     )
+
+
+def verify_governance_schema_permissions(
+    api: AidpApi,
+    catalog_key: str,
+    technical_user_ocid: str,
+    *,
+    attempts: int = RESOURCE_WAIT_ATTEMPTS,
+) -> None:
+    """Fail closed if oci_control is visible outside the administrative boundary."""
+    if not technical_user_ocid.startswith("ocid1.user."):
+        raise ReconcileError("The governance JDBC technical user OCID is invalid")
+    assert_operator_platform_admin(
+        api,
+        technical_user_ocid,
+        attempts=attempts,
+        principal_label="governance JDBC technical user",
+    )
+    schema: dict[str, Any] | None = None
+    for attempt in range(attempts):
+        schema = exact_one(
+            [
+                item
+                for item in api.list_all("/schemas", params={"catalogKey": catalog_key})
+                if item.get("displayName") == "oci_control"
+            ],
+            "oci_control",
+            "governance control schema",
+        )
+        if schema is not None:
+            break
+        if attempt + 1 < attempts:
+            _sleep(5)
+    if schema is None or not schema.get("key"):
+        raise ReconcileError("The governance gateway did not publish the oci_control schema")
+
+    permissions = api.list_all(
+        f"/schemas/{quote(str(schema['key']), safe='')}/permissions"
+    )
+    technical_admin = False
+    for item in permissions:
+        grantee_type = str(item.get("granteeType") or "").upper()
+        grantee = str(item.get("grantee") or "")
+        grantee_name = str(item.get("granteeName") or grantee)
+        granted = set(item.get("granteePermissions") or [])
+        if not granted:
+            continue
+        if grantee_type == "ROLE" and grantee_name == "AI_DATA_PLATFORM_ADMIN":
+            technical_admin = technical_admin or "ADMIN" in granted
+            continue
+        if grantee_type == "USER" and grantee == technical_user_ocid:
+            technical_admin = technical_admin or "ADMIN" in granted
+            continue
+        inheritance = "inherited " if bool(item.get("isInherited")) else ""
+        raise ReconcileError(
+            f"oci_control has an unauthorized {inheritance}grant for {grantee_name}"
+        )
+    if not technical_admin:
+        raise ReconcileError(
+            "The governance JDBC technical user must inherit or hold ADMIN on oci_control"
+        )
+
+
+def retire_legacy_developer_role(
+    api: AidpApi,
+    new_role_key: str,
+    developer_group_ocid: str,
+    expected_permissions: set[tuple[str, str, frozenset[str]]],
+) -> bool:
+    """Remove the old role only after the replacement is demonstrably equivalent."""
+    assert_role_members_exact(
+        api, new_role_key, DEVELOPER_ROLE_NAME, "GROUP", developer_group_ocid
+    )
+    assert_role_permissions_exact(
+        api, new_role_key, DEVELOPER_ROLE_NAME, expected_permissions
+    )
+    legacy = exact_one(
+        api.list_all("/roles", params={"displayName": LEGACY_DEVELOPER_ROLE_NAME}),
+        LEGACY_DEVELOPER_ROLE_NAME,
+        "legacy developer role",
+    )
+    if legacy is None:
+        return False
+    legacy_key = str(legacy.get("key") or "")
+    if not legacy_key:
+        raise ReconcileError("Legacy developer role has no key")
+    assert_role_members_exact(
+        api, legacy_key, LEGACY_DEVELOPER_ROLE_NAME, "GROUP", developer_group_ocid
+    )
+    assert_role_permissions_exact(
+        api, legacy_key, LEGACY_DEVELOPER_ROLE_NAME, expected_permissions
+    )
+    api.request("DELETE", f"/roles/{quote(legacy_key, safe='')}")
+    if exact_one(
+        api.list_all("/roles", params={"displayName": LEGACY_DEVELOPER_ROLE_NAME}),
+        LEGACY_DEVELOPER_ROLE_NAME,
+        "legacy developer role",
+    ) is not None:
+        raise ReconcileError("Legacy developer role remained visible after deletion")
+    return True
 
 
 def assert_fresh_catalog(
@@ -982,6 +1084,16 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
         assert_role_permissions_exact(
             api, role_keys[role_name], role_name, expected_permissions[role_name]
         )
+    legacy_retired = retire_legacy_developer_role(
+        api,
+        role_keys[DEVELOPER_ROLE_NAME],
+        str(outputs["developer_group_ocid"]),
+        expected_permissions[DEVELOPER_ROLE_NAME],
+    )
+    events.append(
+        f"Legacy role {LEGACY_DEVELOPER_ROLE_NAME} "
+        f"{'retired' if legacy_retired else 'not present'} after equivalence validation"
+    )
     events.append("AIDP developer and pending RBAC verified; operator retains platform administration")
 
     return (
@@ -1605,6 +1717,20 @@ def main() -> int:
             if credential_created
             else "AIDP governance operator credential rotated"
         )
+        if bool(outputs.get("enable_ai_data_governance")):
+            technical_user_ocid = str(outputs.get("governance_gateway_jdbc_user_ocid") or "")
+            if technical_user_ocid == str(outputs["operator_user_ocid"]):
+                raise ReconcileError(
+                    "The governance JDBC technical user must not be the deployment operator"
+                )
+            verify_governance_schema_permissions(
+                credential_api,
+                str(reconciled["catalog_key"]),
+                technical_user_ocid,
+            )
+            messages.append(
+                "oci_control access verified for platform administrators and the dedicated JDBC identity"
+            )
         aidp_url = resolve_workbench_url(outputs, oci_config, signer)
         if not aidp_url:
             raise ReconcileError("AIDP Workbench direct URL is not published yet")

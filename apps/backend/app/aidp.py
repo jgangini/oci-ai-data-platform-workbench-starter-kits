@@ -641,6 +641,20 @@ class AidpClient:
         *,
         repair_drift: bool,
     ) -> tuple[str, bool]:
+        session_config = {
+            "variables": {
+                "governance_access_token": {
+                    "name": "governance_access_token",
+                    "description": (
+                        "Short-lived effective-user OAuth token for the private "
+                        "governance gateway"
+                    ),
+                    "isRequired": True,
+                    "shouldLog": False,
+                    "isSystem": False,
+                }
+            }
+        }
         entry_path = f"{root}/governance_agent.py"
         dependencies_path = f"{root}/requirements.txt"
         descriptor_path = f"{root}/agent-manifest.json"
@@ -669,12 +683,13 @@ class AidpClient:
                 f"/workspaces/{workspace_key}/agents",
                 payload={
                     "displayName": name,
-                    "description": "Participant-editable data governance agent with predefined read-only tools",
+                    "description": "Participant-editable data governance agent with predefined governance tools",
                     "pathInfo": root,
                     "type": "CODE",
                     "entryFilePath": entry_path,
                     "dependenciesFilePath": dependencies_path,
                     "computeKey": compute_key,
+                    "sessionConfig": session_config,
                 },
                 phase="content",
             )
@@ -698,11 +713,12 @@ class AidpClient:
                     "displayName": name,
                     "description": (
                         "Participant-editable data governance agent with predefined "
-                        "read-only tools"
+                        "governance tools"
                     ),
                     "entryFilePath": entry_path,
                     "dependenciesFilePath": dependencies_path,
                     "computeKey": compute_key,
+                    "sessionConfig": session_config,
                 },
                 phase="content",
                 retry_scope=f"agent-update:{hashlib.sha256(source).hexdigest()}",
@@ -1670,6 +1686,23 @@ class AidpClient:
             raise AidpProvisionPending("AIDP has not applied the participant permission yet.", "permissions")
         return True
 
+    def _assert_permission_absent(
+        self,
+        resource_path: str,
+        user_ocid: str,
+        permission: str,
+    ) -> None:
+        current = self._list(f"{resource_path}/permissions", phase="permissions")
+        if any(
+            self._permission_grantee(item) == (user_ocid, "USER")
+            and permission in self._permission_values(item)
+            for item in current
+        ):
+            raise AidpProvisionError(
+                "Governed data access is enabled, but this participant still has direct catalog SELECT. "
+                "An AI_DATA_PLATFORM_ADMIN must revoke that permission in AIDP before retrying."
+            )
+
     def _ensure_permissions(
         self,
         workspace_key: str,
@@ -1694,12 +1727,13 @@ class AidpClient:
             "ADMIN",
             inheritable=True,
         ) or changed
-        changed = self._ensure_permission(
-            f"/catalogs/{catalog_key}",
-            "assignCatalogPermissionDetails",
-            user_ocid,
-            "SELECT",
-        ) or changed
+        catalog_path = f"/catalogs/{catalog_key}"
+        if getattr(self.settings, "enforce_governed_data_access", False):
+            self._assert_permission_absent(catalog_path, user_ocid, "SELECT")
+        else:
+            changed = self._ensure_permission(
+                catalog_path, "assignCatalogPermissionDetails", user_ocid, "SELECT"
+            ) or changed
         changed = self._ensure_permission(
             f"/workspaces/{workspace_key}/jobs/{job_key}",
             "assignJobPermissionDetails",
@@ -1881,10 +1915,11 @@ class AidpClient:
             platform_id=self.settings.aidp_platform_id,
             participant_key=key,
             catalog_name=catalog_name,
+            gateway_url=self.settings.governance_gateway_url,
         )
         descriptor = json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "lab_id": pack.lab_id,
                 "pack_version": pack.pack_version,
                 "pack_hash": pack.pack_sha256,
@@ -1892,6 +1927,13 @@ class AidpClient:
                 "catalog_name": catalog_name,
                 "entry_file": "governance_agent.py",
                 "entry_sha256": hashlib.sha256(source).hexdigest(),
+                "tool_contract_version": "2.0.0",
+                "tools": [
+                    "catalog_inventory",
+                    "catalog_lineage",
+                    "governance_policy_explain",
+                    "governed_query",
+                ],
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -2017,7 +2059,6 @@ class AidpClient:
                 "assignClusterPermissionDetails",
                 "USE",
             ),
-            (f"/catalogs/{catalog_key}", "assignCatalogPermissionDetails", "SELECT"),
             (
                 f"/workspaces/{workspace_key}/agents/{agent_key}",
                 "assignAgentPermissionDetails",
@@ -2025,6 +2066,13 @@ class AidpClient:
             ),
         ):
             changed = self._ensure_permission(path, action, user_ocid, permission) or changed
+        catalog_path = f"/catalogs/{catalog_key}"
+        if getattr(self.settings, "enforce_governed_data_access", False):
+            self._assert_permission_absent(catalog_path, user_ocid, "SELECT")
+        else:
+            changed = self._ensure_permission(
+                catalog_path, "assignCatalogPermissionDetails", user_ocid, "SELECT"
+            ) or changed
         return changed
 
     def _provision_lab(

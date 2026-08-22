@@ -68,96 +68,183 @@ class FakeApi:
         headers=None,
     ):
         self.calls.append((method, path, payload, params))
-        if method == "POST" and path in self.resources:
-            item = dict(payload)
-            name = payload["displayName"]
-            if path == "/catalogs":
-                item["key"] = f"{name}-key"
-            elif path == "/schemas":
-                item["key"] = f"{payload['catalogName']}.{name}"
-            elif path == "/volumes":
-                item["key"] = f"{payload['catalogName']}.{payload['schemaName']}.{name}"
-            else:
-                item["key"] = f"{name}-key"
-            if path in {"/catalogs", "/schemas", "/volumes", "/workspaces/ws-key/clusters"}:
-                item["lifecycleState"] = "ACTIVE"
-            self.resources[path].append(item)
-            return post_apply.ApiResponse(201, item, {})
-        if method == "PUT" and path.startswith("/credentials/"):
-            key = path.removeprefix("/credentials/")
-            current = next(
-                item for item in self.resources["/credentials"] if item["key"] == key
-            )
-            current.update(payload)
-            return post_apply.ApiResponse(200, current, {})
-        if method in {"POST", "PUT"} and "/actions/" in path:
-            base_path = path.split("/actions/", 1)[0]
-            if path.endswith("/addMember"):
-                self.actions[base_path] = {"assignees": payload["assignees"]}
-            else:
-                inspect_path = f"{base_path}/permissions"
-                details = next(iter(payload.values()))
-                assignees = details["assignees"]
-                targets = assignees["targets"]
-                self.actions.setdefault(inspect_path, []).extend(
-                    [
-                    {
-                        "grantee": target,
-                        "granteeName": target,
-                        "granteeType": assignees["type"],
-                        "granteePermissions": details["permissions"],
-                        "isPermissionsInheritable": details.get(
-                            "isPermissionsInheritable"
-                        ),
-                    }
-                    for target in targets
-                    ]
-                )
-                if "/clusters/" in base_path:
-                    resource_type, resource_key = "CLUSTER", "ws/aidp_cluster_shared_compute"
-                elif base_path.startswith("/schemas/"):
-                    schema_key = base_path.removeprefix("/schemas/")
-                    resource_type, resource_key = "SCHEMA", schema_key
-                elif "/objects/" in base_path:
-                    resource_type, resource_key = "FOLDER", base_path.rsplit("/", 1)[-1]
-                elif base_path.startswith("/workspaces/"):
-                    resource_type, resource_key = "WORKSPACE", "ws"
-                else:
-                    resource_type, resource_key = "CATALOG", "aidp_lab"
-                for target in targets:
-                    role_key = f"{target}-key"
-                    self.actions.setdefault(f"/roles/{role_key}/permissions", []).append(
-                        {
-                            "roleKey": role_key,
-                            "permissionsWithResourceDetails": {
-                                "permissions": details["permissions"],
-                                "resourceType": resource_type,
-                                "resourceKey": resource_key,
-                            },
-                        }
-                    )
-            return post_apply.ApiResponse(200, {}, {})
-        if method == "POST" and path == "/workspaces/ws-key/objects":
-            object_path = headers["path"]
-            self.workspace_objects[object_path] = "medallon-key"
-            return post_apply.ApiResponse(201, None, {"object-key": "medallon-key"})
-        if method == "GET" and path.startswith("/workspaces/ws-key/objects/"):
-            object_path = unquote(path.rsplit("/", 1)[-1])
-            object_key = self.workspace_objects.get(object_path)
-            if not object_key:
-                raise post_apply.ApiRequestError(method, path, 404, "request-id")
-            return post_apply.ApiResponse(200, None, {"object-key": object_key})
-        if method == "GET" and path.startswith("/schemas/"):
-            key = path.removeprefix("/schemas/")
-            item = next(item for item in self.resources["/schemas"] if item["key"] == key)
-            return post_apply.ApiResponse(200, item, {})
-        if method == "GET" and path.startswith("/volumes/") and not path.endswith("/permissions"):
-            key = path.removeprefix("/volumes/")
-            item = next(item for item in self.resources["/volumes"] if item["key"] == key)
-            return post_apply.ApiResponse(200, item, {})
         if method == "GET":
-            return post_apply.ApiResponse(200, self.actions.get(path, {}), {})
+            return self._read_request(method, path)
+        return self._write_request(method, path, payload, headers)
+
+    def _write_request(self, method: str, path: str, payload, headers):
+        if method == "POST" and path in self.resources:
+            return self._create_resource(path, payload)
+        if method == "PUT" and path.startswith("/credentials/"):
+            return self._update_credential(path, payload)
+        if method == "DELETE" and path.startswith("/roles/"):
+            return self._delete_role(path)
+        if method in {"POST", "PUT"} and "/actions/" in path:
+            return self._apply_action(path, payload)
+        if method == "POST" and path == "/workspaces/ws-key/objects":
+            return self._create_workspace_object(headers)
         return post_apply.ApiResponse(200, {}, {})
+
+    def _read_request(self, method: str, path: str):
+        if path.startswith("/workspaces/ws-key/objects/"):
+            return self._get_workspace_object(method, path)
+        if path.startswith("/schemas/"):
+            return self._get_named_resource(path, "/schemas/", "/schemas")
+        if path.startswith("/volumes/") and not path.endswith("/permissions"):
+            return self._get_named_resource(path, "/volumes/", "/volumes")
+        return post_apply.ApiResponse(200, self.actions.get(path, {}), {})
+
+    def _create_resource(self, path: str, payload: dict) -> post_apply.ApiResponse:
+        item = dict(payload)
+        name = payload["displayName"]
+        if path == "/catalogs":
+            item["key"] = f"{name}-key"
+        elif path == "/schemas":
+            item["key"] = f"{payload['catalogName']}.{name}"
+        elif path == "/volumes":
+            item["key"] = f"{payload['catalogName']}.{payload['schemaName']}.{name}"
+        else:
+            item["key"] = f"{name}-key"
+        if path in {"/catalogs", "/schemas", "/volumes", "/workspaces/ws-key/clusters"}:
+            item["lifecycleState"] = "ACTIVE"
+        self.resources[path].append(item)
+        return post_apply.ApiResponse(201, item, {})
+
+    def _update_credential(self, path: str, payload: dict) -> post_apply.ApiResponse:
+        key = path.removeprefix("/credentials/")
+        current = next(item for item in self.resources["/credentials"] if item["key"] == key)
+        current.update(payload)
+        return post_apply.ApiResponse(200, current, {})
+
+    def _delete_role(self, path: str) -> post_apply.ApiResponse:
+        key = path.removeprefix("/roles/")
+        self.resources["/roles"] = [
+            item for item in self.resources["/roles"] if item.get("key") != key
+        ]
+        return post_apply.ApiResponse(204, {}, {})
+
+    def _apply_action(self, path: str, payload: dict) -> post_apply.ApiResponse:
+        base_path = path.split("/actions/", 1)[0]
+        if path.endswith("/addMember"):
+            self.actions[base_path] = {"assignees": payload["assignees"]}
+        else:
+            self._record_permissions(base_path, payload)
+        return post_apply.ApiResponse(200, {}, {})
+
+    def _record_permissions(self, base_path: str, payload: dict) -> None:
+        details = next(iter(payload.values()))
+        assignees = details["assignees"]
+        targets = assignees["targets"]
+        inspect_path = f"{base_path}/permissions"
+        self.actions.setdefault(inspect_path, []).extend([
+            {
+                "grantee": target,
+                "granteeName": target,
+                "granteeType": assignees["type"],
+                "granteePermissions": details["permissions"],
+                "isPermissionsInheritable": details.get("isPermissionsInheritable"),
+            }
+            for target in targets
+        ])
+        resource_type, resource_key = self._permission_resource(base_path)
+        for target in targets:
+            role_key = f"{target}-key"
+            self.actions.setdefault(f"/roles/{role_key}/permissions", []).append({
+                "roleKey": role_key,
+                "permissionsWithResourceDetails": {
+                    "permissions": details["permissions"],
+                    "resourceType": resource_type,
+                    "resourceKey": resource_key,
+                },
+            })
+
+    @staticmethod
+    def _permission_resource(base_path: str) -> tuple[str, str]:
+        if "/clusters/" in base_path:
+            return "CLUSTER", "ws/aidp_cluster_shared_compute"
+        if base_path.startswith("/schemas/"):
+            return "SCHEMA", base_path.removeprefix("/schemas/")
+        if "/objects/" in base_path:
+            return "FOLDER", base_path.rsplit("/", 1)[-1]
+        if base_path.startswith("/workspaces/"):
+            return "WORKSPACE", "ws"
+        return "CATALOG", "aidp_lab"
+
+    def _create_workspace_object(self, headers: dict) -> post_apply.ApiResponse:
+        object_path = headers["path"]
+        self.workspace_objects[object_path] = "medallon-key"
+        return post_apply.ApiResponse(201, None, {"object-key": "medallon-key"})
+
+    def _get_workspace_object(self, method: str, path: str) -> post_apply.ApiResponse:
+        object_path = unquote(path.rsplit("/", 1)[-1])
+        object_key = self.workspace_objects.get(object_path)
+        if not object_key:
+            raise post_apply.ApiRequestError(method, path, 404, "request-id")
+        return post_apply.ApiResponse(200, None, {"object-key": object_key})
+
+    def _get_named_resource(self, path: str, prefix: str, collection: str) -> post_apply.ApiResponse:
+        key = path.removeprefix(prefix)
+        item = next(item for item in self.resources[collection] if item["key"] == key)
+        return post_apply.ApiResponse(200, item, {})
+
+
+def test_governance_schema_permissions_allow_only_admins_and_dedicated_jdbc_user() -> None:
+    api = FakeApi()
+    technical_user = "ocid1.user.oc1..governance"
+    api.actions["/roles/platform-admin-key"]["assignees"].append(
+        {"type": "USER", "target": technical_user}
+    )
+    api.resources["/schemas"] = [
+        {"displayName": "oci_control", "key": "aidp_lab.oci_control"}
+    ]
+    api.actions["/schemas/aidp_lab.oci_control/permissions"] = [
+        {
+            "grantee": "AI_DATA_PLATFORM_ADMIN",
+            "granteeName": "AI_DATA_PLATFORM_ADMIN",
+            "granteeType": "ROLE",
+            "granteePermissions": ["ADMIN"],
+            "isInherited": True,
+        },
+        {
+            "grantee": technical_user,
+            "granteeName": "governance-service",
+            "granteeType": "USER",
+            "granteePermissions": ["ADMIN"],
+            "isInherited": False,
+        },
+    ]
+    post_apply.verify_governance_schema_permissions(
+        api, "aidp_lab-key", technical_user, attempts=1
+    )
+
+
+def test_governance_schema_permissions_fail_closed_for_developer_access() -> None:
+    api = FakeApi()
+    technical_user = "ocid1.user.oc1..governance"
+    api.actions["/roles/platform-admin-key"]["assignees"].append(
+        {"type": "USER", "target": technical_user}
+    )
+    api.resources["/schemas"] = [
+        {"displayName": "oci_control", "key": "aidp_lab.oci_control"}
+    ]
+    api.actions["/schemas/aidp_lab.oci_control/permissions"] = [
+        {
+            "grantee": technical_user,
+            "granteeType": "USER",
+            "granteePermissions": ["ADMIN"],
+        },
+        {
+            "grantee": "AIDP_DEVELOPER",
+            "granteeName": "AIDP_DEVELOPER",
+            "granteeType": "ROLE",
+            "granteePermissions": ["SELECT"],
+            "isInherited": True,
+        },
+    ]
+    with pytest.raises(post_apply.ReconcileError, match="unauthorized inherited grant"):
+        post_apply.verify_governance_schema_permissions(
+            api, "aidp_lab-key", technical_user, attempts=1
+        )
 
 
 def test_reconcile_leaves_legacy_catalog_empty_for_private_participant_catalogs(monkeypatch) -> None:
@@ -172,6 +259,12 @@ def test_reconcile_leaves_legacy_catalog_empty_for_private_participant_catalogs(
         "operator_user_ocid": "ocid1.user.oc1..operator",
     }
     reconciled, events = post_apply.reconcile(api, outputs)
+    _assert_empty_legacy_catalog(api, reconciled, events)
+    _assert_shared_compute(api, reconciled)
+    _assert_workspace_permissions(api)
+
+
+def _assert_empty_legacy_catalog(api: FakeApi, reconciled: dict, events: list[str]) -> None:
     assert reconciled["catalog_key"] == "aidp_lab-key"
     assert reconciled["catalog_name"] == "aidp_lab"
     assert reconciled["global_schema_count"] == 0
@@ -190,10 +283,14 @@ def test_reconcile_leaves_legacy_catalog_empty_for_private_participant_catalogs(
     role_queries = [params for path, params in api.list_calls if path == "/roles"]
     assert {query["displayName"] for query in role_queries} == {
         "AI_DATA_PLATFORM_ADMIN",
+        "AIDP_DEVELOPER",
         "AIDP_LAB_DEVELOPER",
         "AIDP_LAB_PENDING",
     }
     assert any("zero legacy schemas and zero external volumes" in event for event in events)
+
+
+def _assert_shared_compute(api: FakeApi, reconciled: dict) -> None:
     cluster_payloads = [payload for method, path, payload, _ in api.calls if method == "POST" and path.endswith("/clusters")]
     assert cluster_payloads[0]["displayName"] == "aidp_cluster_shared_compute"
     assert cluster_payloads[0]["type"] == "USER"
@@ -206,20 +303,111 @@ def test_reconcile_leaves_legacy_catalog_empty_for_private_participant_catalogs(
     assert reconciled["shared_compute_key"] == "aidp_cluster_shared_compute-key"
     assert reconciled["root_object_key"] == "medallon-key"
     assert "shared_schema_keys" not in reconciled
+
+
+def _assert_workspace_permissions(api: FakeApi) -> None:
     workspace_permissions = api.actions["/workspaces/ws-key/permissions"]
     assert {
         (item["grantee"], tuple(item["granteePermissions"]))
         for item in workspace_permissions
     } == {
-        ("AIDP_LAB_DEVELOPER", ("USER",)),
+        ("AIDP_DEVELOPER", ("USER",)),
         ("AIDP_LAB_PENDING", ("USER",)),
     }
     assert "/catalogs/aidp_lab-key/permissions" not in api.actions
     compute_permissions = api.actions[
         "/workspaces/ws-key/clusters/aidp_cluster_shared_compute-key/permissions"
     ]
-    assert {item["grantee"] for item in compute_permissions} == {"AIDP_LAB_DEVELOPER"}
+    assert {item["grantee"] for item in compute_permissions} == {"AIDP_DEVELOPER"}
     assert "/workspaces/ws-key/objects/medallon-key/permissions" not in api.actions
+
+
+def test_reconcile_retires_legacy_developer_role_only_after_equivalence(monkeypatch) -> None:
+    monkeypatch.setattr(post_apply.time, "sleep", lambda _: None)
+    api = FakeApi()
+    legacy_key = "AIDP_LAB_DEVELOPER-key"
+    api.resources["/roles"].append(
+        {"displayName": "AIDP_LAB_DEVELOPER", "key": legacy_key}
+    )
+    api.actions[f"/roles/{legacy_key}"] = {
+        "assignees": [{"type": "GROUP", "target": "ocid1.group.developer"}]
+    }
+    api.actions[f"/roles/{legacy_key}/permissions"] = [
+        {
+            "permissionsWithResourceDetails": {
+                "resourceType": "WORKSPACE",
+                "resourceKey": "ws",
+                "permissions": ["USER"],
+            }
+        },
+        {
+            "permissionsWithResourceDetails": {
+                "resourceType": "CLUSTER",
+                "resourceKey": "ws/aidp_cluster_shared_compute",
+                "permissions": ["USE"],
+            }
+        },
+    ]
+
+    _, events = post_apply.reconcile(
+        api,
+        {
+            "default_workspace_name": "ws",
+            "objectstorage_namespace": "namespace",
+            "bucket_name": "aidp-data-test",
+            "developer_group_ocid": "ocid1.group.developer",
+            "pending_group_ocid": "ocid1.group.pending",
+            "operator_user_ocid": "ocid1.user.oc1..operator",
+        },
+    )
+
+    assert not any(
+        item.get("displayName") == "AIDP_LAB_DEVELOPER"
+        for item in api.resources["/roles"]
+    )
+    assert ("DELETE", f"/roles/{legacy_key}") in {
+        (method, path) for method, path, _, _ in api.calls
+    }
+    assert any("AIDP_LAB_DEVELOPER retired" in event for event in events)
+
+
+def test_legacy_developer_role_with_broader_permissions_is_not_retired(monkeypatch) -> None:
+    monkeypatch.setattr(post_apply.time, "sleep", lambda _: None)
+    api = FakeApi()
+    legacy_key = "AIDP_LAB_DEVELOPER-key"
+    api.resources["/roles"].append(
+        {"displayName": "AIDP_LAB_DEVELOPER", "key": legacy_key}
+    )
+    api.actions[f"/roles/{legacy_key}"] = {
+        "assignees": [{"type": "GROUP", "target": "ocid1.group.developer"}]
+    }
+    api.actions[f"/roles/{legacy_key}/permissions"] = [
+        {
+            "permissionsWithResourceDetails": {
+                "resourceType": "MASTER_CATALOG",
+                "resourceKey": "master",
+                "permissions": ["ADMIN"],
+            }
+        }
+    ]
+
+    with pytest.raises(post_apply.ReconcileError, match="unexpected direct permissions"):
+        post_apply.reconcile(
+            api,
+            {
+                "default_workspace_name": "ws",
+                "objectstorage_namespace": "namespace",
+                "bucket_name": "aidp-data-test",
+                "developer_group_ocid": "ocid1.group.developer",
+                "pending_group_ocid": "ocid1.group.pending",
+                "operator_user_ocid": "ocid1.user.oc1..operator",
+            },
+        )
+
+    assert all(
+        not (method == "DELETE" and path == f"/roles/{legacy_key}")
+        for method, path, _, _ in api.calls
+    )
 
 
 def test_reconcile_rejects_operator_without_platform_admin_membership(monkeypatch) -> None:
@@ -369,12 +557,12 @@ def test_permission_action_must_be_observable(monkeypatch) -> None:
         "/catalogs/key/actions/managePermission",
         {
             "assignCatalogPermissionDetails": {
-                "assignees": {"type": "ROLE", "targets": ["AIDP_LAB_DEVELOPER"]},
+                "assignees": {"type": "ROLE", "targets": ["AIDP_DEVELOPER"]},
                 "permissions": ["SELECT"],
             }
         },
         lambda: post_apply.permission_is_assigned(
-            api, inspect_path, "AIDP_LAB_DEVELOPER", "SELECT"
+            api, inspect_path, "AIDP_DEVELOPER", "SELECT"
         ),
         attempts=1,
     )
@@ -387,14 +575,14 @@ def test_schema_admin_can_be_added_over_inherited_catalog_select() -> None:
         def list_all(_path):
             return [
                 {
-                    "grantee": "AIDP_LAB_DEVELOPER",
+                    "grantee": "AIDP_DEVELOPER",
                     "granteeType": "ROLE",
                     "granteePermissions": ["SELECT"],
                 }
             ]
 
     assert not post_apply.permission_is_assigned(
-        Api(), "/schemas/schema/permissions", "AIDP_LAB_DEVELOPER", "ADMIN"
+        Api(), "/schemas/schema/permissions", "AIDP_DEVELOPER", "ADMIN"
     )
 
 
@@ -424,7 +612,7 @@ def test_role_readiness_rejects_extra_member() -> None:
 
     with pytest.raises(post_apply.ReconcileError, match="unexpected members"):
         post_apply.assert_role_members_exact(
-            Api(), "role-key", "AIDP_LAB_DEVELOPER", "GROUP", "expected"
+            Api(), "role-key", "AIDP_DEVELOPER", "GROUP", "expected"
         )
 
 
@@ -448,7 +636,7 @@ def test_role_readiness_rejects_master_catalog_or_broader_permissions() -> None:
         post_apply.assert_role_permissions_exact(
             Api(),
             "role-key",
-            "AIDP_LAB_DEVELOPER",
+            "AIDP_DEVELOPER",
             {("CATALOG", "catalog-key", frozenset({"SELECT"}))},
         )
 
@@ -459,7 +647,7 @@ def test_resource_readiness_rejects_broader_direct_permission() -> None:
         def list_all(path):
             return [
                 {
-                    "grantee": "AIDP_LAB_DEVELOPER",
+                    "grantee": "AIDP_DEVELOPER",
                     "granteeType": "ROLE",
                     "granteePermissions": ["USE", "ADMIN"],
                 }
@@ -467,7 +655,7 @@ def test_resource_readiness_rejects_broader_direct_permission() -> None:
 
     with pytest.raises(post_apply.ReconcileError, match="conflicting direct permission"):
         post_apply.permission_is_assigned(
-            Api(), "/clusters/key/permissions", "AIDP_LAB_DEVELOPER", "USE"
+            Api(), "/clusters/key/permissions", "AIDP_DEVELOPER", "USE"
         )
 
 
@@ -1175,8 +1363,8 @@ def test_permission_verification_paginates_and_correlates_one_item() -> None:
             return Response(
                 [
                     {
-                        "grantee": "AIDP_LAB_DEVELOPER",
-                        "granteeName": "AIDP_LAB_DEVELOPER",
+                        "grantee": "AIDP_DEVELOPER",
+                        "granteeName": "AIDP_DEVELOPER",
                         "granteeType": "ROLE",
                         "granteePermissions": ["READ"],
                     }
@@ -1188,7 +1376,7 @@ def test_permission_verification_paginates_and_correlates_one_item() -> None:
     api.session = Session()
     with pytest.raises(post_apply.ReconcileError, match="conflicting direct permission"):
         post_apply.permission_is_assigned(
-            api, "/catalogs/key/permissions", "AIDP_LAB_DEVELOPER", "SELECT"
+            api, "/catalogs/key/permissions", "AIDP_DEVELOPER", "SELECT"
         )
 
 

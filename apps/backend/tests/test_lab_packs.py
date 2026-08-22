@@ -25,7 +25,7 @@ def test_catalog_has_five_lineage_labs_and_available_governance_agent() -> None:
     assert all(item["description"].strip() for item in public)
     assert "transactions" in public[0]["description"]
     assert packs[-1].status == "available"
-    assert packs[-1].pack_version == "1.4.5"
+    assert packs[-1].pack_version == "2.0.0"
     assert packs[-1].kind == "governance_agent"
     assert not packs[-1].datasets and not packs[-1].notebooks
     assert load_lab_pack("agent").agent["editable"] is True

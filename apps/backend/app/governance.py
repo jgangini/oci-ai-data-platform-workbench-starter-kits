@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+from urllib.parse import urlparse
 
 
 PARTICIPANT_KEY = re.compile(r"u[1-9][0-9]*")
 IDENTIFIER = re.compile(r"[a-z][a-z0-9_]*")
 GOVERNANCE_CREDENTIAL_NAME = "AidpGovernanceOperator"
+QUERY_ID = re.compile(r"[a-z][a-z0-9_-]{2,63}")
 
 DAMA_SYSTEM_PROMPT = """You are a senior data governance specialist grounded in DAMA-DMBOK. Use only the provided participant-scoped tools and never invent SQL, identifiers, owners, metrics, lineage, freshness, or data. Match the user's language. Call at most one tool per model turn and never emit parallel tool calls; sequential calls are allowed when one result is needed to resolve the next call.
 
@@ -16,6 +18,8 @@ Choose evidence precisely:
 - For where to find a table or field, what information a table contains, column types, descriptions, format, lifecycle state, or catalog timestamps, call catalog_inventory. Pass search_term and include_columns=true for a focused table or field lookup. Use the smallest relevant medallion layer and use ALL only when the location is unknown or the complete live scope is required.
 - For the flow to or from a table, the workflow tasks or notebook paths involved, call catalog_lineage at ENTITY level.
 - For the origin, destination, derivation, or use of a field, call catalog_lineage at COLUMN level and pass column_name. If the table is unknown, locate it first with catalog_inventory, then call catalog_lineage on the uniquely observed table.
+- To explain the effective access decision for an approved query, call governance_policy_explain with its registered query_id.
+- To execute an approved query, call governed_query with only its registered query_id and validated scalar parameters. Never accept, reconstruct, or execute arbitrary SQL.
 
 Treat timeUpdated as the last Master Catalog metadata update, not proof that the underlying data was refreshed at that time. Treat a task display name as a workflow task; call it a notebook only when the job metadata provides notebook_path. Explain a field's likely business use only as an interpretation of observed name, type, table, and lineage unless a catalog description explicitly defines it. Use match_count and counts_by_layer exactly as returned; never recalculate or alter those counts in prose. Reconcile enumerated records with those counts, and omit a count rather than estimate it.
 
@@ -44,6 +48,7 @@ def agent_source(
     platform_id: str,
     participant_key: str,
     catalog_name: str,
+    gateway_url: str = "",
 ) -> bytes:
     """Render a code Agent that reads live AIDP metadata with a stored OCI signer."""
     required = (
@@ -57,6 +62,17 @@ def agent_source(
     if not all(required):
         raise ValueError("The Agent runtime contract is incomplete")
     database_names(participant_key)
+    if gateway_url:
+        parsed_gateway = urlparse(gateway_url)
+        if (
+            parsed_gateway.scheme != "https"
+            or not parsed_gateway.hostname
+            or parsed_gateway.username
+            or parsed_gateway.password
+            or parsed_gateway.query
+            or parsed_gateway.fragment
+        ):
+            raise ValueError("The governance gateway URL must be a credential-free HTTPS origin")
     encoded = json.dumps(
         {
             "model_id": model_id,
@@ -67,6 +83,7 @@ def agent_source(
             "credential_name": GOVERNANCE_CREDENTIAL_NAME,
             "participant_key": participant_key,
             "table_prefix": f"{participant_key}_",
+            "gateway_url": gateway_url.rstrip("/"),
         },
         sort_keys=True,
     )
@@ -97,6 +114,7 @@ from urllib.parse import quote
 import oci
 import requests
 import aidputils
+from aidputils.agents.toolkit import chat_context
 from aidputils.agents.toolkit.agent_helper import init_oci_llm, pre_invoke_setup
 from aidputils.agents.toolkit.configs import OCIAIConf
 from langchain_core.messages import HumanMessage
@@ -113,6 +131,7 @@ API_BASE = (
 LAYERS = ("landing", "bronze", "silver", "gold")
 TABLE_NAME = re.compile(rf"^{{re.escape(CONFIG['table_prefix'])}}[a-z0-9_]+$")
 FOREIGN_TABLE = re.compile(r"\\bu[1-9][0-9]*_[a-z0-9_]+", re.IGNORECASE)
+QUERY_ID = re.compile(r"^[a-z][a-z0-9_-]{{2,63}}$")
 logger = logging.getLogger("data_governance_agent")
 checkpointer = globals().get("checkpointer")
 
@@ -541,6 +560,67 @@ def _credential_signer():
         raise RuntimeError("The shared OCI credential is unavailable or invalid") from exc
 
 
+def _session_variable(name):
+    """Read one non-logged AIDP session variable without persisting it."""
+    context = chat_context.session_context_var.get() or {{}}
+    if not isinstance(context, dict):
+        raise RuntimeError("The AIDP session context is unavailable")
+    value = context.get(name) or context.get(f"sessionvariables.{{name}}")
+    if isinstance(value, dict):
+        value = value.get("value")
+    if not isinstance(value, str) or not value or len(value) > 16384 or "\\r" in value or "\\n" in value:
+        raise RuntimeError("The governance session credential is unavailable")
+    return value
+
+
+def _gateway_request(method, path, payload=None):
+    """Call the private governance gateway with the effective user's token."""
+    if not CONFIG["gateway_url"]:
+        raise RuntimeError("The governance gateway endpoint is not configured")
+    response = requests.request(
+        method,
+        CONFIG["gateway_url"] + path,
+        headers={{
+            "Accept": "application/json",
+            "Authorization": f"Bearer {{_session_variable('governance_access_token')}}",
+        }},
+        json=payload,
+        timeout=(10, 60),
+        allow_redirects=False,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"The governance gateway rejected the request (HTTP {{response.status_code}})")
+    if len(response.content) > 2_000_000:
+        raise RuntimeError("The governance gateway response exceeded the Agent limit")
+    body = response.json() if response.content else {{}}
+    if not isinstance(body, dict):
+        raise RuntimeError("The governance gateway returned an invalid response")
+    return body
+
+
+def _registered_query_id(value):
+    query_id = value.strip().lower()
+    if QUERY_ID.fullmatch(query_id) is None:
+        raise ValueError("query_id must identify a registered governance query")
+    return query_id
+
+
+def _query_parameters(parameters_json):
+    if len(parameters_json) > 8192:
+        raise ValueError("parameters_json is too large")
+    value = json.loads(parameters_json)
+    if not isinstance(value, dict) or len(value) > 20:
+        raise ValueError("parameters_json must be an object with at most 20 values")
+    if any(
+        not isinstance(key, str)
+        or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) is None
+        or not isinstance(item, (str, int, float, bool, type(None)))
+        for key, item in value.items()
+    ):
+        raise ValueError("parameters_json accepts only named scalar values")
+    return value
+
+
 def _tools():
     """Create read-only tools bound to the participant catalog in CONFIG."""
     signer = _credential_signer()
@@ -734,7 +814,36 @@ def _tools():
         except Exception as exc:
             return json.dumps({{"error": _safe_error("catalog_lineage", exc)}}, sort_keys=True)
 
-    return [catalog_inventory, catalog_lineage]
+    @tool
+    def governance_policy_explain(query_id: str) -> str:
+        """Explain the effective policy for one registered governance query."""
+        try:
+            registered = _registered_query_id(query_id)
+            return json.dumps(
+                _gateway_request("GET", f"/v1/queries/{{quote(registered, safe='')}}:explain"),
+                sort_keys=True,
+            )
+        except Exception as exc:
+            return json.dumps({{"error": _safe_error("governance_policy_explain", exc)}}, sort_keys=True)
+
+    @tool
+    def governed_query(query_id: str, parameters_json: str = "{{}}") -> str:
+        """Execute one registered governance query with validated scalar parameters."""
+        try:
+            registered = _registered_query_id(query_id)
+            parameters = _query_parameters(parameters_json)
+            return json.dumps(
+                _gateway_request(
+                    "POST",
+                    f"/v1/queries/{{quote(registered, safe='')}}:execute",
+                    {{"parameters": parameters}},
+                ),
+                sort_keys=True,
+            )
+        except Exception as exc:
+            return json.dumps({{"error": _safe_error("governed_query", exc)}}, sort_keys=True)
+
+    return [catalog_inventory, catalog_lineage, governance_policy_explain, governed_query]
 
 
 def _error_response(error):
