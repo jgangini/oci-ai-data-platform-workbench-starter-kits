@@ -106,6 +106,10 @@ def test_deploy_studio_manifest_contract() -> None:
         runtime_fields["operator_user_ocid"]["pattern"],
         "ocid1.user.oc1..operator",
     )
+    assert re.fullmatch(
+        runtime_fields["governance_gateway_oidc_issuer"]["pattern"],
+        "https://identity.oraclecloud.com/",
+    )
     assert (root / manifest["preflight"]["entrypoint"]).is_file()
     assert "aidp_workbench_url" in manifest["outputs"]
     assert "aidp_alias_key" in manifest["outputs"]

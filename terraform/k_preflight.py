@@ -21,7 +21,8 @@ SUPPORTED_SHAPES = (E5_SHAPE, E4_SHAPE, E3_SHAPE)
 ACTIVE_WORK_REQUEST_STATES = {"ACCEPTED", "IN_PROGRESS", "WAITING", "NEEDS_ATTENTION", "CANCELING"}
 MODEL_TYPE_BASE = "BASE"
 GOVERNANCE_IMAGE_REPOSITORY = "ghcr.io/jgangini/oci-aidp-governance-gateway"
-GOVERNANCE_IMAGE_TAG = "v2.1.3"
+GOVERNANCE_IMAGE_TAG = "v2.1.4"
+GOVERNANCE_CONTROL_BUCKET = "oci_control"
 MAX_PUBLIC_DOCUMENT_BYTES = 1024 * 1024
 
 
@@ -170,6 +171,25 @@ def _governance_runtime_inputs(
             "message": "Public PKCE client and static OCI signing keys are ready",
         }
     ]
+
+
+def _require_governance_bucket_available(object_storage: Any) -> str:
+    namespace = str(object_storage.get_namespace().data or "").strip()
+    if not namespace:
+        raise RuntimeError("OCI did not return an Object Storage namespace")
+    try:
+        object_storage.get_bucket(
+            namespace_name=namespace,
+            bucket_name=GOVERNANCE_CONTROL_BUCKET,
+        )
+    except oci.exceptions.ServiceError as exc:
+        if exc.status == 404 and exc.code == "BucketNotFound":
+            return f"{GOVERNANCE_CONTROL_BUCKET} is available in the Object Storage namespace"
+        raise
+    raise RuntimeError(
+        f"{GOVERNANCE_CONTROL_BUCKET} already exists in this Object Storage namespace; "
+        "reuse or upgrade the existing governance installation"
+    )
 
 
 def _safe_error_message(exc: Exception) -> str:
@@ -351,6 +371,7 @@ def select_inputs(
         config,
         service_endpoint=endpoint,
     ),
+    object_storage_factory: Callable[[dict[str, Any]], Any] = oci.object_storage.ObjectStorageClient,
     governance_image_resolver: Callable[[], str] = _resolve_governance_image,
 ) -> dict[str, Any]:
     target, mode = compartment_target(context)
@@ -369,6 +390,11 @@ def select_inputs(
     _require_ready_region(identity, tenancy_id, region)
     inputs = context.get("inputs") if isinstance(context.get("inputs"), dict) else {}
     governance_enabled = _is_enabled(inputs, "enable_ai_data_governance")
+    governance_bucket_message = (
+        _require_governance_bucket_available(object_storage_factory(regional_config))
+        if governance_enabled
+        else ""
+    )
     model_id = str(inputs.get("agent_model_id") or "").strip()
     if not model_id:
         raise ValueError("agent_model_id is required")
@@ -421,9 +447,9 @@ def select_inputs(
                 },
                 "events": [
                     {
-                        "name": "Immutable v2.1.3 source",
+                        "name": "Immutable v2.1.4 source",
                         "status": "passed",
-                        "message": "v2.1.3 source context and deployment source passed",
+                        "message": "v2.1.4 source context and deployment source passed",
                     },
                     {
                         "name": "Compartment availability",
@@ -438,6 +464,17 @@ def select_inputs(
                         "status": "passed",
                         "message": f"{selected} available in {availability_domain}",
                     },
+                    *(
+                        [
+                            {
+                                "name": "Governance control bucket",
+                                "status": "passed",
+                                "message": governance_bucket_message,
+                            }
+                        ]
+                        if governance_enabled
+                        else []
+                    ),
                     *governance_event,
                 ],
             }

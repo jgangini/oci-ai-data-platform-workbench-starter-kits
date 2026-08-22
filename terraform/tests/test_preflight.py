@@ -107,6 +107,24 @@ class Genai:
         return SimpleNamespace(data=SimpleNamespace(items=self.models), headers={})
 
 
+class ObjectStorage:
+    def __init__(self, bucket_exists: bool = False) -> None:
+        self.bucket_exists = bucket_exists
+
+    def get_namespace(self) -> Any:
+        return SimpleNamespace(data="testnamespace")
+
+    def get_bucket(self, **_kwargs: Any) -> Any:
+        if self.bucket_exists:
+            return SimpleNamespace(data=SimpleNamespace(name="oci_control"))
+        raise preflight.oci.exceptions.ServiceError(
+            status=404,
+            code="BucketNotFound",
+            headers={},
+            message="bucket not found",
+        )
+
+
 def _select(
     statuses: dict[str, tuple[str, str]],
     *,
@@ -116,6 +134,7 @@ def _select(
     compartment_mode: str = "new",
     input_overrides: dict[str, Any] | None = None,
     identity_domains_factory: Any | None = None,
+    object_storage: ObjectStorage | None = None,
     governance_image_resolver: Any | None = None,
 ) -> tuple[dict[str, Any], Compute]:
     compute = Compute(statuses)
@@ -145,6 +164,7 @@ def _select(
         aidp_factory=lambda _config: aidp,
         database_factory=lambda _config: Database(),
         genai_factory=lambda _config: Genai(),
+        object_storage_factory=lambda _config: object_storage or ObjectStorage(),
         **kwargs,
     )
     return result, compute
@@ -214,6 +234,18 @@ def test_preflight_resolves_governance_identity_and_immutable_image(monkeypatch)
             "use": "sig",
         }
     ]
+
+
+def test_preflight_rejects_second_governance_installation_in_namespace() -> None:
+    available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
+    with pytest.raises(RuntimeError, match="oci_control already exists"):
+        _select(
+            {preflight.E5_SHAPE: (available, "1")},
+            input_overrides={"enable_ai_data_governance": True},
+            object_storage=ObjectStorage(bucket_exists=True),
+        )
+
+
 def test_preflight_rejects_occupied_new_compartment_across_pages() -> None:
     class PagedIdentity(Identity):
         def list_compartments(self, **kwargs: Any) -> Any:

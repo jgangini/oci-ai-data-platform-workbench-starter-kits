@@ -270,7 +270,7 @@
         "label": "Resolved OCI token issuer",
         "type": "text",
         "required": false,
-        "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~/-]+)?$",
+        "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~/-]*)?$",
         "min_length": 12,
         "max_length": 512
       },

@@ -4,7 +4,7 @@ OCI AI Data Platform Cloud Migration Lab is a hands-on data engineering environm
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more laboratories without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current validation target: **v2.1.3**. This patch centralizes governance Delta tables and the licensed JDBC driver in the private `oci_control` bucket while preserving Autonomous Database for AI Compute agent memory.
+Current validation target: **v2.1.4**. This patch accepts OCI's canonical trailing-slash token issuer, prevents a second `oci_control` installation in the same Object Storage namespace, and preserves Autonomous Database for AI Compute agent memory.
 
 ## What the project provides
 
@@ -333,7 +333,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 
 ## OCI Deploy Studio compatibility
 
-The **v2.1.3** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery and encrypted hook-file extensions.
+The **v2.1.4** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery and encrypted hook-file extensions.
 
 Deploy Studio support includes:
 
@@ -348,7 +348,7 @@ Deploy Studio support includes:
 - Post-apply reconciliation of the AIDP workspace, catalog, `aidp_cluster_shared_compute`, AI feature enablement, Identity roles, participant application, and final access artifact. The first Agent assignment reuses the shared `aidp_agent_shared_compute` runtime.
 - Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
 
-The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.3` tag rather than an untagged development commit.
+The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.4` tag rather than an untagged development commit.
 
 Deploy Studio currently applies the Resource Manager plan automatically after planning and does not expose a repository hook between those stages. For controlled deployments, review the generated plan or run `python terraform/release_gate.py --plan-json <plan.json>` in CI before starting the final apply.
 
