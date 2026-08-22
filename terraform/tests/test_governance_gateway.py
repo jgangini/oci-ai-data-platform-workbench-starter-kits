@@ -16,7 +16,8 @@ def test_devops_pipeline_targets_only_the_governance_cluster() -> None:
 
 
 def test_gateway_manifest_is_private_behind_public_oidc_gateway_and_immutable() -> None:
-    manifest = (ROOT / "deploy/governance/gateway.yaml").read_text(encoding="utf-8")
+    manifest_path = ROOT / "terraform/templatefile/governance-gateway.yaml"
+    manifest = manifest_path.read_text(encoding="utf-8")
     gateway = (ROOT / "terraform/i_oci_data_governance_gateway.tf").read_text(encoding="utf-8")
     edge = (ROOT / "terraform/i_oci_data_governance_edge.tf").read_text(encoding="utf-8")
     assert 'service.beta.kubernetes.io/oci-load-balancer-internal: "true"' in manifest
@@ -36,6 +37,11 @@ def test_gateway_manifest_is_private_behind_public_oidc_gateway_and_immutable() 
     assert 'type = "STATIC_KEYS"' in edge
     assert "local.governance_gateway_scope" in edge
     assert "governance_gateway_oidc_static_jwks_json" in edge
+    assert manifest_path.is_file()
+    assert not (ROOT / "deploy/governance/gateway.yaml").exists()
+    assert '"${path.module}/templatefile/governance-gateway.yaml"' in (
+        ROOT / "terraform/i_oci_data_governance_deployment.tf"
+    ).read_text(encoding="utf-8")
 
 
 def test_governance_cross_variable_contract_uses_terraform_15_preconditions() -> None:
@@ -64,7 +70,7 @@ def test_control_bucket_centralizes_delta_tables_and_the_jdbc_driver() -> None:
     storage = (ROOT / "terraform/f_oci_objectstorage_bucket.tf").read_text(encoding="utf-8")
     deployment = (ROOT / "terraform/i_oci_data_governance_deployment.tf").read_text(encoding="utf-8")
     edge = (ROOT / "terraform/i_oci_data_governance_edge.tf").read_text(encoding="utf-8")
-    manifest = (ROOT / "deploy/governance/gateway.yaml").read_text(encoding="utf-8")
+    manifest = (ROOT / "terraform/templatefile/governance-gateway.yaml").read_text(encoding="utf-8")
     assert 'resource "oci_objectstorage_bucket" "control"' in storage
     assert 'count          = var.enable_ai_data_governance ? 1 : 0' in storage
     assert 'name           = "oci_control"' in storage

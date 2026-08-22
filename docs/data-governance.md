@@ -1,6 +1,6 @@
 # AI Data Governance add-on
 
-> Status: `v2.1.5` validation target. Local contracts are implemented; live OCI acceptance remains gated.
+> Status: `v2.1.6` validation target. Local contracts are implemented; live OCI acceptance remains gated.
 
 ## Runtime boundaries
 

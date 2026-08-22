@@ -1,6 +1,6 @@
 locals {
   governance_gateway_manifest = var.enable_ai_data_governance ? templatefile(
-    "${path.module}/../deploy/governance/gateway.yaml",
+    "${path.module}/templatefile/governance-gateway.yaml",
     {
       gateway_image                = var.governance_gateway_image
       oci_region                   = var.region

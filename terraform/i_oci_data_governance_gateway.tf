@@ -100,8 +100,8 @@ data "oci_containerengine_node_pool_option" "governance" {
   node_pool_option_id            = "all"
   compartment_id                 = local.target_compartment
   node_pool_k8s_version          = local.governance_kubernetes_version
-  node_pool_os_arch              = "AMD64"
-  node_pool_os_type              = "Oracle Linux"
+  node_pool_os_arch              = "X86_64"
+  node_pool_os_type              = "OL8"
   should_list_all_patch_versions = true
 }
 
