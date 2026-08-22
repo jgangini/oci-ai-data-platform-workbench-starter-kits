@@ -49,6 +49,24 @@ def test_gateway_manifest_is_private_behind_public_oidc_gateway_and_immutable() 
     ).read_text(encoding="utf-8")
 
 
+def test_oke_private_network_allows_worker_registration() -> None:
+    network = (ROOT / "terraform/e_oci_core_vcn.tf").read_text(encoding="utf-8")
+    endpoint = network.split('resource "oci_core_security_list" "governance_endpoint"', 1)[1].split(
+        'resource "oci_core_security_list" "governance_workers"', 1
+    )[0]
+    workers = network.split('resource "oci_core_security_list" "governance_workers"', 1)[1].split(
+        'resource "oci_core_security_list" "governance_service"', 1
+    )[0]
+    assert "min = 12250" in endpoint
+    assert "max = 12250" in endpoint
+    assert endpoint.count('source      = var._oci_governance.worker_subnet_cidr') >= 2
+    assert 'description = "Allow OKE path MTU discovery"' in endpoint
+    assert "type = 3" in endpoint
+    assert "code = 4" in endpoint
+    assert 'source      = "0.0.0.0/0"' in workers
+    assert 'description = "Allow OKE path MTU discovery"' in workers
+
+
 def test_governance_cross_variable_contract_uses_terraform_15_preconditions() -> None:
     variables = (ROOT / "terraform/b_variables.tf").read_text(encoding="utf-8")
     gateway = (ROOT / "terraform/i_oci_data_governance_gateway.tf").read_text(encoding="utf-8")

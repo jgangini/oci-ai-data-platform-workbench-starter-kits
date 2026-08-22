@@ -189,7 +189,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Fresh-only v2.1.8 contract: post-apply creates no external volumes."
+  description = "Fresh-only v2.1.9 contract: post-apply creates no external volumes."
   value       = 0
 }
 

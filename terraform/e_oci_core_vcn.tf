@@ -122,6 +122,26 @@ resource "oci_core_security_list" "governance_endpoint" {
   }
 
   ingress_security_rules {
+    protocol    = "6"
+    source      = var._oci_governance.worker_subnet_cidr
+    description = "Allow OKE workers to register with the control plane"
+    tcp_options {
+      min = 12250
+      max = 12250
+    }
+  }
+
+  ingress_security_rules {
+    protocol    = "1"
+    source      = var._oci_governance.worker_subnet_cidr
+    description = "Allow OKE path MTU discovery"
+    icmp_options {
+      type = 3
+      code = 4
+    }
+  }
+
+  ingress_security_rules {
     protocol = "6"
     source   = var._oci_governance.endpoint_subnet_cidr
     tcp_options {
@@ -154,6 +174,16 @@ resource "oci_core_security_list" "governance_workers" {
   ingress_security_rules {
     protocol = "all"
     source   = var._oci_governance.vcn_cidr
+  }
+
+  ingress_security_rules {
+    protocol    = "1"
+    source      = "0.0.0.0/0"
+    description = "Allow OKE path MTU discovery"
+    icmp_options {
+      type = 3
+      code = 4
+    }
   }
 
   egress_security_rules {
