@@ -105,6 +105,13 @@ data "oci_containerengine_node_pool_option" "governance" {
   should_list_all_patch_versions = true
 }
 
+locals {
+  governance_node_sources = var.enable_ai_data_governance ? [
+    for source in data.oci_containerengine_node_pool_option.governance[0].sources : source
+    if length(regexall("-GPU-", source.source_name)) == 0
+  ] : []
+}
+
 resource "oci_containerengine_node_pool" "governance" {
   count              = var.enable_ai_data_governance ? 1 : 0
   cluster_id         = oci_containerengine_cluster.governance[0].id
@@ -128,8 +135,8 @@ resource "oci_containerengine_node_pool" "governance" {
   }
 
   node_source_details {
-    image_id    = data.oci_containerengine_node_pool_option.governance[0].sources[0].image_id
-    source_type = data.oci_containerengine_node_pool_option.governance[0].sources[0].source_type
+    image_id    = local.governance_node_sources[0].image_id
+    source_type = local.governance_node_sources[0].source_type
   }
 
   initial_node_labels {

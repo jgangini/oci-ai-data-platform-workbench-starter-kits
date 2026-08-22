@@ -33,6 +33,10 @@ def test_operator_identity_is_reused_and_governance_resources_are_isolated() -> 
     assert "client_secret" not in edge
     assert 'client_type       = "public"' in edge
     assert "allowed_scopes" in edge
+    assert edge.count("fqs              = local.governance_gateway_scope") == 0
+    assert edge.count("fqs = local.governance_gateway_scope") == 1
+    assert 'methods = ["GET", "POST", "PUT", "DELETE"]' in edge
+    assert 'email          = "governance-jdbc-${local.suffix}@example.invalid"' in edge
 
 
 def test_identity_groups_ignore_service_managed_schema_extensions() -> None:

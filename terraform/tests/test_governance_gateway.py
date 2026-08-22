@@ -4,6 +4,11 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 
 
+def test_oci_provider_matches_resource_manager_runtime() -> None:
+    versions = (ROOT / "terraform/a_versions.tf").read_text(encoding="utf-8")
+    assert 'version = "= 8.28.0"' in versions
+
+
 def test_devops_pipeline_targets_only_the_governance_cluster() -> None:
     terraform = (ROOT / "terraform/i_oci_data_governance_deployment.tf").read_text(encoding="utf-8")
     assert "resource.type = 'devopsdeploypipeline'" in terraform
@@ -64,6 +69,9 @@ def test_workload_identity_reads_only_named_runtime_inputs() -> None:
     assert "target.key.id='${oci_kms_key.governance[0].id}'" in gateway
     assert "use keys" in gateway
     assert "manage secret" not in gateway
+    assert 'regexall("-GPU-", source.source_name)' in gateway
+    assert "local.governance_node_sources[0].image_id" in gateway
+    assert "node_pool_option.governance[0].sources[0].image_id" not in gateway
 
 
 def test_control_bucket_centralizes_delta_tables_and_the_jdbc_driver() -> None:

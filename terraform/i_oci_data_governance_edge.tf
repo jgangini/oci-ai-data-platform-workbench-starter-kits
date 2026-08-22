@@ -35,7 +35,6 @@ resource "oci_identity_domains_app" "governance_public_client" {
 
   scopes {
     value            = "governance.all"
-    fqs              = local.governance_gateway_scope
     display_name     = "AI Data Governance Gateway"
     description      = "Execute governed queries and inspect effective policy"
     requires_consent = true
@@ -106,7 +105,8 @@ resource "oci_apigateway_deployment" "governance" {
     }
 
     routes {
-      path = "/{req*}"
+      path    = "/{req*}"
+      methods = ["GET", "POST", "PUT", "DELETE"]
 
       backend {
         type                       = "HTTP_BACKEND"
@@ -130,6 +130,7 @@ resource "oci_identity_user" "governance_jdbc" {
   count          = var.enable_ai_data_governance ? 1 : 0
   compartment_id = var.tenancy_ocid
   name           = "${local.name_prefix}-governance-jdbc"
+  email          = "governance-jdbc-${local.suffix}@example.invalid"
   description    = "Dedicated API-key identity for the AI Data Governance JDBC runtime"
 }
 

@@ -21,7 +21,7 @@ SUPPORTED_SHAPES = (E5_SHAPE, E4_SHAPE, E3_SHAPE)
 ACTIVE_WORK_REQUEST_STATES = {"ACCEPTED", "IN_PROGRESS", "WAITING", "NEEDS_ATTENTION", "CANCELING"}
 MODEL_TYPE_BASE = "BASE"
 GOVERNANCE_IMAGE_REPOSITORY = "ghcr.io/jgangini/oci-aidp-governance-gateway"
-GOVERNANCE_IMAGE_TAG = "v2.1.6"
+GOVERNANCE_IMAGE_TAG = "v2.1.7"
 GOVERNANCE_CONTROL_BUCKET = "oci_control"
 MAX_PUBLIC_DOCUMENT_BYTES = 1024 * 1024
 
@@ -447,9 +447,9 @@ def select_inputs(
                 },
                 "events": [
                     {
-                        "name": "Immutable v2.1.6 source",
+                        "name": "Immutable v2.1.7 source",
                         "status": "passed",
-                        "message": "v2.1.6 source context and deployment source passed",
+                        "message": "v2.1.7 source context and deployment source passed",
                     },
                     {
                         "name": "Compartment availability",
