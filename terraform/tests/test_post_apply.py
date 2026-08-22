@@ -271,35 +271,6 @@ def test_governance_runtime_gets_only_schema_admin_and_cluster_use() -> None:
     }
 
 
-def test_governance_jdbc_driver_is_validated_and_uploaded(tmp_path: Path, monkeypatch) -> None:
-    driver = tmp_path / "aidp-jdbc.zip"
-    with zipfile.ZipFile(driver, "w") as archive:
-        archive.writestr("driver/sparkJDBC42.jar", b"jar")
-    monkeypatch.setenv(post_apply.GOVERNANCE_JDBC_DRIVER_ENV, str(driver))
-    assert post_apply.governance_jdbc_driver_path() == driver.resolve()
-
-    uploaded: dict[str, object] = {}
-
-    class ObjectStorage:
-        @staticmethod
-        def put_object(namespace, bucket, name, body, **kwargs):
-            uploaded.update(
-                namespace=namespace,
-                bucket=bucket,
-                name=name,
-                body=body.read(),
-                **kwargs,
-            )
-
-    post_apply.upload_governance_jdbc_driver(
-        ObjectStorage(), "namespace", "bucket", ".governance/aidp-jdbc-driver.zip", driver
-    )
-    assert uploaded["body"] == driver.read_bytes()
-    assert uploaded["content_length"] == driver.stat().st_size
-    assert uploaded["content_type"] == "application/zip"
-    assert isinstance(uploaded["content_md5"], str)
-
-
 def test_governance_jdbc_credential_is_created_then_reused() -> None:
     fingerprint = ":".join(["aa"] * 16)
     state: dict[str, object] = {

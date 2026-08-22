@@ -126,7 +126,16 @@ output "governance_gateway_jdbc_secret_ocid" {
 }
 
 output "governance_gateway_jdbc_driver_bucket" {
-  value = var.enable_ai_data_governance ? oci_objectstorage_bucket.data.name : null
+  value = try(oci_objectstorage_bucket.control[0].name, null)
+}
+
+output "governance_control_bucket" {
+  description = "Private Object Storage bucket for oci_control Delta tables and governance runtime artifacts."
+  value       = try(oci_objectstorage_bucket.control[0].name, null)
+}
+
+output "governance_control_delta_location" {
+  value = var.enable_ai_data_governance ? "oci://${oci_objectstorage_bucket.control[0].name}@${var.objectstorage_namespace}/delta" : null
 }
 
 output "governance_gateway_jdbc_driver_object" {
@@ -180,7 +189,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Fresh-only v2.1.2 contract: post-apply creates no external volumes."
+  description = "Fresh-only v2.1.3 contract: post-apply creates no external volumes."
   value       = 0
 }
 

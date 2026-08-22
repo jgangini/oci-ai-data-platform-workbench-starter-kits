@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import logging
+import os
 import re
+import tempfile
 import time
+import zipfile
 from contextlib import asynccontextmanager
+from pathlib import Path, PurePosixPath
 from typing import Any, AsyncIterator, Callable
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .aidp import (
@@ -38,6 +44,106 @@ LOCAL_COOKIE_NAME = "aidp_lab_admin"
 CODE_PATTERN = re.compile(r"^[A-Z]{4}-[0-9]{4}$")
 EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$")
 logger = logging.getLogger(__name__)
+MAX_JDBC_DRIVER_BYTES = 128 * 1024 * 1024
+MAX_JDBC_DRIVER_EXPANDED_BYTES = 512 * 1024 * 1024
+
+
+def _jdbc_object_storage(settings: Settings) -> Any:
+    import oci
+
+    signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+    return oci.object_storage.ObjectStorageClient(
+        {},
+        signer=signer,
+        service_endpoint=f"https://objectstorage.{settings.aidp_region}.oraclecloud.com",
+        retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY,
+    )
+
+
+def _validate_jdbc_driver_archive(path: Path) -> None:
+    if not path.stat().st_size or not zipfile.is_zipfile(path):
+        raise ValueError("Select the ZIP downloaded from AIDP Workbench")
+    with zipfile.ZipFile(path) as archive:
+        members = [item for item in archive.infolist() if not item.is_dir()]
+        if (
+            not members
+            or sum(item.file_size for item in members) > MAX_JDBC_DRIVER_EXPANDED_BYTES
+            or any(
+                PurePosixPath(item.filename.replace("\\", "/")).is_absolute()
+                or ".." in PurePosixPath(item.filename.replace("\\", "/")).parts
+                for item in members
+            )
+            or not any(item.filename.casefold().endswith((".jar", ".zip")) for item in members)
+        ):
+            raise ValueError("The AIDP JDBC driver archive is not valid")
+
+
+def _sync_jdbc_driver_object(settings: Settings, source: Path) -> None:
+    if settings.local_development_mode or not settings.enforce_governed_data_access:
+        return
+    if not all((settings.aidp_region, settings.objectstorage_namespace, settings.governance_control_bucket)):
+        raise RuntimeError("Object Storage is not configured for the governance gateway")
+    client = _jdbc_object_storage(settings)
+    digest = hashlib.md5(usedforsecurity=False)
+    with source.open("rb") as content:
+        for chunk in iter(lambda: content.read(1024 * 1024), b""):
+            digest.update(chunk)
+    with source.open("rb") as body:
+        client.put_object(
+            settings.objectstorage_namespace,
+            settings.governance_control_bucket,
+            settings.governance_jdbc_driver_object,
+            body,
+            content_length=source.stat().st_size,
+            content_md5=base64.b64encode(digest.digest()).decode("ascii"),
+            content_type="application/zip",
+        )
+
+
+def _restore_jdbc_driver_object(settings: Settings, destination: Path) -> bool:
+    if destination.is_file():
+        return True
+    if settings.local_development_mode or not settings.enforce_governed_data_access:
+        return False
+    if not all((settings.aidp_region, settings.objectstorage_namespace, settings.governance_control_bucket)):
+        return False
+    import oci
+
+    try:
+        response = _jdbc_object_storage(settings).get_object(
+            settings.objectstorage_namespace,
+            settings.governance_control_bucket,
+            settings.governance_jdbc_driver_object,
+        )
+    except oci.exceptions.ServiceError as exc:
+        if exc.status == 404:
+            return False
+        raise
+    declared = int(response.headers.get("content-length", 0))
+    if not 1 <= declared <= MAX_JDBC_DRIVER_BYTES:
+        raise ValueError("The stored AIDP JDBC driver size is invalid")
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=destination.parent, suffix=".zip", delete=False) as handle:
+            temporary = Path(handle.name)
+            remaining = MAX_JDBC_DRIVER_BYTES + 1
+            while remaining:
+                chunk = response.data.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                handle.write(chunk)
+                remaining -= len(chunk)
+        if temporary.stat().st_size != declared:
+            raise ValueError("The stored AIDP JDBC driver is incomplete")
+        _validate_jdbc_driver_archive(temporary)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+        temporary = None
+        return True
+    finally:
+        if temporary:
+            temporary.unlink(missing_ok=True)
 HEALTH_SUCCESS_TTL_SECONDS = 30
 HEALTH_FAILURE_TTL_SECONDS = 5
 
@@ -249,7 +355,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except IdentityRejected as exc:
             logger.warning("Identity Domains rejected a lab registration: %s", exc)
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "Identity Domains rejected this registration request",
             ) from exc
         except IdentityPending as exc:
@@ -385,7 +491,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "Too many invalid registration codes",
                     headers={"Retry-After": str(invalid_retry_after)},
                 )
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid registration code")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid registration code")
         participant_key = opaque_rate_limit_key(app.state.session_key, payload.email)
         retry_after = app.state.register_limiter.consume(participant_key)
         if retry_after:
@@ -426,16 +532,92 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def admin_session(username: str = Depends(require_admin)) -> dict[str, str]:
         return {"username": username}
 
+    async def admin_settings_payload() -> dict[str, str | bool]:
+        driver = Path(settings.jdbc_driver_file)
+        if not driver.is_file():
+            try:
+                await asyncio.to_thread(_restore_jdbc_driver_object, settings, driver)
+            except Exception:
+                logger.exception("Failed to restore the JDBC driver from private Object Storage")
+        result = app.state.settings_store.get_admin_settings()
+        try:
+            result.update(await app.state.aidp_factory().connection_access())
+        except (AidpProvisionPending, AidpProvisionError):
+            result.update(compute_name="", jdbc_url="")
+        return result
+
     @app.get("/api/admin/settings")
     async def admin_settings(_admin: str = Depends(require_admin)) -> dict[str, str | bool]:
-        return app.state.settings_store.get_admin_settings()
+        return await admin_settings_payload()
+
+    @app.get("/api/admin/aidp/jdbc-driver", response_class=FileResponse)
+    async def download_jdbc_driver(_admin: str = Depends(require_admin)) -> FileResponse:
+        driver = Path(settings.jdbc_driver_file)
+        if not driver.is_file():
+            try:
+                await asyncio.to_thread(_restore_jdbc_driver_object, settings, driver)
+            except Exception:
+                logger.exception("Failed to restore the JDBC driver for an administrator download")
+        if not driver.is_file() or driver.suffix.casefold() != ".zip":
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "The AIDP JDBC driver has not been synchronized to this lab VM yet",
+            )
+        return FileResponse(
+            driver,
+            media_type="application/zip",
+            filename="aidp-jdbc-driver.zip",
+        )
+
+    @app.put("/api/admin/aidp/jdbc-driver")
+    async def upload_jdbc_driver(
+        request: Request,
+        _admin: str = Depends(require_admin),
+    ) -> dict[str, bool]:
+        content_length = request.headers.get("content-length")
+        if content_length and (not content_length.isdigit() or int(content_length) > MAX_JDBC_DRIVER_BYTES):
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "The JDBC driver exceeds 128 MiB")
+        driver = Path(settings.jdbc_driver_file)
+        driver.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=driver.parent, suffix=".zip", delete=False) as handle:
+                temporary = Path(handle.name)
+                size = 0
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > MAX_JDBC_DRIVER_BYTES:
+                        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "The JDBC driver exceeds 128 MiB")
+                    handle.write(chunk)
+            if not temporary:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Select the ZIP downloaded from AIDP Workbench")
+            try:
+                _validate_jdbc_driver_archive(temporary)
+            except ValueError as exc:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+            try:
+                _sync_jdbc_driver_object(settings, temporary)
+            except Exception:
+                logger.exception("Failed to synchronize the validated JDBC driver to private Object Storage")
+                raise HTTPException(
+                    status.HTTP_502_BAD_GATEWAY,
+                    "The JDBC driver could not be synchronized to the governance gateway",
+                ) from None
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, driver)
+            temporary = None
+            return {"jdbc_driver_available": True}
+        finally:
+            if temporary:
+                temporary.unlink(missing_ok=True)
 
     @app.put("/api/admin/settings")
     async def update_admin_settings(payload: SettingsRequest, _admin: str = Depends(require_admin)) -> dict[str, str | bool]:
         try:
-            return app.state.settings_store.update(payload.aidp_url, payload.registration_code)
+            app.state.settings_store.update(payload.aidp_url, payload.registration_code)
+            return await admin_settings_payload()
         except ValueError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
     @app.get("/api/admin/users")
     async def admin_users(_admin: str = Depends(require_admin)) -> dict[str, list[dict]]:

@@ -56,6 +56,12 @@ type UserDraft = { name: string; email: string; lab_ids: string[] };
 type AdminSettingsResponse = {
   aidp_url: string;
   aidp_platform_id: string;
+  compute_name: string;
+  jdbc_url: string;
+  jdbc_authentication: string;
+  jdbc_driver_available: boolean;
+  governance_gateway_url: string;
+  governance_control_bucket: string;
   registration_code_configured: boolean;
 };
 const fallbackCatalog: CatalogLab[] = [
@@ -1868,17 +1874,33 @@ function AdminUsers() {
 function AdminSettings() {
   const [aidpUrl, setAidpUrl] = useState("");
   const [aidpPlatformId, setAidpPlatformId] = useState("");
+  const [computeName, setComputeName] = useState("");
+  const [jdbcUrl, setJdbcUrl] = useState("");
+  const [jdbcAuthentication, setJdbcAuthentication] = useState("");
+  const [jdbcDriverAvailable, setJdbcDriverAvailable] = useState(false);
+  const [governanceGatewayUrl, setGovernanceGatewayUrl] = useState("");
+  const [governanceControlBucket, setGovernanceControlBucket] = useState("");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
+  const [uploadingDriver, setUploadingDriver] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const urlRef = useRef<HTMLInputElement>(null);
   const platformIdRef = useRef<HTMLInputElement>(null);
+  const jdbcUrlRef = useRef<HTMLInputElement>(null);
+  const gatewayUrlRef = useRef<HTMLInputElement>(null);
+  const driverInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     void api<AdminSettingsResponse>("/api/admin/settings")
       .then((result) => {
         setAidpUrl(result.aidp_url);
         setAidpPlatformId(result.aidp_platform_id);
+        setComputeName(result.compute_name);
+        setJdbcUrl(result.jdbc_url);
+        setJdbcAuthentication(result.jdbc_authentication);
+        setJdbcDriverAvailable(result.jdbc_driver_available);
+        setGovernanceGatewayUrl(result.governance_gateway_url);
+        setGovernanceControlBucket(result.governance_control_bucket);
         setRegistrationCodeConfigured(result.registration_code_configured);
       })
       .catch((reason) => {
@@ -1926,11 +1948,43 @@ function AdminSettings() {
       });
       setAidpUrl(result.aidp_url);
       setAidpPlatformId(result.aidp_platform_id);
+      setComputeName(result.compute_name);
+      setJdbcUrl(result.jdbc_url);
+      setJdbcAuthentication(result.jdbc_authentication);
+      setJdbcDriverAvailable(result.jdbc_driver_available);
+      setGovernanceGatewayUrl(result.governance_gateway_url);
+      setGovernanceControlBucket(result.governance_control_bucket);
       setRegistrationCode("");
       setRegistrationCodeConfigured(result.registration_code_configured);
       setToast(rotatesRegistrationCode ? "Lab settings saved. Registration code updated." : "AI Data Platform URL saved.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save settings");
+    }
+  }
+  async function uploadJdbcDriver(file?: File) {
+    if (!file) return;
+    setError("");
+    if (!file.name.toLowerCase().endsWith(".zip")) {
+      setError("Select the ZIP downloaded from AIDP Workbench.");
+      return;
+    }
+    setUploadingDriver(true);
+    try {
+      const result = await api<{ jdbc_driver_available: boolean }>(
+        "/api/admin/aidp/jdbc-driver",
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/zip" },
+          body: file,
+        },
+      );
+      setJdbcDriverAvailable(result.jdbc_driver_available);
+      setToast("AIDP JDBC driver synchronized to oci_control and the lab VM.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to store the JDBC driver");
+    } finally {
+      setUploadingDriver(false);
+      if (driverInputRef.current) driverInputRef.current.value = "";
     }
   }
   return (
@@ -1986,6 +2040,31 @@ function AdminSettings() {
                 Open AI Data Platform
               </a>
             )}
+            {jdbcDriverAvailable ? (
+              <span className="settings-driver-actions">
+                <a className="settings-link" href="/api/admin/aidp/jdbc-driver" download>
+                  Download AIDP JDBC driver
+                </a>
+                <button type="button" className="quiet-link" onClick={() => driverInputRef.current?.click()} disabled={uploadingDriver}>
+                  Replace driver
+                </button>
+              </span>
+            ) : (
+              <span className="settings-driver-actions">
+                <span className="settings-help">Download the driver from AIDP Workbench once, then store it on this lab VM.</span>
+                <button type="button" className="secondary" onClick={() => driverInputRef.current?.click()} disabled={uploadingDriver}>
+                  {uploadingDriver ? "Uploading…" : "Import JDBC driver"}
+                </button>
+              </span>
+            )}
+            <input
+              ref={driverInputRef}
+              className="sr-only"
+              type="file"
+              accept=".zip,application/zip"
+              aria-label="Import AIDP JDBC driver ZIP"
+              onChange={(event) => void uploadJdbcDriver(event.target.files?.[0])}
+            />
           </label>
           <label className="settings-field">
             AI Data Platform OCID
@@ -2015,6 +2094,43 @@ function AdminSettings() {
                 <CopyIcon />
               </button>
             </span>
+          </label>
+          <div className="settings-intro settings-connection-intro">
+            <div>
+              <strong>Connection access</strong>
+              <p>Share these non-secret endpoints with authorized lab users.</p>
+            </div>
+          </div>
+          <label className="settings-field">
+            Shared compute
+            <input value={computeName} readOnly spellCheck={false} aria-label="Shared compute" placeholder="Not available" />
+          </label>
+          <label className="settings-field">
+            JDBC URL
+            <span className="settings-url-control">
+              <input ref={jdbcUrlRef} value={jdbcUrl} readOnly spellCheck={false} aria-label="JDBC URL" placeholder="Not available" />
+              <button type="button" className="copy-url" onClick={() => void copyAidpValue(jdbcUrl, jdbcUrlRef, "JDBC URL")} disabled={!jdbcUrl} aria-label="Copy JDBC URL" title="Copy JDBC URL">
+                <CopyIcon />
+              </button>
+            </span>
+          </label>
+          <label className="settings-field">
+            Authentication
+            <input value={jdbcAuthentication} readOnly spellCheck={false} aria-label="JDBC authentication" />
+          </label>
+          <label className="settings-field">
+            AI Data Governance Gateway URL
+            <span className="settings-url-control">
+              <input ref={gatewayUrlRef} value={governanceGatewayUrl} readOnly spellCheck={false} aria-label="AI Data Governance Gateway URL" placeholder="Not installed" />
+              <button type="button" className="copy-url" onClick={() => void copyAidpValue(governanceGatewayUrl, gatewayUrlRef, "AI Data Governance Gateway URL")} disabled={!governanceGatewayUrl} aria-label="Copy AI Data Governance Gateway URL" title="Copy AI Data Governance Gateway URL">
+                <CopyIcon />
+              </button>
+            </span>
+          </label>
+          <label className="settings-field">
+            Governance control bucket
+            <input value={governanceControlBucket} readOnly spellCheck={false} aria-label="Governance control bucket" placeholder="Not installed" />
+            <span className="settings-help">Stores the oci_control Delta tables and the private JDBC driver under separate prefixes.</span>
           </label>
           <label className="settings-field">
             Lab registration code

@@ -10,6 +10,7 @@ from typing import Any, Literal, Protocol
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
+from . import __version__
 from .auth import AuthenticationError, OidcAuthenticator, OidcSettings
 from .catalog import AidpCatalogClient, CatalogSyncError, CatalogSynchronizer
 from .jdbc import AidpJdbcRuntime
@@ -139,7 +140,7 @@ def _require_scope(identity: Principal, scope: str) -> None:
 def _register_base_routes(app: FastAPI, readiness: Readiness) -> None:
     @app.get("/healthz")
     def health() -> dict[str, str]:
-        return {"status": "ok", "version": "2.1.2"}
+        return {"status": "ok", "version": __version__}
 
     @app.get("/readyz")
     def ready() -> dict[str, str]:
@@ -417,7 +418,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(
         title="AI Data Governance Gateway",
-        version="2.1.0",
+        version=__version__,
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -440,7 +441,11 @@ def production_app() -> FastAPI:
     authority = os.environ.get("GOVERNANCE_OIDC_AUTHORITY", "")
     authenticator = OidcAuthenticator(OidcSettings(issuer, audience, authority))
     runtime = AidpJdbcRuntime()
-    store = JdbcControlStore(runtime.connect, os.environ.get("GOVERNANCE_CONTROL_CATALOG", "aidp_lab"))
+    store = JdbcControlStore(
+        runtime.connect,
+        os.environ.get("GOVERNANCE_CONTROL_CATALOG", "aidp_lab"),
+        os.environ.get("GOVERNANCE_CONTROL_LOCATION", ""),
+    )
     tokenizer = VaultTokenizer(store, OciKmsCipher(KmsSettings.from_environment()))
     service = GovernanceService(store, runtime.execute, tokenizer.tokenize)
     catalog_client = AidpCatalogClient.from_environment()

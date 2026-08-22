@@ -21,7 +21,7 @@ metadata:
   namespace: aidp-governance
   labels:
     app.kubernetes.io/name: ai-data-governance-gateway
-    app.kubernetes.io/version: "2.1.0"
+    app.kubernetes.io/version: "2.1.3"
 spec:
   replicas: 2
   revisionHistoryLimit: 3
@@ -76,6 +76,8 @@ spec:
               value: ${jsonencode(jdbc_driver_bucket)}
             - name: GOVERNANCE_OBJECT_STORAGE_NAMESPACE
               value: ${jsonencode(object_storage_namespace)}
+            - name: GOVERNANCE_CONTROL_LOCATION
+              value: ${jsonencode(control_delta_location)}
             - name: GOVERNANCE_TOKENIZATION_KEY_OCID
               value: ${jsonencode(tokenization_key_ocid)}
             - name: GOVERNANCE_TOKENIZATION_CRYPTO_ENDPOINT

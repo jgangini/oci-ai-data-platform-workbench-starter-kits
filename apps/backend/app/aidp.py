@@ -110,6 +110,15 @@ class LocalAidpClient:
     async def healthcheck(self) -> None:
         return None
 
+    async def connection_access(self) -> dict[str, str]:
+        return {
+            "compute_name": SHARED_COMPUTE_NAME,
+            "jdbc_url": (
+                "jdbc:spark://gateway.aidp.us-chicago-1.oci.oraclecloud.com/default;"
+                "SparkServerType=AIDP;httpPath=cliservice/local-cluster"
+            ),
+        }
+
     @staticmethod
     def _material(user_ocid: str, email: str, lab_id: str, participant_code: int) -> UserMaterial:
         pack = load_lab_pack(lab_id)
@@ -225,6 +234,30 @@ class AidpClient:
 
     async def close(self) -> None:
         self.session.close()
+
+    async def connection_access(self) -> dict[str, str]:
+        workspace = self._workspace()
+        workspace_key = str(workspace["key"])
+        cluster = self._shared_compute(workspace_key)
+        cluster_key = str(cluster["key"])
+        details = self._request(
+            "GET",
+            f"/workspaces/{workspace_key}/clusters/{cluster_key}",
+            phase="workspace",
+        )
+        jdbc_url = str(
+            (details.get("jdbcEndpointUrl") if isinstance(details, dict) else "")
+            or cluster.get("jdbcEndpointUrl")
+            or ""
+        ).strip()
+        if not jdbc_url.startswith("jdbc:spark://") or ";SparkServerType=AIDP" not in jdbc_url:
+            raise AidpProvisionPending(
+                "AIDP has not published the JDBC connection details yet.", "workspace"
+            )
+        return {
+            "compute_name": str(cluster.get("displayName") or SHARED_COMPUTE_NAME),
+            "jdbc_url": jdbc_url,
+        }
 
     @staticmethod
     def _request_headers(

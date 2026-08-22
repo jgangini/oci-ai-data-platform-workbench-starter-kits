@@ -18,7 +18,7 @@ import uuid
 import zipfile
 from io import BytesIO, StringIO
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote
 
@@ -38,8 +38,6 @@ BOOTSTRAP_READY = "AIDP_LAB_CREDENTIALS_V2_READY"
 DATABASE_OPERATOR = "AIDP_LAB_OPERATOR"
 GOVERNANCE_CREDENTIAL_NAME = "AidpGovernanceOperator"
 GOVERNANCE_JDBC_PURPOSE = "AIDP_GOVERNANCE_GATEWAY"
-GOVERNANCE_JDBC_DRIVER_ENV = "DEPLOY_STUDIO_GOVERNANCE_JDBC_DRIVER"
-MAX_GOVERNANCE_DRIVER_BYTES = 128 * 1024 * 1024
 LAYERS = ("landing", "bronze", "silver", "gold")
 RESOURCE_WAIT_ATTEMPTS = 120
 POST_APPLY_BUDGET_SECONDS = 3300
@@ -467,56 +465,6 @@ def ensure_governance_jdbc_credential(
     if previous and previous != fingerprint and previous in fingerprints:
         identity.delete_api_key(user_id, previous)
     return True
-
-
-def governance_jdbc_driver_path() -> Path:
-    value = os.environ.get(GOVERNANCE_JDBC_DRIVER_ENV, "").strip()
-    if not value:
-        raise ReconcileError(
-            "The Oracle AIDP JDBC driver upload is required when AI Data Governance is enabled"
-        )
-    path = Path(value).resolve()
-    if not path.is_file() or path.suffix.casefold() not in {".jar", ".zip"}:
-        raise ReconcileError("The governance JDBC driver must be an existing JAR or ZIP file")
-    size = path.stat().st_size
-    if not 1 <= size <= MAX_GOVERNANCE_DRIVER_BYTES or not zipfile.is_zipfile(path):
-        raise ReconcileError("The governance JDBC driver is invalid or exceeds 128 MiB")
-    with zipfile.ZipFile(path) as archive:
-        members = [item for item in archive.infolist() if not item.is_dir()]
-        if any(
-            PurePosixPath(item.filename).is_absolute()
-            or ".." in PurePosixPath(item.filename).parts
-            for item in members
-        ):
-            raise ReconcileError("The governance JDBC driver archive contains an unsafe path")
-        if path.suffix.casefold() == ".zip" and not any(
-            item.filename.casefold().endswith((".jar", ".zip")) for item in members
-        ):
-            raise ReconcileError("The governance JDBC ZIP contains no driver archive")
-    return path
-
-
-def upload_governance_jdbc_driver(
-    object_storage: Any,
-    namespace: str,
-    bucket: str,
-    object_name: str,
-    path: Path,
-) -> None:
-    digest = hashlib.md5(usedforsecurity=False)
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    with path.open("rb") as source:
-        object_storage.put_object(
-            namespace,
-            bucket,
-            object_name,
-            source,
-            content_length=path.stat().st_size,
-            content_md5=base64.b64encode(digest.digest()).decode("ascii"),
-            content_type="application/java-archive" if path.suffix.casefold() == ".jar" else "application/zip",
-        )
 
 
 def assert_fields(resource: dict[str, Any], expected: dict[str, Any], kind: str) -> None:
@@ -2070,14 +2018,6 @@ def main() -> int:
                 str(reconciled["workspace_key"]),
                 str(reconciled["shared_compute_key"]),
                 technical_user_ocid,
-            )
-            driver_path = governance_jdbc_driver_path()
-            upload_governance_jdbc_driver(
-                object_storage,
-                str(outputs["objectstorage_namespace"]),
-                str(outputs["governance_gateway_jdbc_driver_bucket"]),
-                str(outputs["governance_gateway_jdbc_driver_object"]),
-                driver_path,
             )
             credential_rotated = ensure_governance_jdbc_credential(
                 oci,

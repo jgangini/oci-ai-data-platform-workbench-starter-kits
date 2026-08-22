@@ -27,6 +27,9 @@ class Settings:
     autonomous_runtime_file: str = "/etc/aidp-lab/autonomous/runtime.json"
     agent_model_id: str = ""
     governance_gateway_url: str = ""
+    governance_control_bucket: str = ""
+    jdbc_driver_file: str = "/var/lib/aidp-lab/drivers/aidp-jdbc-driver.zip"
+    governance_jdbc_driver_object: str = ".governance/aidp-jdbc-driver.zip"
     enforce_governed_data_access: bool = False
     oci_config_file: str = "/etc/aidp-lab/oci/config"
     objectstorage_namespace: str = ""
@@ -58,6 +61,15 @@ class Settings:
             ),
             agent_model_id=os.getenv("AGENT_MODEL_ID", ""),
             governance_gateway_url=os.getenv("GOVERNANCE_GATEWAY_URL", "").rstrip("/"),
+            governance_control_bucket=os.getenv("GOVERNANCE_CONTROL_BUCKET", ""),
+            jdbc_driver_file=os.getenv(
+                "AIDP_JDBC_DRIVER_FILE",
+                "/var/lib/aidp-lab/drivers/aidp-jdbc-driver.zip",
+            ),
+            governance_jdbc_driver_object=os.getenv(
+                "GOVERNANCE_JDBC_DRIVER_OBJECT",
+                ".governance/aidp-jdbc-driver.zip",
+            ),
             enforce_governed_data_access=os.getenv("ENFORCE_GOVERNED_DATA_ACCESS", "false").lower()
             in {"1", "true", "yes"},
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
@@ -107,6 +119,10 @@ class SettingsStore:
         return {
             "aidp_url": values["aidp_workbench_url"],
             "aidp_platform_id": self._settings.aidp_platform_id,
+            "governance_gateway_url": self._settings.governance_gateway_url,
+            "governance_control_bucket": self._settings.governance_control_bucket,
+            "jdbc_driver_available": Path(self._settings.jdbc_driver_file).is_file(),
+            "jdbc_authentication": "OCI API key or browser authorization token",
             "registration_code_configured": bool(values["registration_code_hash"]),
         }
 

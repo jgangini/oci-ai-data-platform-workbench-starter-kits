@@ -179,5 +179,7 @@ resource "oci_identity_policy" "governance_jdbc" {
   description    = "Allow only the dedicated JDBC identity to connect to this AIDP instance"
   statements = [
     "Allow any-user to use ai-data-platforms in compartment id ${local.target_compartment} where request.principal.id = '${oci_identity_user.governance_jdbc[0].id}'",
+    "Allow any-user to read buckets in compartment id ${local.target_compartment} where all {request.principal.id = '${oci_identity_user.governance_jdbc[0].id}', target.bucket.name = '${oci_objectstorage_bucket.control[0].name}'}",
+    "Allow any-user to inspect objects in compartment id ${local.target_compartment} where all {request.principal.id = '${oci_identity_user.governance_jdbc[0].id}', target.bucket.name = '${oci_objectstorage_bucket.control[0].name}'}",
   ]
 }

@@ -44,17 +44,34 @@ def test_workload_identity_reads_only_named_runtime_inputs() -> None:
     assert "request.principal.namespace='aidp-governance'" in gateway
     assert "request.principal.service_account='ai-data-governance'" in gateway
     assert "target.secret.id='${oci_vault_secret.governance_jdbc[0].id}'" in gateway
-    assert "target.bucket.name='${oci_objectstorage_bucket.data.name}'" in gateway
+    assert "target.bucket.name='${oci_objectstorage_bucket.control[0].name}'" in gateway
     assert "target.object.name='${local.governance_jdbc_object}'" in gateway
     assert "target.key.id='${oci_kms_key.governance[0].id}'" in gateway
     assert "use keys" in gateway
     assert "manage secret" not in gateway
 
 
+def test_control_bucket_centralizes_delta_tables_and_the_jdbc_driver() -> None:
+    storage = (ROOT / "terraform/f_oci_objectstorage_bucket.tf").read_text(encoding="utf-8")
+    deployment = (ROOT / "terraform/i_oci_data_governance_deployment.tf").read_text(encoding="utf-8")
+    edge = (ROOT / "terraform/i_oci_data_governance_edge.tf").read_text(encoding="utf-8")
+    manifest = (ROOT / "deploy/governance/gateway.yaml").read_text(encoding="utf-8")
+    assert 'resource "oci_objectstorage_bucket" "control"' in storage
+    assert 'count          = var.enable_ai_data_governance ? 1 : 0' in storage
+    assert 'name           = "oci_control"' in storage
+    assert 'access_type    = "NoPublicAccess"' in storage
+    assert "oci_objectstorage_bucket.control[0].name" in deployment
+    assert '/delta"' in deployment
+    assert "GOVERNANCE_CONTROL_LOCATION" in manifest
+    assert "to read buckets" in edge and "to inspect objects" in edge
+    assert edge.count("target.bucket.name = '${oci_objectstorage_bucket.control[0].name}'") == 2
+    assert "to read objects" not in edge and "to manage objects" not in edge
+
+
 def test_production_gateway_uses_delta_not_process_memory() -> None:
     api = (ROOT / "apps/governance_gateway/api.py").read_text(encoding="utf-8")
     runtime = (ROOT / "apps/governance_gateway/jdbc.py").read_text(encoding="utf-8")
-    assert "JdbcControlStore(runtime.connect" in api
+    assert "JdbcControlStore(" in api and "runtime.connect" in api
     assert "MemoryControlStore" not in api
     assert "AIDP_GOVERNANCE_GATEWAY" in runtime
     assert "get_oke_workload_identity_resource_principal_signer" in runtime

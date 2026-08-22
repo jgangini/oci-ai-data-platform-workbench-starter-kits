@@ -7,9 +7,14 @@ services:
       dockerfile: apps/governance_gateway/Dockerfile
     environment:
       GOVERNANCE_OIDC_ISSUER: https://identity.example.invalid
+      GOVERNANCE_OIDC_AUTHORITY: https://identity.example.invalid
       GOVERNANCE_OIDC_AUDIENCE: local-governance-tests
       GOVERNANCE_CONTROL_CATALOG: aidp_lab
       GOVERNANCE_CONTROL_SCHEMA: oci_control
+      GOVERNANCE_TOKENIZATION_KEY_OCID: ocid1.key.oc1.us-chicago-1.local
+      GOVERNANCE_TOKENIZATION_CRYPTO_ENDPOINT: https://kms.example.invalid
+      GOVERNANCE_OCI_REGION: us-chicago-1
+      GOVERNANCE_AIDP_PLATFORM_ID: ocid1.aidataplatform.oc1.us-chicago-1.local
     ports:
       - "127.0.0.1:18082:8080"
     read_only: true

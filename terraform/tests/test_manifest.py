@@ -132,6 +132,8 @@ def test_deploy_studio_manifest_contract() -> None:
         "governance_gateway_jdbc_secret_ocid",
         "governance_gateway_jdbc_driver_bucket",
         "governance_gateway_jdbc_driver_object",
+        "governance_control_bucket",
+        "governance_control_delta_location",
         "governance_gateway_tokenization_key_ocid",
         "governance_gateway_tokenization_crypto_endpoint",
         "governance_gateway_api_gateway_id",
@@ -187,6 +189,8 @@ def test_runtime_security_contracts() -> None:
     attributes = (root / ".gitattributes").read_text(encoding="utf-8")
     nginx = (root / "docker/nginx.conf").read_text(encoding="utf-8")
     local_nginx = (root / "docker/nginx.oci-local.conf").read_text(encoding="utf-8")
+    backend_requirements = (root / "apps/backend/requirements.txt").read_text(encoding="utf-8")
+    gateway_requirements = (root / "apps/governance_gateway/requirements.txt").read_text(encoding="utf-8")
     entrypoint = (root / "docker/entrypoint.sh").read_text(encoding="utf-8")
     cloud_init = (root / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")
     variables = (root / "terraform/b_variables.tf").read_text(encoding="utf-8")
@@ -198,10 +202,16 @@ def test_runtime_security_contracts() -> None:
     backend_main = (root / "apps/backend/app/main.py").read_text(encoding="utf-8")
     assert "$proxy_add_x_forwarded_for" not in nginx
     assert "*.sh text eol=lf" in attributes
-    assert nginx.count("X-Forwarded-For $remote_addr") == 1
+    assert nginx.count("X-Forwarded-For $remote_addr") == 2
     for proxy in (nginx, local_nginx):
+        assert "location = /api/admin/aidp/jdbc-driver {" in proxy
+        assert "client_max_body_size 128m;" in proxy
+        assert "client_max_body_size 1m;" in proxy
         assert "proxy_read_timeout 300s;" in proxy
         assert "proxy_send_timeout 300s;" in proxy
+    for requirements in (backend_requirements, gateway_requirements):
+        assert "fastapi==0.141.1" in requirements
+        assert "starlette==0.49.1" in requirements
     assert "limit_req" not in nginx
     assert "opaque_rate_limit_key" in backend_main
     assert 'headers={"Retry-After": str(' in backend_main

@@ -1,6 +1,6 @@
 # AI Data Governance add-on
 
-> Status: `v2.1.1` validation target. Local contracts are implemented; live OCI acceptance remains gated.
+> Status: `v2.1.3` validation target. Local contracts are implemented; live OCI acceptance remains gated.
 
 ## Runtime boundaries
 
@@ -12,6 +12,8 @@
 | VS Code extension | Catalog navigation, governed SQL/notebooks, Permissions UI, and Agent chat | OCI request signing plus user OAuth PKCE | Tokens only in VS Code SecretStorage |
 
 Autonomous is mandatory for the deployed Agent-memory path. The governance gateway does not read or replace Agent memory. Conversely, policies are authoritative only in `oci_control`; Autonomous is never used as a policy fallback.
+
+Deploy Studio creates one private Object Storage bucket named `oci_control` when the add-on is enabled. The catalog tables remain addressable as `aidp_lab.oci_control.<table>`, and their Delta files live under `oci://oci_control@<namespace>/delta/<table>`. Runtime artifacts use separate prefixes; the JDBC bundle is stored at `.governance/aidp-jdbc-driver.zip`. This keeps one control boundary without mixing driver files into Delta table locations.
 
 ## Authorization model
 
@@ -51,7 +53,9 @@ The AIDP Agent defines `governance_access_token` as required with `shouldLog: fa
 
 OCI API Gateway is the only public entry point. It terminates TLS, validates the OCI Identity Domains token, audience, issuer, signing key, and governance scope, then forwards requests to one fixed private OKE load-balancer address. The OKE service accepts port `8080` only from the API Gateway subnet. The container is non-root, read-only, and stripped of Linux capabilities; it validates OIDC again before executing a request.
 
-OCI APIs are accessed through Workload Identity. Deploy Studio creates the dedicated JDBC API key after Terraform apply and stores its private half only in OCI Vault. The operator uploads the licensed Oracle AIDP JDBC driver during deployment; it is validated, sent directly to the deployment data bucket under `.governance/`, and never stored in Git or Terraform state. The pod materializes both artifacts only on its ephemeral filesystem.
+OCI APIs are accessed through Workload Identity. Deploy Studio creates the dedicated JDBC API key after Terraform apply and stores its private half only in OCI Vault. The administrator imports the licensed Oracle AIDP JDBC driver from the VM settings page; it is validated, sent directly to the private `oci_control` bucket under `.governance/`, and never stored in Git or Terraform state. The pod materializes both artifacts only on its ephemeral filesystem.
+
+The technical JDBC identity receives only the documented external-table discovery permissions on `oci_control`: `read buckets` and `inspect objects`. It cannot read object contents, create objects, manage objects, or delete objects directly. AIDP's existing service-principal policy remains the only writer for buckets governed by that AIDP instance.
 
 ## Acceptance gates
 

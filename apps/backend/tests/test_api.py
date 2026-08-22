@@ -1,3 +1,5 @@
+import io
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -135,6 +137,15 @@ class FakeAidp:
     async def close(self) -> None:
         return None
 
+    async def connection_access(self) -> dict[str, str]:
+        return {
+            "compute_name": "aidp_cluster_shared_compute",
+            "jdbc_url": (
+                "jdbc:spark://gateway.aidp.us-chicago-1.oci.oraclecloud.com/default;"
+                "SparkServerType=AIDP;httpPath=cliservice/test-cluster"
+            ),
+        }
+
 
 def make_client(tmp_path: Path, mode: str = "active") -> TestClient:
     settings = Settings(
@@ -146,6 +157,9 @@ def make_client(tmp_path: Path, mode: str = "active") -> TestClient:
         aidp_workbench_url="https://example.datalake.oci.oraclecloud.com#?tenant=test&domain=Default",
         aidp_platform_id="ocid1.aidataplatform.oc1..test",
         aidp_workspace_name="aidp-lab-workspace-test", aidp_region="us-chicago-1",
+        governance_gateway_url="https://governance.example.test",
+        governance_control_bucket="oci_control",
+        jdbc_driver_file=str(tmp_path / "aidp-jdbc-driver.zip"),
         oci_config_file="/etc/aidp-lab/oci/config",
         objectstorage_namespace="namespace", bucket_name="aidp-data-test",
         lab_marker="lab-test", session_secret_file=str(tmp_path / "session.key"),
@@ -230,6 +244,34 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     response = client.get("/api/admin/settings")
     assert response.status_code == 200
     assert response.json()["aidp_platform_id"] == "ocid1.aidataplatform.oc1..test"
+    assert response.json()["compute_name"] == "aidp_cluster_shared_compute"
+    assert response.json()["jdbc_url"].startswith("jdbc:spark://")
+    assert response.json()["governance_gateway_url"] == "https://governance.example.test"
+    assert response.json()["governance_control_bucket"] == "oci_control"
+    assert response.json()["jdbc_driver_available"] is False
+
+
+def test_admin_jdbc_driver_download_requires_session_and_existing_vm_file(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    assert client.get("/api/admin/aidp/jdbc-driver").status_code == 401
+    assert client.put("/api/admin/aidp/jdbc-driver", content=b"not-a-zip").status_code == 401
+    login(client)
+    assert client.get("/api/admin/aidp/jdbc-driver").status_code == 404
+    assert client.put("/api/admin/aidp/jdbc-driver", content=b"not-a-zip").status_code == 422
+    bundle = io.BytesIO()
+    with zipfile.ZipFile(bundle, "w") as archive:
+        archive.writestr("simbaSpark/SparkJDBC42.jar", b"driver")
+    uploaded = client.put(
+        "/api/admin/aidp/jdbc-driver",
+        content=bundle.getvalue(),
+        headers={"content-type": "application/zip"},
+    )
+    assert uploaded.status_code == 200
+    assert uploaded.json() == {"jdbc_driver_available": True}
+    response = client.get("/api/admin/aidp/jdbc-driver")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "aidp-jdbc-driver.zip" in response.headers["content-disposition"]
 
 
 def test_registration_accepts_multiple_labs_and_activates_after_all_are_ready(tmp_path: Path) -> None:

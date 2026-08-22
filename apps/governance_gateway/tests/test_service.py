@@ -25,6 +25,24 @@ def test_delta_contract_contains_every_generic_control_table() -> None:
     assert "lineage_propagation" in ddl and "source_version STRING" in ddl
 
 
+def test_delta_contract_uses_a_separate_object_storage_path_per_control_table() -> None:
+    location = "oci://oci_control@namespace/delta"
+    ddl = delta_schema_ddl("aidp_lab", location)
+    for table in CONTROL_TABLES:
+        assert any(f"LOCATION '{location}/{table}'" in statement for statement in ddl)
+    unsafe_locations = (
+        "oci://oci_control@namespace/delta'; DROP TABLE secrets; --",
+        "oci://oci_control:secret@namespace/delta",
+    )
+    for unsafe_location in unsafe_locations:
+        try:
+            delta_schema_ddl("aidp_lab", unsafe_location)
+        except ValueError as error:
+            assert "safe OCI Object Storage URI" in str(error)
+        else:
+            raise AssertionError("An unsafe governance control location was accepted")
+
+
 def test_masking_happens_before_rows_leave_the_service() -> None:
     store = MemoryControlStore()
     column = ColumnRef("aidp_lab", "oci_gold", "customers", "email")

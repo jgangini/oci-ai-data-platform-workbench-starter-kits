@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import RLock
 from typing import Any, Callable, Iterable, Protocol
+from urllib.parse import urlparse
 
 from .policy import ColumnPolicy, ColumnRef, PolicyAction, Principal
 from .catalog import CatalogColumn, CatalogSnapshot, new_object_id
@@ -280,31 +281,38 @@ class MemoryControlStore:
             })
 
 
-def delta_schema_ddl(catalog: str) -> tuple[str, ...]:
+def delta_schema_ddl(catalog: str, control_location: str = "") -> tuple[str, ...]:
     prefix = f"`{catalog}`.`oci_control`"
+    location = _control_location(control_location)
+
+    def table(name: str, columns: str) -> str:
+        target = f" LOCATION '{location}/{name}'" if location else ""
+        return f"CREATE TABLE IF NOT EXISTS {prefix}.{name} ({columns}) USING DELTA{target}"
+
     return (
         f"CREATE SCHEMA IF NOT EXISTS {prefix}",
-        f"CREATE TABLE IF NOT EXISTS {prefix}.data_governance (object_id STRING, catalog_name STRING, schema_name STRING, table_name STRING, column_name STRING, classification STRING, sensitivity STRING, owner STRING, review_state STRING, deleted BOOLEAN, source_version STRING, updated_at TIMESTAMP, source_system STRING, source_catalog_key STRING, source_catalog_guid STRING, source_schema_key STRING, source_table_key STRING, source_table_fingerprint STRING, source_column_ordinal INT, source_column_type STRING, source_column_description STRING, source_entity_type STRING, source_created_at STRING, source_created_by STRING, identity_status STRING, first_seen_at TIMESTAMP) USING DELTA",
-        f"CREATE TABLE IF NOT EXISTS {prefix}.access_policy (policy_id STRING, object_id STRING, principal_type STRING, principal_name STRING, action STRING, priority INT, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP) USING DELTA",
-        f"CREATE TABLE IF NOT EXISTS {prefix}.lineage_propagation (rule_id STRING, source_object_id STRING, target_object_id STRING, action STRING, priority INT, enabled BOOLEAN, updated_at TIMESTAMP, source_system STRING, source_version STRING, deleted BOOLEAN, updated_by STRING) USING DELTA",
-        f"CREATE TABLE IF NOT EXISTS {prefix}.query_registry (query_id STRING, statement STRING, parameter_schema STRING, referenced_object_ids ARRAY<STRING>, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP) USING DELTA",
-        f"CREATE TABLE IF NOT EXISTS {prefix}.token_vault (token_id STRING, ciphertext STRING, key_version STRING, created_at TIMESTAMP) USING DELTA",
-        f"CREATE TABLE IF NOT EXISTS {prefix}.governance_audit (event_id STRING, principal STRING, decision STRING, query_id STRING, affected_columns ARRAY<STRING>, policy_version STRING, event_time TIMESTAMP) USING DELTA",
-        f"CREATE TABLE IF NOT EXISTS {prefix}.sync_state (source STRING, snapshot_version STRING, content_hash STRING, status STRING, updated_at TIMESTAMP) USING DELTA",
-        f"CREATE TABLE IF NOT EXISTS {prefix}.sql_access (grant_id STRING, principal_type STRING, principal_name STRING, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP) USING DELTA",
+        table("data_governance", "object_id STRING, catalog_name STRING, schema_name STRING, table_name STRING, column_name STRING, classification STRING, sensitivity STRING, owner STRING, review_state STRING, deleted BOOLEAN, source_version STRING, updated_at TIMESTAMP, source_system STRING, source_catalog_key STRING, source_catalog_guid STRING, source_schema_key STRING, source_table_key STRING, source_table_fingerprint STRING, source_column_ordinal INT, source_column_type STRING, source_column_description STRING, source_entity_type STRING, source_created_at STRING, source_created_by STRING, identity_status STRING, first_seen_at TIMESTAMP"),
+        table("access_policy", "policy_id STRING, object_id STRING, principal_type STRING, principal_name STRING, action STRING, priority INT, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP"),
+        table("lineage_propagation", "rule_id STRING, source_object_id STRING, target_object_id STRING, action STRING, priority INT, enabled BOOLEAN, updated_at TIMESTAMP, source_system STRING, source_version STRING, deleted BOOLEAN, updated_by STRING"),
+        table("query_registry", "query_id STRING, statement STRING, parameter_schema STRING, referenced_object_ids ARRAY<STRING>, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP"),
+        table("token_vault", "token_id STRING, ciphertext STRING, key_version STRING, created_at TIMESTAMP"),
+        table("governance_audit", "event_id STRING, principal STRING, decision STRING, query_id STRING, affected_columns ARRAY<STRING>, policy_version STRING, event_time TIMESTAMP"),
+        table("sync_state", "source STRING, snapshot_version STRING, content_hash STRING, status STRING, updated_at TIMESTAMP"),
+        table("sql_access", "grant_id STRING, principal_type STRING, principal_name STRING, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP"),
     )
 
 
 class JdbcControlStore:
     """Persist the control plane in AIDP Delta tables through the Simba JDBC endpoint."""
 
-    def __init__(self, connect: Callable[[], Any], catalog: str) -> None:
+    def __init__(self, connect: Callable[[], Any], catalog: str, control_location: str = "") -> None:
         self._connect = connect
         self._catalog = _identifier(catalog)
+        self._control_location = _control_location(control_location)
         self._prefix = f"`{self._catalog}`.`oci_control`"
 
     def initialize(self) -> None:
-        self._write_many(delta_schema_ddl(self._catalog))
+        self._write_many(delta_schema_ddl(self._catalog, self._control_location))
         self._migrate_data_governance()
         self._migrate_lineage()
 
@@ -995,6 +1003,30 @@ def _identifier(value: str) -> str:
     if not value or not value.replace("_", "a").isalnum():
         raise ValueError("The governance catalog must be a simple identifier.")
     return value
+
+
+def _control_location(value: str) -> str:
+    if not value:
+        return ""
+    parsed = urlparse(value.rstrip("/"))
+
+    def valid_name(name: str) -> bool:
+        return bool(name) and all(character.isalnum() or character in "._-" for character in name)
+
+    safe = (
+        parsed.scheme == "oci",
+        valid_name(parsed.username or ""),
+        not parsed.password,
+        valid_name(parsed.hostname or ""),
+        parsed.path.startswith("/") and parsed.path != "/",
+        not parsed.params,
+        not parsed.query,
+        not parsed.fragment,
+        not any(character in parsed.path for character in ("'", ";", "\n", "\r")),
+    )
+    if not all(safe):
+        raise ValueError("The governance control location must be a safe OCI Object Storage URI.")
+    return value.rstrip("/")
 
 
 _CATALOG_COLUMNS = (

@@ -29,7 +29,9 @@ def client() -> TestClient:
 
 
 def test_health_reports_the_gateway_release() -> None:
-    assert client().get("/healthz").json() == {"status": "ok", "version": "2.1.2"}
+    gateway = client()
+    assert gateway.app.version == "2.1.3"
+    assert gateway.get("/healthz").json() == {"status": "ok", "version": "2.1.3"}
 
 
 def test_missing_token_is_unauthorized() -> None:
