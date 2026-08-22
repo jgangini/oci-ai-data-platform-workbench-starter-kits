@@ -147,6 +147,21 @@
         "group": "optional_addons"
       }
     ],
+    "files": [
+      {
+        "name": "governance_jdbc_driver",
+        "label": "Oracle AIDP JDBC driver",
+        "environment": "DEPLOY_STUDIO_GOVERNANCE_JDBC_DRIVER",
+        "accept": [".jar", ".zip"],
+        "max_bytes": 134217728,
+        "required": true,
+        "visible_when": {
+          "field": "enable_ai_data_governance",
+          "equals": "true"
+        },
+        "group": "optional_addons"
+      }
+    ],
     "email_access_fields": ["admin_username", "admin_password", "registration_code"]
   },
   "outputs": [

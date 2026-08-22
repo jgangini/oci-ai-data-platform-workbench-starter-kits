@@ -29,7 +29,7 @@ def client() -> TestClient:
 
 
 def test_health_reports_the_gateway_release() -> None:
-    assert client().get("/healthz").json() == {"status": "ok", "version": "2.1.1"}
+    assert client().get("/healthz").json() == {"status": "ok", "version": "2.1.2"}
 
 
 def test_missing_token_is_unauthorized() -> None:
