@@ -140,7 +140,7 @@
       },
       {
         "name": "enable_ai_data_governance",
-        "label": "Install AI Data Governance Gateway",
+        "label": "AI Data Governance Gateway",
         "type": "boolean",
         "required": false,
         "default": false,

@@ -40,10 +40,6 @@ resource "oci_identity_domains_app" "governance_public_client" {
     requires_consent = true
   }
 
-  allowed_scopes {
-    fqs = local.governance_gateway_scope
-  }
-
   force_delete = true
 
   lifecycle {
@@ -141,6 +137,16 @@ resource "oci_kms_vault" "governance" {
   vault_type     = "DEFAULT"
 }
 
+# ponytail: OCI publishes a new vault's regional DNS endpoints asynchronously; replace this fixed wait when the provider exposes an endpoint-ready waiter.
+resource "terraform_data" "governance_vault_dns_wait" {
+  count            = var.enable_ai_data_governance ? 1 : 0
+  triggers_replace = [oci_kms_vault.governance[0].id]
+
+  provisioner "local-exec" {
+    command = "sleep 60"
+  }
+}
+
 resource "oci_kms_key" "governance" {
   count               = var.enable_ai_data_governance ? 1 : 0
   compartment_id      = local.target_compartment
@@ -152,6 +158,8 @@ resource "oci_kms_key" "governance" {
     algorithm = "AES"
     length    = 32
   }
+
+  depends_on = [terraform_data.governance_vault_dns_wait]
 }
 
 resource "oci_vault_secret" "governance_jdbc" {

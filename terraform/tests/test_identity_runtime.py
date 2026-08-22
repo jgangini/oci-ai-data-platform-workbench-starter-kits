@@ -32,11 +32,13 @@ def test_operator_identity_is_reused_and_governance_resources_are_isolated() -> 
     assert edge.count('resource "oci_vault_secret" "governance_jdbc"') == 1
     assert "client_secret" not in edge
     assert 'client_type       = "public"' in edge
-    assert "allowed_scopes" in edge
-    assert edge.count("fqs              = local.governance_gateway_scope") == 0
-    assert edge.count("fqs = local.governance_gateway_scope") == 1
+    assert "allowed_scopes" not in edge
+    assert "fqs = local.governance_gateway_scope" not in edge
     assert 'methods = ["GET", "POST", "PUT", "DELETE"]' in edge
     assert 'email          = "governance-jdbc-${local.suffix}@example.invalid"' in edge
+    assert 'resource "terraform_data" "governance_vault_dns_wait"' in edge
+    assert 'command = "sleep 60"' in edge
+    assert "depends_on = [terraform_data.governance_vault_dns_wait]" in edge
 
 
 def test_identity_groups_ignore_service_managed_schema_extensions() -> None:

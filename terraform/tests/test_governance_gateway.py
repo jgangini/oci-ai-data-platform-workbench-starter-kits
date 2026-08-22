@@ -72,6 +72,8 @@ def test_workload_identity_reads_only_named_runtime_inputs() -> None:
     assert 'regexall("-GPU-", source.source_name)' in gateway
     assert "local.governance_node_sources[0].image_id" in gateway
     assert "node_pool_option.governance[0].sources[0].image_id" not in gateway
+    assert 'name               = "${local.name_prefix}-gov-workers"' in gateway
+    assert 'name               = "${local.name_prefix}-governance-workers"' not in gateway
 
 
 def test_control_bucket_centralizes_delta_tables_and_the_jdbc_driver() -> None:

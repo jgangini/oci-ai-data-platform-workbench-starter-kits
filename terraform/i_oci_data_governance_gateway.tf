@@ -117,7 +117,7 @@ resource "oci_containerengine_node_pool" "governance" {
   cluster_id         = oci_containerengine_cluster.governance[0].id
   compartment_id     = local.target_compartment
   kubernetes_version = local.governance_kubernetes_version
-  name               = "${local.name_prefix}-governance-workers"
+  name               = "${local.name_prefix}-gov-workers"
   node_shape         = var._oci_governance.node_shape
 
   node_config_details {
