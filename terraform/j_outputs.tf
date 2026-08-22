@@ -93,7 +93,7 @@ output "governance_gateway_deployment_id" {
 }
 
 output "governance_gateway_jdbc_user_ocid" {
-  value = var.enable_ai_data_governance ? var.governance_gateway_jdbc_user_ocid : null
+  value = try(oci_identity_user.governance_jdbc[0].id, null)
 }
 
 output "governance_gateway_oidc_authority" {
@@ -101,7 +101,7 @@ output "governance_gateway_oidc_authority" {
 }
 
 output "governance_gateway_oidc_client_id" {
-  value = var.enable_ai_data_governance ? var.governance_gateway_oidc_client_id : null
+  value = try(oci_identity_domains_app.governance_public_client[0].name, null)
 }
 
 output "governance_gateway_oidc_issuer" {
@@ -109,12 +109,40 @@ output "governance_gateway_oidc_issuer" {
 }
 
 output "governance_gateway_oidc_audience" {
-  value = var.enable_ai_data_governance ? var.governance_gateway_oidc_audience : null
+  value = var.enable_ai_data_governance ? local.governance_gateway_audience : null
 }
 
 output "governance_gateway_url" {
-  description = "Private gateway service URL, populated after the Kubernetes service is installed."
-  value       = var.enable_ai_data_governance ? "https://ai-data-governance-gateway.aidp-governance.svc:8443" : null
+  description = "Public TLS API Gateway endpoint backed only by the private OKE service."
+  value       = try(oci_apigateway_deployment.governance[0].endpoint, null)
+}
+
+output "governance_gateway_oidc_scopes" {
+  value = var.enable_ai_data_governance ? "openid offline_access ${local.governance_gateway_scope}" : null
+}
+
+output "governance_gateway_jdbc_secret_ocid" {
+  value = try(oci_vault_secret.governance_jdbc[0].id, null)
+}
+
+output "governance_gateway_jdbc_driver_bucket" {
+  value = var.enable_ai_data_governance ? oci_objectstorage_bucket.data.name : null
+}
+
+output "governance_gateway_jdbc_driver_object" {
+  value = var.enable_ai_data_governance ? local.governance_jdbc_object : null
+}
+
+output "governance_gateway_tokenization_key_ocid" {
+  value = try(oci_kms_key.governance[0].id, null)
+}
+
+output "governance_gateway_tokenization_crypto_endpoint" {
+  value = try(oci_kms_vault.governance[0].crypto_endpoint, null)
+}
+
+output "governance_gateway_api_gateway_id" {
+  value = try(oci_apigateway_gateway.governance[0].id, null)
 }
 
 output "agent_model_id" {
@@ -152,7 +180,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Fresh-only v2.1.0 contract: post-apply creates no external volumes."
+  description = "Fresh-only v2.1.1 contract: post-apply creates no external volumes."
   value       = 0
 }
 

@@ -139,7 +139,7 @@ def _require_scope(identity: Principal, scope: str) -> None:
 def _register_base_routes(app: FastAPI, readiness: Readiness) -> None:
     @app.get("/healthz")
     def health() -> dict[str, str]:
-        return {"status": "ok", "version": "2.1.0"}
+        return {"status": "ok", "version": "2.1.1"}
 
     @app.get("/readyz")
     def ready() -> dict[str, str]:

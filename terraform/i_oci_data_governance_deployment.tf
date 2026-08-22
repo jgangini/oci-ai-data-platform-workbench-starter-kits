@@ -6,16 +6,17 @@ locals {
       oci_region                   = var.region
       oidc_issuer                  = var.governance_gateway_oidc_issuer
       oidc_authority               = var.governance_gateway_oidc_authority
-      oidc_audience                = var.governance_gateway_oidc_audience
-      tls_secret_ocid              = var.governance_gateway_tls_secret_ocid
+      oidc_audience                = local.governance_gateway_audience
       aidp_platform_id             = oci_ai_data_platform_ai_data_platform.lab.id
-      jdbc_secret_ocid             = var.governance_gateway_jdbc_secret_ocid
-      jdbc_user_ocid               = var.governance_gateway_jdbc_user_ocid
-      jdbc_driver_object           = var.governance_gateway_jdbc_driver_object
-      jdbc_driver_bucket           = var.governance_gateway_jdbc_driver_bucket
+      jdbc_secret_ocid             = oci_vault_secret.governance_jdbc[0].id
+      jdbc_user_ocid               = oci_identity_user.governance_jdbc[0].id
+      jdbc_driver_object           = local.governance_jdbc_object
+      jdbc_driver_bucket           = oci_objectstorage_bucket.data.name
       object_storage_namespace     = var.objectstorage_namespace
-      tokenization_key_ocid        = var.governance_gateway_tokenization_key_ocid
-      tokenization_crypto_endpoint = var.governance_gateway_tokenization_crypto_endpoint
+      tokenization_key_ocid        = oci_kms_key.governance[0].id
+      tokenization_crypto_endpoint = oci_kms_vault.governance[0].crypto_endpoint
+      gateway_backend_ip           = var._oci_governance.gateway_backend_ip
+      gateway_subnet_cidr          = var._oci_governance.gateway_subnet_cidr
     }
   ) : ""
   governance_gateway_manifest_rendered = local.governance_gateway_manifest
@@ -125,6 +126,7 @@ resource "oci_devops_deployment" "governance" {
     oci_containerengine_node_pool.governance,
     oci_identity_policy.governance_deploy_pipeline,
     oci_identity_policy.governance_workload,
+    oci_apigateway_deployment.governance,
   ]
 
   timeouts {

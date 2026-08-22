@@ -24,7 +24,7 @@ def _context() -> dict[str, object]:
         "compartment_mode": "new",
         "source": {
             "repository": "https://github.com/jgangini/oci-aidp-cloud-migration-lab.git",
-            "ref": "v2.1.0",
+            "ref": "v2.1.1",
             "commit_sha": "0123456789abcdef0123456789abcdef01234567",
         },
     }
@@ -58,11 +58,11 @@ def _plan(
     }
 
 
-def test_context_requires_v201_source() -> None:
+def test_context_requires_v211_source() -> None:
     release_gate.validate_context(_context())
     invalid = _context()
     invalid["source"] = {**invalid["source"], "ref": "main"}  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="v2.1.0"):
+    with pytest.raises(ValueError, match="v2.1.1"):
         release_gate.validate_context(invalid)
 
 
@@ -152,6 +152,22 @@ def test_source_accepts_minimal_safe_deployment(tmp_path: Path) -> None:
     release_gate.validate_source(_source(tmp_path))
 
 
+def test_source_accepts_only_named_governance_control_resources(tmp_path: Path) -> None:
+    root = _source(tmp_path)
+    (root / "i_oci_data_governance_edge.tf").write_text(
+        '\n'.join(
+            (
+                'resource "oci_identity_domains_app" "governance_public_client" {}',
+                'resource "oci_kms_vault" "governance" {}',
+                'resource "oci_kms_key" "governance" {}',
+                'resource "oci_vault_secret" "governance_jdbc" {}',
+            )
+        ),
+        encoding="utf-8",
+    )
+    release_gate.validate_source(root)
+
+
 def test_source_accepts_developer_pending_groups_and_ignores_docs(tmp_path: Path) -> None:
     root = _source(tmp_path)
     (root / "h_oci_identity.tf").write_text(
@@ -189,6 +205,16 @@ def test_plan_rejects_forbidden_resource_and_customer_managed_bucket_key() -> No
     bucket_plan["resource_changes"][0]["change"]["after"]["kms_key_id"] = "ocid1.key.oc1..test"  # type: ignore[index]
     with pytest.raises(ValueError, match="customer-managed"):
         release_gate.validate_plan(bucket_plan)
+
+
+def test_plan_accepts_only_named_governance_control_resources() -> None:
+    for resource_type, address in (
+        ("oci_kms_vault", "oci_kms_vault.governance[0]"),
+        ("oci_kms_key", "oci_kms_key.governance[0]"),
+        ("oci_vault_secret", "oci_vault_secret.governance_jdbc[0]"),
+        ("oci_identity_domains_app", "oci_identity_domains_app.governance_public_client[0]"),
+    ):
+        release_gate.validate_plan(_plan(resource_type=resource_type, address=address))
 
 
 def test_plan_rejects_technical_identity_resources_but_allows_lab_groups() -> None:

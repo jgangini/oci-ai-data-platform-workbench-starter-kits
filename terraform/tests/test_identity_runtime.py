@@ -12,9 +12,10 @@ def _resource(source: str, resource_type: str, label: str) -> str:
     return source[start:] if next_resource == -1 else source[start:next_resource]
 
 
-def test_operator_identity_is_reused_without_a_technical_user() -> None:
+def test_operator_identity_is_reused_and_governance_resources_are_isolated() -> None:
     identity = (ROOT / "terraform/h_oci_identity.tf").read_text(encoding="utf-8")
     compute = (ROOT / "terraform/g_oci_core_instance.tf").read_text(encoding="utf-8")
+    edge = (ROOT / "terraform/i_oci_data_governance_edge.tf").read_text(encoding="utf-8")
 
     assert 'resource "oci_identity_domains_user"' not in identity
     assert 'resource "oci_identity_domains_group" "provisioner"' not in identity
@@ -25,6 +26,13 @@ def test_operator_identity_is_reused_without_a_technical_user() -> None:
     assert 'resource "oci_vault_' not in identity
     assert 'resource "oci_identity_policy" "vm_secret"' not in compute
     assert "secret-bundles" not in compute
+    assert edge.count('resource "oci_identity_domains_app" "governance_public_client"') == 1
+    assert edge.count('resource "oci_kms_vault" "governance"') == 1
+    assert edge.count('resource "oci_kms_key" "governance"') == 1
+    assert edge.count('resource "oci_vault_secret" "governance_jdbc"') == 1
+    assert "client_secret" not in edge
+    assert 'client_type       = "public"' in edge
+    assert "allowed_scopes" in edge
 
 
 def test_identity_groups_ignore_service_managed_schema_extensions() -> None:

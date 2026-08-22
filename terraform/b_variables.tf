@@ -147,7 +147,7 @@ variable "enable_ai_data_governance" {
 }
 
 variable "governance_gateway_image" {
-  description = "Immutable gateway container image reference pinned by SHA-256 digest."
+  description = "Immutable gateway image resolved by the authenticated deployment preflight."
   type        = string
   default     = ""
   validation {
@@ -160,7 +160,7 @@ variable "governance_gateway_image" {
 }
 
 variable "governance_gateway_oidc_issuer" {
-  description = "HTTPS issuer used to validate end-user bearer tokens at the governance gateway."
+  description = "HTTPS issuer discovered from the active default OCI Identity Domain."
   type        = string
   default     = ""
   validation {
@@ -173,7 +173,7 @@ variable "governance_gateway_oidc_issuer" {
 }
 
 variable "governance_gateway_oidc_authority" {
-  description = "OCI IAM Identity Domain URL used for OIDC discovery and PKCE sign-in."
+  description = "Active default OCI Identity Domain URL discovered by the deployment preflight."
   type        = string
   default     = ""
   validation {
@@ -185,117 +185,20 @@ variable "governance_gateway_oidc_authority" {
   }
 }
 
-variable "governance_gateway_oidc_client_id" {
-  description = "Client ID of an existing public OCI IAM OAuth application configured for VS Code PKCE."
+variable "governance_gateway_oidc_static_jwks_json" {
+  description = "Current public RSA signing keys retrieved through authenticated Identity Domains preflight."
   type        = string
   default     = ""
   validation {
-    condition     = !var.enable_ai_data_governance || length(trimspace(var.governance_gateway_oidc_client_id)) >= 3
-    error_message = "governance_gateway_oidc_client_id is required when governance is enabled."
-  }
-}
-
-variable "governance_gateway_oidc_audience" {
-  description = "OIDC audience assigned to the governance gateway."
-  type        = string
-  default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^[A-Za-z0-9._:/-]{3,255}$",
-      var.governance_gateway_oidc_audience,
-    ))
-    error_message = "governance_gateway_oidc_audience is required when governance is enabled."
-  }
-}
-
-variable "governance_gateway_tls_secret_ocid" {
-  description = "OCI Vault secret containing certificate_pem and private_key_pem for the private gateway endpoint."
-  type        = string
-  default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^ocid1\\.(?:vaultsecret|secret)\\.",
-      var.governance_gateway_tls_secret_ocid,
-    ))
-    error_message = "governance_gateway_tls_secret_ocid must identify an OCI Vault secret when governance is enabled."
-  }
-}
-
-variable "governance_gateway_jdbc_secret_ocid" {
-  description = "OCI Vault secret containing the dedicated AIDP JDBC technical credential."
-  type        = string
-  default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^ocid1\\.(?:vaultsecret|secret)\\.",
-      var.governance_gateway_jdbc_secret_ocid,
-    ))
-    error_message = "governance_gateway_jdbc_secret_ocid must identify an OCI Vault secret when governance is enabled."
-  }
-}
-
-variable "governance_gateway_jdbc_user_ocid" {
-  description = "Dedicated OCI user whose API key is stored in the governance JDBC Vault secret."
-  type        = string
-  default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^ocid1[.]user[.]",
-      var.governance_gateway_jdbc_user_ocid,
-    ))
-    error_message = "governance_gateway_jdbc_user_ocid must identify the dedicated OCI JDBC user when governance is enabled."
-  }
-}
-
-variable "governance_gateway_jdbc_driver_object" {
-  description = "Object name of the licensed AIDP JDBC driver bundle in the configured driver bucket."
-  type        = string
-  default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$",
-      var.governance_gateway_jdbc_driver_object,
-    ))
-    error_message = "governance_gateway_jdbc_driver_object must be a safe Object Storage object name when governance is enabled."
-  }
-}
-
-variable "governance_gateway_jdbc_driver_bucket" {
-  description = "Existing Object Storage bucket containing the licensed AIDP JDBC driver bundle."
-  type        = string
-  default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$",
-      var.governance_gateway_jdbc_driver_bucket,
-    ))
-    error_message = "governance_gateway_jdbc_driver_bucket must be an existing safe bucket name when governance is enabled."
-  }
-}
-
-variable "governance_gateway_tokenization_key_ocid" {
-  description = "OCI Vault master encryption key used by KMS for reversible governance tokens."
-  type        = string
-  default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^ocid1[.]key[.]",
-      var.governance_gateway_tokenization_key_ocid,
-    ))
-    error_message = "governance_gateway_tokenization_key_ocid must identify an OCI Vault key when governance is enabled."
-  }
-}
-
-variable "governance_gateway_tokenization_crypto_endpoint" {
-  description = "Regional OCI Vault cryptographic endpoint for the tokenization key."
-  type        = string
-  default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^https://[A-Za-z0-9.-]+(?::[0-9]+)?$",
-      var.governance_gateway_tokenization_crypto_endpoint,
-    ))
-    error_message = "governance_gateway_tokenization_crypto_endpoint must be an HTTPS OCI Vault crypto endpoint."
+    condition = !var.enable_ai_data_governance || can(
+      length(jsondecode(var.governance_gateway_oidc_static_jwks_json)) >= 1 &&
+      length(jsondecode(var.governance_gateway_oidc_static_jwks_json)) <= 10 &&
+      alltrue([
+        for key in jsondecode(var.governance_gateway_oidc_static_jwks_json) :
+        key.alg == "RS256" && key.kty == "RSA" && key.e != "" && key.kid != "" && key.n != ""
+      ])
+    )
+    error_message = "governance_gateway_oidc_static_jwks_json must contain 1-10 RS256 public RSA keys."
   }
 }
 
@@ -344,6 +247,8 @@ variable "_oci_governance" {
     endpoint_subnet_cidr = "10.11.0.0/28"
     worker_subnet_cidr   = "10.11.1.0/24"
     service_subnet_cidr  = "10.11.2.0/24"
+    gateway_subnet_cidr  = "10.11.3.0/28"
+    gateway_backend_ip   = "10.11.2.10"
     node_shape           = "VM.Standard.E4.Flex"
     node_ocpus           = 2
     node_memory_in_gbs   = 16

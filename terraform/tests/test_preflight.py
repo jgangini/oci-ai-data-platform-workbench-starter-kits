@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -44,6 +45,11 @@ class Identity:
 
     def list_compartments(self, **_kwargs: Any) -> Any:
         return SimpleNamespace(data=[], headers={})
+
+    def list_domains(self, _tenancy_id: str, **_kwargs: Any) -> Any:
+        return SimpleNamespace(
+            data=[SimpleNamespace(url="https://identity.example.test")]
+        )
 
 
 class Compute:
@@ -108,20 +114,30 @@ def _select(
     aidp: Aidp | None = None,
     compartment: str = "oci-aidp-cloud-migration-lab-5",
     compartment_mode: str = "new",
+    input_overrides: dict[str, Any] | None = None,
+    identity_domains_factory: Any | None = None,
+    governance_image_resolver: Any | None = None,
 ) -> tuple[dict[str, Any], Compute]:
     compute = Compute(statuses)
     identity = identity or Identity()
     aidp = aidp or Aidp()
+    inputs = {
+        "agent_model_id": "ocid1.generativeaimodel.oc1..chat",
+        "autonomous_database_mode": "new",
+        "autonomous_database_compute_count": 4,
+        **(input_overrides or {}),
+    }
+    kwargs: dict[str, Any] = {}
+    if identity_domains_factory is not None:
+        kwargs["identity_domains_factory"] = identity_domains_factory
+    if governance_image_resolver is not None:
+        kwargs["governance_image_resolver"] = governance_image_resolver
     result = preflight.select_inputs(
         {
             "region": "us-chicago-1",
             "compartment": compartment,
             "compartment_mode": compartment_mode,
-            "inputs": {
-                "agent_model_id": "ocid1.generativeaimodel.oc1..chat",
-                "autonomous_database_mode": "new",
-                "autonomous_database_compute_count": 4,
-            },
+            "inputs": inputs,
         },
         {"tenancy": "ocid1.tenancy.oc1..test", "user": "ocid1.user.oc1..operator", "region": "us-chicago-1"},
         identity_factory=lambda _config: identity,
@@ -129,6 +145,7 @@ def _select(
         aidp_factory=lambda _config: aidp,
         database_factory=lambda _config: Database(),
         genai_factory=lambda _config: Genai(),
+        **kwargs,
     )
     return result, compute
 
@@ -147,6 +164,56 @@ def test_preflight_selects_e5_and_discovers_home_region() -> None:
     assert [item.instance_shape for item in compute.details.shape_availabilities] == list(preflight.SUPPORTED_SHAPES)
     assert compute.details.shape_availabilities[0].instance_shape_config.ocpus == 2
     assert compute.details.shape_availabilities[0].instance_shape_config.memory_in_gbs == 16
+
+
+def test_preflight_resolves_governance_identity_and_immutable_image(monkeypatch) -> None:
+    class SigningKeys:
+        base_client = SimpleNamespace(
+            call_api=lambda *_args, **_kwargs: SimpleNamespace(
+                data={
+                    "keys": [
+                        {
+                            "alg": "RS256",
+                            "e": "AQAB",
+                            "kid": "signing-key",
+                            "kty": "RSA",
+                            "n": "public-modulus",
+                            "use": "sig",
+                        }
+                    ]
+                }
+            )
+        )
+
+    monkeypatch.setattr(
+        preflight,
+        "_public_json",
+        lambda *_args, **_kwargs: {
+            "issuer": "https://identity.oraclecloud.com/",
+            "jwks_uri": "https://identity.example.test/admin/v1/SigningCert/jwk",
+        },
+    )
+    image = f"{preflight.GOVERNANCE_IMAGE_REPOSITORY}@sha256:{'a' * 64}"
+    available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
+    result, _ = _select(
+        {preflight.E5_SHAPE: (available, "1")},
+        input_overrides={"enable_ai_data_governance": True},
+        identity_domains_factory=lambda _config, _endpoint: SigningKeys(),
+        governance_image_resolver=lambda: image,
+    )
+    assert result["inputs"]["governance_gateway_image"] == image
+    assert result["inputs"]["governance_gateway_oidc_authority"] == "https://identity.example.test"
+    assert result["inputs"]["governance_gateway_oidc_issuer"] == "https://identity.oraclecloud.com/"
+    assert json.loads(result["inputs"]["governance_gateway_oidc_static_jwks_json"]) == [
+        {
+            "alg": "RS256",
+            "e": "AQAB",
+            "kid": "signing-key",
+            "kty": "RSA",
+            "n": "public-modulus",
+            "use": "sig",
+        }
+    ]
 def test_preflight_rejects_occupied_new_compartment_across_pages() -> None:
     class PagedIdentity(Identity):
         def list_compartments(self, **kwargs: Any) -> Any:

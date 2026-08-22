@@ -50,18 +50,7 @@ def test_deploy_studio_manifest_contract() -> None:
         "equals": "existing",
     }
     assert fields["enable_ai_data_governance"]["group"] == "optional_addons"
-    assert fields["governance_gateway_image"]["visible_when"] == {
-        "field": "enable_ai_data_governance",
-        "equals": "true",
-    }
-    assert fields["governance_gateway_jdbc_driver_bucket"]["visible_when"] == {
-        "field": "enable_ai_data_governance",
-        "equals": "true",
-    }
-    assert fields["governance_gateway_jdbc_user_ocid"]["visible_when"] == {
-        "field": "enable_ai_data_governance",
-        "equals": "true",
-    }
+    assert not any(name.startswith("governance_gateway_") for name in fields)
     assert fields["admin_username"]["group"] == "application_vm"
     assert manifest["post_apply"]["secret_inputs"] == [
         "autonomous_database_admin_password",
@@ -95,12 +84,20 @@ def test_deploy_studio_manifest_contract() -> None:
         "operator_user_ocid",
         "preferred_vm_shape",
         "availability_domain_index",
+        "governance_gateway_image",
+        "governance_gateway_oidc_authority",
+        "governance_gateway_oidc_issuer",
+        "governance_gateway_oidc_static_jwks_json",
     ]
     assert manifest["preflight"]["output_inputs"] == [
         "home_region",
         "operator_user_ocid",
         "preferred_vm_shape",
         "availability_domain_index",
+        "governance_gateway_image",
+        "governance_gateway_oidc_authority",
+        "governance_gateway_oidc_issuer",
+        "governance_gateway_oidc_static_jwks_json",
     ]
     runtime_fields = {
         field["name"]: field for field in manifest["preflight"]["runtime_fields"]
@@ -131,6 +128,13 @@ def test_deploy_studio_manifest_contract() -> None:
         "governance_gateway_deployment_id",
         "governance_gateway_jdbc_user_ocid",
         "governance_gateway_url",
+        "governance_gateway_oidc_scopes",
+        "governance_gateway_jdbc_secret_ocid",
+        "governance_gateway_jdbc_driver_bucket",
+        "governance_gateway_jdbc_driver_object",
+        "governance_gateway_tokenization_key_ocid",
+        "governance_gateway_tokenization_crypto_endpoint",
+        "governance_gateway_api_gateway_id",
         "agent_model_id",
     }.issubset(manifest["outputs"])
     assert "aidp_console_url" not in manifest["outputs"]
@@ -302,7 +306,7 @@ def test_terraform_files_follow_select_ai_order() -> None:
         "j_outputs.tf",
     }
     assert expected.issubset({path.name for path in root.glob("*.tf")})
-    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefghiiiij")
+    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefghiiiiij")
     assert not {"main.tf", "network.tf", "compute.tf", "storage.tf", "identity.tf", "aidp.tf", "outputs.tf", "providers.tf"} & {
         path.name for path in root.glob("*.tf")
     }

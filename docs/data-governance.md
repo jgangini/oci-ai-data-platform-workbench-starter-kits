@@ -1,6 +1,6 @@
 # AI Data Governance add-on
 
-> Status: unreleased `v2.1.0` target. Local contracts are implemented; publication and live OCI acceptance remain gated.
+> Status: `v2.1.1` validation target. Local contracts are implemented; live OCI acceptance remains gated.
 
 ## Runtime boundaries
 
@@ -49,9 +49,9 @@ The AIDP Agent defines `governance_access_token` as required with `shouldLog: fa
 
 ## Deployment and network gate
 
-The OKE service is private, TLS-only, non-root, read-only, and stripped of Linux capabilities. OCI APIs are accessed through Workload Identity. JDBC material, when required by the Oracle-provided AIDP driver, is fetched from a dedicated Vault secret at runtime and written only to an in-memory temporary filesystem.
+OCI API Gateway is the only public entry point. It terminates TLS, validates the OCI Identity Domains token, audience, issuer, signing key, and governance scope, then forwards requests to one fixed private OKE load-balancer address. The OKE service accepts port `8080` only from the API Gateway subnet. The container is non-root, read-only, and stripped of Linux capabilities; it validates OIDC again before executing a request.
 
-Live Agent-to-gateway execution requires the AIDP workspace to reach the OKE private load balancer. Oracle documents configuring `networkConfigurationDetails` on the workspace and granting the AIDP service permission to use the selected subnet, NSGs, and VNICs. Those persistent tenancy permissions are intentionally not added without an explicit deployment authorization and security review. Until that gate is approved, gateway tools fail closed with “endpoint is not configured” or a connectivity error.
+OCI APIs are accessed through Workload Identity. Deploy Studio creates the dedicated JDBC API key after Terraform apply and stores its private half only in OCI Vault. The operator uploads the licensed Oracle AIDP JDBC driver during deployment; it is validated, sent directly to the deployment data bucket under `.governance/`, and never stored in Git or Terraform state. The pod materializes both artifacts only on its ephemeral filesystem.
 
 ## Acceptance gates
 

@@ -170,16 +170,50 @@ resource "oci_core_security_list" "governance_service" {
 
   ingress_security_rules {
     protocol = "6"
-    source   = var._oci_vcn.cidr_block
+    source   = var._oci_governance.gateway_subnet_cidr
     tcp_options {
-      min = 8443
-      max = 8443
+      min = 8080
+      max = 8080
     }
   }
 
   egress_security_rules {
     protocol    = "all"
     destination = "0.0.0.0/0"
+  }
+}
+
+resource "oci_core_security_list" "governance_gateway" {
+  count          = var.enable_ai_data_governance ? 1 : 0
+  compartment_id = local.target_compartment
+  vcn_id         = oci_core_vcn.lab.id
+  display_name   = "${local.name_prefix}-governance-gateway"
+
+  ingress_security_rules {
+    protocol = "6"
+    source   = "0.0.0.0/0"
+    tcp_options {
+      min = 443
+      max = 443
+    }
+  }
+
+  egress_security_rules {
+    protocol    = "6"
+    destination = var._oci_governance.service_subnet_cidr
+    tcp_options {
+      min = 8080
+      max = 8080
+    }
+  }
+
+  egress_security_rules {
+    protocol    = "6"
+    destination = "0.0.0.0/0"
+    tcp_options {
+      min = 443
+      max = 443
+    }
   }
 }
 
@@ -220,4 +254,17 @@ resource "oci_core_subnet" "governance_service" {
   prohibit_public_ip_on_vnic = true
   route_table_id             = oci_core_route_table.governance_private[0].id
   security_list_ids          = [oci_core_security_list.governance_service[0].id]
+}
+
+resource "oci_core_subnet" "governance_gateway" {
+  count                      = var.enable_ai_data_governance ? 1 : 0
+  cidr_block                 = var._oci_governance.gateway_subnet_cidr
+  compartment_id             = local.target_compartment
+  vcn_id                     = oci_core_vcn.lab.id
+  display_name               = "${local.name_prefix}-governance-gateway"
+  dns_label                  = "govedge"
+  prohibit_internet_ingress  = false
+  prohibit_public_ip_on_vnic = false
+  route_table_id             = oci_core_route_table.public.id
+  security_list_ids          = [oci_core_security_list.governance_gateway[0].id]
 }

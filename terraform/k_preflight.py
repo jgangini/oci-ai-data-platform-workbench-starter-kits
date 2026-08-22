@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlencode, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import oci
 from cryptography.hazmat.primitives import serialization
@@ -18,6 +20,156 @@ E3_SHAPE = "VM.Standard.E3.Flex"
 SUPPORTED_SHAPES = (E5_SHAPE, E4_SHAPE, E3_SHAPE)
 ACTIVE_WORK_REQUEST_STATES = {"ACCEPTED", "IN_PROGRESS", "WAITING", "NEEDS_ATTENTION", "CANCELING"}
 MODEL_TYPE_BASE = "BASE"
+GOVERNANCE_IMAGE_REPOSITORY = "ghcr.io/jgangini/oci-aidp-governance-gateway"
+GOVERNANCE_IMAGE_TAG = "v2.1.1"
+MAX_PUBLIC_DOCUMENT_BYTES = 1024 * 1024
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: object,
+        fp: object,
+        code: int,
+        msg: str,
+        headers: object,
+        newurl: str,
+    ) -> None:
+        return None
+
+
+def _public_json(url: str, *, allowed_hosts: set[str], headers: dict[str, str] | None = None) -> dict[str, Any]:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname not in allowed_hosts or parsed.username or parsed.password:
+        raise RuntimeError("OCI identity discovery returned an unsafe URL")
+    request = Request(url, headers={"accept": "application/json", **(headers or {})}, method="GET")
+    with build_opener(_NoRedirect()).open(request, timeout=20) as response:
+        payload = response.read(MAX_PUBLIC_DOCUMENT_BYTES + 1)
+    if len(payload) > MAX_PUBLIC_DOCUMENT_BYTES:
+        raise RuntimeError("public deployment metadata exceeds the size limit")
+    value = json.loads(payload)
+    if not isinstance(value, dict):
+        raise RuntimeError("public deployment metadata is invalid")
+    return value
+
+
+def _default_domain(identity: Any, tenancy_id: str) -> Any:
+    domains = identity.list_domains(
+        tenancy_id,
+        type="DEFAULT",
+        lifecycle_state="ACTIVE",
+    ).data
+    if len(domains) != 1 or not getattr(domains[0], "url", None):
+        raise RuntimeError("OCI did not return one active default Identity Domain")
+    return domains[0]
+
+
+def _normalized_signing_keys(document: Any) -> list[dict[str, str]]:
+    keys = document.get("keys") if isinstance(document, dict) else None
+    if not isinstance(keys, list) or not 1 <= len(keys) <= 10:
+        raise RuntimeError("OCI Identity Domain returned no usable signing keys")
+    normalized = [
+        {name: str(item.get(name) or "") for name in ("alg", "e", "kid", "kty", "n", "use")}
+        for item in keys
+        if isinstance(item, dict)
+    ]
+    if len(normalized) != len(keys) or any(
+        key["alg"] != "RS256"
+        or key["kty"] != "RSA"
+        or not all(key[name] for name in ("e", "kid", "n"))
+        for key in normalized
+    ):
+        raise RuntimeError("OCI Identity Domain returned an unsupported signing key")
+    return normalized
+
+
+def _governance_oidc_runtime(
+    identity: Any,
+    tenancy_id: str,
+    sdk_config: dict[str, Any],
+    identity_domains_factory: Callable[[dict[str, Any], str], Any],
+) -> dict[str, str]:
+    domain = _default_domain(identity, tenancy_id)
+    authority = str(domain.url).rstrip("/")
+    hostname = urlparse(authority).hostname
+    if not hostname:
+        raise RuntimeError("OCI Identity Domain URL is invalid")
+    discovery = _public_json(
+        f"{authority}/.well-known/openid-configuration",
+        allowed_hosts={hostname},
+    )
+    issuer = str(discovery.get("issuer") or "")
+    jwks_uri = str(discovery.get("jwks_uri") or "")
+    if urlparse(jwks_uri).netloc.casefold() != urlparse(authority).netloc.casefold() or not issuer.startswith("https://"):
+        raise RuntimeError("OCI identity discovery returned an unsafe issuer or JWKS URL")
+
+    client = identity_domains_factory(sdk_config, authority)
+    response = client.base_client.call_api(
+        "/admin/v1/SigningCert/jwk",
+        "GET",
+        response_type="object",
+        allow_control_chars=False,
+    )
+    document = response.data.to_dict() if hasattr(response.data, "to_dict") else response.data
+    normalized = _normalized_signing_keys(document)
+    return {
+        "governance_gateway_oidc_authority": authority,
+        "governance_gateway_oidc_issuer": issuer,
+        "governance_gateway_oidc_static_jwks_json": json.dumps(
+            normalized,
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+    }
+
+
+def _resolve_governance_image() -> str:
+    repository = "jgangini/oci-aidp-governance-gateway"
+    token = _public_json(
+        "https://ghcr.io/token?" + urlencode({"scope": f"repository:{repository}:pull"}),
+        allowed_hosts={"ghcr.io"},
+    ).get("token")
+    if not isinstance(token, str) or not token:
+        raise RuntimeError("GitHub Container Registry returned no pull token")
+    request = Request(
+        f"https://ghcr.io/v2/{repository}/manifests/{GOVERNANCE_IMAGE_TAG}",
+        headers={
+            "authorization": f"Bearer {token}",
+            "accept": "application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json",
+        },
+        method="HEAD",
+    )
+    with build_opener(_NoRedirect()).open(request, timeout=20) as response:
+        digest = str(response.headers.get("Docker-Content-Digest") or "")
+    if not digest.startswith("sha256:") or len(digest) != 71:
+        raise RuntimeError("GitHub Container Registry returned an invalid image digest")
+    return f"{GOVERNANCE_IMAGE_REPOSITORY}@{digest}"
+
+
+def _governance_runtime_inputs(
+    enabled: bool,
+    identity: Any,
+    tenancy_id: str,
+    sdk_config: dict[str, Any],
+    identity_domains_factory: Callable[[dict[str, Any], str], Any],
+    image_resolver: Callable[[], str],
+) -> tuple[dict[str, str], list[dict[str, str]]]:
+    if not enabled:
+        return {}, []
+    inputs = _governance_oidc_runtime(
+        identity,
+        tenancy_id,
+        sdk_config,
+        identity_domains_factory,
+    )
+    inputs["governance_gateway_image"] = image_resolver()
+    return inputs, [
+        {
+            "name": "AI Data Governance identity edge",
+            "status": "passed",
+            "message": "Public PKCE client and static OCI signing keys are ready",
+        }
+    ]
 
 
 def _safe_error_message(exc: Exception) -> str:
@@ -116,6 +268,24 @@ def _candidate_shapes(preferred: str) -> list[str]:
     return list(SUPPORTED_SHAPES[SUPPORTED_SHAPES.index(preferred) :])
 
 
+def _available_shape(report: Any, candidates: list[str]) -> str | None:
+    available = oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
+    for shape in candidates:
+        if any(
+            str(item.instance_shape) == shape
+            and item.availability_status == available
+            and (item.available_count is None or int(item.available_count) >= 1)
+            for item in report.shape_availabilities
+        ):
+            return shape
+    return None
+
+
+def _is_enabled(inputs: dict[str, Any], name: str) -> bool:
+    value = inputs.get(name, False)
+    return value is True or str(value).lower() == "true"
+
+
 def _list_all(call: Callable[..., Any], **kwargs: Any) -> list[Any]:
     items: list[Any] = []
     while True:
@@ -177,6 +347,11 @@ def select_inputs(
     aidp_factory: Callable[[dict[str, Any]], Any] = oci.ai_data_platform.AiDataPlatformClient,
     database_factory: Callable[[dict[str, Any]], Any] = oci.database.DatabaseClient,
     genai_factory: Callable[[dict[str, Any]], Any] = oci.generative_ai.GenerativeAiClient,
+    identity_domains_factory: Callable[[dict[str, Any], str], Any] = lambda config, endpoint: oci.identity_domains.IdentityDomainsClient(
+        config,
+        service_endpoint=endpoint,
+    ),
+    governance_image_resolver: Callable[[], str] = _resolve_governance_image,
 ) -> dict[str, Any]:
     target, mode = compartment_target(context)
     region = str(context.get("region") or sdk_config.get("region") or "").strip()
@@ -193,6 +368,7 @@ def select_inputs(
     identity = identity_factory(regional_config)
     _require_ready_region(identity, tenancy_id, region)
     inputs = context.get("inputs") if isinstance(context.get("inputs"), dict) else {}
+    governance_enabled = _is_enabled(inputs, "enable_ai_data_governance")
     model_id = str(inputs.get("agent_model_id") or "").strip()
     if not model_id:
         raise ValueError("agent_model_id is required")
@@ -225,33 +401,29 @@ def select_inputs(
             ],
         )
         report = compute.create_compute_capacity_report(details).data
-        selected = next(
-            (
-                shape
-                for shape in candidates
-                if any(
-                    str(item.instance_shape) == shape
-                    and item.availability_status
-                    == oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
-                    and (item.available_count is None or int(item.available_count) >= 1)
-                    for item in report.shape_availabilities
-                )
-            ),
-            None,
-        )
+        selected = _available_shape(report, candidates)
         if selected:
+            governance_inputs, governance_event = _governance_runtime_inputs(
+                governance_enabled,
+                identity,
+                tenancy_id,
+                regional_config,
+                identity_domains_factory,
+                governance_image_resolver,
+            )
             return {
                 "inputs": {
                     "home_region": home_region,
                     "operator_user_ocid": operator_user_ocid,
                     "preferred_vm_shape": selected,
                     "availability_domain_index": availability_domain_index,
+                    **governance_inputs,
                 },
                 "events": [
                     {
-                        "name": "Immutable v2.1.0 source",
+                        "name": "Immutable v2.1.1 source",
                         "status": "passed",
-                        "message": "v2.1.0 source context and deployment source passed",
+                        "message": "v2.1.1 source context and deployment source passed",
                     },
                     {
                         "name": "Compartment availability",
@@ -266,6 +438,7 @@ def select_inputs(
                         "status": "passed",
                         "message": f"{selected} available in {availability_domain}",
                     },
+                    *governance_event,
                 ],
             }
     raise RuntimeError("OCI reports no capacity for the supported E5/E4/E3 Flex shapes in any Availability Domain")

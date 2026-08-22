@@ -18,7 +18,7 @@ import uuid
 import zipfile
 from io import BytesIO, StringIO
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 from urllib.parse import quote
 
@@ -37,6 +37,9 @@ BOOTSTRAP_VERSION = 2
 BOOTSTRAP_READY = "AIDP_LAB_CREDENTIALS_V2_READY"
 DATABASE_OPERATOR = "AIDP_LAB_OPERATOR"
 GOVERNANCE_CREDENTIAL_NAME = "AidpGovernanceOperator"
+GOVERNANCE_JDBC_PURPOSE = "AIDP_GOVERNANCE_GATEWAY"
+GOVERNANCE_JDBC_DRIVER_ENV = "DEPLOY_STUDIO_GOVERNANCE_JDBC_DRIVER"
+MAX_GOVERNANCE_DRIVER_BYTES = 128 * 1024 * 1024
 LAYERS = ("landing", "bronze", "silver", "gold")
 RESOURCE_WAIT_ATTEMPTS = 120
 POST_APPLY_BUDGET_SECONDS = 3300
@@ -250,6 +253,270 @@ def ensure_governance_operator_credential(
         raise ReconcileError("The governance operator credential has no identifier")
     api.request("PUT", f"/credentials/{quote(credential_key, safe='')}", payload=payload)
     return False
+
+
+def _governance_jdbc_url(region: str, compute_key: str) -> str:
+    if not re.fullmatch(r"[a-z]{2}-[a-z]+-\d", region) or not compute_key.strip():
+        raise ReconcileError("The governance JDBC endpoint inputs are invalid")
+    return (
+        f"jdbc:spark://gateway.aidp.{region}.oci.oraclecloud.com/default;"
+        f"SparkServerType=AIDP;httpPath=cliservice/{compute_key}"
+    )
+
+
+def _read_governance_secret(oci_module: Any, client: Any, secret_id: str) -> dict[str, Any] | None:
+    try:
+        content = client.get_secret_bundle(secret_id).data.secret_bundle_content.content
+        raw = base64.b64decode(str(content), validate=True)
+        if len(raw) > 64 * 1024:
+            raise ValueError("secret too large")
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else None
+    except oci_module.exceptions.ServiceError as exc:
+        if exc.status == 404:
+            return None
+        raise ReconcileError(f"Governance Vault secret read failed with OCI {exc.status}") from exc
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _valid_governance_secret(
+    document: dict[str, Any] | None,
+    *,
+    tenancy_id: str,
+    user_id: str,
+    region: str,
+    jdbc_url: str,
+    fingerprints: set[str],
+) -> bool:
+    if not document or not {
+        "purpose": GOVERNANCE_JDBC_PURPOSE,
+        "tenancy_ocid": tenancy_id,
+        "user_ocid": user_id,
+        "region": region,
+        "jdbc_url": jdbc_url,
+    }.items() <= document.items():
+        return False
+    fingerprint = str(document.get("fingerprint") or "")
+    private_key = str(document.get("private_key_pem") or "")
+    if fingerprint not in fingerprints:
+        return False
+    try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        key = serialization.load_pem_private_key(private_key.encode("ascii"), password=None)
+    except (TypeError, ValueError, UnicodeEncodeError):
+        return False
+    return isinstance(key, rsa.RSAPrivateKey) and key.key_size >= 3072
+
+
+def _delete_api_key_safely(identity: Any, user_id: str, fingerprint: str) -> None:
+    if not fingerprint:
+        return
+    try:
+        identity.delete_api_key(user_id, fingerprint)
+    except Exception:
+        pass
+
+
+def _new_governance_api_key(oci_module: Any, identity: Any, user_id: str) -> tuple[str, str]:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+    public_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("ascii")
+    private_pem = private_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode("ascii")
+    uploaded = identity.upload_api_key(
+        user_id,
+        oci_module.identity.models.CreateApiKeyDetails(key=public_pem),
+    ).data
+    fingerprint = str(getattr(uploaded, "fingerprint", "") or "")
+    if not re.fullmatch(r"(?:[0-9a-fA-F]{2}:){15}[0-9a-fA-F]{2}", fingerprint):
+        _delete_api_key_safely(identity, user_id, fingerprint)
+        raise ReconcileError("OCI returned an invalid governance API-key fingerprint")
+    return fingerprint, private_pem
+
+
+def _governance_secret_document(
+    tenancy_id: str,
+    user_id: str,
+    fingerprint: str,
+    region: str,
+    private_pem: str,
+    jdbc_url: str,
+) -> dict[str, str]:
+    return {
+        "purpose": GOVERNANCE_JDBC_PURPOSE,
+        "tenancy_ocid": tenancy_id,
+        "user_ocid": user_id,
+        "fingerprint": fingerprint,
+        "region": region,
+        "private_key_pem": private_pem,
+        "jdbc_url": jdbc_url,
+        "driver_class": "com.simba.spark.jdbc.Driver",
+    }
+
+
+def _publish_governance_secret(
+    oci_module: Any,
+    vault: Any,
+    secrets_client: Any,
+    secret_id: str,
+    document: dict[str, str],
+    *,
+    attempts: int,
+) -> None:
+    encoded = base64.b64encode(
+        json.dumps(document, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii")
+    vault.update_secret(
+        secret_id,
+        oci_module.vault.models.UpdateSecretDetails(
+            secret_content=oci_module.vault.models.Base64SecretContentDetails(
+                content=encoded,
+                stage="CURRENT",
+            )
+        ),
+    )
+    for attempt in range(attempts):
+        published = _read_governance_secret(oci_module, secrets_client, secret_id)
+        if published and published.get("fingerprint") == document["fingerprint"]:
+            return
+        if attempt + 1 < attempts:
+            _sleep(5)
+    raise ReconcileError("Timed out waiting for the governance Vault secret version")
+
+
+def ensure_governance_jdbc_credential(
+    oci_module: Any,
+    config: dict[str, Any],
+    signer: Any,
+    outputs: dict[str, Any],
+    region: str,
+    compute_key: str,
+    *,
+    attempts: int = 60,
+) -> bool:
+    """Create or reuse one dedicated API key whose private half lives only in OCI Vault."""
+    user_id = str(outputs.get("governance_gateway_jdbc_user_ocid") or "")
+    secret_id = str(outputs.get("governance_gateway_jdbc_secret_ocid") or "")
+    tenancy_id = str(config.get("tenancy") or "")
+    if not user_id.startswith("ocid1.user.") or not secret_id.startswith("ocid1.vaultsecret."):
+        raise ReconcileError("The governance JDBC identity or Vault secret output is invalid")
+    jdbc_url = _governance_jdbc_url(region, compute_key)
+    regional_config = {**config, "region": region}
+    identity = oci_module.identity.IdentityClient(regional_config, signer=signer)
+    secrets_client = oci_module.secrets.SecretsClient(regional_config, signer=signer)
+    vault = oci_module.vault.VaultsClient(regional_config, signer=signer)
+    fingerprints = {
+        str(item.fingerprint)
+        for item in identity.list_api_keys(user_id).data
+        if getattr(item, "fingerprint", None)
+    }
+    current = _read_governance_secret(oci_module, secrets_client, secret_id)
+    if _valid_governance_secret(
+        current,
+        tenancy_id=tenancy_id,
+        user_id=user_id,
+        region=region,
+        jdbc_url=jdbc_url,
+        fingerprints=fingerprints,
+    ):
+        return False
+
+    fingerprint, private_pem = _new_governance_api_key(
+        oci_module,
+        identity,
+        user_id,
+    )
+    previous = (
+        str(current.get("fingerprint") or "")
+        if current
+        and current.get("purpose") == GOVERNANCE_JDBC_PURPOSE
+        and current.get("user_ocid") == user_id
+        else ""
+    )
+    document = _governance_secret_document(
+        tenancy_id,
+        user_id,
+        fingerprint,
+        region,
+        private_pem,
+        jdbc_url,
+    )
+    try:
+        _publish_governance_secret(
+            oci_module,
+            vault,
+            secrets_client,
+            secret_id,
+            document,
+            attempts=attempts,
+        )
+    except Exception:
+        _delete_api_key_safely(identity, user_id, fingerprint)
+        raise
+    if previous and previous != fingerprint and previous in fingerprints:
+        identity.delete_api_key(user_id, previous)
+    return True
+
+
+def governance_jdbc_driver_path() -> Path:
+    value = os.environ.get(GOVERNANCE_JDBC_DRIVER_ENV, "").strip()
+    if not value:
+        raise ReconcileError(
+            "The Oracle AIDP JDBC driver upload is required when AI Data Governance is enabled"
+        )
+    path = Path(value).resolve()
+    if not path.is_file() or path.suffix.casefold() not in {".jar", ".zip"}:
+        raise ReconcileError("The governance JDBC driver must be an existing JAR or ZIP file")
+    size = path.stat().st_size
+    if not 1 <= size <= MAX_GOVERNANCE_DRIVER_BYTES or not zipfile.is_zipfile(path):
+        raise ReconcileError("The governance JDBC driver is invalid or exceeds 128 MiB")
+    with zipfile.ZipFile(path) as archive:
+        members = [item for item in archive.infolist() if not item.is_dir()]
+        if any(
+            PurePosixPath(item.filename).is_absolute()
+            or ".." in PurePosixPath(item.filename).parts
+            for item in members
+        ):
+            raise ReconcileError("The governance JDBC driver archive contains an unsafe path")
+        if path.suffix.casefold() == ".zip" and not any(
+            item.filename.casefold().endswith((".jar", ".zip")) for item in members
+        ):
+            raise ReconcileError("The governance JDBC ZIP contains no driver archive")
+    return path
+
+
+def upload_governance_jdbc_driver(
+    object_storage: Any,
+    namespace: str,
+    bucket: str,
+    object_name: str,
+    path: Path,
+) -> None:
+    digest = hashlib.md5(usedforsecurity=False)
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    with path.open("rb") as source:
+        object_storage.put_object(
+            namespace,
+            bucket,
+            object_name,
+            source,
+            content_length=path.stat().st_size,
+            content_md5=base64.b64encode(digest.digest()).decode("ascii"),
+            content_type="application/java-archive" if path.suffix.casefold() == ".jar" else "application/zip",
+        )
 
 
 def assert_fields(resource: dict[str, Any], expected: dict[str, Any], kind: str) -> None:
@@ -682,6 +949,82 @@ def ensure_role_permission(
     )
 
 
+def _user_permission_is_assigned(
+    api: AidpApi,
+    inspect_path: str,
+    user_ocid: str,
+    permission: str,
+) -> bool:
+    matches = [
+        item
+        for item in api.list_all(inspect_path)
+        if isinstance(item, dict)
+        and str(item.get("granteeType") or "").upper() == "USER"
+        and user_ocid in {str(item.get("grantee") or ""), str(item.get("granteeName") or "")}
+    ]
+    if any(set(item.get("granteePermissions") or []) != {permission} for item in matches) or len(matches) > 1:
+        raise ReconcileError("The governance JDBC user has a conflicting direct permission")
+    return len(matches) == 1
+
+
+def ensure_governance_control_access(
+    api: AidpApi,
+    catalog_key: str,
+    catalog_name: str,
+    workspace_key: str,
+    compute_key: str,
+    technical_user_ocid: str,
+) -> str:
+    """Create only oci_control and grant the runtime only schema ADMIN plus cluster USE."""
+    if not technical_user_ocid.startswith("ocid1.user."):
+        raise ReconcileError("The governance JDBC technical user OCID is invalid")
+    schema, _ = ensure_resource(
+        api,
+        "/schemas",
+        "governance control schema",
+        "oci_control",
+        {
+            "displayName": "oci_control",
+            "description": "Private control plane for AIDP governance extensions",
+            "catalogName": catalog_name,
+        },
+        {"catalogName": catalog_name},
+        filters={"catalogKey": catalog_key},
+    )
+    schema_key = str(schema.get("key") or "")
+    if not schema_key:
+        raise ReconcileError("The governance control schema has no key")
+    for resource_path, assignment_key, permission in (
+        (
+            f"/schemas/{quote(schema_key, safe='')}",
+            "assignSchemaPermissionDetails",
+            "ADMIN",
+        ),
+        (
+            f"/workspaces/{quote(workspace_key, safe='')}/clusters/{quote(compute_key, safe='')}",
+            "assignClusterPermissionDetails",
+            "USE",
+        ),
+    ):
+        assignment = {
+            "assignees": {"type": "USER", "targets": [technical_user_ocid]},
+            "permissions": [permission],
+        }
+        ensure_action(
+            api,
+            "POST",
+            f"{resource_path}/actions/managePermission",
+            {assignment_key: assignment},
+            lambda path=f"{resource_path}/permissions", value=permission: _user_permission_is_assigned(
+                api,
+                path,
+                technical_user_ocid,
+                value,
+            ),
+        )
+    return schema_key
+
+
 def verify_governance_schema_permissions(
     api: AidpApi,
     catalog_key: str,
@@ -692,12 +1035,6 @@ def verify_governance_schema_permissions(
     """Fail closed if oci_control is visible outside the administrative boundary."""
     if not technical_user_ocid.startswith("ocid1.user."):
         raise ReconcileError("The governance JDBC technical user OCID is invalid")
-    assert_operator_platform_admin(
-        api,
-        technical_user_ocid,
-        attempts=attempts,
-        principal_label="governance JDBC technical user",
-    )
     schema: dict[str, Any] | None = None
     for attempt in range(attempts):
         schema = exact_one(
@@ -719,6 +1056,7 @@ def verify_governance_schema_permissions(
     permissions = api.list_all(
         f"/schemas/{quote(str(schema['key']), safe='')}/permissions"
     )
+    platform_admin = False
     technical_admin = False
     for item in permissions:
         grantee_type = str(item.get("granteeType") or "").upper()
@@ -728,7 +1066,7 @@ def verify_governance_schema_permissions(
         if not granted:
             continue
         if grantee_type == "ROLE" and grantee_name == "AI_DATA_PLATFORM_ADMIN":
-            technical_admin = technical_admin or "ADMIN" in granted
+            platform_admin = platform_admin or "ADMIN" in granted
             continue
         if grantee_type == "USER" and grantee == technical_user_ocid:
             technical_admin = technical_admin or "ADMIN" in granted
@@ -737,6 +1075,8 @@ def verify_governance_schema_permissions(
         raise ReconcileError(
             f"oci_control has an unauthorized {inheritance}grant for {grantee_name}"
         )
+    if not platform_admin:
+        raise ReconcileError("AI_DATA_PLATFORM_ADMIN must retain ADMIN on oci_control")
     if not technical_admin:
         raise ReconcileError(
             "The governance JDBC technical user must inherit or hold ADMIN on oci_control"
@@ -1723,13 +2063,38 @@ def main() -> int:
                 raise ReconcileError(
                     "The governance JDBC technical user must not be the deployment operator"
                 )
+            ensure_governance_control_access(
+                credential_api,
+                str(reconciled["catalog_key"]),
+                str(reconciled["catalog_name"]),
+                str(reconciled["workspace_key"]),
+                str(reconciled["shared_compute_key"]),
+                technical_user_ocid,
+            )
+            driver_path = governance_jdbc_driver_path()
+            upload_governance_jdbc_driver(
+                object_storage,
+                str(outputs["objectstorage_namespace"]),
+                str(outputs["governance_gateway_jdbc_driver_bucket"]),
+                str(outputs["governance_gateway_jdbc_driver_object"]),
+                driver_path,
+            )
+            credential_rotated = ensure_governance_jdbc_credential(
+                oci,
+                oci_config,
+                signer,
+                outputs,
+                str(context["region"]),
+                str(reconciled["shared_compute_key"]),
+            )
             verify_governance_schema_permissions(
                 credential_api,
                 str(reconciled["catalog_key"]),
                 technical_user_ocid,
             )
             messages.append(
-                "oci_control access verified for platform administrators and the dedicated JDBC identity"
+                "oci_control access verified for platform administrators and the dedicated JDBC identity; "
+                f"JDBC credential {'rotated' if credential_rotated else 'reused'}"
             )
         aidp_url = resolve_workbench_url(outputs, oci_config, signer)
         if not aidp_url:

@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   validate-and-release:
@@ -33,10 +34,13 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/frontend/package-lock.json
-      - run: pip install -r apps/backend/requirements-dev.txt
+      - run: pip install -r apps/backend/requirements-dev.txt -r apps/governance_gateway/requirements.txt
       - run: python -m pytest apps/backend/tests terraform/tests
         env:
           SESSION_SECRET_FILE: ${{ runner.temp }}/aidp-lab/session.key
+      - run: python -m pytest apps/governance_gateway/tests
+        env:
+          PYTHONPATH: apps
       - run: npm ci
         working-directory: apps/frontend
       - run: npm test && npm run build
@@ -45,6 +49,19 @@ jobs:
         working-directory: terraform
       - run: terraform init -backend=false && terraform validate && terraform test
         working-directory: terraform
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Publish the governance gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/governance_gateway/Dockerfile
+          push: true
+          tags: ghcr.io/jgangini/oci-aidp-governance-gateway:${{ github.ref_name }}
       - name: Create or reuse GitHub release
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then

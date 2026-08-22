@@ -13,12 +13,24 @@ EXPECTED_REPOSITORIES = {
     "https://github.com/jgangini/oci-aidp-cloud-migration-lab",
     "https://github.com/jgangini/oci-aidp-cloud-migration-lab.git",
 }
-EXPECTED_REFS = frozenset({"v2.1.0"})
+EXPECTED_REFS = frozenset({"v2.1.1"})
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _COMPARTMENT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _OCI_REGION = re.compile(r"^[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*$")
 _ALLOWED_IDENTITY_DOMAIN_GROUPS = frozenset({"developers", "pending"})
+_ALLOWED_GOVERNANCE_RESOURCES = frozenset(
+    {
+        ("oci_identity_domains_app", "governance_public_client"),
+        ("oci_kms_key", "governance"),
+        ("oci_kms_vault", "governance"),
+        ("oci_vault_secret", "governance_jdbc"),
+    }
+)
+_CONTROL_RESOURCE = re.compile(
+    r'resource\s+"(oci_identity_domains_app|oci_kms_[^"]+|oci_vault_[^"]+)"\s+"([^"]+)"',
+    re.IGNORECASE,
+)
 _IDENTITY_DOMAIN_RESOURCE = re.compile(
     r'resource\s+"oci_identity_domains_(user|group|grant)"\s+"([^"]+)"',
     re.IGNORECASE,
@@ -39,14 +51,6 @@ _SOURCE_PATTERNS = (
             r"resource\s+\"oci_ai_data_platform[^\"]*volume[^\"]*\"",
             re.IGNORECASE,
         ),
-    ),
-    (
-        "OCI Vault or customer-managed KMS resource",
-        re.compile(r'resource\s+"(?:oci_kms_|oci_vault_)[^"]+"', re.IGNORECASE),
-    ),
-    (
-        "Identity Domains OAuth client",
-        re.compile(r'resource\s+"oci_identity_domains_app"', re.IGNORECASE),
     ),
     ("optional VNIC policy", re.compile(r"\bmanage\s+vnics\b", re.IGNORECASE)),
     ("optional subnet policy", re.compile(r"\buse\s+subnets\b", re.IGNORECASE)),
@@ -89,7 +93,7 @@ def validate_context(context: dict[str, Any]) -> None:
     if str(source.get("repository") or "").rstrip("/") not in EXPECTED_REPOSITORIES:
         raise ValueError("release requires the trusted GitHub repository")
     if source.get("ref") not in EXPECTED_REFS:
-        raise ValueError("release requires source ref v2.1.0")
+        raise ValueError("release requires source ref v2.1.1")
     if not _SHA.fullmatch(str(source.get("commit_sha") or "")):
         raise ValueError("release requires a full lowercase 40-character source SHA")
     if _OCI_REGION.fullmatch(str(context.get("region") or "")) is None:
@@ -121,6 +125,19 @@ def _forbidden_finding(text: str) -> str | None:
     return None
 
 
+def _forbidden_control_resource(text: str) -> str | None:
+    for resource_type, name in _CONTROL_RESOURCE.findall(text):
+        normalized = (resource_type.lower(), name.lower())
+        if normalized in _ALLOWED_GOVERNANCE_RESOURCES:
+            continue
+        return (
+            "Identity Domains OAuth client"
+            if resource_type.lower() == "oci_identity_domains_app"
+            else "OCI Vault or customer-managed KMS resource"
+        )
+    return None
+
+
 def validate_source(terraform_root: Path) -> None:
     files = _deployment_files(terraform_root)
     if not files:
@@ -128,6 +145,7 @@ def validate_source(terraform_root: Path) -> None:
     for path in files:
         text = path.read_text(encoding="utf-8")
         finding = _forbidden_finding(text)
+        finding = finding or _forbidden_control_resource(text)
         if finding:
             raise ValueError(f"release source contains {finding} in {path.relative_to(terraform_root)}")
         if 'resource "oci_objectstorage_bucket"' in text and re.search(r"\bkms_key_id\s*=", text):
@@ -154,6 +172,9 @@ def _planned_values(resource: dict[str, Any]) -> dict[str, Any]:
 
 
 def _forbidden_plan_type(resource_type: str, address: str) -> str | None:
+    resource_name = address.rsplit(".", 1)[-1].split("[", 1)[0].lower()
+    if (resource_type, resource_name) in _ALLOWED_GOVERNANCE_RESOURCES:
+        return None
     if resource_type.startswith(("oci_kms_", "oci_vault_")):
         return "OCI Vault or customer-managed KMS resource"
     if resource_type == "oci_identity_domains_app":
@@ -163,7 +184,6 @@ def _forbidden_plan_type(resource_type: str, address: str) -> str | None:
     identity_prefix = "oci_identity_domains_"
     identity_kind = resource_type.removeprefix(identity_prefix)
     if resource_type.startswith(identity_prefix) and identity_kind in {"user", "group", "grant"}:
-        resource_name = address.rsplit(".", 1)[-1].split("[", 1)[0]
         return _technical_identity_finding(identity_kind, resource_name)
     return None
 
@@ -190,7 +210,7 @@ def validate_plan(plan: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate the immutable fresh-only v2.1.0 AIDP lab release contract.")
+    parser = argparse.ArgumentParser(description="Validate the immutable fresh-only v2.1.1 AIDP lab release contract.")
     parser.add_argument("--source-root", type=Path, default=Path(__file__).parent)
     parser.add_argument("--context-json", type=Path)
     parser.add_argument("--plan-json", type=Path)

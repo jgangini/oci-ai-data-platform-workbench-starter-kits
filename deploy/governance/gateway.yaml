@@ -49,9 +49,12 @@ spec:
           image: ${jsonencode(gateway_image)}
           imagePullPolicy: IfNotPresent
           args:
-            - python
-            - -m
-            - governance_gateway.tls_entrypoint
+            - uvicorn
+            - governance_gateway.main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8080"
           env:
             - name: GOVERNANCE_OCI_REGION
               value: ${jsonencode(oci_region)}
@@ -61,8 +64,6 @@ spec:
               value: ${jsonencode(oidc_authority)}
             - name: GOVERNANCE_OIDC_AUDIENCE
               value: ${jsonencode(oidc_audience)}
-            - name: GOVERNANCE_TLS_SECRET_OCID
-              value: ${jsonencode(tls_secret_ocid)}
             - name: GOVERNANCE_AIDP_PLATFORM_ID
               value: ${jsonencode(aidp_platform_id)}
             - name: GOVERNANCE_JDBC_SECRET_OCID
@@ -88,29 +89,31 @@ spec:
             - name: GOVERNANCE_MAX_RESULT_BYTES
               value: "5242880"
           ports:
-            - name: https
-              containerPort: 8443
+            - name: http
+              containerPort: 8080
               protocol: TCP
           resources:
             requests:
               cpu: 250m
               memory: 512Mi
+              ephemeral-storage: 256Mi
             limits:
               cpu: "1"
               memory: 2Gi
+              ephemeral-storage: 1Gi
           readinessProbe:
             httpGet:
-              scheme: HTTPS
+              scheme: HTTP
               path: /readyz
-              port: https
+              port: http
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 6
           livenessProbe:
             httpGet:
-              scheme: HTTPS
+              scheme: HTTP
               path: /healthz
-              port: https
+              port: http
             periodSeconds: 30
             timeoutSeconds: 3
             failureThreshold: 3
@@ -127,7 +130,7 @@ spec:
       volumes:
         - name: runtime
           emptyDir:
-            sizeLimit: 256Mi
+            sizeLimit: 768Mi
 ---
 apiVersion: v1
 kind: Service
@@ -137,14 +140,15 @@ metadata:
   annotations:
     oci.oraclecloud.com/load-balancer-type: "lb"
     service.beta.kubernetes.io/oci-load-balancer-internal: "true"
+    oci.oraclecloud.com/reserved-private-ips: ${jsonencode(gateway_backend_ip)}
 spec:
   type: LoadBalancer
   selector:
     app.kubernetes.io/name: ai-data-governance-gateway
   ports:
-    - name: https
-      port: 8443
-      targetPort: https
+    - name: http
+      port: 8080
+      targetPort: http
       protocol: TCP
 ---
 apiVersion: policy/v1
@@ -167,9 +171,12 @@ spec:
   podSelector: {}
   policyTypes: ["Ingress", "Egress"]
   ingress:
-    - ports:
+    - from:
+        - ipBlock:
+            cidr: ${jsonencode(gateway_subnet_cidr)}
+      ports:
         - protocol: TCP
-          port: 8443
+          port: 8080
   egress:
     - to:
         - namespaceSelector:

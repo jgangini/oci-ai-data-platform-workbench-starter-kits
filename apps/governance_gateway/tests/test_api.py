@@ -28,6 +28,10 @@ def client() -> TestClient:
     return TestClient(create_app(service, FakeAuthenticator()))
 
 
+def test_health_reports_the_gateway_release() -> None:
+    assert client().get("/healthz").json() == {"status": "ok", "version": "2.1.1"}
+
+
 def test_missing_token_is_unauthorized() -> None:
     response = client().get("/v1/admin/status")
     assert response.status_code == 401

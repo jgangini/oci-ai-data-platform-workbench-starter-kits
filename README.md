@@ -4,7 +4,7 @@ OCI AI Data Platform Cloud Migration Lab is a hands-on data engineering environm
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more laboratories without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current published stable release: **v2.1.0**. This release adds the optional AI Data Governance Gateway while preserving Autonomous Database for AI Compute agent memory.
+Current validation target: **v2.1.1**. This patch adds the optional AI Data Governance Gateway while preserving Autonomous Database for AI Compute agent memory.
 
 ## What the project provides
 
@@ -138,7 +138,7 @@ flowchart LR
   AG -->|AIDP checkpointer| ADB[(Autonomous AI Database 26ai)]
 ```
 
-OKE uses Workload Identity for OCI access. If the AIDP JDBC driver requires a technical credential, it is a dedicated least-privilege identity stored in OCI Vault; the personal deployment key is never mounted in pods. The gateway endpoint is private and requires an approved AIDP workspace-to-OKE network path before live Agent execution. See [`docs/data-governance.md`](docs/data-governance.md) for the complete contract and acceptance gates.
+OKE uses Workload Identity for OCI access. The only operator-supplied governance artifact is the licensed Oracle AIDP JDBC driver (`.jar` or `.zip`); Deploy Studio validates it and uploads it directly to the deployment data bucket without placing it in Git or Terraform state. A dedicated API key is generated for the technical JDBC user, stored in OCI Vault, and limited to `ADMIN` on `oci_control` plus `USE` on the shared cluster. The personal deployment key is never mounted in pods. Public TLS and OIDC terminate at OCI API Gateway; the OKE service remains private. See [`docs/data-governance.md`](docs/data-governance.md) for the complete contract and acceptance gates.
 
 ## End-to-end user guide
 
@@ -333,7 +333,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 
 ## OCI Deploy Studio compatibility
 
-The **v2.1.0** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery extensions.
+The **v2.1.1** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery extensions.
 
 Deploy Studio support includes:
 
@@ -348,7 +348,7 @@ Deploy Studio support includes:
 - Post-apply reconciliation of the AIDP workspace, catalog, `aidp_cluster_shared_compute`, AI feature enablement, Identity roles, participant application, and final access artifact. The first Agent assignment reuses the shared `aidp_agent_shared_compute` runtime.
 - Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
 
-The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.0` tag rather than an untagged development commit.
+The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.1` tag rather than an untagged development commit.
 
 Deploy Studio currently applies the Resource Manager plan automatically after planning and does not expose a repository hook between those stages. For controlled deployments, review the generated plan or run `python terraform/release_gate.py --plan-json <plan.json>` in CI before starting the final apply.
 

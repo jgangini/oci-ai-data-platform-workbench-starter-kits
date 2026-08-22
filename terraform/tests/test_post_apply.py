@@ -191,9 +191,6 @@ class FakeApi:
 def test_governance_schema_permissions_allow_only_admins_and_dedicated_jdbc_user() -> None:
     api = FakeApi()
     technical_user = "ocid1.user.oc1..governance"
-    api.actions["/roles/platform-admin-key"]["assignees"].append(
-        {"type": "USER", "target": technical_user}
-    )
     api.resources["/schemas"] = [
         {"displayName": "oci_control", "key": "aidp_lab.oci_control"}
     ]
@@ -221,9 +218,6 @@ def test_governance_schema_permissions_allow_only_admins_and_dedicated_jdbc_user
 def test_governance_schema_permissions_fail_closed_for_developer_access() -> None:
     api = FakeApi()
     technical_user = "ocid1.user.oc1..governance"
-    api.actions["/roles/platform-admin-key"]["assignees"].append(
-        {"type": "USER", "target": technical_user}
-    )
     api.resources["/schemas"] = [
         {"displayName": "oci_control", "key": "aidp_lab.oci_control"}
     ]
@@ -245,6 +239,131 @@ def test_governance_schema_permissions_fail_closed_for_developer_access() -> Non
         post_apply.verify_governance_schema_permissions(
             api, "aidp_lab-key", technical_user, attempts=1
         )
+
+
+def test_governance_runtime_gets_only_schema_admin_and_cluster_use() -> None:
+    api = FakeApi()
+    technical_user = "ocid1.user.oc1..governance"
+    schema_key = post_apply.ensure_governance_control_access(
+        api,
+        "aidp_lab-key",
+        "aidp_lab",
+        "ws-key",
+        "aidp_cluster_shared_compute-key",
+        technical_user,
+    )
+    assert schema_key == "aidp_lab.oci_control"
+    permissions = [
+        (path, next(iter(payload.values()))["permissions"])
+        for method, path, payload, _params in api.calls
+        if method == "POST" and payload and "/actions/managePermission" in path
+    ]
+    assert permissions == [
+        ("/schemas/aidp_lab.oci_control/actions/managePermission", ["ADMIN"]),
+        (
+            "/workspaces/ws-key/clusters/aidp_cluster_shared_compute-key/actions/managePermission",
+            ["USE"],
+        ),
+    ]
+    assert not any(path.startswith("/catalogs/") for path, _permissions in permissions)
+    assert {item["target"] for item in api.actions["/roles/platform-admin-key"]["assignees"]} == {
+        "ocid1.user.oc1..operator"
+    }
+
+
+def test_governance_jdbc_driver_is_validated_and_uploaded(tmp_path: Path, monkeypatch) -> None:
+    driver = tmp_path / "aidp-jdbc.zip"
+    with zipfile.ZipFile(driver, "w") as archive:
+        archive.writestr("driver/sparkJDBC42.jar", b"jar")
+    monkeypatch.setenv(post_apply.GOVERNANCE_JDBC_DRIVER_ENV, str(driver))
+    assert post_apply.governance_jdbc_driver_path() == driver.resolve()
+
+    uploaded: dict[str, object] = {}
+
+    class ObjectStorage:
+        @staticmethod
+        def put_object(namespace, bucket, name, body, **kwargs):
+            uploaded.update(
+                namespace=namespace,
+                bucket=bucket,
+                name=name,
+                body=body.read(),
+                **kwargs,
+            )
+
+    post_apply.upload_governance_jdbc_driver(
+        ObjectStorage(), "namespace", "bucket", ".governance/aidp-jdbc-driver.zip", driver
+    )
+    assert uploaded["body"] == driver.read_bytes()
+    assert uploaded["content_length"] == driver.stat().st_size
+    assert uploaded["content_type"] == "application/zip"
+    assert isinstance(uploaded["content_md5"], str)
+
+
+def test_governance_jdbc_credential_is_created_then_reused() -> None:
+    fingerprint = ":".join(["aa"] * 16)
+    state: dict[str, object] = {
+        "keys": [],
+        "secret": base64.b64encode(b'{"status":"bootstrap_pending"}').decode("ascii"),
+    }
+
+    class Identity:
+        @staticmethod
+        def list_api_keys(_user_id):
+            return SimpleNamespace(data=list(state["keys"]))
+
+        @staticmethod
+        def upload_api_key(_user_id, details):
+            assert details.key.startswith("-----BEGIN PUBLIC KEY-----")
+            item = SimpleNamespace(fingerprint=fingerprint)
+            state["keys"].append(item)
+            return SimpleNamespace(data=item)
+
+        @staticmethod
+        def delete_api_key(_user_id, value):
+            state["keys"] = [item for item in state["keys"] if item.fingerprint != value]
+
+    class Secrets:
+        @staticmethod
+        def get_secret_bundle(_secret_id):
+            return SimpleNamespace(
+                data=SimpleNamespace(
+                    secret_bundle_content=SimpleNamespace(content=state["secret"])
+                )
+            )
+
+    class Vault:
+        @staticmethod
+        def update_secret(_secret_id, details):
+            state["secret"] = details.secret_content.content
+
+    models = SimpleNamespace(
+        CreateApiKeyDetails=lambda **kwargs: SimpleNamespace(**kwargs),
+        UpdateSecretDetails=lambda **kwargs: SimpleNamespace(**kwargs),
+        Base64SecretContentDetails=lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    oci_module = SimpleNamespace(
+        identity=SimpleNamespace(IdentityClient=lambda *_args, **_kwargs: Identity(), models=models),
+        secrets=SimpleNamespace(SecretsClient=lambda *_args, **_kwargs: Secrets()),
+        vault=SimpleNamespace(VaultsClient=lambda *_args, **_kwargs: Vault(), models=models),
+        exceptions=SimpleNamespace(ServiceError=RuntimeError),
+    )
+    outputs = {
+        "governance_gateway_jdbc_user_ocid": "ocid1.user.oc1..governance",
+        "governance_gateway_jdbc_secret_ocid": "ocid1.vaultsecret.oc1..governance",
+    }
+    config = {"tenancy": "ocid1.tenancy.oc1..tenant", "region": "us-chicago-1"}
+    assert post_apply.ensure_governance_jdbc_credential(
+        oci_module, config, object(), outputs, "us-chicago-1", "cluster-key", attempts=1
+    )
+    assert not post_apply.ensure_governance_jdbc_credential(
+        oci_module, config, object(), outputs, "us-chicago-1", "cluster-key", attempts=1
+    )
+    document = json.loads(base64.b64decode(state["secret"]))
+    assert document["purpose"] == post_apply.GOVERNANCE_JDBC_PURPOSE
+    assert document["fingerprint"] == fingerprint
+    assert document["user_ocid"] == outputs["governance_gateway_jdbc_user_ocid"]
+    assert "private_key_pem" in document
 
 
 def test_reconcile_leaves_legacy_catalog_empty_for_private_participant_catalogs(monkeypatch) -> None:

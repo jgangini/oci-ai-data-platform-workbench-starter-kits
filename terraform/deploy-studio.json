@@ -14,7 +14,7 @@
   },
   "presentation": {
     "title": "OCI AI Data Platform Cloud Migration Lab",
-    "summary": "Deploys a governed OCI data engineering laboratory with AI Data Platform, an optional private data-governance gateway on OKE, a registration VM, medallion Object Storage, and least-privilege Identity Domains access.",
+    "summary": "Deploys a governed OCI data engineering laboratory with AI Data Platform, Autonomous AI Database agent memory, an optional OIDC-protected public API Gateway backed by private OKE, medallion Object Storage, and least-privilege Identity Domains access.",
     "tags": ["VM", "VCN", "OKE", "AI Data Platform", "Data Governance", "Object Storage", "IAM"],
     "image": "/assets/oci-aidp-cloud-migration-lab.png",
     "image_alt": "OCI AI Data Platform Cloud Migration Lab architecture",
@@ -145,150 +145,6 @@
         "required": false,
         "default": false,
         "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_image",
-        "label": "Gateway image digest",
-        "type": "text",
-        "required": true,
-        "pattern": "^[a-z0-9./_-]+(?:\\.[a-z0-9.-]+)?/[a-z0-9./_-]+@sha256:[0-9a-f]{64}$",
-        "min_length": 80,
-        "max_length": 512,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_oidc_issuer",
-        "label": "Gateway OIDC issuer",
-        "type": "text",
-        "required": true,
-        "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~/-]+)?$",
-        "min_length": 12,
-        "max_length": 512,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_oidc_authority",
-        "label": "OCI IAM Identity Domain URL",
-        "type": "text",
-        "required": true,
-        "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~/-]+)?$",
-        "min_length": 12,
-        "max_length": 512,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_oidc_client_id",
-        "label": "VS Code governance OAuth client ID",
-        "type": "text",
-        "required": true,
-        "pattern": "^[A-Za-z0-9._:-]{3,255}$",
-        "min_length": 3,
-        "max_length": 255,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_oidc_audience",
-        "label": "Gateway OIDC audience",
-        "type": "text",
-        "required": true,
-        "pattern": "^[A-Za-z0-9._:/-]{3,255}$",
-        "min_length": 3,
-        "max_length": 255,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_tls_secret_ocid",
-        "label": "Gateway TLS certificate secret OCID",
-        "type": "text",
-        "required": true,
-        "pattern": "^ocid1\\.vaultsecret\\..+$|^ocid1\\.secret\\..+$",
-        "min_length": 30,
-        "max_length": 255,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_jdbc_user_ocid",
-        "label": "AIDP JDBC technical user OCID",
-        "type": "text",
-        "required": true,
-        "pattern": "^ocid1\\.user\\..+$",
-        "min_length": 30,
-        "max_length": 255,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_jdbc_secret_ocid",
-        "label": "AIDP JDBC technical credential secret OCID",
-        "type": "text",
-        "required": true,
-        "pattern": "^ocid1\\.vaultsecret\\..+$|^ocid1\\.secret\\..+$",
-        "min_length": 30,
-        "max_length": 255,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_jdbc_driver_bucket",
-        "label": "AIDP JDBC driver Object Storage bucket",
-        "type": "text",
-        "required": true,
-        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$",
-        "min_length": 1,
-        "max_length": 255,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_jdbc_driver_object",
-        "label": "AIDP JDBC driver Object Storage object",
-        "type": "text",
-        "required": true,
-        "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$",
-        "min_length": 1,
-        "max_length": 255,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_tokenization_key_ocid",
-        "label": "Tokenization Vault key OCID",
-        "type": "text",
-        "required": true,
-        "pattern": "^ocid1\\.key\\..+$",
-        "min_length": 30,
-        "max_length": 255,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_gateway_tokenization_crypto_endpoint",
-        "label": "Tokenization Vault crypto endpoint",
-        "type": "text",
-        "required": true,
-        "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]+)?$",
-        "min_length": 12,
-        "max_length": 512,
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "span": 2,
-        "group": "optional_addons"
       }
     ],
     "email_access_fields": ["admin_username", "admin_password", "registration_code"]
@@ -321,7 +177,14 @@
     "governance_gateway_oidc_client_id",
     "governance_gateway_oidc_issuer",
     "governance_gateway_oidc_audience",
+    "governance_gateway_oidc_scopes",
     "governance_gateway_url",
+    "governance_gateway_jdbc_secret_ocid",
+    "governance_gateway_jdbc_driver_bucket",
+    "governance_gateway_jdbc_driver_object",
+    "governance_gateway_tokenization_key_ocid",
+    "governance_gateway_tokenization_crypto_endpoint",
+    "governance_gateway_api_gateway_id",
     "agent_model_id",
     "default_workspace_name",
     "developer_group_ocid",
@@ -343,7 +206,7 @@
     "timeout_seconds": 300,
     "requires_oci_credentials": true,
     "secret_inputs": ["autonomous_database_admin_password", "autonomous_database_wallet_password"],
-    "output_inputs": ["home_region", "operator_user_ocid", "preferred_vm_shape", "availability_domain_index"],
+    "output_inputs": ["home_region", "operator_user_ocid", "preferred_vm_shape", "availability_domain_index", "governance_gateway_image", "governance_gateway_oidc_authority", "governance_gateway_oidc_issuer", "governance_gateway_oidc_static_jwks_json"],
     "runtime_fields": [
       {
         "name": "home_region",
@@ -381,6 +244,42 @@
         "required": true,
         "min_length": 1,
         "max_length": 2
+      },
+      {
+        "name": "governance_gateway_image",
+        "label": "Resolved governance image",
+        "type": "text",
+        "required": false,
+        "pattern": "^[a-z0-9./_-]+(?:\\.[a-z0-9.-]+)?/[a-z0-9./_-]+@sha256:[0-9a-f]{64}$",
+        "min_length": 80,
+        "max_length": 512
+      },
+      {
+        "name": "governance_gateway_oidc_authority",
+        "label": "Resolved OCI Identity Domain",
+        "type": "text",
+        "required": false,
+        "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~/-]+)?$",
+        "min_length": 12,
+        "max_length": 512
+      },
+      {
+        "name": "governance_gateway_oidc_issuer",
+        "label": "Resolved OCI token issuer",
+        "type": "text",
+        "required": false,
+        "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~/-]+)?$",
+        "min_length": 12,
+        "max_length": 512
+      },
+      {
+        "name": "governance_gateway_oidc_static_jwks_json",
+        "label": "Resolved OCI signing keys",
+        "type": "text",
+        "required": false,
+        "pattern": "^\\[\\{.*\\}\\]$",
+        "min_length": 64,
+        "max_length": 4096
       }
     ]
   },
