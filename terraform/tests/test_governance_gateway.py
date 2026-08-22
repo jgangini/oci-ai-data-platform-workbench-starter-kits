@@ -17,7 +17,7 @@ def test_devops_pipeline_targets_only_the_governance_cluster() -> None:
 
 def test_gateway_manifest_is_private_behind_public_oidc_gateway_and_immutable() -> None:
     manifest = (ROOT / "deploy/governance/gateway.yaml").read_text(encoding="utf-8")
-    variables = (ROOT / "terraform/b_variables.tf").read_text(encoding="utf-8")
+    gateway = (ROOT / "terraform/i_oci_data_governance_gateway.tf").read_text(encoding="utf-8")
     edge = (ROOT / "terraform/i_oci_data_governance_edge.tf").read_text(encoding="utf-8")
     assert 'service.beta.kubernetes.io/oci-load-balancer-internal: "true"' in manifest
     assert "oci.oraclecloud.com/reserved-private-ips" in manifest
@@ -28,7 +28,7 @@ def test_gateway_manifest_is_private_behind_public_oidc_gateway_and_immutable() 
     assert "GOVERNANCE_TOKENIZATION_KEY_OCID" in manifest
     assert "GOVERNANCE_TOKENIZATION_CRYPTO_ENDPOINT" in manifest
     assert "secretName:" not in manifest
-    assert "@sha256:" in variables
+    assert "@sha256:" in gateway
     assert "private_key_pem" not in manifest
     assert "BEGIN PRIVATE KEY" not in manifest
     assert 'resource "oci_apigateway_gateway" "governance"' in edge
@@ -36,6 +36,15 @@ def test_gateway_manifest_is_private_behind_public_oidc_gateway_and_immutable() 
     assert 'type = "STATIC_KEYS"' in edge
     assert "local.governance_gateway_scope" in edge
     assert "governance_gateway_oidc_static_jwks_json" in edge
+
+
+def test_governance_cross_variable_contract_uses_terraform_15_preconditions() -> None:
+    variables = (ROOT / "terraform/b_variables.tf").read_text(encoding="utf-8")
+    gateway = (ROOT / "terraform/i_oci_data_governance_gateway.tf").read_text(encoding="utf-8")
+    assert 'resource "terraform_data" "validate_governance_inputs"' in gateway
+    assert gateway.count("precondition {") == 4
+    assert gateway.count("!var.enable_ai_data_governance ||") == 4
+    assert "!var.enable_ai_data_governance" not in variables
 
 
 def test_workload_identity_reads_only_named_runtime_inputs() -> None:

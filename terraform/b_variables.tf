@@ -150,56 +150,24 @@ variable "governance_gateway_image" {
   description = "Immutable gateway image resolved by the authenticated deployment preflight."
   type        = string
   default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^[a-z0-9./_-]+(?:\\.[a-z0-9.-]+)?/[a-z0-9./_-]+@sha256:[0-9a-f]{64}$",
-      var.governance_gateway_image,
-    ))
-    error_message = "governance_gateway_image must be an immutable image@sha256:digest reference when governance is enabled."
-  }
 }
 
 variable "governance_gateway_oidc_issuer" {
   description = "HTTPS issuer discovered from the active default OCI Identity Domain."
   type        = string
   default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~/-]+)?$",
-      var.governance_gateway_oidc_issuer,
-    ))
-    error_message = "governance_gateway_oidc_issuer must be an HTTPS issuer URL when governance is enabled."
-  }
 }
 
 variable "governance_gateway_oidc_authority" {
   description = "Active default OCI Identity Domain URL discovered by the deployment preflight."
   type        = string
   default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(regex(
-      "^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~/-]+)?$",
-      var.governance_gateway_oidc_authority,
-    ))
-    error_message = "governance_gateway_oidc_authority must be an HTTPS Identity Domain URL when governance is enabled."
-  }
 }
 
 variable "governance_gateway_oidc_static_jwks_json" {
   description = "Current public RSA signing keys retrieved through authenticated Identity Domains preflight."
   type        = string
   default     = ""
-  validation {
-    condition = !var.enable_ai_data_governance || can(
-      length(jsondecode(var.governance_gateway_oidc_static_jwks_json)) >= 1 &&
-      length(jsondecode(var.governance_gateway_oidc_static_jwks_json)) <= 10 &&
-      alltrue([
-        for key in jsondecode(var.governance_gateway_oidc_static_jwks_json) :
-        key.alg == "RS256" && key.kty == "RSA" && key.e != "" && key.kid != "" && key.n != ""
-      ])
-    )
-    error_message = "governance_gateway_oidc_static_jwks_json must contain 1-10 RS256 public RSA keys."
-  }
 }
 
 variable "preferred_vm_shape" {

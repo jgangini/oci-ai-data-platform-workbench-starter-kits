@@ -307,6 +307,7 @@ def test_runtime_security_contracts() -> None:
 
 def test_terraform_files_follow_select_ai_order() -> None:
     root = Path(__file__).parents[2] / "terraform"
+    assert 'required_version = ">= 1.5.7"' in (root / "a_versions.tf").read_text(encoding="utf-8")
     expected = {
         "a_versions.tf",
         "b_variables.tf",
