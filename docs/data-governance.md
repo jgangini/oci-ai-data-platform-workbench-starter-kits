@@ -1,6 +1,6 @@
 # AI Data Governance add-on
 
-> Status: `v2.1.10` validation target. Local contracts are implemented; live OCI acceptance is running after aligning private OKE worker traffic and the canonical AIDP `catalogKey` schema response.
+> Status: `v2.1.11` validation target. Local contracts are implemented; live OCI acceptance is running after aligning private OKE worker traffic, the canonical AIDP `catalogKey` schema response, and Vault endpoint DNS readiness.
 
 ## Runtime boundaries
 

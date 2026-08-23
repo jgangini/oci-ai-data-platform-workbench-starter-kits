@@ -137,13 +137,27 @@ resource "oci_kms_vault" "governance" {
   vault_type     = "DEFAULT"
 }
 
-# ponytail: OCI publishes a new vault's regional DNS endpoints asynchronously; replace this fixed wait when the provider exposes an endpoint-ready waiter.
+# ponytail: OCI publishes a new vault's regional DNS asynchronously; replace this bounded poll when the provider exposes an endpoint-ready waiter.
 resource "terraform_data" "governance_vault_dns_wait" {
   count            = var.enable_ai_data_governance ? 1 : 0
   triggers_replace = [oci_kms_vault.governance[0].id]
 
   provisioner "local-exec" {
-    command = "sleep 60"
+    command = <<-EOT
+      attempt=1
+      while [ "$attempt" -le 30 ]; do
+        if getent ahostsv4 "$GOVERNANCE_VAULT_HOST" >/dev/null 2>&1; then
+          exit 0
+        fi
+        sleep 10
+        attempt=$((attempt + 1))
+      done
+      echo "Vault management endpoint DNS was not ready after 300 seconds" >&2
+      exit 1
+    EOT
+    environment = {
+      GOVERNANCE_VAULT_HOST = trimprefix(oci_kms_vault.governance[0].management_endpoint, "https://")
+    }
   }
 }
 
