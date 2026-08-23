@@ -72,7 +72,7 @@ test("administrator UI manages lab users through protected API routes", () => {
   assert.match(source, /!tableError && !visible\.length/);
   assert.match(source, /user\.participant_code \?\? "--"/);
   assert.doesNotMatch(source, /String\(index \+ 1\)\.padStart/);
-  assert.match(source, /Open AI Data Platform/);
+  assert.match(source, /Open AI Data Platform Workbench/);
   assert.match(source, /function Toast/);
   assert.match(source, /window\.setTimeout\(onDismiss, 4_000\)/);
   assert.match(source, /className="toast"/);
@@ -82,9 +82,13 @@ test("administrator UI manages lab users through protected API routes", () => {
   assert.match(source, /function copyAidpValue/);
   assert.match(source, /navigator\.clipboard\.writeText\(value\)/);
   assert.match(source, /className="settings-url-control"/);
-  assert.match(source, /aria-label="Copy AI Data Platform URL"/);
-  assert.match(source, /AI Data Platform OCID/);
-  assert.match(source, /aria-label="Copy AI Data Platform OCID"/);
+  assert.match(source, /aria-label="Copy AI Data Platform Workbench URL"/);
+  assert.match(source, /function OpenExternalIcon/);
+  assert.match(source, /className="settings-url-control settings-url-control-actions"/);
+  assert.match(source, /aria-label="Open AI Data Platform Workbench"/);
+  assert.match(styles, /\.settings-url-control-actions/);
+  assert.match(source, /AI Data Platform Workbench OCID/);
+  assert.match(source, /aria-label="Copy AI Data Platform Workbench OCID"/);
   assert.match(source, /className="confirm-error"/);
 });
 
@@ -107,12 +111,57 @@ test("administrator adds a user from an accessible catalog-driven lab table", ()
 });
 
 test("settings can rotate the registration code without exposing or persisting it", () => {
+  assert.match(source, /function SettingsRegistrationCodeField/);
   assert.match(source, /Lab registration code/);
   assert.match(source, /registration_code_configured/);
   assert.match(source, /registration_code: registrationCode/);
-  assert.match(source, /Configured — enter a new code to replace it/);
-  assert.match(source, /aria-label="Lab registration code"/);
+  assert.match(source, /className="registration-code settings-registration-code"/);
+  assert.match(source, /Lab registration code character \$\{index \+ 1\} of 8/);
+  assert.match(source, /\^\[A-Z\]\{4\}-\[0-9\]\{4\}\$/);
   assert.doesNotMatch(source, /(?:localStorage|sessionStorage).*registrationCode/);
+});
+
+test("settings separate Workbench, application and governance details into accessible tabs", () => {
+  assert.match(source, /className="settings-tabs" role="tablist"/);
+  assert.match(source, /role="tab"[\s\S]*aria-controls="settings-panel-workbench"/);
+  assert.match(source, /role="tab"[\s\S]*aria-controls="settings-panel-application"/);
+  assert.match(source, /role="tab"[\s\S]*aria-controls="settings-panel-governance"/);
+  assert.match(source, /role="tabpanel"[\s\S]*aria-labelledby="settings-tab-workbench"/);
+  assert.match(source, /role="tabpanel"[\s\S]*aria-labelledby="settings-tab-application"/);
+  assert.match(source, /role="tabpanel"[\s\S]*aria-labelledby="settings-tab-governance"/);
+  assert.match(source, /ArrowLeft[\s\S]*ArrowRight[\s\S]*Home[\s\S]*End/);
+  assert.match(source, /\["workbench", "application", "governance"\]/);
+
+  const workbenchPanel = source.indexOf('id="settings-panel-workbench"');
+  const applicationPanel = source.indexOf('id="settings-panel-application"');
+  const governancePanel = source.indexOf('id="settings-panel-governance"');
+  const panelsEnd = source.indexOf("{error && (", governancePanel);
+  assert.ok(workbenchPanel > 0 && applicationPanel > workbenchPanel && governancePanel > applicationPanel && panelsEnd > governancePanel);
+
+  const workbenchSource = source.slice(workbenchPanel, applicationPanel);
+  const applicationSource = source.slice(applicationPanel, governancePanel);
+  const governanceSource = source.slice(governancePanel, panelsEnd);
+  const serviceEndpoint = workbenchSource.indexOf("AI Data Platform Workbench Service Endpoint");
+  const workbenchUrl = workbenchSource.indexOf("AI Data Platform Workbench URL");
+  const workbenchOcid = workbenchSource.indexOf("AI Data Platform Workbench OCID");
+  assert.ok(serviceEndpoint < workbenchUrl && workbenchUrl < workbenchOcid);
+  assert.doesNotMatch(workbenchSource, /Shared compute/);
+  assert.match(applicationSource, /<SettingsRegistrationCodeField/);
+  assert.doesNotMatch(applicationSource, /AIDP JDBC driver/);
+  assert.match(applicationSource, />\s*Save Settings\s*</);
+  assert.match(governanceSource, /Governance artifact bucket/);
+  assert.match(governanceSource, /Governance Delta schema/);
+  assert.match(governanceSource, /AIDP JDBC driver/);
+  assert.match(governanceSource, /Install JDBC Driver/);
+  assert.match(governanceSource, /jdbcDriverAvailable \? \(/);
+  assert.match(governanceSource, /connect-compute\.html#GUID-B7F594C8-724D-4733-B80D-7A4C9A0CB0A2/);
+  assert.match(governanceSource, /jdbcDriverDownloadImage/);
+  assert.match(source, /title="Install JDBC driver\?"/);
+  assert.match(source, /label="Installing JDBC driver"/);
+  assert.match(styles, /\.settings-tab\[aria-selected="true"\]/);
+  assert.match(styles, /\.settings-panel\[hidden\] \{ display: none; \}/);
+  assert.match(styles, /\.settings-tabs \{[^}]*flex-wrap: wrap;[^}]*overflow: visible;/);
+  assert.doesNotMatch(styles, /\.settings-tabs \{[^}]*overflow-x: auto;/);
 });
 
 test("administrator mutates one participant laboratory at a time", () => {

@@ -243,6 +243,7 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     login(client)
     response = client.get("/api/admin/settings")
     assert response.status_code == 200
+    assert response.json()["aidp_service_endpoint"] == "https://aidp.us-chicago-1.oci.oraclecloud.com"
     assert response.json()["aidp_platform_id"] == "ocid1.aidataplatform.oc1..test"
     assert response.json()["compute_name"] == "aidp_cluster_shared_compute"
     assert response.json()["jdbc_url"].startswith("jdbc:spark://")

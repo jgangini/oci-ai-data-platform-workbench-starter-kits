@@ -25,6 +25,11 @@ import {
   type RegistrationResponse,
 } from "./registrationPoll";
 
+const jdbcDriverDownloadImage = new URL(
+  "./assets/aidp-jdbc-driver-download.png",
+  import.meta.url,
+).href;
+
 type ApiError = { detail?: string };
 type LabUser = {
   id: string;
@@ -54,6 +59,7 @@ type CatalogLab = {
 };
 type UserDraft = { name: string; email: string; lab_ids: string[] };
 type AdminSettingsResponse = {
+  aidp_service_endpoint: string;
   aidp_url: string;
   aidp_platform_id: string;
   compute_name: string;
@@ -277,12 +283,17 @@ function Toast({
 function ProvisioningOverlay({
   phase,
   message,
+  label,
+  indeterminate = false,
 }: {
   phase?: RegistrationPhaseValue;
   message?: string;
+  label?: string;
+  indeterminate?: boolean;
 }) {
   const phaseId = useId();
   const progress = registrationProgress(phase);
+  const phaseLabel = label || registrationPhaseLabel(phase);
   return (
     <section
       className="registration-overlay"
@@ -294,25 +305,29 @@ function ProvisioningOverlay({
         <span className="progress-orbit" aria-hidden="true" />
         <p className="registration-loading-title">Loading...</p>
         <p className="registration-progress-phase" id={phaseId}>
-          {registrationPhaseLabel(phase)}
+          {phaseLabel}
         </p>
-        <div
-          className="registration-progress-track"
-          role="progressbar"
-          aria-labelledby={phaseId}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={progress.percent}
-          aria-valuetext={`${progress.percent}% completed, step ${progress.step} of ${progress.total}: ${registrationPhaseLabel(phase)}`}
-        >
-          <span style={{ width: `${progress.percent}%` }} />
-        </div>
-        <div className="registration-progress-meta">
-          <strong>{progress.percent}% completed</strong>
-          <span>
-            Step {progress.step} of {progress.total}
-          </span>
-        </div>
+        {!indeterminate && (
+          <>
+            <div
+              className="registration-progress-track"
+              role="progressbar"
+              aria-labelledby={phaseId}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progress.percent}
+              aria-valuetext={`${progress.percent}% completed, step ${progress.step} of ${progress.total}: ${phaseLabel}`}
+            >
+              <span style={{ width: `${progress.percent}%` }} />
+            </div>
+            <div className="registration-progress-meta">
+              <strong>{progress.percent}% completed</strong>
+              <span>
+                Step {progress.step} of {progress.total}
+              </span>
+            </div>
+          </>
+        )}
         <p className="registration-progress-detail">{message}</p>
       </div>
     </section>
@@ -771,6 +786,21 @@ function CopyIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function OpenExternalIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14 5h5v5m0-5-8 8" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />
     </svg>
   );
 }
@@ -1871,10 +1901,95 @@ function AdminUsers() {
   );
 }
 
+function SettingsRegistrationCodeField({
+  value,
+  configured,
+  onChange,
+}: {
+  value: string;
+  configured: boolean;
+  onChange: (value: string) => void;
+}) {
+  const inputs = useRef<Array<HTMLInputElement | null>>([]);
+  const [letters = "", digits = ""] = value.split("-", 2);
+  const slots = Array.from({ length: 8 }, (_, index) =>
+    index < 4 ? letters[index] ?? "" : digits[index - 4] ?? "",
+  );
+  const focusSlot = (index: number) => inputs.current[Math.min(Math.max(index, 0), 7)]?.focus();
+  const emitSlots = (next: string[]) => {
+    const nextLetters = next.slice(0, 4).join("");
+    const nextDigits = next.slice(4).join("");
+    onChange(nextDigits || nextLetters.length === 4 ? `${nextLetters}-${nextDigits}` : nextLetters);
+  };
+  const setSlot = (index: number, rawValue: string) => {
+    const character = rawValue.toUpperCase().match(index < 4 ? /[A-Z]/ : /[0-9]/)?.[0] ?? "";
+    const next = [...slots];
+    next[index] = character;
+    emitSlots(next);
+    if (character && index < 7) requestAnimationFrame(() => focusSlot(index + 1));
+  };
+  const pasteCode = (rawValue: string) => {
+    const compact = rawValue.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!/^[A-Z]{4}[0-9]{4}$/.test(compact)) return;
+    onChange(`${compact.slice(0, 4)}-${compact.slice(4)}`);
+    requestAnimationFrame(() => focusSlot(7));
+  };
+  const handleKeyDown = (index: number, event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Backspace" || slots[index] || index === 0) return;
+    event.preventDefault();
+    const next = [...slots];
+    next[index - 1] = "";
+    emitSlots(next);
+    requestAnimationFrame(() => focusSlot(index - 1));
+  };
+
+  return (
+    <fieldset className="registration-code settings-registration-code">
+      <legend>Lab registration code</legend>
+      <div
+        className="code-slots"
+        onPaste={(event) => {
+          event.preventDefault();
+          pasteCode(event.clipboardData.getData("text"));
+        }}
+      >
+        {slots.map((slot, index) => (
+          <span className="code-slot-wrap" key={index}>
+            {index === 4 && <span className="code-separator" aria-hidden="true">-</span>}
+            <input
+              ref={(element) => {
+                inputs.current[index] = element;
+              }}
+              className="code-slot"
+              aria-label={`Lab registration code character ${index + 1} of 8`}
+              aria-describedby="registration-code-settings-help"
+              autoComplete="off"
+              autoCapitalize="characters"
+              inputMode={index < 4 ? "text" : "numeric"}
+              maxLength={1}
+              value={slot}
+              onChange={(event) => setSlot(index, event.target.value)}
+              onKeyDown={(event) => handleKeyDown(index, event)}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+          </span>
+        ))}
+      </div>
+      <span id="registration-code-settings-help" className="settings-help">
+        {configured
+          ? "For security, the current code is not displayed. Enter a new AAAA-0000 code to replace it."
+          : "Enter an AAAA-0000 code to enable participant registration."}
+      </span>
+    </fieldset>
+  );
+}
+
 function AdminSettings() {
+  type SettingsTab = "workbench" | "application" | "governance";
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("workbench");
+  const [aidpServiceEndpoint, setAidpServiceEndpoint] = useState("");
   const [aidpUrl, setAidpUrl] = useState("");
   const [aidpPlatformId, setAidpPlatformId] = useState("");
-  const [computeName, setComputeName] = useState("");
   const [jdbcUrl, setJdbcUrl] = useState("");
   const [jdbcAuthentication, setJdbcAuthentication] = useState("");
   const [jdbcDriverAvailable, setJdbcDriverAvailable] = useState(false);
@@ -1882,27 +1997,33 @@ function AdminSettings() {
   const [governanceControlBucket, setGovernanceControlBucket] = useState("");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
+  const [pendingDriverFile, setPendingDriverFile] = useState<File | null>(null);
   const [uploadingDriver, setUploadingDriver] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+  const workbenchTabRef = useRef<HTMLButtonElement>(null);
+  const applicationTabRef = useRef<HTMLButtonElement>(null);
+  const governanceTabRef = useRef<HTMLButtonElement>(null);
+  const serviceEndpointRef = useRef<HTMLInputElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const platformIdRef = useRef<HTMLInputElement>(null);
   const jdbcUrlRef = useRef<HTMLInputElement>(null);
   const gatewayUrlRef = useRef<HTMLInputElement>(null);
   const driverInputRef = useRef<HTMLInputElement>(null);
+  function applyAdminSettings(result: AdminSettingsResponse) {
+    setAidpServiceEndpoint(result.aidp_service_endpoint);
+    setAidpUrl(result.aidp_url);
+    setAidpPlatformId(result.aidp_platform_id);
+    setJdbcUrl(result.jdbc_url);
+    setJdbcAuthentication(result.jdbc_authentication);
+    setJdbcDriverAvailable(result.jdbc_driver_available);
+    setGovernanceGatewayUrl(result.governance_gateway_url);
+    setGovernanceControlBucket(result.governance_control_bucket);
+    setRegistrationCodeConfigured(result.registration_code_configured);
+  }
   useEffect(() => {
     void api<AdminSettingsResponse>("/api/admin/settings")
-      .then((result) => {
-        setAidpUrl(result.aidp_url);
-        setAidpPlatformId(result.aidp_platform_id);
-        setComputeName(result.compute_name);
-        setJdbcUrl(result.jdbc_url);
-        setJdbcAuthentication(result.jdbc_authentication);
-        setJdbcDriverAvailable(result.jdbc_driver_available);
-        setGovernanceGatewayUrl(result.governance_gateway_url);
-        setGovernanceControlBucket(result.governance_control_bucket);
-        setRegistrationCodeConfigured(result.registration_code_configured);
-      })
+      .then(applyAdminSettings)
       .catch((reason) => {
         if (reason instanceof ApiRequestError && reason.status === 401)
           window.location.assign("/admin/login");
@@ -1914,6 +2035,23 @@ function AdminSettings() {
           );
       });
   }, []);
+  function handleSettingsTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const tabs: SettingsTab[] = ["workbench", "application", "governance"];
+    const currentIndex = tabs.indexOf(activeSettingsTab);
+    const nextTab = event.key === "Home"
+      ? tabs[0]
+      : event.key === "End"
+        ? tabs[tabs.length - 1]
+        : tabs[(currentIndex + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+    setActiveSettingsTab(nextTab);
+    (nextTab === "workbench"
+      ? workbenchTabRef
+      : nextTab === "application"
+        ? applicationTabRef
+        : governanceTabRef).current?.focus();
+  }
   async function logout() {
     await api("/api/admin/logout", { method: "POST" });
     window.location.assign("/");
@@ -1935,28 +2073,24 @@ function AdminSettings() {
     }
     setToast(`${label} copied.`);
   }
-  async function saveSettings() {
+  async function saveSettings(section: "workbench" | "application") {
     setError("");
-    const rotatesRegistrationCode = Boolean(registrationCode);
+    const rotatesRegistrationCode = section === "application" && Boolean(registrationCode);
+    if (rotatesRegistrationCode && !/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)) {
+      setError("Enter four letters followed by four numbers.");
+      return;
+    }
     try {
       const result = await api<AdminSettingsResponse>("/api/admin/settings", {
         method: "PUT",
         body: JSON.stringify({
-          ...(aidpUrl ? { aidp_url: aidpUrl } : {}),
+          ...(section === "workbench" && aidpUrl ? { aidp_url: aidpUrl } : {}),
           ...(rotatesRegistrationCode ? { registration_code: registrationCode } : {}),
         }),
       });
-      setAidpUrl(result.aidp_url);
-      setAidpPlatformId(result.aidp_platform_id);
-      setComputeName(result.compute_name);
-      setJdbcUrl(result.jdbc_url);
-      setJdbcAuthentication(result.jdbc_authentication);
-      setJdbcDriverAvailable(result.jdbc_driver_available);
-      setGovernanceGatewayUrl(result.governance_gateway_url);
-      setGovernanceControlBucket(result.governance_control_bucket);
+      applyAdminSettings(result);
       setRegistrationCode("");
-      setRegistrationCodeConfigured(result.registration_code_configured);
-      setToast(rotatesRegistrationCode ? "Lab settings saved. Registration code updated." : "AI Data Platform URL saved.");
+      setToast(section === "application" ? "Application settings saved." : "AI Data Platform Workbench settings saved.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save settings");
     }
@@ -1968,6 +2102,7 @@ function AdminSettings() {
       setError("Select the ZIP downloaded from AIDP Workbench.");
       return;
     }
+    setPendingDriverFile(null);
     setUploadingDriver(true);
     try {
       const result = await api<{ jdbc_driver_available: boolean }>(
@@ -1987,6 +2122,20 @@ function AdminSettings() {
       if (driverInputRef.current) driverInputRef.current.value = "";
     }
   }
+  function selectJdbcDriver(file?: File) {
+    if (!file) return;
+    setError("");
+    if (!file.name.toLowerCase().endsWith(".zip")) {
+      setError("Select the ZIP downloaded from AI Data Platform Workbench.");
+      if (driverInputRef.current) driverInputRef.current.value = "";
+      return;
+    }
+    setPendingDriverFile(file);
+  }
+  function cancelJdbcDriverInstall() {
+    setPendingDriverFile(null);
+    if (driverInputRef.current) driverInputRef.current.value = "";
+  }
   return (
     <Shell adminLink={false} onSignOut={logout}>
       <section className="settings-page">
@@ -1995,166 +2144,294 @@ function AdminSettings() {
           <p>Review the lab configuration.</p>
         </div>
         <div className="settings-surface">
-          <div className="settings-tabs">
-            <span>Application</span>
+          <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+            <button
+              ref={workbenchTabRef}
+              id="settings-tab-workbench"
+              type="button"
+              className="settings-tab"
+              role="tab"
+              aria-selected={activeSettingsTab === "workbench"}
+              aria-controls="settings-panel-workbench"
+              tabIndex={activeSettingsTab === "workbench" ? 0 : -1}
+              onClick={() => setActiveSettingsTab("workbench")}
+              onKeyDown={handleSettingsTabKeyDown}
+            >
+              AI Data Platform Workbench
+            </button>
+            <button
+              ref={applicationTabRef}
+              id="settings-tab-application"
+              type="button"
+              className="settings-tab"
+              role="tab"
+              aria-selected={activeSettingsTab === "application"}
+              aria-controls="settings-panel-application"
+              tabIndex={activeSettingsTab === "application" ? 0 : -1}
+              onClick={() => setActiveSettingsTab("application")}
+              onKeyDown={handleSettingsTabKeyDown}
+            >
+              Application
+            </button>
+            <button
+              ref={governanceTabRef}
+              id="settings-tab-governance"
+              type="button"
+              className="settings-tab"
+              role="tab"
+              aria-selected={activeSettingsTab === "governance"}
+              aria-controls="settings-panel-governance"
+              tabIndex={activeSettingsTab === "governance" ? 0 : -1}
+              onClick={() => setActiveSettingsTab("governance")}
+              onKeyDown={handleSettingsTabKeyDown}
+            >
+              AI Data Governance Gateway
+            </button>
           </div>
-          <div className="settings-intro">
-            <span className="settings-icon">
-              <AdminLoginIcon />
-            </span>
-            <div>
-              <strong>AI Data Platform</strong>
-              <p>Open the workspace configured for this lab.</p>
+          <section
+            id="settings-panel-workbench"
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby="settings-tab-workbench"
+            hidden={activeSettingsTab !== "workbench"}
+          >
+            <div className="settings-intro">
+              <span className="settings-icon">
+                <AdminLoginIcon />
+              </span>
+              <div>
+                <strong>AI Data Platform Workbench</strong>
+                <p>Review the service and open the workspace configured for this lab.</p>
+              </div>
             </div>
-          </div>
-          <label className="settings-field">
-            AI Data Platform URL
-            <span className="settings-url-control">
-              <input
-                ref={urlRef}
-                value={aidpUrl}
-                onChange={(event) => setAidpUrl(event.target.value)}
-                aria-label="AI Data Platform URL"
-                placeholder="Loading configuration…"
-              />
-              <button
-                type="button"
-                className="copy-url"
-                onClick={() =>
-                  void copyAidpValue(aidpUrl, urlRef, "AI Data Platform URL")
-                }
-                disabled={!aidpUrl}
-                aria-label="Copy AI Data Platform URL"
-                title="Copy AI Data Platform URL"
-              >
-                <CopyIcon />
-              </button>
-            </span>
-            {aidpUrl && (
-              <a
-                className="settings-link"
-                href={aidpUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open AI Data Platform
-              </a>
-            )}
-            {jdbcDriverAvailable ? (
-              <span className="settings-driver-actions">
-                <a className="settings-link" href="/api/admin/aidp/jdbc-driver" download>
-                  Download AIDP JDBC driver
+            <label className="settings-field">
+              AI Data Platform Workbench Service Endpoint
+              <span className="settings-url-control">
+                <input
+                  ref={serviceEndpointRef}
+                  value={aidpServiceEndpoint}
+                  readOnly
+                  spellCheck={false}
+                  aria-label="AI Data Platform Workbench Service Endpoint"
+                  placeholder="Not configured"
+                />
+                <button
+                  type="button"
+                  className="copy-url"
+                  onClick={() => void copyAidpValue(aidpServiceEndpoint, serviceEndpointRef, "AI Data Platform Workbench Service Endpoint")}
+                  disabled={!aidpServiceEndpoint}
+                  aria-label="Copy AI Data Platform Workbench Service Endpoint"
+                  title="Copy AI Data Platform Workbench Service Endpoint"
+                >
+                  <CopyIcon />
+                </button>
+              </span>
+            </label>
+            <label className="settings-field">
+              AI Data Platform Workbench URL
+              <span className="settings-url-control settings-url-control-actions">
+                <input
+                  ref={urlRef}
+                  value={aidpUrl}
+                  onChange={(event) => setAidpUrl(event.target.value)}
+                  aria-label="AI Data Platform Workbench URL"
+                  placeholder="Loading configuration…"
+                />
+                <button
+                  type="button"
+                  className="copy-url"
+                  onClick={() => void copyAidpValue(aidpUrl, urlRef, "AI Data Platform Workbench URL")}
+                  disabled={!aidpUrl}
+                  aria-label="Copy AI Data Platform Workbench URL"
+                  title="Copy AI Data Platform Workbench URL"
+                >
+                  <CopyIcon />
+                </button>
+                <a
+                  className="copy-url open-url"
+                  href={aidpUrl || undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Open AI Data Platform Workbench"
+                  title="Open AI Data Platform Workbench"
+                  aria-disabled={!aidpUrl}
+                  tabIndex={aidpUrl ? 0 : -1}
+                >
+                  <OpenExternalIcon />
                 </a>
-                <button type="button" className="quiet-link" onClick={() => driverInputRef.current?.click()} disabled={uploadingDriver}>
-                  Replace driver
+              </span>
+            </label>
+            <label className="settings-field">
+              AI Data Platform Workbench OCID
+              <span className="settings-url-control">
+                <input
+                  ref={platformIdRef}
+                  value={aidpPlatformId}
+                  readOnly
+                  spellCheck={false}
+                  aria-label="AI Data Platform Workbench OCID"
+                  placeholder="Not configured"
+                />
+                <button
+                  type="button"
+                  className="copy-url"
+                  onClick={() => void copyAidpValue(aidpPlatformId, platformIdRef, "AI Data Platform Workbench OCID")}
+                  disabled={!aidpPlatformId}
+                  aria-label="Copy AI Data Platform Workbench OCID"
+                  title="Copy AI Data Platform Workbench OCID"
+                >
+                  <CopyIcon />
                 </button>
               </span>
+            </label>
+            <div className="settings-actions">
+              <button type="button" className="settings-save" onClick={() => void saveSettings("workbench")} disabled={!aidpUrl}>
+                Save Settings
+              </button>
+            </div>
+          </section>
+          <section
+            id="settings-panel-application"
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby="settings-tab-application"
+            hidden={activeSettingsTab !== "application"}
+          >
+            <div className="settings-intro">
+              <span className="settings-icon">
+                <AdminLoginIcon />
+              </span>
+              <div>
+                <strong>Application</strong>
+                <p>Manage participant access to this lab.</p>
+              </div>
+            </div>
+            <SettingsRegistrationCodeField
+              value={registrationCode}
+              configured={registrationCodeConfigured}
+              onChange={setRegistrationCode}
+            />
+            <div className="settings-actions">
+              <button type="button" className="settings-save" onClick={() => void saveSettings("application")} disabled={!registrationCode}>
+                Save Settings
+              </button>
+            </div>
+          </section>
+          <section
+            id="settings-panel-governance"
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby="settings-tab-governance"
+            hidden={activeSettingsTab !== "governance"}
+          >
+            <div className="settings-intro">
+              <span className="settings-icon">
+                <AdminLoginIcon />
+              </span>
+              <div>
+                <div className="settings-title-row">
+                  <strong>AI Data Governance Gateway</strong>
+                  <span className={`settings-status ${jdbcDriverAvailable ? "available" : "unavailable"}`}>
+                    {jdbcDriverAvailable ? "Installed" : "Not installed"}
+                  </span>
+                </div>
+                <p>Review governed data access, runtime artifacts and JDBC connectivity.</p>
+              </div>
+              {!jdbcDriverAvailable && (
+                <button type="button" className="settings-intro-action" onClick={() => driverInputRef.current?.click()}>
+                  Install JDBC Driver
+                </button>
+              )}
+            </div>
+            {jdbcDriverAvailable ? (
+              <>
+                <label className="settings-field">
+                  AI Data Governance Gateway URL
+                  <span className="settings-url-control">
+                    <input ref={gatewayUrlRef} value={governanceGatewayUrl} readOnly spellCheck={false} aria-label="AI Data Governance Gateway URL" placeholder="Not installed" />
+                    <button type="button" className="copy-url" onClick={() => void copyAidpValue(governanceGatewayUrl, gatewayUrlRef, "AI Data Governance Gateway URL")} disabled={!governanceGatewayUrl} aria-label="Copy AI Data Governance Gateway URL" title="Copy AI Data Governance Gateway URL">
+                      <CopyIcon />
+                    </button>
+                  </span>
+                </label>
+                <label className="settings-field">
+                  Governance artifact bucket
+                  <input value={governanceControlBucket} readOnly spellCheck={false} aria-label="Governance artifact bucket" placeholder="Not installed" />
+                  <span className="settings-help">Private Object Storage bucket for governance tables and runtime artifacts.</span>
+                </label>
+                <label className="settings-field">
+                  Governance Delta schema
+                  <input value="data_governance" readOnly spellCheck={false} aria-label="Governance Delta schema" />
+                </label>
+                <div className="settings-intro settings-connection-intro">
+                  <div>
+                    <strong>Gateway connection</strong>
+                    <p>Share these non-secret connection details only with authorized lab users.</p>
+                  </div>
+                </div>
+                <label className="settings-field">
+                  JDBC URL
+                  <span className="settings-url-control">
+                    <input ref={jdbcUrlRef} value={jdbcUrl} readOnly spellCheck={false} aria-label="JDBC URL" placeholder="Not available" />
+                    <button type="button" className="copy-url" onClick={() => void copyAidpValue(jdbcUrl, jdbcUrlRef, "JDBC URL")} disabled={!jdbcUrl} aria-label="Copy JDBC URL" title="Copy JDBC URL">
+                      <CopyIcon />
+                    </button>
+                  </span>
+                </label>
+                <label className="settings-field">
+                  Authentication
+                  <input value={jdbcAuthentication} readOnly spellCheck={false} aria-label="JDBC authentication" placeholder="Not available" />
+                </label>
+                <div className="settings-field">
+                  <span className="settings-field-label">AIDP JDBC driver</span>
+                  <div className="settings-driver-card">
+                    <div>
+                      <strong>Available</strong>
+                      <p>The driver is synchronized to oci_artifact and the lab VM.</p>
+                    </div>
+                    <div className="settings-driver-actions">
+                      <a className="settings-link" href="/api/admin/aidp/jdbc-driver" download>
+                        Download driver
+                      </a>
+                      <button type="button" className="secondary" onClick={() => driverInputRef.current?.click()}>
+                        Replace driver
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </>
             ) : (
-              <span className="settings-driver-actions">
-                <span className="settings-help">Download the driver from AIDP Workbench once, then store it on this lab VM.</span>
-                <button type="button" className="secondary" onClick={() => driverInputRef.current?.click()} disabled={uploadingDriver}>
-                  {uploadingDriver ? "Uploading…" : "Import JDBC driver"}
-                </button>
-              </span>
+              <section className="jdbc-install-guide" aria-labelledby="jdbc-install-title">
+                <div>
+                  <p className="eyebrow">Required setup</p>
+                  <h2 id="jdbc-install-title">Download the JDBC driver from Workbench</h2>
+                  <p>The gateway installs the official ZIP produced by your AI Data Platform Workbench cluster.</p>
+                  <ol>
+                    <li>Open AI Data Platform Workbench and select the workspace for this lab.</li>
+                    <li>Open <strong>Compute</strong> and select the cluster that the gateway will use.</li>
+                    <li>Open <strong>Connections</strong> or <strong>Connection details</strong>.</li>
+                    <li>Select <strong>Download JDBC Driver</strong> and keep the downloaded ZIP unchanged.</li>
+                    <li>Return here and select <strong>Install JDBC Driver</strong>.</li>
+                  </ol>
+                  <a className="settings-link jdbc-docs-link" href="https://docs.oracle.com/en/cloud/paas/ai-data-platform/aidug/connect-compute.html#GUID-B7F594C8-724D-4733-B80D-7A4C9A0CB0A2" target="_blank" rel="noopener noreferrer">
+                    View Oracle JDBC instructions <OpenExternalIcon />
+                  </a>
+                </div>
+                <figure>
+                  <img src={jdbcDriverDownloadImage} alt="AI Data Platform Workbench Connection details page with Download JDBC Driver highlighted" />
+                  <figcaption>Connection details → Download JDBC Driver</figcaption>
+                </figure>
+              </section>
             )}
             <input
               ref={driverInputRef}
               className="sr-only"
               type="file"
               accept=".zip,application/zip"
-              aria-label="Import AIDP JDBC driver ZIP"
-              onChange={(event) => void uploadJdbcDriver(event.target.files?.[0])}
+              aria-label="Select AI Data Platform Workbench JDBC driver ZIP"
+              onChange={(event) => selectJdbcDriver(event.target.files?.[0])}
             />
-          </label>
-          <label className="settings-field">
-            AI Data Platform OCID
-            <span className="settings-url-control">
-              <input
-                ref={platformIdRef}
-                value={aidpPlatformId}
-                readOnly
-                spellCheck={false}
-                aria-label="AI Data Platform OCID"
-                placeholder="Not configured"
-              />
-              <button
-                type="button"
-                className="copy-url"
-                onClick={() =>
-                  void copyAidpValue(
-                    aidpPlatformId,
-                    platformIdRef,
-                    "AI Data Platform OCID",
-                  )
-                }
-                disabled={!aidpPlatformId}
-                aria-label="Copy AI Data Platform OCID"
-                title="Copy AI Data Platform OCID"
-              >
-                <CopyIcon />
-              </button>
-            </span>
-          </label>
-          <div className="settings-intro settings-connection-intro">
-            <div>
-              <strong>Connection access</strong>
-              <p>Share these non-secret endpoints with authorized lab users.</p>
-            </div>
-          </div>
-          <label className="settings-field">
-            Shared compute
-            <input value={computeName} readOnly spellCheck={false} aria-label="Shared compute" placeholder="Not available" />
-          </label>
-          <label className="settings-field">
-            JDBC URL
-            <span className="settings-url-control">
-              <input ref={jdbcUrlRef} value={jdbcUrl} readOnly spellCheck={false} aria-label="JDBC URL" placeholder="Not available" />
-              <button type="button" className="copy-url" onClick={() => void copyAidpValue(jdbcUrl, jdbcUrlRef, "JDBC URL")} disabled={!jdbcUrl} aria-label="Copy JDBC URL" title="Copy JDBC URL">
-                <CopyIcon />
-              </button>
-            </span>
-          </label>
-          <label className="settings-field">
-            Authentication
-            <input value={jdbcAuthentication} readOnly spellCheck={false} aria-label="JDBC authentication" />
-          </label>
-          <label className="settings-field">
-            AI Data Governance Gateway URL
-            <span className="settings-url-control">
-              <input ref={gatewayUrlRef} value={governanceGatewayUrl} readOnly spellCheck={false} aria-label="AI Data Governance Gateway URL" placeholder="Not installed" />
-              <button type="button" className="copy-url" onClick={() => void copyAidpValue(governanceGatewayUrl, gatewayUrlRef, "AI Data Governance Gateway URL")} disabled={!governanceGatewayUrl} aria-label="Copy AI Data Governance Gateway URL" title="Copy AI Data Governance Gateway URL">
-                <CopyIcon />
-              </button>
-            </span>
-          </label>
-          <label className="settings-field">
-            Governance artifact bucket
-            <input value={governanceControlBucket} readOnly spellCheck={false} aria-label="Governance artifact bucket" placeholder="Not installed" />
-            <span className="settings-help">Stores the data_governance Delta schema and its runtime artifacts in the private oci_artifact bucket.</span>
-          </label>
-          <label className="settings-field">
-            Lab registration code
-            <input
-              type="text"
-              value={registrationCode}
-              onChange={(event) => setRegistrationCode(event.target.value.toUpperCase())}
-              aria-describedby="registration-code-settings-help"
-              aria-label="Lab registration code"
-              placeholder={registrationCodeConfigured ? "Configured — enter a new code to replace it" : "AAAA-0000"}
-              autoComplete="off"
-              autoCapitalize="characters"
-              spellCheck={false}
-              maxLength={9}
-            />
-            <span id="registration-code-settings-help" className="settings-help">
-              {registrationCodeConfigured
-                ? "For security, the current code is not displayed. Enter a new AAAA-0000 code to replace it."
-                : "Enter an AAAA-0000 code to enable participant registration."}
-            </span>
-          </label>
-          <button type="button" className="settings-save" onClick={() => void saveSettings()}>
-            Save settings
-          </button>
+          </section>
           {error && (
             <p className="notice error" role="alert">
               {error}
@@ -2162,6 +2439,23 @@ function AdminSettings() {
           )}
         </div>
       </section>
+      <ConfirmModal
+        open={Boolean(pendingDriverFile)}
+        kind="question"
+        title="Install JDBC driver?"
+        description={`Install ${pendingDriverFile?.name || "the selected ZIP"} for the AI Data Governance Gateway?`}
+        confirmLabel="Install JDBC Driver"
+        onClose={cancelJdbcDriverInstall}
+        onConfirm={() => void uploadJdbcDriver(pendingDriverFile || undefined)}
+      />
+      {uploadingDriver && (
+        <ProvisioningOverlay
+          phase="content"
+          label="Installing JDBC driver"
+          indeterminate
+          message="Validating the ZIP and synchronizing the driver to oci_artifact and the lab VM."
+        />
+      )}
       <Toast message={toast} onDismiss={() => setToast("")} />
     </Shell>
   );

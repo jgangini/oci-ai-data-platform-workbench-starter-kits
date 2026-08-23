@@ -117,6 +117,11 @@ class SettingsStore:
     def get_admin_settings(self) -> dict[str, str | bool]:
         values = self._load()
         return {
+            "aidp_service_endpoint": (
+                f"https://aidp.{self._settings.aidp_region}.oci.oraclecloud.com"
+                if self._settings.aidp_region
+                else ""
+            ),
             "aidp_url": values["aidp_workbench_url"],
             "aidp_platform_id": self._settings.aidp_platform_id,
             "governance_gateway_url": self._settings.governance_gateway_url,
