@@ -21,7 +21,7 @@ metadata:
   namespace: aidp-governance
   labels:
     app.kubernetes.io/name: ai-data-governance-gateway
-    app.kubernetes.io/version: "2.1.11"
+    app.kubernetes.io/version: "2.1.12"
 spec:
   replicas: 2
   revisionHistoryLimit: 3
@@ -106,7 +106,7 @@ spec:
           readinessProbe:
             httpGet:
               scheme: HTTP
-              path: /readyz
+              path: /healthz
               port: http
             periodSeconds: 10
             timeoutSeconds: 3

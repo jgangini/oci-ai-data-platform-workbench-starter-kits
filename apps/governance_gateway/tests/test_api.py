@@ -30,8 +30,8 @@ def client() -> TestClient:
 
 def test_health_reports_the_gateway_release() -> None:
     gateway = client()
-    assert gateway.app.version == "2.1.11"
-    assert gateway.get("/healthz").json() == {"status": "ok", "version": "2.1.11"}
+    assert gateway.app.version == "2.1.12"
+    assert gateway.get("/healthz").json() == {"status": "ok", "version": "2.1.12"}
 
 
 def test_missing_token_is_unauthorized() -> None:
@@ -62,6 +62,8 @@ def test_readiness_initializes_the_control_schema_once() -> None:
         lambda: attempts.append("initialized"),
     )
     test_client = TestClient(app)
+    assert test_client.get("/healthz").status_code == 200
+    assert attempts == []
     assert test_client.get("/readyz").status_code == 200
     assert test_client.get("/readyz").status_code == 200
     assert attempts == ["initialized"]

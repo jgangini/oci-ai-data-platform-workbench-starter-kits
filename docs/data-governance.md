@@ -1,6 +1,6 @@
 # AI Data Governance add-on
 
-> Status: `v2.1.11` validation target. Local contracts are implemented; live OCI acceptance is running after aligning private OKE worker traffic, the canonical AIDP `catalogKey` schema response, and Vault endpoint DNS readiness.
+> Status: `v2.1.12` validation target. Local contracts are implemented; the next live OCI acceptance is a single clean deployment after closing DevOps IAM propagation, deployment logging, and pod/JDBC readiness locally.
 
 ## Runtime boundaries
 
@@ -52,6 +52,8 @@ The AIDP Agent defines `governance_access_token` as required with `shouldLog: fa
 ## Deployment and network gate
 
 OCI API Gateway is the only public entry point. It terminates TLS, validates the OCI Identity Domains token, audience, issuer, signing key, and governance scope, then forwards requests to one fixed private OKE load-balancer address. The OKE service accepts port `8080` only from the API Gateway subnet. The container is non-root, read-only, and stripped of Linux capabilities; it validates OIDC again before executing a request.
+
+Terraform waits once for the exact DevOps pipeline policy to propagate before starting the server-side apply. The DevOps project emits a 30-day OCI service log so a failed manifest or rollout has stage-level evidence. Kubernetes uses `/healthz` for pod availability; `/readyz` remains the stricter operational check and returns `503` until the JDBC runtime, `oci_control` tables, and first catalog synchronization are ready. This allows the gateway to be installed before the licensed driver is uploaded without claiming data access is ready.
 
 OCI APIs are accessed through Workload Identity. Deploy Studio creates the dedicated JDBC API key after Terraform apply and stores its private half only in OCI Vault. The administrator imports the licensed Oracle AIDP JDBC driver from the VM settings page; it is validated, sent directly to the private `oci_control` bucket under `.governance/`, and never stored in Git or Terraform state. The pod materializes both artifacts only on its ephemeral filesystem.
 

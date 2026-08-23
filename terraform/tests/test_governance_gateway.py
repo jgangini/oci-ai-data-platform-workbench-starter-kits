@@ -18,6 +18,20 @@ def test_devops_pipeline_targets_only_the_governance_cluster() -> None:
     assert 'deploy_artifact_source_type = "INLINE"' in terraform
     assert 'deploy_stage_type  = "OKE_DEPLOYMENT"' in terraform
     assert 'trigger_new_devops_deployment = true' in terraform
+    assert 'resource "terraform_data" "governance_deploy_iam_propagation"' in terraform
+    assert 'command = "sleep 120"' in terraform
+    assert "terraform_data.governance_deploy_iam_propagation" in terraform
+
+
+def test_devops_project_emits_service_logs_for_the_next_deployment() -> None:
+    terraform = (ROOT / "terraform/i_oci_data_governance_deployment.tf").read_text(encoding="utf-8")
+    assert 'resource "oci_logging_log_group" "governance_devops"' in terraform
+    assert 'resource "oci_logging_log" "governance_devops"' in terraform
+    assert 'log_type           = "SERVICE"' in terraform
+    assert 'category    = "all"' in terraform
+    assert 'service     = "devops"' in terraform
+    assert 'source_type = "OCISERVICE"' in terraform
+    assert "oci_logging_log.governance_devops" in terraform
 
 
 def test_gateway_manifest_is_private_behind_public_oidc_gateway_and_immutable() -> None:
@@ -33,6 +47,9 @@ def test_gateway_manifest_is_private_behind_public_oidc_gateway_and_immutable() 
     assert "GOVERNANCE_OIDC_AUTHORITY" in manifest
     assert "GOVERNANCE_TOKENIZATION_KEY_OCID" in manifest
     assert "GOVERNANCE_TOKENIZATION_CRYPTO_ENDPOINT" in manifest
+    assert "readinessProbe:" in manifest
+    assert "path: /readyz" not in manifest
+    assert manifest.count("path: /healthz") == 2
     assert "secretName:" not in manifest
     assert "@sha256:" in gateway
     assert "private_key_pem" not in manifest

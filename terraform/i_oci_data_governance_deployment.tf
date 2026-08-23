@@ -42,6 +42,33 @@ resource "oci_devops_project" "governance" {
   }
 }
 
+resource "oci_logging_log_group" "governance_devops" {
+  count          = var.enable_ai_data_governance ? 1 : 0
+  compartment_id = local.target_compartment
+  display_name   = "${local.name_prefix}-governance-devops"
+  description    = "Deployment diagnostics for the AI Data Governance Gateway"
+}
+
+resource "oci_logging_log" "governance_devops" {
+  count              = var.enable_ai_data_governance ? 1 : 0
+  display_name       = "${local.name_prefix}-governance-devops"
+  log_group_id       = oci_logging_log_group.governance_devops[0].id
+  log_type           = "SERVICE"
+  is_enabled         = true
+  retention_duration = 30
+
+  configuration {
+    compartment_id = local.target_compartment
+
+    source {
+      category    = "all"
+      resource    = oci_devops_project.governance[0].id
+      service     = "devops"
+      source_type = "OCISERVICE"
+    }
+  }
+}
+
 resource "oci_devops_deploy_environment" "governance" {
   count                   = var.enable_ai_data_governance ? 1 : 0
   deploy_environment_type = "OKE_CLUSTER"
@@ -98,6 +125,21 @@ resource "oci_identity_policy" "governance_deploy_pipeline" {
   ]
 }
 
+resource "terraform_data" "governance_deploy_iam_propagation" {
+  count = var.enable_ai_data_governance ? 1 : 0
+
+  triggers_replace = [
+    oci_identity_dynamic_group.governance_deploy_pipeline[0].id,
+    oci_identity_policy.governance_deploy_pipeline[0].id,
+  ]
+
+  # ponytail: Resource Manager is Linux-only. Replace this bounded create-time
+  # wait if OCI exposes a direct IAM policy-readiness probe for DevOps pipelines.
+  provisioner "local-exec" {
+    command = "sleep 120"
+  }
+}
+
 resource "oci_devops_deploy_stage" "governance" {
   count              = var.enable_ai_data_governance ? 1 : 0
   deploy_pipeline_id = oci_devops_deploy_pipeline.governance[0].id
@@ -125,9 +167,10 @@ resource "oci_devops_deployment" "governance" {
 
   depends_on = [
     oci_containerengine_node_pool.governance,
-    oci_identity_policy.governance_deploy_pipeline,
+    terraform_data.governance_deploy_iam_propagation,
     oci_identity_policy.governance_workload,
     oci_apigateway_deployment.governance,
+    oci_logging_log.governance_devops,
   ]
 
   timeouts {
