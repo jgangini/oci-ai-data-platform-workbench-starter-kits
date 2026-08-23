@@ -244,6 +244,13 @@ def test_governance_schema_permissions_fail_closed_for_developer_access() -> Non
 def test_governance_runtime_gets_only_schema_admin_and_cluster_use() -> None:
     api = FakeApi()
     technical_user = "ocid1.user.oc1..governance"
+    api.resources["/schemas"] = [
+        {
+            "displayName": "oci_control",
+            "key": "aidp_lab.oci_control",
+            "catalogKey": "aidp_lab-key",
+        }
+    ]
     schema_key = post_apply.ensure_governance_control_access(
         api,
         "aidp_lab-key",

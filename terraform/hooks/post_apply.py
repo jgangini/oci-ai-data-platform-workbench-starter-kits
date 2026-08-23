@@ -936,7 +936,7 @@ def ensure_governance_control_access(
             "description": "Private control plane for AIDP governance extensions",
             "catalogName": catalog_name,
         },
-        {"catalogName": catalog_name},
+        {"catalogKey": catalog_key},
         filters={"catalogKey": catalog_key},
     )
     schema_key = str(schema.get("key") or "")
