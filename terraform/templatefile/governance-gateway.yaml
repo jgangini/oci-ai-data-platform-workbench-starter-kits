@@ -21,7 +21,7 @@ metadata:
   namespace: aidp-governance
   labels:
     app.kubernetes.io/name: ai-data-governance-gateway
-    app.kubernetes.io/version: "2.1.12"
+    app.kubernetes.io/version: "2.1.13"
 spec:
   replicas: 2
   revisionHistoryLimit: 3
@@ -85,7 +85,7 @@ spec:
             - name: GOVERNANCE_CONTROL_CATALOG
               value: aidp_lab
             - name: GOVERNANCE_CONTROL_SCHEMA
-              value: oci_control
+              value: data_governance
             - name: GOVERNANCE_MAX_RESULT_ROWS
               value: "1000"
             - name: GOVERNANCE_MAX_RESULT_BYTES

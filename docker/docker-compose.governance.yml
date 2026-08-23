@@ -10,7 +10,7 @@ services:
       GOVERNANCE_OIDC_AUTHORITY: https://identity.example.invalid
       GOVERNANCE_OIDC_AUDIENCE: local-governance-tests
       GOVERNANCE_CONTROL_CATALOG: aidp_lab
-      GOVERNANCE_CONTROL_SCHEMA: oci_control
+      GOVERNANCE_CONTROL_SCHEMA: data_governance
       GOVERNANCE_TOKENIZATION_KEY_OCID: ocid1.key.oc1.us-chicago-1.local
       GOVERNANCE_TOKENIZATION_CRYPTO_ENDPOINT: https://kms.example.invalid
       GOVERNANCE_OCI_REGION: us-chicago-1

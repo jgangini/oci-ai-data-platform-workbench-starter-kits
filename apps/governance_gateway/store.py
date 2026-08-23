@@ -282,7 +282,7 @@ class MemoryControlStore:
 
 
 def delta_schema_ddl(catalog: str, control_location: str = "") -> tuple[str, ...]:
-    prefix = f"`{catalog}`.`oci_control`"
+    prefix = f"`{catalog}`.`data_governance`"
     location = _control_location(control_location)
 
     def table(name: str, columns: str) -> str:
@@ -309,7 +309,7 @@ class JdbcControlStore:
         self._connect = connect
         self._catalog = _identifier(catalog)
         self._control_location = _control_location(control_location)
-        self._prefix = f"`{self._catalog}`.`oci_control`"
+        self._prefix = f"`{self._catalog}`.`data_governance`"
 
     def initialize(self) -> None:
         self._write_many(delta_schema_ddl(self._catalog, self._control_location))

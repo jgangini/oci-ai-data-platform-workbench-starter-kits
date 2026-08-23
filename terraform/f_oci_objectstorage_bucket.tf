@@ -18,7 +18,7 @@ resource "oci_objectstorage_bucket" "control" {
   count          = var.enable_ai_data_governance ? 1 : 0
   compartment_id = local.target_compartment
   namespace      = var.objectstorage_namespace
-  name           = "oci_control"
+  name           = "oci_artifact"
   access_type    = "NoPublicAccess"
   storage_tier   = "Standard"
   versioning     = "Disabled"
@@ -26,7 +26,7 @@ resource "oci_objectstorage_bucket" "control" {
 
   freeform_tags = {
     managed-by = "deploy-studio"
-    data-model = "governance-control"
+    data-model = "governance-artifact"
   }
 }
 

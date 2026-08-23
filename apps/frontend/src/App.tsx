@@ -1979,7 +1979,7 @@ function AdminSettings() {
         },
       );
       setJdbcDriverAvailable(result.jdbc_driver_available);
-      setToast("AIDP JDBC driver synchronized to oci_control and the lab VM.");
+      setToast("AIDP JDBC driver synchronized to oci_artifact and the lab VM.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to store the JDBC driver");
     } finally {
@@ -2128,9 +2128,9 @@ function AdminSettings() {
             </span>
           </label>
           <label className="settings-field">
-            Governance control bucket
-            <input value={governanceControlBucket} readOnly spellCheck={false} aria-label="Governance control bucket" placeholder="Not installed" />
-            <span className="settings-help">Stores the oci_control Delta tables and the private JDBC driver under separate prefixes.</span>
+            Governance artifact bucket
+            <input value={governanceControlBucket} readOnly spellCheck={false} aria-label="Governance artifact bucket" placeholder="Not installed" />
+            <span className="settings-help">Stores the data_governance Delta schema and its runtime artifacts in the private oci_artifact bucket.</span>
           </label>
           <label className="settings-field">
             Lab registration code

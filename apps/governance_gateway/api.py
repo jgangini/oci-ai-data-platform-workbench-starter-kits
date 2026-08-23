@@ -245,7 +245,7 @@ def _register_catalog_admin_routes(
         ready = readiness.ensure()
         return {
             "status": "ready" if ready else "initializing",
-            "control_schema": os.getenv("GOVERNANCE_CONTROL_SCHEMA", "oci_control"),
+            "control_schema": os.getenv("GOVERNANCE_CONTROL_SCHEMA", "data_governance"),
             "catalog_sync": service.store.sync_status() if ready else {"status": "NOT_READY"},
         }
 

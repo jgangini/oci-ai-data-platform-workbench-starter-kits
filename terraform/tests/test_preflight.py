@@ -116,7 +116,7 @@ class ObjectStorage:
 
     def get_bucket(self, **_kwargs: Any) -> Any:
         if self.bucket_exists:
-            return SimpleNamespace(data=SimpleNamespace(name="oci_control"))
+            return SimpleNamespace(data=SimpleNamespace(name="oci_artifact"))
         raise preflight.oci.exceptions.ServiceError(
             status=404,
             code="BucketNotFound",
@@ -238,7 +238,7 @@ def test_preflight_resolves_governance_identity_and_immutable_image(monkeypatch)
 
 def test_preflight_rejects_second_governance_installation_in_namespace() -> None:
     available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
-    with pytest.raises(RuntimeError, match="oci_control already exists"):
+    with pytest.raises(RuntimeError, match="oci_artifact already exists"):
         _select(
             {preflight.E5_SHAPE: (available, "1")},
             input_overrides={"enable_ai_data_governance": True},

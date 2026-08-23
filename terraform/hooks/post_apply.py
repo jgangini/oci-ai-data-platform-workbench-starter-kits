@@ -923,16 +923,16 @@ def ensure_governance_control_access(
     compute_key: str,
     technical_user_ocid: str,
 ) -> str:
-    """Create only oci_control and grant the runtime only schema ADMIN plus cluster USE."""
+    """Create only data_governance and grant the runtime only schema ADMIN plus cluster USE."""
     if not technical_user_ocid.startswith("ocid1.user."):
         raise ReconcileError("The governance JDBC technical user OCID is invalid")
     schema, _ = ensure_resource(
         api,
         "/schemas",
         "governance control schema",
-        "oci_control",
+        "data_governance",
         {
-            "displayName": "oci_control",
+            "displayName": "data_governance",
             "description": "Private control plane for AIDP governance extensions",
             "catalogName": catalog_name,
         },
@@ -980,7 +980,7 @@ def verify_governance_schema_permissions(
     *,
     attempts: int = RESOURCE_WAIT_ATTEMPTS,
 ) -> None:
-    """Fail closed if oci_control is visible outside the administrative boundary."""
+    """Fail closed if data_governance is visible outside the administrative boundary."""
     if not technical_user_ocid.startswith("ocid1.user."):
         raise ReconcileError("The governance JDBC technical user OCID is invalid")
     schema: dict[str, Any] | None = None
@@ -989,9 +989,9 @@ def verify_governance_schema_permissions(
             [
                 item
                 for item in api.list_all("/schemas", params={"catalogKey": catalog_key})
-                if item.get("displayName") == "oci_control"
+                if item.get("displayName") == "data_governance"
             ],
-            "oci_control",
+            "data_governance",
             "governance control schema",
         )
         if schema is not None:
@@ -999,7 +999,7 @@ def verify_governance_schema_permissions(
         if attempt + 1 < attempts:
             _sleep(5)
     if schema is None or not schema.get("key"):
-        raise ReconcileError("The governance gateway did not publish the oci_control schema")
+        raise ReconcileError("The governance gateway did not publish the data_governance schema")
 
     permissions = api.list_all(
         f"/schemas/{quote(str(schema['key']), safe='')}/permissions"
@@ -1021,13 +1021,13 @@ def verify_governance_schema_permissions(
             continue
         inheritance = "inherited " if bool(item.get("isInherited")) else ""
         raise ReconcileError(
-            f"oci_control has an unauthorized {inheritance}grant for {grantee_name}"
+            f"data_governance has an unauthorized {inheritance}grant for {grantee_name}"
         )
     if not platform_admin:
-        raise ReconcileError("AI_DATA_PLATFORM_ADMIN must retain ADMIN on oci_control")
+        raise ReconcileError("AI_DATA_PLATFORM_ADMIN must retain ADMIN on data_governance")
     if not technical_admin:
         raise ReconcileError(
-            "The governance JDBC technical user must inherit or hold ADMIN on oci_control"
+            "The governance JDBC technical user must inherit or hold ADMIN on data_governance"
         )
 
 
@@ -2033,7 +2033,7 @@ def main() -> int:
                 technical_user_ocid,
             )
             messages.append(
-                "oci_control access verified for platform administrators and the dedicated JDBC identity; "
+                "data_governance access verified for platform administrators and the dedicated JDBC identity; "
                 f"JDBC credential {'rotated' if credential_rotated else 'reused'}"
             )
         aidp_url = resolve_workbench_url(outputs, oci_config, signer)

@@ -4,13 +4,13 @@ OCI AI Data Platform Cloud Migration Lab is a hands-on data engineering environm
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more laboratories without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current validation target: **v2.1.11**. This patch waits for the new OCI Vault management endpoint to resolve before creating its KMS key, keeps the OKE manifest inside the Resource Manager source, selects a non-GPU OKE image compatible with the E4 worker shape, allows the required private OKE worker registration and path-discovery traffic, accepts AIDP's canonical `catalogKey` schema response, completes the Identity Domains and API Gateway contracts, prevents a second `oci_control` installation in the same Object Storage namespace, and preserves Autonomous Database for AI Compute agent memory.
+Current validation target: **v2.1.13**. This patch organizes governance artifacts in the private `oci_artifact` bucket, publishes the authoritative AIDP schema as `data_governance`, preserves one installation per Object Storage namespace, and keeps Autonomous Database for AI Compute Agent memory.
 
 ## What the project provides
 
 - A shared AIDP workspace with `aidp_cluster_shared_compute` for Spark workflows, plus a private catalog with four medallion schemas per participant.
 - A shared `aidp_agent_shared_compute` AI Compute runtime for participant-specific governance Agents.
-- An optional private AI Data Governance Gateway on OKE, backed by the generic `oci_control` Delta schema.
+- An optional private AI Data Governance Gateway on OKE, backed by the `data_governance` Delta schema in `oci_artifact`.
 - Autonomous AI Database 26ai for the AI Compute Agent memory/checkpointer contract.
 - A private Object Storage bucket organized as `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/`.
 - A registration and administration web application hosted on an OCI Compute VM.
@@ -111,13 +111,13 @@ The optional Agent laboratory creates or reconciles `u101_agent_data_governance`
 
 The package includes a versioned acceptance matrix covering catalog scope, quality, entity and column lineage, stewardship gaps, DAMA control mapping, participant isolation, unsupported certification claims, and arbitrary-SQL refusal. Candidate releases execute these questions live and retain the tool trace and response text as structured evidence without participant data from another catalog.
 
-Each participant receives an independent Agent definition, but all participant Agents reuse `aidp_agent_shared_compute`. AIDP injects the Agent `checkpointer`; Autonomous AI Database remains deployed because AI Compute uses it for persistent Agent memory. The governance gateway never replaces that memory path. It evaluates the effective user token supplied as a required, non-logged AIDP session variable and never gives the Agent direct access to `oci_control`.
+Each participant receives an independent Agent definition, but all participant Agents reuse `aidp_agent_shared_compute`. AIDP injects the Agent `checkpointer`; Autonomous AI Database remains deployed because AI Compute uses it for persistent Agent memory. The governance gateway never replaces that memory path. It evaluates the effective user token supplied as a required, non-logged AIDP session variable and never gives the Agent direct access to `data_governance`.
 
 The package preserves `catalog_inventory` and `catalog_lineage` and adds `governance_policy_explain` and `governed_query`. A source, package, or tool-contract hash change causes one controlled redeploy; an unchanged Agent is reused. A participant deletion removes only that participant's Agent and legacy participant-scoped mirror artifacts. It does not remove the shared Autonomous deployment or shared AI Compute.
 
 ### AI Data Governance Gateway
 
-The optional **Install AI Data Governance Gateway** add-on deploys a private, least-privilege service on OKE. It is the policy enforcement point for the VS Code SQL editor, governed notebooks, and Agent tools. The authoritative control plane is the `oci_control` Delta schema in the selected standard AIDP catalog:
+The optional **Install AI Data Governance Gateway** add-on deploys a private, least-privilege service on OKE. It is the policy enforcement point for the VS Code SQL editor, governed notebooks, and Agent tools. The authoritative control plane is the `data_governance` Delta schema in the selected standard AIDP catalog:
 
 - `data_governance` stores catalog classification, sensitivity, ownership, and review state.
 - `access_policy` stores `ALLOW`, `DENY`, `NULL`, `MASK`, and `TOKENIZE` rules for existing users, groups, and roles.
@@ -127,18 +127,18 @@ The optional **Install AI Data Governance Gateway** add-on deploys a private, le
 - `governance_audit` records policy changes and effective query decisions.
 - `sync_state` records versioned Master Catalog snapshots and tombstones.
 
-`AI_DATA_PLATFORM_ADMIN` can manage policies. `AIDP_DEVELOPER` cannot read `oci_control`; the Permissions UI is disabled and the API returns `403`. New or unclassified columns fail closed. `SELECT *` omits denied columns, while an explicit denied reference returns `403` and names the restricted columns. Masking and tokenization happen before results, previews, logs, or Agent responses leave the gateway.
+`AI_DATA_PLATFORM_ADMIN` can manage policies. `AIDP_DEVELOPER` cannot read `data_governance`; the Permissions UI is disabled and the API returns `403`. New or unclassified columns fail closed. `SELECT *` omits denied columns, while an explicit denied reference returns `403` and names the restricted columns. Masking and tokenization happen before results, previews, logs, or Agent responses leave the gateway.
 
 ```mermaid
 flowchart LR
   VS[VS Code extension] -->|OAuth user token| GW[Private governance gateway on OKE]
   AG[AIDP governance Agent] -->|non-logged session token| GW
   GW -->|registered query / JDBC| AIDP[AIDP compute and Master Catalog]
-  GW -->|policy and audit| CTRL[(Delta: oci_control)]
+  GW -->|policy and audit| CTRL[(oci_artifact / data_governance)]
   AG -->|AIDP checkpointer| ADB[(Autonomous AI Database 26ai)]
 ```
 
-OKE uses Workload Identity for OCI access. Deploy Studio creates the private `oci_control` Object Storage bucket for the governance add-on. Each control table is an external Delta table under `delta/<table-name>`, while the licensed Oracle AIDP JDBC driver is stored separately as `.governance/aidp-jdbc-driver.zip`; neither artifact enters Git or Terraform state. A dedicated API key is generated for the technical JDBC user, stored in OCI Vault, and limited to `ADMIN` on the `oci_control` schema, `USE` on the shared cluster, and the documented `read buckets`/`inspect objects` discovery permissions on `oci_control`. It cannot read object contents, create objects, manage objects, or delete objects directly. The personal deployment key is never mounted in pods. Public TLS and OIDC terminate at OCI API Gateway; the OKE service remains private. See [`docs/data-governance.md`](docs/data-governance.md) for the complete contract and acceptance gates.
+OKE uses Workload Identity for OCI access. Deploy Studio creates one private `oci_artifact` Object Storage bucket for governance data and runtime artifacts. Each external Delta table lives at `data_governance/<table-name>` and is published as `aidp_lab.data_governance.<table-name>`; the licensed Oracle AIDP JDBC bundle lives at `data_governance/runtime/aidp-jdbc-driver.zip`. Neither artifact enters Git or Terraform state. A dedicated API key is generated for the technical JDBC user, stored in OCI Vault, and limited to `ADMIN` on the `data_governance` schema, `USE` on the shared cluster, and the documented `read buckets`/`inspect objects` discovery permissions on `oci_artifact`. It cannot read object contents, create objects, manage objects, or delete objects directly. The personal deployment key is never mounted in pods. Public TLS and OIDC terminate at OCI API Gateway; the OKE service remains private. See [`docs/data-governance.md`](docs/data-governance.md) for the complete contract and acceptance gates.
 
 ## End-to-end user guide
 
@@ -326,7 +326,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 - Deploy Studio does not package OCI credentials in the Terraform source or state.
 - The VM receives the operator profile once through an encrypted bootstrap object, validates it, installs it with restrictive permissions, and deletes the bootstrap object.
 - The Autonomous wallet is stored only on the registration VM at `/opt/aidp-lab/autonomous` with owner-only permissions and is mounted read-only into the application container. The ADMIN password stays in the post-apply process; the VM receives only a rotated `EXECUTE`-only database operator and the wallet credentials required for participant lifecycle operations.
-- Autonomous AI Database remains part of every deployment that hosts AI Compute Agents: AIDP uses it for Agent memory/checkpointing. Governance policies and audit records live separately in Delta `oci_control`; neither store is a fallback for the other.
+- Autonomous AI Database remains part of every deployment that hosts AI Compute Agents: AIDP uses it for Agent memory/checkpointing. Governance policies and audit records live separately in Delta `data_governance`; neither store is a fallback for the other.
 - New Agent assignments do not copy Master Catalog metadata into Autonomous. The VM retains the allowlisted database operator for AI bootstrap and exact cleanup of legacy participant mirrors.
 - Participants receive access only to their folder, workflow, namespaced objects, and namespaced tables.
 - The data bucket uses Oracle-managed encryption and remains private.

@@ -29,7 +29,7 @@ class Settings:
     governance_gateway_url: str = ""
     governance_control_bucket: str = ""
     jdbc_driver_file: str = "/var/lib/aidp-lab/drivers/aidp-jdbc-driver.zip"
-    governance_jdbc_driver_object: str = ".governance/aidp-jdbc-driver.zip"
+    governance_jdbc_driver_object: str = "data_governance/runtime/aidp-jdbc-driver.zip"
     enforce_governed_data_access: bool = False
     oci_config_file: str = "/etc/aidp-lab/oci/config"
     objectstorage_namespace: str = ""
@@ -68,7 +68,7 @@ class Settings:
             ),
             governance_jdbc_driver_object=os.getenv(
                 "GOVERNANCE_JDBC_DRIVER_OBJECT",
-                ".governance/aidp-jdbc-driver.zip",
+                "data_governance/runtime/aidp-jdbc-driver.zip",
             ),
             enforce_governed_data_access=os.getenv("ENFORCE_GOVERNED_DATA_ACCESS", "false").lower()
             in {"1", "true", "yes"},

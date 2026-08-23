@@ -1,7 +1,7 @@
 locals {
   governance_gateway_audience = var.enable_ai_data_governance ? "https://${oci_apigateway_gateway.governance[0].hostname}/governance" : ""
   governance_gateway_scope    = "${local.governance_gateway_audience}/governance.all"
-  governance_jdbc_object      = ".governance/aidp-jdbc-driver.zip"
+  governance_jdbc_object      = "data_governance/runtime/aidp-jdbc-driver.zip"
 }
 
 resource "oci_identity_domains_app" "governance_public_client" {

@@ -1,26 +1,26 @@
 # AI Data Governance add-on
 
-> Status: `v2.1.12` validation target. Local contracts are implemented; the next live OCI acceptance is a single clean deployment after closing DevOps IAM propagation, deployment logging, and pod/JDBC readiness locally.
+> Status: `v2.1.13` validation target. Local contracts are implemented; the next live OCI acceptance is one clean deployment after all local gates pass.
 
 ## Runtime boundaries
 
 | Component | Responsibility | Identity | Persistent state |
 | --- | --- | --- | --- |
 | AIDP Agent on `aidp_agent_shared_compute` | DAMA-DMBOK evidence, explanations, and registered query requests | Effective AIDP caller plus a non-logged governance session variable | AIDP `checkpointer` backed by Autonomous AI Database |
-| Governance gateway on OKE | Authorization, column policy, masking, tokenization, registered query execution, and audit | OCI Workload Identity plus the effective user's OAuth token | Delta tables in the standard catalog's `oci_control` schema |
+| Governance gateway on OKE | Authorization, column policy, masking, tokenization, registered query execution, and audit | OCI Workload Identity plus the effective user's OAuth token | Delta tables in the standard catalog's `data_governance` schema |
 | Autonomous AI Database 26ai | AI Compute Agent memory and platform AI bootstrap | AIDP/VM bootstrap identities | Agent conversation/checkpoint state |
 | VS Code extension | Catalog navigation, governed SQL/notebooks, Permissions UI, and Agent chat | OCI request signing plus user OAuth PKCE | Tokens only in VS Code SecretStorage |
 
-Autonomous is mandatory for the deployed Agent-memory path. The governance gateway does not read or replace Agent memory. Conversely, policies are authoritative only in `oci_control`; Autonomous is never used as a policy fallback.
+Autonomous is mandatory for the deployed Agent-memory path. The governance gateway does not read or replace Agent memory. Conversely, policies are authoritative only in `data_governance`; Autonomous is never used as a policy fallback.
 
-Deploy Studio creates one private Object Storage bucket named `oci_control` when the add-on is enabled. The catalog tables remain addressable as `aidp_lab.oci_control.<table>`, and their Delta files live under `oci://oci_control@<namespace>/delta/<table>`. Runtime artifacts use separate prefixes; the JDBC bundle is stored at `.governance/aidp-jdbc-driver.zip`. This keeps one control boundary without mixing driver files into Delta table locations.
+Deploy Studio creates one private Object Storage bucket named `oci_artifact` when the add-on is enabled. The governance schema is `data_governance`: catalog tables are addressable as `aidp_lab.data_governance.<table>` and their Delta files live at `oci://oci_artifact@<namespace>/data_governance/<table>`. The JDBC bundle is stored at `data_governance/runtime/aidp-jdbc-driver.zip`. This hierarchy keeps governance tables and runtime assets centralized while preserving one path per Delta table.
 
 ## Authorization model
 
 - `AI_DATA_PLATFORM_ADMIN` can read and update policy records.
 - `AIDP_DEVELOPER` can execute only the effective access granted by existing policies and registered queries.
 - The server enforces authorization independently of UI state. A disabled Permissions panel is convenience, not a security boundary.
-- The Agent has no direct `oci_control` permission and cannot submit arbitrary SQL.
+- The Agent has no direct `data_governance` permission and cannot submit arbitrary SQL.
 - Every request is evaluated using the end user's subject, groups, and roles. Agent or gateway service identity never upgrades the user's decision.
 
 ## Query decisions
@@ -53,16 +53,16 @@ The AIDP Agent defines `governance_access_token` as required with `shouldLog: fa
 
 OCI API Gateway is the only public entry point. It terminates TLS, validates the OCI Identity Domains token, audience, issuer, signing key, and governance scope, then forwards requests to one fixed private OKE load-balancer address. The OKE service accepts port `8080` only from the API Gateway subnet. The container is non-root, read-only, and stripped of Linux capabilities; it validates OIDC again before executing a request.
 
-Terraform waits once for the exact DevOps pipeline policy to propagate before starting the server-side apply. The DevOps project emits a 30-day OCI service log so a failed manifest or rollout has stage-level evidence. Kubernetes uses `/healthz` for pod availability; `/readyz` remains the stricter operational check and returns `503` until the JDBC runtime, `oci_control` tables, and first catalog synchronization are ready. This allows the gateway to be installed before the licensed driver is uploaded without claiming data access is ready.
+Terraform waits once for the exact DevOps pipeline policy to propagate before starting the server-side apply. The DevOps project emits a 30-day OCI service log so a failed manifest or rollout has stage-level evidence. Kubernetes uses `/healthz` for pod availability; `/readyz` remains the stricter operational check and returns `503` until the JDBC runtime, `data_governance` tables, and first catalog synchronization are ready. This allows the gateway to be installed before the licensed driver is uploaded without claiming data access is ready.
 
-OCI APIs are accessed through Workload Identity. Deploy Studio creates the dedicated JDBC API key after Terraform apply and stores its private half only in OCI Vault. The administrator imports the licensed Oracle AIDP JDBC driver from the VM settings page; it is validated, sent directly to the private `oci_control` bucket under `.governance/`, and never stored in Git or Terraform state. The pod materializes both artifacts only on its ephemeral filesystem.
+OCI APIs are accessed through Workload Identity. Deploy Studio creates the dedicated JDBC API key after Terraform apply and stores its private half only in OCI Vault. The administrator imports the licensed Oracle AIDP JDBC driver from the VM settings page; it is validated, sent directly to `oci_artifact/data_governance/runtime/`, and never stored in Git or Terraform state. The pod materializes both artifacts only on its ephemeral filesystem.
 
-The technical JDBC identity receives only the documented external-table discovery permissions on `oci_control`: `read buckets` and `inspect objects`. It cannot read object contents, create objects, manage objects, or delete objects directly. AIDP's existing service-principal policy remains the only writer for buckets governed by that AIDP instance.
+The technical JDBC identity receives only the documented external-table discovery permissions on `oci_artifact`: `read buckets` and `inspect objects`. It cannot read object contents, create objects, manage objects, or delete objects directly. AIDP's existing service-principal policy remains the only writer for buckets governed by that AIDP instance.
 
 ## Acceptance gates
 
 - No `.oci`, PEM, token, wallet, secret, or Terraform state in Git, Docker build contexts, logs, VSIX packages, or OKE pod specifications.
-- One gateway, one `oci_control` schema, and one participant Agent are reconciled without duplicates.
+- One gateway, one `data_governance` schema, and one participant Agent are reconciled without duplicates.
 - One Agent redeploy occurs only when the package, source, or tool contract changes.
 - Administrator policy operations succeed; developer operations return `403`.
 - SQL, Python, Scala, notebooks, and Agent tools reach the same policy decision.

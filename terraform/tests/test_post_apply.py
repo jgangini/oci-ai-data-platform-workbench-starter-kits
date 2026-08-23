@@ -192,9 +192,9 @@ def test_governance_schema_permissions_allow_only_admins_and_dedicated_jdbc_user
     api = FakeApi()
     technical_user = "ocid1.user.oc1..governance"
     api.resources["/schemas"] = [
-        {"displayName": "oci_control", "key": "aidp_lab.oci_control"}
+        {"displayName": "data_governance", "key": "aidp_lab.data_governance"}
     ]
-    api.actions["/schemas/aidp_lab.oci_control/permissions"] = [
+    api.actions["/schemas/aidp_lab.data_governance/permissions"] = [
         {
             "grantee": "AI_DATA_PLATFORM_ADMIN",
             "granteeName": "AI_DATA_PLATFORM_ADMIN",
@@ -219,9 +219,9 @@ def test_governance_schema_permissions_fail_closed_for_developer_access() -> Non
     api = FakeApi()
     technical_user = "ocid1.user.oc1..governance"
     api.resources["/schemas"] = [
-        {"displayName": "oci_control", "key": "aidp_lab.oci_control"}
+        {"displayName": "data_governance", "key": "aidp_lab.data_governance"}
     ]
-    api.actions["/schemas/aidp_lab.oci_control/permissions"] = [
+    api.actions["/schemas/aidp_lab.data_governance/permissions"] = [
         {
             "grantee": technical_user,
             "granteeType": "USER",
@@ -246,8 +246,8 @@ def test_governance_runtime_gets_only_schema_admin_and_cluster_use() -> None:
     technical_user = "ocid1.user.oc1..governance"
     api.resources["/schemas"] = [
         {
-            "displayName": "oci_control",
-            "key": "aidp_lab.oci_control",
+            "displayName": "data_governance",
+            "key": "aidp_lab.data_governance",
             "catalogKey": "aidp_lab-key",
         }
     ]
@@ -259,14 +259,14 @@ def test_governance_runtime_gets_only_schema_admin_and_cluster_use() -> None:
         "aidp_cluster_shared_compute-key",
         technical_user,
     )
-    assert schema_key == "aidp_lab.oci_control"
+    assert schema_key == "aidp_lab.data_governance"
     permissions = [
         (path, next(iter(payload.values()))["permissions"])
         for method, path, payload, _params in api.calls
         if method == "POST" and payload and "/actions/managePermission" in path
     ]
     assert permissions == [
-        ("/schemas/aidp_lab.oci_control/actions/managePermission", ["ADMIN"]),
+        ("/schemas/aidp_lab.data_governance/actions/managePermission", ["ADMIN"]),
         (
             "/workspaces/ws-key/clusters/aidp_cluster_shared_compute-key/actions/managePermission",
             ["USE"],

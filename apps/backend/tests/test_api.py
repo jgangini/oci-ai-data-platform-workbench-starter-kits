@@ -158,7 +158,7 @@ def make_client(tmp_path: Path, mode: str = "active") -> TestClient:
         aidp_platform_id="ocid1.aidataplatform.oc1..test",
         aidp_workspace_name="aidp-lab-workspace-test", aidp_region="us-chicago-1",
         governance_gateway_url="https://governance.example.test",
-        governance_control_bucket="oci_control",
+        governance_control_bucket="oci_artifact",
         jdbc_driver_file=str(tmp_path / "aidp-jdbc-driver.zip"),
         oci_config_file="/etc/aidp-lab/oci/config",
         objectstorage_namespace="namespace", bucket_name="aidp-data-test",
@@ -247,7 +247,7 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     assert response.json()["compute_name"] == "aidp_cluster_shared_compute"
     assert response.json()["jdbc_url"].startswith("jdbc:spark://")
     assert response.json()["governance_gateway_url"] == "https://governance.example.test"
-    assert response.json()["governance_control_bucket"] == "oci_control"
+    assert response.json()["governance_control_bucket"] == "oci_artifact"
     assert response.json()["jdbc_driver_available"] is False
 
 

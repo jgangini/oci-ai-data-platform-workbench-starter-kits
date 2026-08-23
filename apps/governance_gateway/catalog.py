@@ -95,7 +95,7 @@ class AidpCatalogClient:
             for schema in schemas:
                 schema_key = _required_string(schema, "key")
                 schema_name = _required_string(schema, "displayName")
-                if catalog_key == os.environ.get("GOVERNANCE_CONTROL_CATALOG", "aidp_lab") and schema_name == "oci_control":
+                if catalog_key == os.environ.get("GOVERNANCE_CONTROL_CATALOG", "aidp_lab") and schema_name == "data_governance":
                     continue
                 tables = self._list("tables", {"catalogKey": catalog_key, "schemaKey": schema_key})
                 for summary in tables:
