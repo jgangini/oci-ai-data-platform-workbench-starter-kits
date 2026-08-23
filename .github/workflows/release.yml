@@ -61,7 +61,9 @@ jobs:
           context: .
           file: apps/governance_gateway/Dockerfile
           push: true
-          tags: ghcr.io/jgangini/oci-aidp-governance-gateway:${{ github.ref_name }}
+          tags: |
+            ghcr.io/jgangini/oci-aidp-data-governance-gateway:${{ github.ref_name }}
+            ghcr.io/jgangini/oci-aidp-governance-gateway:${{ github.ref_name }}
       - name: Create or reuse GitHub release
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then

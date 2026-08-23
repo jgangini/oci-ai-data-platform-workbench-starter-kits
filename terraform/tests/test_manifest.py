@@ -62,8 +62,10 @@ def test_deploy_studio_manifest_contract() -> None:
         "autonomous_database_wallet_password",
     ]
     assert manifest["form"]["email_access_fields"] == ["admin_username", "admin_password", "registration_code"]
-    assert manifest["presentation"]["title"] == "OCI AI Data Platform Cloud Migration Lab"
-    assert manifest["presentation"]["tags"] == ["VM", "VCN", "OKE", "AI Data Platform", "Data Governance", "Object Storage", "IAM"]
+    assert manifest["presentation"]["title"] == "Oracle AI Data Platform Workbench Starter Kits"
+    assert manifest["presentation"]["summary"].startswith("Deploys reusable Oracle AI Data Platform Workbench starter kits")
+    assert manifest["presentation"]["href"] == "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
+    assert manifest["presentation"]["tags"] == ["VM", "VCN", "OKE", "AI Data Platform Workbench", "Data Governance", "Object Storage", "IAM"]
     assert manifest["presentation"]["image"] == "/assets/oci-aidp-cloud-migration-lab.png"
     assert [step["key"] for step in manifest["run_steps"]] == [
         "queue",

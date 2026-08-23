@@ -1,4 +1,4 @@
-# OCI AIDP Cloud Migration Lab
+# Oracle AI Data Platform Workbench Starter Kits
 
 - Keep `terraform/deploy-studio.json` and the `terraform/` package compatible with Deploy Studio schema v1.
 - Never commit OCI config files, PEM keys, OAuth client secrets, passwords, access codes, Terraform state, or generated certificates.

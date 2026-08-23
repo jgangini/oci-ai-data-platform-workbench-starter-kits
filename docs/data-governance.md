@@ -1,6 +1,6 @@
 # AI Data Governance add-on
 
-> Status: `v2.1.16` validation target. Local contracts and the live AIDP schema-owner permission check are implemented; the next acceptance is one clean deployment after all local gates pass.
+> Status: `v2.1.17` validation target. Local contracts and the live AIDP schema-owner permission check are implemented; the next acceptance is one clean deployment after all local gates pass.
 
 ## Runtime boundaries
 

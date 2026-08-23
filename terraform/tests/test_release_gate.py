@@ -23,8 +23,8 @@ def _context() -> dict[str, object]:
         "compartment": "oci-aidp-cloud-migration-lab-5",
         "compartment_mode": "new",
         "source": {
-            "repository": "https://github.com/jgangini/oci-aidp-cloud-migration-lab.git",
-            "ref": "v2.1.16",
+            "repository": "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits.git",
+            "ref": "v2.1.17",
             "commit_sha": "0123456789abcdef0123456789abcdef01234567",
         },
     }
@@ -58,11 +58,11 @@ def _plan(
     }
 
 
-def test_context_requires_v212_source() -> None:
+def test_context_requires_current_release_source() -> None:
     release_gate.validate_context(_context())
     invalid = _context()
     invalid["source"] = {**invalid["source"], "ref": "main"}  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="v2.1.16"):
+    with pytest.raises(ValueError, match="v2.1.17"):
         release_gate.validate_context(invalid)
 
 

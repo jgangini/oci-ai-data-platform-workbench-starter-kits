@@ -396,7 +396,7 @@ function CreateUserModal({
             <p className="eyebrow">Participant access</p>
             <h2 id={titleId}>Add user</h2>
             <p id={descriptionId}>
-              Enter the participant details and select one or more initial laboratories.
+              Enter the participant details and select one or more initial starter kits.
             </p>
           </div>
           <span className="lab-selection-count">
@@ -432,11 +432,11 @@ function CreateUserModal({
           </div>
           <div className="lab-manager-table-wrap">
             <table className="lab-manager-table create-user-lab-table">
-              <caption className="sr-only">Select initial laboratories</caption>
+              <caption className="sr-only">Select initial starter kits</caption>
               <thead>
                 <tr>
                   <th scope="col">Select</th>
-                  <th scope="col">Laboratory</th>
+                  <th scope="col">Starter kit</th>
                   <th scope="col">Version</th>
                   <th scope="col">Description</th>
                   <th scope="col">Availability</th>
@@ -453,7 +453,7 @@ function CreateUserModal({
                           type="checkbox"
                           checked={selected}
                           disabled={creating || !lab.available}
-                          aria-label={`Select ${lab.display_name} laboratory`}
+                          aria-label={`Select ${lab.display_name} starter kit`}
                           onChange={(event) => onDraftChange({
                             ...draft,
                             lab_ids: event.target.checked
@@ -541,8 +541,8 @@ function LabManagerModal({
       >
         <header>
           <div>
-            <p className="eyebrow">Participant laboratories</p>
-            <h2 id={titleId}>Manage laboratories</h2>
+            <p className="eyebrow">Participant starter kits</p>
+            <h2 id={titleId}>Manage starter kits</h2>
             <p id={descriptionId}>{user.email}</p>
           </div>
           <span className="lab-selection-count">
@@ -554,7 +554,7 @@ function LabManagerModal({
             <thead>
               <tr>
                 <th scope="col">Assigned</th>
-                <th scope="col">Laboratory</th>
+                <th scope="col">Starter kit</th>
                 <th scope="col">Version</th>
                 <th scope="col">Description</th>
                 <th scope="col">State</th>
@@ -609,7 +609,7 @@ function LabManagerModal({
         </div>
         {confirmingRemoval && (
           <p className="lab-manager-warning" role="alert">
-            Confirm removal of {changes.remove.length} {changes.remove.length === 1 ? "laboratory" : "laboratories"}. Only their jobs, tables, objects and workspace content will be deleted.
+            Confirm removal of {changes.remove.length} {changes.remove.length === 1 ? "starter kit" : "starter kits"}. Only their jobs, tables, objects and workspace content will be deleted.
           </p>
         )}
         {error && <p className="lab-manager-error" role="alert">{error}</p>}
@@ -818,13 +818,13 @@ function LogoutIcon() {
 
 function Brand() {
   return (
-    <a className="brand" href="/" aria-label="AI Data Platform Workbench home">
+    <a className="brand" href="/" aria-label="Oracle AI Data Platform Workbench Starter Kits home">
       <span className="brand-mark">
         <OracleMark />
       </span>
       <span>
-        <strong>AI Data Platform Workbench</strong>
-        <small>Cloud Migration Lab</small>
+        <strong>Oracle AI Data Platform Workbench</strong>
+        <small>Starter Kits</small>
       </span>
     </a>
   );
@@ -973,10 +973,10 @@ function RegisterPage() {
   const registrationCode = `${codeSlots.slice(0, 4).join("")}-${codeSlots.slice(4).join("")}`;
   const selectedLabSummary =
     labIds.length === 0
-      ? "Choose laboratories"
+      ? "Choose starter kits"
       : labIds.length === 1
         ? labLabel(catalog, labIds[0])
-        : `${labIds.length} laboratories selected`;
+        : `${labIds.length} starter kits selected`;
 
   function focusCode(index: number) {
     codeInputs.current[Math.min(index, 7)]?.focus();
@@ -1058,7 +1058,7 @@ function RegisterPage() {
       setCodeSlots(Array(8).fill(""));
       setState({
         status: "ready",
-        message: result.message || "Your lab account is ready.",
+        message: result.message || "Your starter kit account is ready.",
         aidpUrl: result.aidp_url,
       });
     } catch (error) {
@@ -1084,8 +1084,8 @@ function RegisterPage() {
           </p>
           <h1>Build in a governed AI data workspace.</h1>
           <p className="lede">
-            Register for this temporary lab to work with landing, bronze, silver
-            and gold data layers in Oracle AI Data Platform.
+            Register to work with landing, bronze, silver and gold data layers
+            in Oracle AI Data Platform Workbench.
           </p>
           <ol className="steps">
             <li className="step-card">
@@ -1094,13 +1094,13 @@ function RegisterPage() {
                 <span>Set up</span>
                 <span>your account</span>
               </strong>
-              <small>Register with your name, email and lab code.</small>
+              <small>Register with your name, email and registration code.</small>
             </li>
             <li className="step-card">
               <span className="step-number">02 · Workbench</span>
               <strong>
                 <span>Open AI Data</span>
-                <span>Platform</span>
+                <span>Platform Workbench</span>
               </strong>
               <small>Enter the workspace from the Oracle Cloud Console.</small>
             </li>
@@ -1117,7 +1117,7 @@ function RegisterPage() {
           aria-busy={state.status === "processing"}
         >
           <div>
-            <p className="eyebrow">Lab access</p>
+            <p className="eyebrow">Starter kit access</p>
             <h2>Create your account</h2>
             <p>
               Use your work or personal email and the code supplied by the
@@ -1147,7 +1147,7 @@ function RegisterPage() {
           </label>
           <div className="lab-combobox" ref={labPickerRef}>
             <span className="lab-combobox-label" id={labPickerLabelId}>
-              Laboratories
+              Starter kits
             </span>
             <button
               ref={labPickerTriggerRef}
@@ -1275,7 +1275,7 @@ function RegisterPage() {
                 <AccessReadyIcon />
               </div>
               <p className="eyebrow">Access ready</p>
-              <h2 id="registration-ready-title">Your lab account is ready</h2>
+              <h2 id="registration-ready-title">Your starter kit account is ready</h2>
               <p id="registration-ready-message">{state.message}</p>
             </div>
             <footer>
@@ -1294,7 +1294,7 @@ function RegisterPage() {
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  Open AI Data Platform
+                  Open AI Data Platform Workbench
                 </a>
               ) : (
                 <button className="secondary" type="button" onClick={closeReady}>
@@ -1567,7 +1567,7 @@ function AdminUsers() {
       selectedLabIds,
     );
     if (!selectedLabIds.length) {
-      setLabManagerError("A participant must keep at least one laboratory.");
+      setLabManagerError("A participant must keep at least one starter kit.");
       return;
     }
     if (changes.remove.length && !confirmingLabRemoval) {
@@ -1607,14 +1607,14 @@ function AdminUsers() {
       await loadUsers();
       setLabManagerUserId(null);
       setConfirmingLabRemoval(false);
-      setMessage(`Laboratories updated for ${labManagerUser.email}.`);
+      setMessage(`Starter kits updated for ${labManagerUser.email}.`);
     } catch (reason) {
       if (controller.signal.aborted) return;
       const loaded = await loadUsers();
       const refreshed = loaded?.find((user) => user.id === labManagerUser.id);
       if (refreshed) setSelectedLabIds(refreshed.labs.map((lab) => lab.lab_id));
       setConfirmingLabRemoval(false);
-      setLabManagerError(reason instanceof Error ? reason.message : "Unable to update the laboratories.");
+      setLabManagerError(reason instanceof Error ? reason.message : "Unable to update the starter kits.");
     } finally {
       if (operationAbortRef.current === controller) operationAbortRef.current = null;
       setOperationProgress(null);
@@ -1716,7 +1716,7 @@ function AdminUsers() {
                     <th>Name</th>
                     <th>Email</th>
                     <th>Status</th>
-                    <th>Laboratories</th>
+                    <th>Starter kits</th>
                     <th>Identity</th>
                     <th className="actions-column">Actions</th>
                   </tr>
@@ -1746,7 +1746,7 @@ function AdminUsers() {
                       <td>
                         <div className="lab-summary">
                           <span>
-                            <strong>{user.labs.length} {user.labs.length === 1 ? "laboratory" : "laboratories"}</strong>
+                            <strong>{user.labs.length} {user.labs.length === 1 ? "starter kit" : "starter kits"}</strong>
                             <small>
                               {user.labs.every((lab) => lab.phase === "active")
                                 ? "All active"
@@ -1770,8 +1770,8 @@ function AdminUsers() {
                             aria-haspopup="dialog"
                             aria-expanded={labManagerUserId === user.id}
                             onClick={() => openLabManager(user)}
-                            aria-label={`Manage laboratories for ${user.email}`}
-                            title="Manage laboratories"
+                            aria-label={`Manage starter kits for ${user.email}`}
+                            title="Manage starter kits"
                           >
                             <EditIcon />
                           </button>
@@ -1855,10 +1855,10 @@ function AdminUsers() {
       <ConfirmModal
         open={Boolean(pendingLabAction) && !operating}
         kind={pendingLabAction?.kind === "remove" ? "delete" : "reset"}
-        title={pendingLabAction?.kind === "remove" ? "Remove laboratory?" : "Redeploy laboratory?"}
+        title={pendingLabAction?.kind === "remove" ? "Remove starter kit?" : "Redeploy starter kit?"}
         description={pendingLabAction?.kind === "redeploy" && pendingLabAction.lab.lab_id === "agent"
-          ? `Reinstall ${labLabel(catalog, "agent")} for ${pendingLabAction.user.email}. This replaces the participant's Agent customizations. Data laboratories and Identity access are preserved.`
-          : `${pendingLabAction?.kind === "remove" ? "Remove" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this lab"} for ${pendingLabAction?.user.email ?? "this participant"}. Other laboratories and Identity access are preserved.`}
+          ? `Reinstall ${labLabel(catalog, "agent")} for ${pendingLabAction.user.email}. This replaces the participant's Agent customizations. Data starter kits and Identity access are preserved.`
+          : `${pendingLabAction?.kind === "remove" ? "Remove" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this starter kit"} for ${pendingLabAction?.user.email ?? "this participant"}. Other starter kits and Identity access are preserved.`}
         error={operationError}
         confirmLabel={pendingLabAction?.kind === "remove" ? "Remove lab" : "Redeploy lab"}
         onClose={() => {
@@ -1893,7 +1893,7 @@ function AdminUsers() {
         <ProvisioningOverlay
           phase={operationProgress?.phase || "cleanup"}
           message={
-            operationProgress?.message || "Updating the participant's laboratory."
+            operationProgress?.message || "Updating the participant's starter kit."
           }
         />
       )}
@@ -2201,7 +2201,7 @@ function AdminSettings() {
               </span>
               <div>
                 <strong>AI Data Platform Workbench</strong>
-                <p>Review the service and open the workspace configured for this lab.</p>
+                <p>Review the service and open the workspace configured for these starter kits.</p>
               </div>
             </div>
             <label className="settings-field">
@@ -2303,7 +2303,7 @@ function AdminSettings() {
               </span>
               <div>
                 <strong>Application</strong>
-                <p>Manage participant access to this lab.</p>
+                <p>Manage participant access to these starter kits.</p>
               </div>
             </div>
             <SettingsRegistrationCodeField
@@ -2407,7 +2407,7 @@ function AdminSettings() {
                   <h2 id="jdbc-install-title">Download the JDBC driver from Workbench</h2>
                   <p>The gateway installs the official ZIP produced by your AI Data Platform Workbench cluster.</p>
                   <ol>
-                    <li>Open AI Data Platform Workbench and select the workspace for this lab.</li>
+                    <li>Open AI Data Platform Workbench and select the workspace for these starter kits.</li>
                     <li>Open <strong>Compute</strong> and select the cluster that the gateway will use.</li>
                     <li>Open <strong>Connections</strong> or <strong>Connection details</strong>.</li>
                     <li>Select <strong>Download JDBC Driver</strong> and keep the downloaded ZIP unchanged.</li>

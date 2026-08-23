@@ -1,10 +1,10 @@
-# OCI AI Data Platform Cloud Migration Lab
+# Oracle AI Data Platform Workbench Starter Kits
 
-OCI AI Data Platform Cloud Migration Lab is a hands-on data engineering environment for Oracle AI Data Platform (AIDP). It provides ready-to-run, versioned laboratories that guide participants through Landing, Bronze, Silver, and Gold data layers, workflow execution, data quality, and lineage analysis.
+Oracle AI Data Platform Workbench Starter Kits is a reusable collection of hands-on data engineering environments for Oracle AI Data Platform Workbench. It provides ready-to-run, versioned starter kits that guide participants through Landing, Bronze, Silver, and Gold data layers, workflow execution, data quality, lineage analysis, and governed AI access.
 
-The project deploys the shared OCI infrastructure once. Participants can then register for one or more laboratories without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
+The project deploys the shared OCI infrastructure once. Participants can then register for one or more starter kits without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current validation target: **v2.1.16**. This patch preserves the `oci_artifact/data_governance` contract, accepts only the verified `AI_DATA_PLATFORM_ADMIN` schema owner emitted by AIDP, enforces OCI-compatible Autonomous passwords, and tolerates asynchronous Vault DNS publication.
+Current validation target: **v2.1.17**. This release introduces the Starter Kits identity and publishes the AI Data Governance Gateway at `ghcr.io/jgangini/oci-aidp-data-governance-gateway`, while preserving the stable Deploy Studio project contract and the existing `oci_artifact/data_governance` architecture.
 
 ## What the project provides
 
@@ -15,14 +15,14 @@ Current validation target: **v2.1.16**. This patch preserves the `oci_artifact/d
 - A private Object Storage bucket organized as `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/`.
 - A registration and administration web application hosted on an OCI Compute VM.
 - Identity Domains onboarding with pending and active participant groups.
-- Versioned laboratory packages containing canonical CSV files, notebooks, task dependencies, expected results, and SHA-256 hashes.
-- One independent AIDP workflow per participant and laboratory.
-- Per-laboratory administration for adding, redeploying, or removing content safely.
+- Versioned starter kit packages containing canonical CSV files, notebooks, task dependencies, expected results, and SHA-256 hashes.
+- One independent AIDP workflow per participant and starter kit.
+- Per-starter-kit administration for adding, redeploying, or removing content safely.
 - A Deploy Studio package for guided infrastructure deployment.
 
 ## Medallion learning path
 
-Each laboratory follows the same progression while using a different business scenario.
+Each starter kit follows the same progression while using a different business scenario.
 
 | Layer | Participant activity | Typical output |
 | --- | --- | --- |
@@ -32,11 +32,11 @@ Each laboratory follows the same progression while using a different business sc
 | Gold | Build business-ready aggregations and analytical views. | Customer, service, operational, or financial insights |
 | Lineage | Validate known transformations and inspect upstream, downstream, and column derivations. | Master Catalog lineage graph |
 
-The standard laboratories contain five notebooks, one for each stage. The Telco Customer 360 Lineage laboratory uses a larger 14-task directed acyclic graph to demonstrate parallel domain processing and multi-source convergence.
+The standard starter kits contain five notebooks, one for each stage. The Telco Customer 360 Lineage starter kit uses a larger 14-task directed acyclic graph to demonstrate parallel domain processing and multi-source convergence.
 
-## Available laboratories
+## Available starter kits
 
-| Laboratory | Package | Sources | Workflow | Main outcome |
+| Starter kit | Package | Sources | Workflow | Main outcome |
 | --- | ---: | ---: | ---: | --- |
 | Banking | 2.0.0 | 4 CSV files | 5 tasks | Customer value, branch activity, transaction quality, and full medallion lineage |
 | Telecommunications | 2.0.0 | 4 CSV files | 5 tasks | Subscriber usage, network-site activity, service quality, and full medallion lineage |
@@ -45,7 +45,7 @@ The standard laboratories contain five notebooks, one for each stage. The Telco 
 | Healthcare | 2.0.0 | 4 CSV files | 5 tasks | Patient utilization, provider activity, encounter quality, and full medallion lineage |
 | Data Governance Agent | 2.0.0 | — | — | Participant-editable DAMA-DMBOK Agent for catalog/lineage evidence, effective-policy explanations, and registered governed queries |
 
-Laboratory order, descriptions, versions, and availability come from [`apps/backend/app/labs/catalog.json`](apps/backend/app/labs/catalog.json) and each package's `lab.json`. Adding a future package does not require hard-coded changes to the registration interface.
+Starter kit order, descriptions, versions, and availability come from [`apps/backend/app/labs/catalog.json`](apps/backend/app/labs/catalog.json) and each package's `lab.json`. Adding a future package does not require hard-coded changes to the registration interface.
 
 ### Banking
 
@@ -85,7 +85,7 @@ Silver tables include `customer_master`, `customer_addresses`, `prepaid_service`
 - `customer_service_portfolio`: 1,261 prepaid, postpaid, and home services with product and ownership details.
 - `geographic_service_summary`: 12 regional summaries of customers, services, and monthly value.
 
-The source data contains exactly 30 controlled quality incidents. Landing uses CSV, while Bronze, Silver, and Gold use Delta tables so AIDP can expose the complete entity and column lineage demonstrated by the laboratory.
+The source data contains exactly 30 controlled quality incidents. Landing uses CSV, while Bronze, Silver, and Gold use Delta tables so AIDP can expose the complete entity and column lineage demonstrated by the starter kit.
 
 ### Retail
 
@@ -107,7 +107,7 @@ Healthcare prepares patient, provider, appointment, and encounter data for opera
 
 ### Data Governance Agent
 
-The optional Agent laboratory creates or reconciles `u101_agent_data_governance` for participant `u101`. It acts as a DAMA-DMBOK data-governance specialist: it can describe that participant's Master Catalog, inspect entity and column lineage, explain the effective policy of a registered query, and execute only a registered `query_id` through the gateway. Answers must separate observed evidence from explanation, governance implications, and recommendations or limitations. The Agent rejects arbitrary SQL and does not infer missing owners, stewards, controls, or lineage.
+The optional Agent starter kit creates or reconciles `u101_agent_data_governance` for participant `u101`. It acts as a DAMA-DMBOK data-governance specialist: it can describe that participant's Master Catalog, inspect entity and column lineage, explain the effective policy of a registered query, and execute only a registered `query_id` through the gateway. Answers must separate observed evidence from explanation, governance implications, and recommendations or limitations. The Agent rejects arbitrary SQL and does not infer missing owners, stewards, controls, or lineage.
 
 The package includes a versioned acceptance matrix covering catalog scope, quality, entity and column lineage, stewardship gaps, DAMA control mapping, participant isolation, unsupported certification claims, and arbitrary-SQL refusal. Candidate releases execute these questions live and retain the tool trace and response text as structured evidence without participant data from another catalog.
 
@@ -149,7 +149,7 @@ Use OCI Deploy Studio with an immutable validated release. Deploy Studio discove
 When the deployment completes, retain these outputs:
 
 - Application URL for participant registration.
-- Administrator URL for user and laboratory management.
+- Administrator URL for user and starter kit management.
 - AIDP Workbench URL.
 - Lab access summary artifact.
 
@@ -159,12 +159,12 @@ See [OCI Deploy Studio compatibility](#oci-deploy-studio-compatibility) for the 
 
 There are two onboarding paths:
 
-1. A participant opens the application URL, enters the registration code, full name, email address, and one or more available laboratories.
-2. An administrator opens the administrator URL, selects **Users**, chooses **Add user**, enters the participant details, and selects laboratories from the catalog table.
+1. A participant opens the application URL, enters the registration code, full name, email address, and one or more available starter kits.
+2. An administrator opens the administrator URL, selects **Users**, chooses **Add user**, enters the participant details, and selects starter kits from the catalog table.
 
 The email address is also the OCI Identity Domains username. It is never rewritten with aliases or release-specific suffixes.
 
-Registration progresses through Identity, Workspace, Schemas, Content, and Permissions. The participant remains pending until every initially selected laboratory is active. The application can resume a retryable operation by its operation ID, so a browser timeout does not require creating another participant.
+Registration progresses through Identity, Workspace, Schemas, Content, and Permissions. The participant remains pending until every initially selected starter kit is active. The application can resume a retryable operation by its operation ID, so a browser timeout does not require creating another participant.
 
 ### 3. Activate the OCI account
 
@@ -178,23 +178,23 @@ Participant codes begin at `101`. The first participant receives `u101`, the nex
 
 The code is used for technical isolation; the email makes the participant folder easy for an instructor to identify.
 
-### 4. Open and run a laboratory
+### 4. Open and run a starter kit
 
 In AIDP Workbench:
 
 1. Open the participant folder under `/Workspace/medallon`.
-2. Select the laboratory folder.
+2. Select the starter kit folder.
 3. Review the canonical source files and notebooks.
 4. Open the workflow named `wf_<participant_key>_<lab_id>`.
 5. Confirm that the shared Spark compute is running.
 6. Run the workflow and monitor every task until it reaches a successful terminal state.
-7. Review the validation task and compare the results with the expected values documented in the laboratory package.
+7. Review the validation task and compare the results with the expected values documented in the starter kit package.
 
 Notebooks receive `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, and `objectstorage_namespace` as AIDP task parameters. They do not contain participant-specific rendered values.
 
 ### 5. Inspect tables and lineage
 
-Each participant receives a private catalog such as `u101_aidp`, containing governed `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas. Table names include the participant key and laboratory ID, for example:
+Each participant receives a private catalog such as `u101_aidp`, containing governed `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas. Table names include the participant key and starter kit ID, for example:
 
 ```text
 u101_telco_lineage_customer_360
@@ -212,16 +212,16 @@ For the Telco Customer 360 Lineage package, useful traces include CRM document t
 
 ## Administrator guide
 
-The **Users** page shows participant status, Identity status, participant code, and a summary of assigned laboratories.
+The **Users** page shows participant status, Identity status, participant code, and a summary of assigned starter kits.
 
-Use the edit action for a participant to open the laboratory manager. From there an administrator can:
+Use the edit action for a participant to open the starter kit manager. From there an administrator can:
 
-- Select an available laboratory and save to provision it.
-- Refresh or redeploy one laboratory to install the current package version.
-- Clear a laboratory selection to remove only that laboratory's workflow, tables, objects, workspace content, and grants.
-- Delete the participant to clean up all laboratories and then remove the Identity Domains account.
+- Select an available starter kit and save to provision it.
+- Refresh or redeploy one starter kit to install the current package version.
+- Clear a starter kit selection to remove only that starter kit's workflow, tables, objects, workspace content, and grants.
+- Delete the participant to clean up all starter kits and then remove the Identity Domains account.
 
-At least one laboratory must remain assigned. To remove the final laboratory, delete the participant instead. Operations are serialized per participant and journaled independently per laboratory, so a pending or failed change does not make other active laboratories unavailable.
+At least one starter kit must remain assigned. To remove the final starter kit, delete the participant instead. Operations are serialized per participant and journaled independently per starter kit, so a pending or failed change does not make other active starter kits unavailable.
 
 The **Settings** page lets an administrator update the registration code and review the AIDP Workbench URL without exposing stored secrets.
 
@@ -283,7 +283,7 @@ docker compose --env-file .env -f docker/docker-compose.oci-local.yml down
 
 ```text
 apps/backend/app/               Registration API, Identity, AIDP provisioning
-apps/backend/app/labs/          Canonical laboratory catalog and packages
+apps/backend/app/labs/          Canonical starter kit catalog and packages
 apps/frontend/                  Registration and administration UI
 docker/                         OCI VM and local Compose profiles
 scripts/                        Local bootstrap, generators, and architecture gates
@@ -313,8 +313,8 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 ## Troubleshooting
 
 - **The deployed application certificate is not trusted:** the VM uses a self-signed HTTPS certificate. Use the OCI-connected local HTTP profile for browser automation, or install and trust an organization-approved certificate for normal browser access.
-- **A participant remains Pending or Permissions is displayed:** refresh the user list or reopen the laboratory manager. Provisioning is resumable and continues from its operation journal.
-- **A request returns 502 or 504:** the application treats transient upstream and gateway timeouts as retryable. Keep the same operation rather than creating a duplicate user or laboratory.
+- **A participant remains Pending or Permissions is displayed:** refresh the user list or reopen the starter kit manager. Provisioning is resumable and continues from its operation journal.
+- **A request returns 502 or 504:** the application treats transient upstream and gateway timeouts as retryable. Keep the same operation rather than creating a duplicate user or starter kit.
 - **A workflow says the cluster cannot be started:** start the shared AIDP compute manually before running the workflow. A cluster explicitly stopped by a user cannot be started by the workflow.
 - **Lineage is incomplete:** confirm the workflow completed, the compute configuration does not set `spark.aidp.lineage.enabled=false`, and the four medallion layers use managed catalog tables. Telco Customer 360 Lineage keeps Landing in CSV and Bronze, Silver, and Gold in Delta; managed tables preserve the governed `oci_landing -> oci_bronze -> oci_silver -> oci_gold` entity and column paths in this environment.
 - **Agent remains Pending:** confirm `aidp_agent_shared_compute` is available, `aidp_cluster_shared_compute` is running with duration **Forever**, the participant catalog has all four medallion schemas, and the selected regional Chat model is still active. Agent SQL tools cannot start a stopped Spark cluster.
@@ -333,7 +333,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 
 ## OCI Deploy Studio compatibility
 
-The **v2.1.11** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery and encrypted hook-file extensions.
+The **v2.1.17** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery and encrypted hook-file extensions.
 
 Deploy Studio support includes:
 
@@ -348,7 +348,7 @@ Deploy Studio support includes:
 - Post-apply reconciliation of the AIDP workspace, catalog, `aidp_cluster_shared_compute`, AI feature enablement, Identity roles, participant application, and final access artifact. The first Agent assignment reuses the shared `aidp_agent_shared_compute` runtime.
 - Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
 
-The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.11` tag rather than an untagged development commit.
+The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.17` tag rather than an untagged development commit.
 
 Deploy Studio currently applies the Resource Manager plan automatically after planning and does not expose a repository hook between those stages. For controlled deployments, review the generated plan or run `python terraform/release_gate.py --plan-json <plan.json>` in CI before starting the final apply.
 
@@ -356,4 +356,4 @@ Deploy Studio currently applies the Resource Manager plan automatically after pl
 
 This project is licensed under the [MIT License](LICENSE).
 
-OCI AI Data Platform Cloud Migration Lab is an independent project and is not an official Oracle product. It is not affiliated with, endorsed by, or sponsored by Oracle Corporation. Oracle, OCI, and related marks are trademarks or registered trademarks of Oracle and/or its affiliates. Third-party trademarks, logos, service names, and assets remain the property of their respective owners.
+Oracle AI Data Platform Workbench Starter Kits is an independent project and is not an official Oracle product. It is not affiliated with, endorsed by, or sponsored by Oracle Corporation. Oracle, OCI, and related marks are trademarks or registered trademarks of Oracle and/or its affiliates. Third-party trademarks, logos, service names, and assets remain the property of their respective owners.

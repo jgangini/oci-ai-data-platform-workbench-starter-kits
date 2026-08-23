@@ -13,30 +13,30 @@
     "regional_requirements": ["aidp", "autonomous_26ai_dw", "genai_chat"]
   },
   "presentation": {
-    "title": "OCI AI Data Platform Cloud Migration Lab",
-    "summary": "Deploys a governed OCI data engineering laboratory with AI Data Platform, Autonomous AI Database agent memory, an optional OIDC-protected public API Gateway backed by private OKE, medallion Object Storage, and least-privilege Identity Domains access.",
-    "tags": ["VM", "VCN", "OKE", "AI Data Platform", "Data Governance", "Object Storage", "IAM"],
+    "title": "Oracle AI Data Platform Workbench Starter Kits",
+    "summary": "Deploys reusable Oracle AI Data Platform Workbench starter kits with governed medallion data layers, Autonomous AI Database agent memory, and an optional AI Data Governance Gateway on private OKE.",
+    "tags": ["VM", "VCN", "OKE", "AI Data Platform Workbench", "Data Governance", "Object Storage", "IAM"],
     "image": "/assets/oci-aidp-cloud-migration-lab.png",
-    "image_alt": "OCI AI Data Platform Cloud Migration Lab architecture",
-    "href": "https://github.com/jgangini/oci-aidp-cloud-migration-lab"
+    "image_alt": "Oracle AI Data Platform Workbench Starter Kits architecture",
+    "href": "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
   },
   "run_steps": [
     {"key": "queue", "label": "Queue"},
     {"key": "credentials", "label": "OCI credentials"},
-    {"key": "compartment", "label": "Lab compartment"},
+    {"key": "compartment", "label": "Starter kit compartment"},
     {"key": "policies", "label": "Identity and IAM"},
     {"key": "stack", "label": "Resource Manager stack"},
     {"key": "plan", "label": "Terraform plan"},
     {"key": "apply", "label": "Terraform apply"},
     {"key": "network", "label": "VCN and public subnet"},
     {"key": "bucket", "label": "Medallion Object Storage"},
-    {"key": "compute", "label": "Lab Application VM"},
+    {"key": "compute", "label": "Starter Kit Application VM"},
     {"key": "database", "label": "Autonomous AI Database 26ai"},
     {"key": "wallet", "label": "Agent memory and governance runtime"},
     {"key": "application", "label": "AIDP workspace, catalog and RBAC"},
-    {"key": "artifacts", "label": "Lab access summary"},
+    {"key": "artifacts", "label": "Starter kit access summary"},
     {"key": "email", "label": "Access email"},
-    {"key": "complete", "label": "Lab ready"}
+    {"key": "complete", "label": "Starter kit ready"}
   ],
   "form": {
     "fields": [

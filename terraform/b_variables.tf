@@ -245,9 +245,9 @@ variable "_oci_governance" {
 variable "source_repository_url" {
   description = "Trusted public source repository cloned by the VM."
   type        = string
-  default     = "https://github.com/jgangini/oci-aidp-cloud-migration-lab.git"
+  default     = "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits.git"
   validation {
-    condition     = var.source_repository_url == "https://github.com/jgangini/oci-aidp-cloud-migration-lab.git"
+    condition     = var.source_repository_url == "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits.git"
     error_message = "Only the trusted AIDP lab repository is accepted."
   }
 }

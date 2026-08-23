@@ -1,4 +1,7 @@
 FROM python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
+LABEL org.opencontainers.image.source="https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits" \
+      org.opencontainers.image.title="OCI AIDP Data Governance Gateway" \
+      org.opencontainers.image.description="Governed query enforcement for Oracle AI Data Platform Workbench starter kits"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /opt/governance
 COPY apps/governance_gateway/requirements.txt ./requirements.txt

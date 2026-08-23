@@ -205,12 +205,12 @@ for attempt in $(seq 1 120); do
 done
 
 cat >/home/opc/startup_info.txt <<'EOF'
-OCI AIDP Cloud Migration Lab is ready.
+Oracle AI Data Platform Workbench Starter Kits is ready.
 
 Application URL: https://[PUBLIC-IP]
 Admin URL: https://[PUBLIC-IP]/admin/users
 Container: aidp-lab
-Source: https://github.com/jgangini/oci-aidp-cloud-migration-lab
+Source: https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits
 
 Useful commands:
   sudo docker ps

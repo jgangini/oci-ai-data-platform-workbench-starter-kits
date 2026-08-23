@@ -20,8 +20,8 @@ E3_SHAPE = "VM.Standard.E3.Flex"
 SUPPORTED_SHAPES = (E5_SHAPE, E4_SHAPE, E3_SHAPE)
 ACTIVE_WORK_REQUEST_STATES = {"ACCEPTED", "IN_PROGRESS", "WAITING", "NEEDS_ATTENTION", "CANCELING"}
 MODEL_TYPE_BASE = "BASE"
-GOVERNANCE_IMAGE_REPOSITORY = "ghcr.io/jgangini/oci-aidp-governance-gateway"
-GOVERNANCE_IMAGE_TAG = "v2.1.16"
+GOVERNANCE_IMAGE_REPOSITORY = "ghcr.io/jgangini/oci-aidp-data-governance-gateway"
+GOVERNANCE_IMAGE_TAG = "v2.1.17"
 GOVERNANCE_CONTROL_BUCKET = "oci_artifact"
 MAX_PUBLIC_DOCUMENT_BYTES = 1024 * 1024
 
@@ -125,7 +125,7 @@ def _governance_oidc_runtime(
 
 
 def _resolve_governance_image() -> str:
-    repository = "jgangini/oci-aidp-governance-gateway"
+    repository = GOVERNANCE_IMAGE_REPOSITORY.removeprefix("ghcr.io/")
     token = _public_json(
         "https://ghcr.io/token?" + urlencode({"scope": f"repository:{repository}:pull"}),
         allowed_hosts={"ghcr.io"},
@@ -447,9 +447,9 @@ def select_inputs(
                 },
                 "events": [
                     {
-                        "name": "Immutable v2.1.16 source",
+                        "name": "Immutable v2.1.17 source",
                         "status": "passed",
-                        "message": "v2.1.16 source context and deployment source passed",
+                        "message": "v2.1.17 source context and deployment source passed",
                     },
                     {
                         "name": "Compartment availability",

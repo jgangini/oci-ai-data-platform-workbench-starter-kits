@@ -21,7 +21,7 @@ test("registration has no password field while administrator login remains prote
   assert.match(source, /type="password"/);
   assert.match(source, /Registration code/);
   assert.match(source, /function AdminLogin/);
-  assert.match(source, /Laboratories/);
+  assert.match(source, /Starter kits/);
   assert.match(source, /lab_id: "banking"/);
   assert.match(source, /Planned/);
   assert.match(source, /role="combobox"/);
@@ -73,6 +73,8 @@ test("administrator UI manages lab users through protected API routes", () => {
   assert.match(source, /user\.participant_code \?\? "--"/);
   assert.doesNotMatch(source, /String\(index \+ 1\)\.padStart/);
   assert.match(source, /Open AI Data Platform Workbench/);
+  assert.match(source, /Oracle AI Data Platform Workbench/);
+  assert.match(source, /Starter Kits/);
   assert.match(source, /function Toast/);
   assert.match(source, /window\.setTimeout\(onDismiss, 4_000\)/);
   assert.match(source, /className="toast"/);
@@ -96,10 +98,10 @@ test("administrator adds a user from an accessible catalog-driven lab table", ()
   assert.match(source, /function CreateUserModal/);
   assert.match(source, /<span>Users<\/span>/);
   assert.match(source, /aria-haspopup="dialog"/);
-  assert.match(source, /Select initial laboratories/);
+  assert.match(source, /Select initial starter kits/);
   assert.match(source, /<th scope="col">Description<\/th>/);
   assert.match(source, /labDescription\(lab\)/);
-  assert.match(source, /aria-label={`Select \$\{lab\.display_name\} laboratory`}/);
+  assert.match(source, /aria-label={`Select \$\{lab\.display_name\} starter kit`}/);
   assert.doesNotMatch(source, /className="admin-create"/);
   assert.match(styles, /\.create-user-modal/);
   assert.match(styles, /\.create-user-fields/);
@@ -165,17 +167,17 @@ test("settings separate Workbench, application and governance details into acces
 });
 
 test("administrator mutates one participant laboratory at a time", () => {
-  assert.match(source, /<th>Laboratories<\/th>/);
+  assert.match(source, /<th>Starter kits<\/th>/);
   assert.match(source, /user\.labs\.map/);
   assert.match(source, /\/labs\/\$\{encodeURIComponent\(action\.lab\.lab_id\)\}/);
   assert.match(source, /getOrCreateLabOperation/);
   assert.match(source, /persistLabOperation/);
   assert.match(source, /operation_id: operation\.operationId/);
-  assert.match(source, /Other laboratories and Identity access are preserved/);
+  assert.match(source, /Other starter kits and Identity access are preserved/);
   assert.match(source, /open=\{Boolean\(pendingLabAction\) && !operating\}/);
   assert.match(source, /aria-busy=\{operating \|\| creating\} inert=\{operating \|\| creating\}/);
   assert.match(source, /operationAbortRef\.current\?\.abort\(\)/);
-  assert.match(source, /A participant must keep at least one laboratory/);
+  assert.match(source, /A participant must keep at least one starter kit/);
   assert.match(source, /disabled=\{!hasChanges \|\| !selectedLabIds\.length\}/);
   assert.match(source, /select:not\(\[disabled\]\)/);
   assert.match(source, /function ProvisioningOverlay/);
@@ -195,9 +197,9 @@ test("laboratory manager derives only the requested assignment changes", () => {
   );
   assert.match(source, /function LabManagerModal/);
   assert.match(source, /function EditIcon/);
-  assert.match(source, /aria-label={`Manage laboratories for \$\{user\.email\}`}/);
+  assert.match(source, /aria-label={`Manage starter kits for \$\{user\.email\}`}/);
   assert.doesNotMatch(source, /className="manage-labs-button"/);
-  assert.match(source, /Participant laboratories/);
+  assert.match(source, /Participant starter kits/);
   assert.match(source, /confirmingRemoval \? "Confirm changes" : "Save"/);
   assert.match(source, /Confirm changes/);
   assert.match(source, /lab-assignment-check/);
