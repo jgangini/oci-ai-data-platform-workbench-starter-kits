@@ -37,8 +37,9 @@ def test_operator_identity_is_reused_and_governance_resources_are_isolated() -> 
     assert 'methods = ["GET", "POST", "PUT", "DELETE"]' in edge
     assert 'email          = "governance-jdbc-${local.suffix}@example.invalid"' in edge
     assert 'resource "terraform_data" "governance_vault_dns_wait"' in edge
-    assert 'getent ahostsv4 "$GOVERNANCE_VAULT_HOST"' in edge
-    assert "Vault management endpoint DNS was not ready after 300 seconds" in edge
+    assert "socket.getaddrinfo(sys.argv[1], 443)" in edge
+    assert 'while [ "$attempt" -le 90 ]' in edge
+    assert "Vault management endpoint DNS was not ready after 900 seconds" in edge
     assert 'GOVERNANCE_VAULT_HOST = trimprefix(oci_kms_vault.governance[0].management_endpoint, "https://")' in edge
     assert "depends_on = [terraform_data.governance_vault_dns_wait]" in edge
 

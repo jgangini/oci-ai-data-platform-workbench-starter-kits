@@ -1,6 +1,6 @@
 # AI Data Governance add-on
 
-> Status: `v2.1.14` validation target. Local contracts are implemented; the next live OCI acceptance is one clean deployment after all local gates pass.
+> Status: `v2.1.15` validation target. Local contracts are implemented; the next live OCI acceptance is one clean deployment after all local gates pass.
 
 ## Runtime boundaries
 

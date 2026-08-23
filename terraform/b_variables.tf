@@ -125,8 +125,17 @@ variable "autonomous_database_admin_password" {
   type        = string
   sensitive   = true
   validation {
-    condition     = length(var.autonomous_database_admin_password) >= 12
-    error_message = "autonomous_database_admin_password must contain at least 12 characters."
+    condition = (
+      length(var.autonomous_database_admin_password) >= 12 &&
+      length(var.autonomous_database_admin_password) <= 30 &&
+      can(regex("[A-Z]", var.autonomous_database_admin_password)) &&
+      can(regex("[a-z]", var.autonomous_database_admin_password)) &&
+      can(regex("[0-9]", var.autonomous_database_admin_password)) &&
+      !strcontains(lower(var.autonomous_database_admin_password), "admin") &&
+      !strcontains(var.autonomous_database_admin_password, "\"") &&
+      !strcontains(var.autonomous_database_admin_password, "'")
+    )
+    error_message = "autonomous_database_admin_password must be 12-30 characters with uppercase, lowercase and a number, without quotes or the word admin."
   }
 }
 
@@ -135,8 +144,17 @@ variable "autonomous_database_wallet_password" {
   type        = string
   sensitive   = true
   validation {
-    condition     = length(var.autonomous_database_wallet_password) >= 12
-    error_message = "autonomous_database_wallet_password must contain at least 12 characters."
+    condition = (
+      length(var.autonomous_database_wallet_password) >= 12 &&
+      length(var.autonomous_database_wallet_password) <= 30 &&
+      can(regex("[A-Z]", var.autonomous_database_wallet_password)) &&
+      can(regex("[a-z]", var.autonomous_database_wallet_password)) &&
+      can(regex("[0-9]", var.autonomous_database_wallet_password)) &&
+      !strcontains(lower(var.autonomous_database_wallet_password), "admin") &&
+      !strcontains(var.autonomous_database_wallet_password, "\"") &&
+      !strcontains(var.autonomous_database_wallet_password, "'")
+    )
+    error_message = "autonomous_database_wallet_password must be 12-30 characters with uppercase, lowercase and a number, without quotes or the word admin."
   }
 }
 

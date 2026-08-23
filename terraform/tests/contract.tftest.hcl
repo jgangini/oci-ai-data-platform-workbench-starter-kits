@@ -6,7 +6,7 @@ mock_provider "random" {}
 
 variables {
   agent_model_id                      = "ocid1.generativeaimodel.oc1.us-ashburn-1.test"
-  autonomous_database_admin_password  = "TestAdminPassword123"
+  autonomous_database_admin_password  = "TestRootPassword123"
   autonomous_database_wallet_password = "TestWalletPassword123"
 }
 

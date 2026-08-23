@@ -125,7 +125,8 @@
         "required": true,
         "secret": true,
         "min_length": 12,
-        "max_length": 128,
+        "max_length": 30,
+        "pattern": "^(?!.*[Aa][Dd][Mm][Ii][Nn])(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])[^\"']{12,30}$",
         "group": "database"
       },
       {
@@ -135,7 +136,8 @@
         "required": true,
         "secret": true,
         "min_length": 12,
-        "max_length": 128,
+        "max_length": 30,
+        "pattern": "^(?!.*[Aa][Dd][Mm][Ii][Nn])(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])[^\"']{12,30}$",
         "group": "database"
       },
       {

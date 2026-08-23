@@ -45,6 +45,11 @@ def test_deploy_studio_manifest_contract() -> None:
         re.DOTALL,
     )
     assert fields["autonomous_database_mode"]["group"] == "database"
+    password_pattern = "^(?!.*[Aa][Dd][Mm][Ii][Nn])(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])[^\"']{12,30}$"
+    for name in ("autonomous_database_admin_password", "autonomous_database_wallet_password"):
+        assert fields[name]["min_length"] == 12
+        assert fields[name]["max_length"] == 30
+        assert fields[name]["pattern"] == password_pattern
     assert fields["existing_autonomous_database_ocid"]["visible_when"] == {
         "field": "autonomous_database_mode",
         "equals": "existing",
