@@ -4,7 +4,7 @@ OCI AI Data Platform Cloud Migration Lab is a hands-on data engineering environm
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more laboratories without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current validation target: **v2.1.15**. This patch preserves the `oci_artifact/data_governance` contract, enforces OCI-compatible Autonomous passwords before deployment, and tolerates the observed asynchronous Vault DNS publication window.
+Current validation target: **v2.1.16**. This patch preserves the `oci_artifact/data_governance` contract, accepts only the verified `AI_DATA_PLATFORM_ADMIN` schema owner emitted by AIDP, enforces OCI-compatible Autonomous passwords, and tolerates asynchronous Vault DNS publication.
 
 ## What the project provides
 

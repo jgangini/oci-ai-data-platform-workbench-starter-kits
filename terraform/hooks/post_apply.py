@@ -979,12 +979,15 @@ def verify_governance_schema_permissions(
     api: AidpApi,
     catalog_key: str,
     technical_user_ocid: str,
+    operator_user_ocid: str,
     *,
     attempts: int = RESOURCE_WAIT_ATTEMPTS,
 ) -> None:
-    """Fail closed if data_governance is visible outside the administrative boundary."""
-    if not technical_user_ocid.startswith("ocid1.user."):
-        raise ReconcileError("The governance JDBC technical user OCID is invalid")
+    """Allow only the admin role, its verified operator owner, and the JDBC identity."""
+    if not technical_user_ocid.startswith("ocid1.user.") or not operator_user_ocid.startswith(
+        "ocid1.user."
+    ):
+        raise ReconcileError("The governance schema user OCIDs are invalid")
     schema: dict[str, Any] | None = None
     for attempt in range(attempts):
         schema = exact_one(
@@ -1020,6 +1023,10 @@ def verify_governance_schema_permissions(
             continue
         if grantee_type == "USER" and grantee == technical_user_ocid:
             technical_admin = technical_admin or "ADMIN" in granted
+            continue
+        if grantee_type == "USER" and grantee == operator_user_ocid and granted == {"ADMIN"}:
+            # ponytail: AIDP publishes the verified schema creator both directly and
+            # through AI_DATA_PLATFORM_ADMIN; the OCID keeps this exception exact.
             continue
         inheritance = "inherited " if bool(item.get("isInherited")) else ""
         raise ReconcileError(
@@ -2033,6 +2040,7 @@ def main() -> int:
                 credential_api,
                 str(reconciled["catalog_key"]),
                 technical_user_ocid,
+                str(outputs["operator_user_ocid"]),
             )
             messages.append(
                 "data_governance access verified for platform administrators and the dedicated JDBC identity; "

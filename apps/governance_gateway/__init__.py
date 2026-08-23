@@ -1,3 +1,3 @@
 """AI Data Governance Gateway."""
 
-__version__ = "2.1.15"
+__version__ = "2.1.16"

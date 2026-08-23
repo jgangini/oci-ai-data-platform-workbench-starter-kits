@@ -191,6 +191,7 @@ class FakeApi:
 def test_governance_schema_permissions_allow_only_admins_and_dedicated_jdbc_user() -> None:
     api = FakeApi()
     technical_user = "ocid1.user.oc1..governance"
+    operator_user = "ocid1.user.oc1..operator"
     api.resources["/schemas"] = [
         {"displayName": "data_governance", "key": "aidp_lab.data_governance"}
     ]
@@ -209,9 +210,23 @@ def test_governance_schema_permissions_allow_only_admins_and_dedicated_jdbc_user
             "granteePermissions": ["ADMIN"],
             "isInherited": False,
         },
+        {
+            "grantee": operator_user,
+            "granteeName": "Default/Administrator",
+            "granteeType": "USER",
+            "granteePermissions": ["ADMIN"],
+            "isInherited": False,
+        },
+        {
+            "grantee": operator_user,
+            "granteeName": "Default/Administrator",
+            "granteeType": "USER",
+            "granteePermissions": ["ADMIN"],
+            "isInherited": True,
+        },
     ]
     post_apply.verify_governance_schema_permissions(
-        api, "aidp_lab-key", technical_user, attempts=1
+        api, "aidp_lab-key", technical_user, operator_user, attempts=1
     )
 
 
@@ -237,7 +252,43 @@ def test_governance_schema_permissions_fail_closed_for_developer_access() -> Non
     ]
     with pytest.raises(post_apply.ReconcileError, match="unauthorized inherited grant"):
         post_apply.verify_governance_schema_permissions(
-            api, "aidp_lab-key", technical_user, attempts=1
+            api, "aidp_lab-key", technical_user, "ocid1.user.oc1..operator", attempts=1
+        )
+
+
+def test_governance_schema_permissions_reject_unrelated_admin_user() -> None:
+    api = FakeApi()
+    technical_user = "ocid1.user.oc1..governance"
+    api.resources["/schemas"] = [
+        {"displayName": "data_governance", "key": "aidp_lab.data_governance"}
+    ]
+    api.actions["/schemas/aidp_lab.data_governance/permissions"] = [
+        {
+            "grantee": "AI_DATA_PLATFORM_ADMIN",
+            "granteeName": "AI_DATA_PLATFORM_ADMIN",
+            "granteeType": "ROLE",
+            "granteePermissions": ["ADMIN"],
+        },
+        {
+            "grantee": technical_user,
+            "granteeType": "USER",
+            "granteePermissions": ["ADMIN"],
+        },
+        {
+            "grantee": "ocid1.user.oc1..another",
+            "granteeName": "Default/Another Administrator",
+            "granteeType": "USER",
+            "granteePermissions": ["ADMIN"],
+        },
+    ]
+
+    with pytest.raises(post_apply.ReconcileError, match="unauthorized grant"):
+        post_apply.verify_governance_schema_permissions(
+            api,
+            "aidp_lab-key",
+            technical_user,
+            "ocid1.user.oc1..operator",
+            attempts=1,
         )
 
 
