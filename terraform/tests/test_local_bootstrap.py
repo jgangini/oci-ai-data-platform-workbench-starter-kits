@@ -1,3 +1,5 @@
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -5,10 +7,32 @@ import pytest
 from scripts.bootstrap_local_oci_env import (
     access_email_credentials,
     one_named,
+    parse_args,
     platform_endpoint,
     platform_workspace_name,
 )
 from apps.backend.app.security import verify_secret
+
+
+def test_compose_local_profile_defaults_and_overrides_are_parameterized() -> None:
+    compose = (
+        Path(__file__).parents[2] / "docker" / "docker-compose.oci-local.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "name: ${AIDP_LOCAL_PROJECT_NAME:-aidp-lab-oci-local}" in compose
+    assert "- ${AIDP_LOCAL_ENV_FILE:-../.env}" in compose
+    assert '"127.0.0.1:${AIDP_LOCAL_HOST_PORT:-18082}:80"' in compose
+
+
+def test_local_bootstrap_accepts_profile_scoped_sanitized_config_path(monkeypatch) -> None:
+    expected = Path(".local/dep_0123456789abcdef/oci/config")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bootstrap_local_oci_env.py", "--local-config-output", str(expected)],
+    )
+
+    assert parse_args().local_config_output == expected
 
 
 def test_local_bootstrap_uses_exact_bucket_name() -> None:

@@ -117,7 +117,7 @@ The package preserves `catalog_inventory` and `catalog_lineage` and adds `govern
 
 ### AI Data Governance Gateway
 
-The optional **AI Data Governance Gateway** component deploys a private, least-privilege service on OKE. It is the policy enforcement point for the VS Code SQL editor, governed notebooks, and Agent tools. The authoritative control plane is the `data_governance` Delta schema in the selected standard AIDP catalog:
+The optional **AI Data Governance Gateway** component deploys a private, least-privilege service on OKE. It is the policy enforcement point for the VS Code SQL editor, governed notebooks, and Agent tools. Workspaces, Master Catalog browsing, clusters, notebooks, starter kits, and shared AIDP Agents remain available when the Gateway is not installed. The authoritative control plane is the `data_governance` Delta schema in the selected standard AIDP catalog:
 
 - `data_governance` stores catalog classification, sensitivity, ownership, and review state.
 - `access_policy` stores `ALLOW`, `DENY`, `NULL`, `MASK`, and `TOKENIZE` rules for existing users, groups, and roles.
@@ -140,7 +140,12 @@ flowchart LR
 
 OKE uses Workload Identity for OCI access. Deploy Studio creates one private `oci_artifact` Object Storage bucket for governance data and runtime artifacts. Each external Delta table lives at `data_governance/<table-name>` and is published as `aidp_lab.data_governance.<table-name>`; the licensed Oracle AIDP JDBC bundle has the fixed object name `data_governance/runtime/aidp-jdbc-driver.zip`. Neither artifact enters Git or Terraform state.
 
-Only an authenticated administrator can request a ten-minute, exact-object write PAR from `POST /v1/admin/jdbc-driver:upload`. The VS Code extension uploads the ZIP directly to Object Storage so the licensed archive never crosses OCI API Gateway, then calls `POST /v1/admin/jdbc-driver:complete` with the opaque upload identifier, declared size, and SHA-256 digest. The gateway revokes the PAR before reading the object, validates size, digest, ZIP structure, and the presence of a JAR, and deletes an invalid object. Its OKE Workload Identity can manage PARs only for the `oci_artifact` bucket and manage only that fixed JDBC object; it cannot manage any other object in the bucket.
+JDBC installation is restricted to authenticated administrators and is available through two interfaces:
+
+- In the registration VM, open **Settings → AI Data Governance Gateway → Install JDBC Driver**. `PUT /api/admin/aidp/jdbc-driver` validates the ZIP, synchronizes the fixed Object Storage artifact, and keeps an owner-only VM copy for recovery and authorized download.
+- In the VS Code extension, an administrator requests a ten-minute, exact-object write PAR from `POST /v1/admin/jdbc-driver:upload`, uploads the ZIP directly to Object Storage, and completes the operation through `POST /v1/admin/jdbc-driver:complete` with the opaque upload identifier, declared size, and SHA-256 digest.
+
+Both paths validate size, digest or archive structure, and the presence of a JAR before the driver becomes available. The gateway revokes the PAR before reading the extension upload and deletes invalid objects. Its OKE Workload Identity can manage PARs only for the `oci_artifact` bucket and manage only that fixed JDBC object; it cannot manage any other object in the bucket.
 
 A separate technical JDBC API key is generated after apply, stored in OCI Vault, and limited to `ADMIN` on the `data_governance` schema, `USE` on the shared cluster, and the documented `read buckets`/`inspect objects` discovery permissions on `oci_artifact`. The personal deployment key is never mounted in pods. Public TLS and OIDC terminate at OCI API Gateway; the OKE service remains private. See [`docs/data-governance.md`](docs/data-governance.md) for the complete contract and acceptance gates.
 
@@ -149,6 +154,8 @@ A separate technical JDBC API key is generated after apply, stored in OCI Vault,
 ### 1. Deploy the shared environment
 
 Use OCI Deploy Studio with an immutable validated release. Deploy Studio discovers subscribed regions and compatible AIDP, Autonomous AI Database 26ai DW, and OCI Generative AI Chat capabilities before provisioning the network, private data bucket, registration VM, Identity Domains groups and policies, AIDP workspace, compute, and permissions.
+
+For a clean `v2.1.18` validation, select **New compartment**, use a unique compartment name, and treat the run as an independent installation rather than an upgrade. Enable **AI Data Governance Gateway** only when `kms/virtual-vault-count` reports at least one available slot.
 
 When the deployment completes, retain these outputs:
 
@@ -227,7 +234,11 @@ Use the edit action for a participant to open the starter kit manager. From ther
 
 At least one starter kit must remain assigned. To remove the final starter kit, delete the participant instead. Operations are serialized per participant and journaled independently per starter kit, so a pending or failed change does not make other active starter kits unavailable.
 
-The **Settings** page lets an administrator update the registration code and review the AIDP Workbench URL without exposing stored secrets.
+The **Settings** page is divided into three sections:
+
+- **AI Data Platform Workbench** shows the service endpoint, Workbench URL, and platform OCID.
+- **Application** lets an administrator replace the registration code without displaying the current secret.
+- **AI Data Governance Gateway** shows installation and connectivity state. Only administrators can install or replace the JDBC driver; non-administrators cannot access this operation.
 
 ## Reproducibility and participant isolation
 
@@ -283,6 +294,21 @@ Stop it with:
 docker compose --env-file .env -f docker/docker-compose.oci-local.yml down
 ```
 
+### Deploy Studio and local proxy lifecycle
+
+The CloudTechNext local wrapper can automate this profile without changing the deployed OCI VM:
+
+```powershell
+Set-Location D:\dev\codex-cloudtechnext
+.\scripts\start-local.ps1
+```
+
+Deploy Studio runs at `http://127.0.0.1:18080`. After an allowlisted Starter Kits deployment completes, its output marker is written atomically under `.local\<deployment-id>\`; the host-side watcher then runs this repository's bootstrap and Compose profile. The first preview uses `http://127.0.0.1:18082`, while concurrent deployment profiles receive the next available loopback port. `preview.state.json` records the exact URL.
+
+Profiles are stable by deployment ID, so navigating away from Deploy Studio does not discard them and a retry reuses the same local directory. The generated environment and sanitized container OCI config stay inside that profile. The OCI private key stays outside `.local`, is mounted read-only from the explicitly selected `.oci` path, and is never copied into the container image or repository.
+
+Run the wrapper with `-Force` after changing this local source tree to rebuild existing previews. The manual `bootstrap_local_oci_env.py` and Compose commands above remain available as a fallback for a single explicitly managed profile.
+
 ## Repository layout
 
 ```text
@@ -322,6 +348,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 - **A workflow says the cluster cannot be started:** start the shared AIDP compute manually before running the workflow. A cluster explicitly stopped by a user cannot be started by the workflow.
 - **Lineage is incomplete:** confirm the workflow completed, the compute configuration does not set `spark.aidp.lineage.enabled=false`, and the four medallion layers use managed catalog tables. Telco Customer 360 Lineage keeps Landing in CSV and Bronze, Silver, and Gold in Delta; managed tables preserve the governed `oci_landing -> oci_bronze -> oci_silver -> oci_gold` entity and column paths in this environment.
 - **Agent remains Pending:** confirm `aidp_agent_shared_compute` is available, `aidp_cluster_shared_compute` is running with duration **Forever**, the participant catalog has all four medallion schemas, and the selected regional Chat model is still active. Agent SQL tools cannot start a stopped Spark cluster.
+- **Governance deployment reports a Vault quota error:** release `v2.1.18` creates a new `DEFAULT` OCI Vault when **AI Data Governance Gateway** is selected. Confirm that `kms/virtual-vault-count` has at least one available slot before deployment. A Vault in `PENDING_DELETION` continues to consume quota until OCI completes its mandatory 7-to-30-day deletion period.
 
 ## Security essentials
 
@@ -349,6 +376,7 @@ Deploy Studio support includes:
 - A selectable effective region from compatible `READY` subscriptions and a dynamically discovered active Chat model in that same region.
 - New or existing Autonomous AI Database 26ai Data Warehouse, with ECPU model and a default of 4 ECPUs for a new database.
 - Optional private OKE governance gateway, deployed only when its checkbox is enabled and always alongside—not instead of—the Autonomous Agent-memory dependency.
+- A fresh deployment in **New compartment** mode is independent; it does not update another deployed VM or retarget an OCI-connected local profile.
 - Post-apply reconciliation of the AIDP workspace, catalog, `aidp_cluster_shared_compute`, AI feature enablement, Identity roles, participant application, and final access artifact. The first Agent assignment reuses the shared `aidp_agent_shared_compute` runtime.
 - Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
 

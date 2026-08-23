@@ -38,6 +38,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile", default="DEFAULT")
     parser.add_argument("--suffix", help="Explicit AIDP lab suffix when several labs exist.")
     parser.add_argument("--output", type=Path, default=Path(".env"))
+    parser.add_argument(
+        "--local-config-output",
+        type=Path,
+        help="Optional path for the sanitized OCI config mounted by the local container.",
+    )
     parser.add_argument("--template", type=Path, default=Path(".env.example"))
     parser.add_argument("--access-email", type=Path, help="Deploy Studio access email used for local login credentials.")
     parser.add_argument("--force", action="store_true")
@@ -396,7 +401,7 @@ def main() -> None:
         admin_hash, registration_hash = template_hashes(args.template)
     discovered = discover(config, args.suffix)
     selected_suffix = discovered["LAB_MARKER"].removeprefix(LAB_PREFIX)
-    local_config = Path(".tmp") / "oci-local" / selected_suffix / "config"
+    local_config = args.local_config_output or Path(".tmp") / "oci-local" / selected_suffix / "config"
     if not args.force:
         for path in (args.output, local_config):
             if path.exists():

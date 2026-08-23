@@ -1,4 +1,4 @@
-name: aidp-lab-oci-local
+name: ${AIDP_LOCAL_PROJECT_NAME:-aidp-lab-oci-local}
 
 services:
   aidp-lab:
@@ -6,9 +6,9 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     env_file:
-      - ../.env
+      - ${AIDP_LOCAL_ENV_FILE:-../.env}
     ports:
-      - "127.0.0.1:18082:80"
+      - "127.0.0.1:${AIDP_LOCAL_HOST_PORT:-18082}:80"
     environment:
       COOKIE_SECURE: "false"
       OCI_CONFIG_FILE: /etc/aidp-lab/oci/config
