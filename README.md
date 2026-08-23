@@ -267,11 +267,11 @@ docker compose -f docker/docker-compose.dev.yml down
 Use this profile to run the application locally while connecting to an already deployed Identity Domain and AIDP environment.
 
 ```powershell
-.\.venv\Scripts\python.exe .\scripts\bootstrap_local_oci_env.py --config <oci-config> --key <oci-key.pem>
+.\.venv\Scripts\python.exe .\scripts\bootstrap_local_oci_env.py --config <oci-config> --key <oci-key.pem> --access-email <deployment-email.html>
 docker compose --env-file .env -f docker/docker-compose.oci-local.yml up --build --detach
 ```
 
-Open `http://127.0.0.1:18082`. This HTTP endpoint avoids the deployed VM's self-signed certificate during local DOM-based testing. The profile binds only to localhost and is not a production deployment mode.
+Use the successful Deploy Studio access email for `--access-email`; the helper hashes its administrator password and registration code into the local `.env` without printing or retaining their plaintext values. Open `http://127.0.0.1:18082`. This HTTP endpoint avoids the deployed VM's self-signed certificate during local DOM-based testing. The profile binds only to localhost and is not a production deployment mode.
 
 Stop it with:
 

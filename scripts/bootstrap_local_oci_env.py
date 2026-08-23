@@ -9,13 +9,21 @@ from __future__ import annotations
 import argparse
 import configparser
 import os
+import sys
 import tempfile
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
 import oci
 from oci import pagination
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from apps.backend.app.security import hash_secret
 
 
 LAB_PREFIX = "aidp-lab-"
@@ -31,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--suffix", help="Explicit AIDP lab suffix when several labs exist.")
     parser.add_argument("--output", type=Path, default=Path(".env"))
     parser.add_argument("--template", type=Path, default=Path(".env.example"))
+    parser.add_argument("--access-email", type=Path, help="Deploy Studio access email used for local login credentials.")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--self-check", action="store_true")
     return parser.parse_args()
@@ -151,6 +160,41 @@ def template_hashes(path: Path) -> tuple[str, str]:
     if not (admin_hash.startswith("pbkdf2_sha256$") and code_hash.startswith("pbkdf2_sha256$")):
         raise RuntimeError(f"{path} must supply PBKDF2 test hashes")
     return admin_hash, code_hash
+
+
+class _AccessEmailParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.cells: list[str] = []
+        self._cell: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() == "td":
+            self._cell = []
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "td" and self._cell is not None:
+            self.cells.append(" ".join("".join(self._cell).split()))
+            self._cell = None
+
+
+def access_email_credentials(path: Path) -> tuple[str, str, str]:
+    parser = _AccessEmailParser()
+    parser.feed(path.read_text(encoding="utf-8"))
+    labels = {"Username": "username", "Password": "password", "Lab registration code": "code"}
+    values = {
+        labels[cell]: parser.cells[index + 1]
+        for index, cell in enumerate(parser.cells[:-1])
+        if cell in labels
+    }
+    missing = [label for label, key in labels.items() if not values.get(key)]
+    if missing:
+        raise RuntimeError(f"{path} is missing access field(s): {', '.join(missing)}")
+    return values["username"], hash_secret(values["password"]), hash_secret(values["code"])
 
 
 def build_workbench_url(endpoint: str, tenancy_name: str, domain_name: str) -> str:
@@ -345,7 +389,11 @@ def main() -> None:
     if not args.config or not args.key:
         raise RuntimeError("--config and --key are required unless --self-check is used")
     config = load_config(args.config, args.key, args.profile)
-    admin_hash, registration_hash = template_hashes(args.template)
+    if args.access_email:
+        admin_username, admin_hash, registration_hash = access_email_credentials(args.access_email)
+    else:
+        admin_username = "admin"
+        admin_hash, registration_hash = template_hashes(args.template)
     discovered = discover(config, args.suffix)
     selected_suffix = discovered["LAB_MARKER"].removeprefix(LAB_PREFIX)
     local_config = Path(".tmp") / "oci-local" / selected_suffix / "config"
@@ -354,7 +402,7 @@ def main() -> None:
             if path.exists():
                 raise RuntimeError(f"Refusing to overwrite {path}. Pass --force after reviewing it.")
     values = {
-        "ADMIN_USERNAME": "admin",
+        "ADMIN_USERNAME": admin_username,
         "ADMIN_PASSWORD_HASH": admin_hash,
         "REGISTRATION_CODE_HASH": registration_hash,
         "OCI_CONFIG_FILE": CONTAINER_OCI_CONFIG,
