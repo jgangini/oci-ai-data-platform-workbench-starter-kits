@@ -248,7 +248,6 @@ def test_governance_runtime_gets_only_schema_admin_and_cluster_use() -> None:
         {
             "displayName": "data_governance",
             "key": "aidp_lab.data_governance",
-            "catalogKey": "aidp_lab-key",
         }
     ]
     schema_key = post_apply.ensure_governance_control_access(
@@ -260,6 +259,8 @@ def test_governance_runtime_gets_only_schema_admin_and_cluster_use() -> None:
         technical_user,
     )
     assert schema_key == "aidp_lab.data_governance"
+    assert ("/schemas", {"displayName": "data_governance", "catalogKey": "aidp_lab-key"}) in api.list_calls
+    assert not any(method == "POST" and path == "/schemas" for method, path, _payload, _headers in api.calls)
     permissions = [
         (path, next(iter(payload.values()))["permissions"])
         for method, path, payload, _params in api.calls

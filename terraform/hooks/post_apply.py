@@ -936,7 +936,9 @@ def ensure_governance_control_access(
             "description": "Private control plane for AIDP governance extensions",
             "catalogName": catalog_name,
         },
-        {"catalogKey": catalog_key},
+        # ponytail: the live schema list omits catalogKey; the scoped query is
+        # the stable parent-catalog boundary until AIDP returns that field.
+        {},
         filters={"catalogKey": catalog_key},
     )
     schema_key = str(schema.get("key") or "")

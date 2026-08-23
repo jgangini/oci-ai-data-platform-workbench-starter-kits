@@ -21,7 +21,7 @@ metadata:
   namespace: aidp-governance
   labels:
     app.kubernetes.io/name: ai-data-governance-gateway
-    app.kubernetes.io/version: "2.1.13"
+    app.kubernetes.io/version: "2.1.14"
 spec:
   replicas: 2
   revisionHistoryLimit: 3
