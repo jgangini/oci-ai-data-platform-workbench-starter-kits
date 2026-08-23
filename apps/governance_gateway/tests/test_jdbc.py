@@ -1,10 +1,17 @@
+import hashlib
+from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
+import zipfile
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 
-from governance_gateway.jdbc import AidpJdbcRuntime, JdbcConfigurationError, _write_oci_profile, bind_named_parameters
+from governance_gateway.jdbc import (
+    AidpJdbcRuntime, JdbcConfigurationError, JdbcDriverValidationError,
+    _validate_driver_archive, _validate_driver_target, _write_oci_profile, bind_named_parameters,
+)
 
 
 def _private_key() -> str:
@@ -115,3 +122,111 @@ def test_jdbc_result_byte_limit_is_enforced_before_results_leave_the_runtime() -
     runtime._connection = Connection  # type: ignore[assignment]
     with pytest.raises(JdbcConfigurationError, match="response size limit"):
         runtime.execute("SELECT 1", {})
+
+
+def test_driver_completion_rejects_non_zip_content(tmp_path: Path) -> None:
+    archive = tmp_path / "driver.zip"
+    archive.write_bytes(b"not-a-zip")
+    with pytest.raises(JdbcDriverValidationError, match="not a ZIP"):
+        _validate_driver_archive(archive)
+
+
+def test_driver_archive_requires_and_accepts_a_jar(tmp_path: Path) -> None:
+    empty = tmp_path / "empty.zip"
+    with zipfile.ZipFile(empty, "w") as archive:
+        archive.writestr("README.txt", "no driver")
+    with pytest.raises(JdbcDriverValidationError, match="contains no JAR"):
+        _validate_driver_archive(empty)
+    driver = tmp_path / "driver.zip"
+    with zipfile.ZipFile(driver, "w") as archive:
+        archive.writestr("lib/aidp-jdbc.jar", b"test-jar")
+    _validate_driver_archive(driver)
+
+
+def test_driver_target_is_fixed_to_the_governance_artifact() -> None:
+    _validate_driver_target("oci_artifact", "data_governance/runtime/aidp-jdbc-driver.zip")
+    with pytest.raises(JdbcConfigurationError, match="must be oci_artifact"):
+        _validate_driver_target("other", "data_governance/runtime/aidp-jdbc-driver.zip")
+    with pytest.raises(JdbcConfigurationError, match="must be oci_artifact"):
+        _validate_driver_target("oci_artifact", "other.zip")
+
+
+class FakeServiceError(Exception):
+    def __init__(self, status: int) -> None:
+        self.status = status
+
+
+class FakeDriverClient:
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+        self.details: object | None = None
+        self.events: list[str] = []
+
+    def create_preauthenticated_request(
+        self, _namespace: str, _bucket: str, details: object,
+    ) -> SimpleNamespace:
+        self.details = details
+        return SimpleNamespace(data=SimpleNamespace(
+            id="opaque-upload-id", access_uri="/p/opaque-secret",
+        ))
+
+    def get_preauthenticated_request(
+        self, _namespace: str, _bucket: str, upload_id: str,
+    ) -> SimpleNamespace:
+        assert upload_id == "opaque-upload-id"
+        self.events.append("inspect-par")
+        return SimpleNamespace(data=self.details)
+
+    def delete_preauthenticated_request(
+        self, _namespace: str, _bucket: str, upload_id: str,
+    ) -> None:
+        assert upload_id == "opaque-upload-id"
+        self.events.append("revoke-par")
+
+    def get_object(self, _namespace: str, _bucket: str, _object_name: str) -> SimpleNamespace:
+        self.events.append("read-object")
+        return SimpleNamespace(
+            headers={"content-length": str(len(self.payload))}, data=BytesIO(self.payload),
+        )
+
+    def delete_object(self, _namespace: str, _bucket: str, _object_name: str) -> None:
+        self.events.append("delete-object")
+
+
+def driver_runtime(payload: bytes) -> tuple[AidpJdbcRuntime, FakeDriverClient]:
+    models = SimpleNamespace(
+        CreatePreauthenticatedRequestDetails=lambda **values: SimpleNamespace(**values),
+    )
+    oci = SimpleNamespace(
+        object_storage=SimpleNamespace(models=models),
+        exceptions=SimpleNamespace(ServiceError=FakeServiceError),
+    )
+    client = FakeDriverClient(payload)
+    runtime = AidpJdbcRuntime({"GOVERNANCE_OCI_REGION": "us-chicago-1"})
+    runtime._object_storage = lambda: (  # type: ignore[method-assign]
+        oci, client, "namespace", "oci_artifact", "data_governance/runtime/aidp-jdbc-driver.zip",
+    )
+    return runtime, client
+
+
+def test_driver_par_is_bound_to_the_request_and_revoked_before_validation() -> None:
+    output = BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("lib/aidp-jdbc.jar", b"test-jar")
+    payload = output.getvalue()
+    digest = hashlib.sha256(payload).hexdigest()
+    runtime, client = driver_runtime(payload)
+    upload = runtime.create_driver_upload(len(payload), digest)
+    assert upload["upload_id"] == "opaque-upload-id"
+    runtime.complete_driver_upload(upload["upload_id"], len(payload), digest)
+    assert client.events == ["inspect-par", "revoke-par", "read-object"]
+
+
+def test_driver_par_is_revoked_and_object_deleted_when_validation_fails() -> None:
+    payload = b"not-a-zip"
+    digest = hashlib.sha256(payload).hexdigest()
+    runtime, client = driver_runtime(payload)
+    upload = runtime.create_driver_upload(len(payload), digest)
+    with pytest.raises(JdbcDriverValidationError, match="not a ZIP"):
+        runtime.complete_driver_upload(upload["upload_id"], len(payload), digest)
+    assert client.events == ["inspect-par", "revoke-par", "read-object", "delete-object"]

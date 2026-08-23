@@ -30,6 +30,10 @@ resource "oci_ai_data_platform_ai_data_platform" "lab" {
     workload   = "migration-lab"
   }
 
+  lifecycle {
+    ignore_changes = [freeform_tags]
+  }
+
   timeouts {
     create = "120m"
   }

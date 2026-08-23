@@ -47,6 +47,7 @@ def test_gateway_manifest_is_private_behind_public_oidc_gateway_and_immutable() 
     assert "GOVERNANCE_OIDC_AUTHORITY" in manifest
     assert "GOVERNANCE_TOKENIZATION_KEY_OCID" in manifest
     assert "GOVERNANCE_TOKENIZATION_CRYPTO_ENDPOINT" in manifest
+    assert "GOVERNANCE_RUNTIME_IMAGE" in manifest
     assert "readinessProbe:" in manifest
     assert "path: /readyz" not in manifest
     assert manifest.count("path: /healthz") == 2
@@ -93,7 +94,7 @@ def test_governance_cross_variable_contract_uses_terraform_15_preconditions() ->
     assert "!var.enable_ai_data_governance" not in variables
 
 
-def test_workload_identity_reads_only_named_runtime_inputs() -> None:
+def test_workload_identity_manages_only_the_named_driver_object() -> None:
     gateway = (ROOT / "terraform/i_oci_data_governance_gateway.tf").read_text(encoding="utf-8")
     assert "request.principal.type='workload'" in gateway
     assert "request.principal.namespace='aidp-governance'" in gateway
@@ -103,6 +104,9 @@ def test_workload_identity_reads_only_named_runtime_inputs() -> None:
     assert "target.object.name='${local.governance_jdbc_object}'" in gateway
     assert "target.key.id='${oci_kms_key.governance[0].id}'" in gateway
     assert "use keys" in gateway
+    assert "request.permission='PAR_MANAGE'" in gateway
+    assert "to manage objects" in gateway
+    assert "to manage object-family" not in gateway
     assert "manage secret" not in gateway
     assert 'regexall("-GPU-", source.source_name)' in gateway
     assert "local.governance_node_sources[0].image_id" in gateway
@@ -136,3 +140,36 @@ def test_production_gateway_uses_delta_not_process_memory() -> None:
     assert "MemoryControlStore" not in api
     assert "AIDP_GOVERNANCE_GATEWAY" in runtime
     assert "get_oke_workload_identity_resource_principal_signer" in runtime
+
+
+def test_jdbc_upload_is_short_lived_exact_and_fail_closed() -> None:
+    runtime = (ROOT / "apps/governance_gateway/jdbc.py").read_text(encoding="utf-8")
+    assert '_JDBC_DRIVER_BUCKET = "oci_artifact"' in runtime
+    assert '_JDBC_DRIVER_OBJECT = "data_governance/runtime/aidp-jdbc-driver.zip"' in runtime
+    assert "timedelta(minutes=10)" in runtime
+    assert 'access_type="ObjectWrite"' in runtime
+    assert "declared != size_bytes" in runtime
+    assert "digest.hexdigest() != sha256" in runtime
+    assert "if not jars:" in runtime
+    assert "_validate_driver_archive(temporary)" in runtime
+    assert "client.delete_object(namespace, bucket, object_name)" in runtime
+
+
+def test_aidp_discovery_tags_are_canonical_and_non_secret() -> None:
+    platform = (ROOT / "terraform/i_oci_ai_data_platform.tf").read_text(encoding="utf-8")
+    post_apply = (ROOT / "terraform/hooks/post_apply.py").read_text(encoding="utf-8")
+    for name in (
+        "enable_ai_data_governance",
+        "governance_gateway_url",
+        "governance_gateway_oidc_authority",
+        "governance_gateway_oidc_issuer",
+        "governance_gateway_oidc_client_id",
+        "governance_gateway_oidc_audience",
+        "governance_gateway_oidc_scopes",
+        "governance_gateway_image",
+        "governance_gateway_runtime",
+    ):
+        assert name in post_apply
+    assert "ignore_changes = [freeform_tags]" in platform
+    assert "GOVERNANCE_JDBC_SECRET_OCID" not in platform
+    assert "private_key" not in platform

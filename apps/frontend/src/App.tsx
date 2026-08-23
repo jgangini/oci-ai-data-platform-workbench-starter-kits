@@ -2010,6 +2010,7 @@ function AdminSettings() {
   const jdbcUrlRef = useRef<HTMLInputElement>(null);
   const gatewayUrlRef = useRef<HTMLInputElement>(null);
   const driverInputRef = useRef<HTMLInputElement>(null);
+  const governanceGatewayInstalled = jdbcDriverAvailable && Boolean(governanceGatewayUrl);
   function applyAdminSettings(result: AdminSettingsResponse) {
     setAidpServiceEndpoint(result.aidp_service_endpoint);
     setAidpUrl(result.aidp_url);
@@ -2331,8 +2332,8 @@ function AdminSettings() {
               <div>
                 <div className="settings-title-row">
                   <strong>AI Data Governance Gateway</strong>
-                  <span className={`settings-status ${jdbcDriverAvailable ? "available" : "unavailable"}`}>
-                    {jdbcDriverAvailable ? "Installed" : "Not installed"}
+                  <span className={`settings-status ${governanceGatewayInstalled ? "available" : "unavailable"}`}>
+                    {governanceGatewayInstalled ? "Installed" : "Not installed"}
                   </span>
                 </div>
                 <p>Review governed data access, runtime artifacts and JDBC connectivity.</p>
@@ -2343,7 +2344,7 @@ function AdminSettings() {
                 </button>
               )}
             </div>
-            {jdbcDriverAvailable ? (
+            {governanceGatewayInstalled ? (
               <>
                 <label className="settings-field">
                   AI Data Governance Gateway URL
@@ -2400,6 +2401,14 @@ function AdminSettings() {
                   </div>
                 </div>
               </>
+            ) : jdbcDriverAvailable ? (
+              <section className="jdbc-install-guide" aria-labelledby="gateway-deployment-title">
+                <div>
+                  <p className="eyebrow">Deployment pending</p>
+                  <h2 id="gateway-deployment-title">Deploy AI Data Governance Gateway in OKE</h2>
+                  <p>The JDBC driver is ready. Enable <strong>AI Data Governance Gateway</strong> under Components in Deploy Studio to create the OKE runtime and publish its connection details.</p>
+                </div>
+              </section>
             ) : (
               <section className="jdbc-install-guide" aria-labelledby="jdbc-install-title">
                 <div>

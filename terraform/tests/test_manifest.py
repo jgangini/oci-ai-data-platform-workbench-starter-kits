@@ -140,6 +140,7 @@ def test_deploy_studio_manifest_contract() -> None:
         "governance_gateway_jdbc_user_ocid",
         "governance_gateway_url",
         "governance_gateway_oidc_scopes",
+        "governance_gateway_image",
         "governance_gateway_jdbc_secret_ocid",
         "governance_gateway_jdbc_driver_bucket",
         "governance_gateway_jdbc_driver_object",

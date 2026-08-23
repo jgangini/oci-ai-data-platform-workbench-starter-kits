@@ -108,6 +108,11 @@ output "governance_gateway_oidc_issuer" {
   value = var.enable_ai_data_governance ? var.governance_gateway_oidc_issuer : null
 }
 
+output "governance_gateway_image" {
+  description = "Canonical immutable OCI Data Governance Gateway image reference."
+  value       = var.enable_ai_data_governance ? var.governance_gateway_image : null
+}
+
 output "governance_gateway_oidc_audience" {
   value = var.enable_ai_data_governance ? local.governance_gateway_audience : null
 }
@@ -189,7 +194,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Fresh-only v2.1.17 contract: post-apply creates no external volumes."
+  description = "Fresh-only v2.1.18 contract: post-apply creates no external volumes."
   value       = 0
 }
 

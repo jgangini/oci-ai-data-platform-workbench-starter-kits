@@ -5,7 +5,7 @@ import os
 import re
 import time
 from threading import Lock
-from typing import Any, Literal, Protocol
+from typing import Any, Callable, Literal, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .auth import AuthenticationError, OidcAuthenticator, OidcSettings
 from .catalog import AidpCatalogClient, CatalogSyncError, CatalogSynchronizer
-from .jdbc import AidpJdbcRuntime
+from .jdbc import (
+    MAX_JDBC_DRIVER_BYTES, AidpJdbcRuntime, JdbcConfigurationError, JdbcDriverValidationError,
+)
 from .policy import ColumnRef, ForbiddenColumns, GovernanceError, PolicyAction, Principal, effective_action
 from .service import GovernanceService
 from .store import JdbcControlStore
@@ -63,6 +65,15 @@ class SqlAccessRequest(BaseModel):
     enabled: bool = True
 
 
+class JdbcDriverUploadRequest(BaseModel):
+    size_bytes: int = Field(ge=1, le=MAX_JDBC_DRIVER_BYTES)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class JdbcDriverCompleteRequest(JdbcDriverUploadRequest):
+    upload_id: str = Field(min_length=1, max_length=512, pattern=r"^[A-Za-z0-9._~-]+$")
+
+
 class Readiness:
     def __init__(self, initialize: Any | None = None) -> None:
         self._initialize = initialize
@@ -85,6 +96,13 @@ class Readiness:
                 return False
             self._ready = True
             return True
+
+    def reset(self) -> None:
+        if self._initialize is None:
+            return
+        with self._lock:
+            self._ready = False
+            self._retry_after = 0.0
 
 
 def _principal_dependency(authenticator: Authenticator) -> Any:
@@ -110,6 +128,40 @@ def _require_admin(identity: Principal) -> None:
 def _require_admin_ready(identity: Principal, readiness: Readiness) -> None:
     _require_admin(identity)
     _require_ready(readiness)
+
+
+_CANONICAL_RUNTIME_IMAGE = "ghcr.io/jgangini/oci-aidp-data-governance-gateway"
+
+
+def _gateway_status(
+    identity: Principal,
+    readiness: Readiness,
+    jdbc_installed: Callable[[], bool] | None,
+    runtime_image: str | None,
+) -> dict[str, Any]:
+    try:
+        installed = jdbc_installed() if jdbc_installed is not None else True
+    except Exception:
+        installed = False
+    ready = readiness.ensure() if installed else False
+    reference = runtime_image or os.getenv("GOVERNANCE_RUNTIME_IMAGE", "")
+    repository, separator, digest = reference.partition("@")
+    attested = bool(
+        separator
+        and repository == _CANONICAL_RUNTIME_IMAGE
+        and re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+    )
+    return {
+        "administrator": identity.is_admin,
+        "state": "ready" if ready else "initializing",
+        "runtime": {"type": "OKE", "ready": attested},
+        "image": {
+            "repository": _CANONICAL_RUNTIME_IMAGE,
+            "reference": reference,
+            "digest": digest if attested else "",
+        },
+        "jdbc": {"state": "ready" if installed else "required", "installed": installed},
+    }
 
 
 def _principal_hash(identity: Principal) -> str:
@@ -150,6 +202,18 @@ def _register_base_routes(app: FastAPI, readiness: Readiness) -> None:
     @app.get("/metrics", include_in_schema=False)
     def metrics() -> str:
         return "aidp_governance_gateway_up 1\n"
+
+
+def _register_status_routes(
+    app: FastAPI,
+    readiness: Readiness,
+    principal: Any,
+    jdbc_installed: Callable[[], bool] | None,
+    runtime_image: str | None,
+) -> None:
+    @app.get("/v1/status")
+    def status(identity: Principal = Depends(principal)) -> dict[str, Any]:
+        return _gateway_status(identity, readiness, jdbc_installed, runtime_image)
 
 
 def _register_execution_routes(
@@ -238,15 +302,21 @@ def _register_catalog_admin_routes(
     readiness: Readiness,
     principal: Any,
     catalog_sync: CatalogSynchronizer | None,
+    jdbc_installed: Callable[[], bool] | None,
+    runtime_image: str | None,
 ) -> None:
     @app.get("/v1/admin/status")
     def admin_status(identity: Principal = Depends(principal)) -> dict[str, Any]:
         _require_admin(identity)
-        ready = readiness.ensure()
+        status = _gateway_status(identity, readiness, jdbc_installed, runtime_image)
         return {
-            "status": "ready" if ready else "initializing",
+            **status,
             "control_schema": os.getenv("GOVERNANCE_CONTROL_SCHEMA", "data_governance"),
-            "catalog_sync": service.store.sync_status() if ready else {"status": "NOT_READY"},
+            "catalog_sync": (
+                service.store.sync_status()
+                if status["state"] == "ready"
+                else {"status": "NOT_READY"}
+            ),
         }
 
     @app.post("/v1/admin/catalog:sync")
@@ -408,6 +478,50 @@ def _register_token_routes(
             raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
+def _register_jdbc_driver_routes(
+    app: FastAPI,
+    readiness: Readiness,
+    principal: Any,
+    jdbc_installed: Callable[[], bool] | None,
+    runtime_image: str | None,
+    create_jdbc_upload: Callable[[int, str], dict[str, Any]] | None,
+    complete_jdbc_upload: Callable[[str, int, str], None] | None,
+) -> None:
+    @app.post("/v1/admin/jdbc-driver:upload")
+    def create_upload(
+        request: JdbcDriverUploadRequest,
+        identity: Principal = Depends(principal),
+    ) -> dict[str, Any]:
+        _require_admin(identity)
+        if create_jdbc_upload is None:
+            raise HTTPException(status_code=503, detail="JDBC driver installation is not configured.")
+        try:
+            return create_jdbc_upload(request.size_bytes, request.sha256)
+        except JdbcConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        except Exception:
+            raise HTTPException(status_code=503, detail="The JDBC upload URL could not be created.") from None
+
+    @app.post("/v1/admin/jdbc-driver:complete")
+    def complete_upload(
+        request: JdbcDriverCompleteRequest,
+        identity: Principal = Depends(principal),
+    ) -> dict[str, Any]:
+        _require_admin(identity)
+        if complete_jdbc_upload is None:
+            raise HTTPException(status_code=503, detail="JDBC driver installation is not configured.")
+        try:
+            complete_jdbc_upload(request.upload_id, request.size_bytes, request.sha256)
+        except JdbcDriverValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        except JdbcConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        except Exception:
+            raise HTTPException(status_code=503, detail="The JDBC driver could not be verified.") from None
+        readiness.reset()
+        return _gateway_status(identity, readiness, jdbc_installed, runtime_image)
+
+
 def create_app(
     service: GovernanceService,
     authenticator: Authenticator,
@@ -415,6 +529,10 @@ def create_app(
     catalog_sync: CatalogSynchronizer | None = None,
     principal_directory: PrincipalDirectory | None = None,
     tokenizer: VaultTokenizer | None = None,
+    jdbc_installed: Callable[[], bool] | None = None,
+    create_jdbc_upload: Callable[[int, str], dict[str, Any]] | None = None,
+    complete_jdbc_upload: Callable[[str, int, str], None] | None = None,
+    runtime_image: str | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="AI Data Governance Gateway",
@@ -426,9 +544,16 @@ def create_app(
     readiness = Readiness(initialize)
     principal = _principal_dependency(authenticator)
     _register_base_routes(app, readiness)
+    _register_status_routes(app, readiness, principal, jdbc_installed, runtime_image)
     _register_execution_routes(app, service, readiness, principal)
     _register_discovery_routes(app, service, readiness, principal)
-    _register_catalog_admin_routes(app, service, readiness, principal, catalog_sync)
+    _register_catalog_admin_routes(
+        app, service, readiness, principal, catalog_sync, jdbc_installed, runtime_image,
+    )
+    _register_jdbc_driver_routes(
+        app, readiness, principal, jdbc_installed, runtime_image,
+        create_jdbc_upload, complete_jdbc_upload,
+    )
     _register_policy_routes(app, service, readiness, principal, principal_directory)
     _register_sql_access_routes(app, service, readiness, principal, principal_directory)
     _register_token_routes(app, principal, tokenizer)
@@ -455,4 +580,15 @@ def production_app() -> FastAPI:
         store.initialize()
         catalog_sync.synchronize()
 
-    return create_app(service, authenticator, initialize, catalog_sync, catalog_client, tokenizer)
+    return create_app(
+        service,
+        authenticator,
+        initialize,
+        catalog_sync,
+        catalog_client,
+        tokenizer,
+        jdbc_installed=runtime.driver_installed,
+        create_jdbc_upload=runtime.create_driver_upload,
+        complete_jdbc_upload=runtime.complete_driver_upload,
+        runtime_image=os.getenv("GOVERNANCE_RUNTIME_IMAGE", ""),
+    )

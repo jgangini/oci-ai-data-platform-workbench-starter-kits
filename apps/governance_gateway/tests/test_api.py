@@ -3,10 +3,14 @@ from fastapi.testclient import TestClient
 from governance_gateway.api import create_app
 from governance_gateway.auth import AuthenticationError
 from governance_gateway.catalog import CatalogColumn, CatalogSnapshot, new_object_id
+from governance_gateway.jdbc import JdbcDriverValidationError
 from governance_gateway.policy import ColumnRef, Principal
 from governance_gateway.service import GovernanceService
 from governance_gateway.store import MemoryControlStore
 from governance_gateway.tokenization import VaultTokenizer
+
+
+RUNTIME_IMAGE = "ghcr.io/jgangini/oci-aidp-data-governance-gateway@sha256:" + "a" * 64
 
 
 class FakeAuthenticator:
@@ -25,18 +29,58 @@ class FakeAuthenticator:
 def client() -> TestClient:
     store = MemoryControlStore()
     service = GovernanceService(store, lambda _sql, _parameters: ([], []))
-    return TestClient(create_app(service, FakeAuthenticator()))
+    return TestClient(create_app(
+        service,
+        FakeAuthenticator(),
+        jdbc_installed=lambda: False,
+        runtime_image=RUNTIME_IMAGE,
+    ))
 
 
 def test_health_reports_the_gateway_release() -> None:
     gateway = client()
-    assert gateway.app.version == "2.1.17"
-    assert gateway.get("/healthz").json() == {"status": "ok", "version": "2.1.17"}
+    assert gateway.app.version == "2.1.18"
+    assert gateway.get("/healthz").json() == {"status": "ok", "version": "2.1.18"}
 
 
 def test_missing_token_is_unauthorized() -> None:
     response = client().get("/v1/admin/status")
     assert response.status_code == 401
+
+
+def test_status_is_available_to_admins_and_developers() -> None:
+    gateway = client()
+    developer = gateway.get("/v1/status", headers={"Authorization": "Bearer developer"})
+    admin = gateway.get("/v1/status", headers={"Authorization": "Bearer admin"})
+    assert developer.status_code == admin.status_code == 200
+    assert developer.json() == {
+        "administrator": False,
+        "state": "initializing",
+        "runtime": {"type": "OKE", "ready": True},
+        "image": {
+            "repository": "ghcr.io/jgangini/oci-aidp-data-governance-gateway",
+            "reference": RUNTIME_IMAGE,
+            "digest": "sha256:" + "a" * 64,
+        },
+        "jdbc": {"state": "required", "installed": False},
+    }
+    assert admin.json()["administrator"] is True
+
+
+def test_status_does_not_initialize_the_data_plane_before_jdbc_is_installed() -> None:
+    attempts: list[str] = []
+    app = create_app(
+        GovernanceService(MemoryControlStore(), lambda _sql, _parameters: ([], [])),
+        FakeAuthenticator(),
+        initialize=lambda: attempts.append("initialized"),
+        jdbc_installed=lambda: False,
+        runtime_image=RUNTIME_IMAGE,
+    )
+    response = TestClient(app).get(
+        "/v1/status", headers={"Authorization": "Bearer developer"},
+    )
+    assert response.json()["state"] == "initializing"
+    assert attempts == []
 
 
 def test_openapi_contract_is_not_exposed() -> None:
@@ -51,6 +95,60 @@ def test_developer_cannot_access_permissions_status() -> None:
 def test_admin_can_access_permissions_status() -> None:
     response = client().get("/v1/admin/status", headers={"Authorization": "Bearer admin"})
     assert response.status_code == 200
+
+
+def test_only_admin_can_install_the_jdbc_driver_through_a_direct_par() -> None:
+    calls: list[tuple[int, str]] = []
+    digest = "b" * 64
+    app = create_app(
+        GovernanceService(MemoryControlStore(), lambda _sql, _parameters: ([], [])),
+        FakeAuthenticator(),
+        create_jdbc_upload=lambda size, sha256: {
+            "upload_id": "opaque-upload-id",
+            "upload_url": "https://objectstorage.example.test/p/token",
+            "expires_at": "2026-08-23T12:00:00Z",
+        },
+        complete_jdbc_upload=lambda upload_id, size, sha256: calls.append((size, sha256)),
+        jdbc_installed=lambda: True,
+        runtime_image=RUNTIME_IMAGE,
+    )
+    gateway = TestClient(app)
+    payload = {"size_bytes": 35_700_000, "sha256": digest}
+    assert gateway.post(
+        "/v1/admin/jdbc-driver:upload", json=payload,
+        headers={"Authorization": "Bearer developer"},
+    ).status_code == 403
+    created = gateway.post(
+        "/v1/admin/jdbc-driver:upload", json=payload,
+        headers={"Authorization": "Bearer admin"},
+    )
+    assert created.status_code == 200
+    assert created.json()["upload_url"].startswith("https://objectstorage.")
+    assert created.json()["upload_id"] == "opaque-upload-id"
+    completed = gateway.post(
+        "/v1/admin/jdbc-driver:complete", json={**payload, "upload_id": "opaque-upload-id"},
+        headers={"Authorization": "Bearer admin"},
+    )
+    assert completed.json()["jdbc"] == {"state": "ready", "installed": True}
+    assert completed.json()["runtime"] == {"type": "OKE", "ready": True}
+    assert calls == [(35_700_000, digest)]
+
+
+def test_invalid_jdbc_zip_is_rejected_after_direct_upload() -> None:
+    def invalid(_upload_id: str, _size: int, _sha256: str) -> None:
+        raise JdbcDriverValidationError("The uploaded JDBC driver is not a ZIP archive.")
+
+    app = create_app(
+        GovernanceService(MemoryControlStore(), lambda _sql, _parameters: ([], [])),
+        FakeAuthenticator(), complete_jdbc_upload=invalid,
+    )
+    response = TestClient(app).post(
+        "/v1/admin/jdbc-driver:complete",
+        json={"upload_id": "opaque-upload-id", "size_bytes": 100, "sha256": "c" * 64},
+        headers={"Authorization": "Bearer admin"},
+    )
+    assert response.status_code == 422
+    assert "not a ZIP" in response.json()["detail"]
 
 
 def test_readiness_initializes_the_control_schema_once() -> None:

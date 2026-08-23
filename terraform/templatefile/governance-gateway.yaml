@@ -21,7 +21,7 @@ metadata:
   namespace: aidp-governance
   labels:
     app.kubernetes.io/name: ai-data-governance-gateway
-    app.kubernetes.io/version: "2.1.17"
+    app.kubernetes.io/version: "2.1.18"
 spec:
   replicas: 2
   revisionHistoryLimit: 3
@@ -58,6 +58,8 @@ spec:
           env:
             - name: GOVERNANCE_OCI_REGION
               value: ${jsonencode(oci_region)}
+            - name: GOVERNANCE_RUNTIME_IMAGE
+              value: ${jsonencode(gateway_image)}
             - name: GOVERNANCE_OIDC_ISSUER
               value: ${jsonencode(oidc_issuer)}
             - name: GOVERNANCE_OIDC_AUTHORITY

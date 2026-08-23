@@ -39,6 +39,18 @@ DATABASE_OPERATOR = "AIDP_LAB_OPERATOR"
 GOVERNANCE_CREDENTIAL_NAME = "AidpGovernanceOperator"
 GOVERNANCE_JDBC_PURPOSE = "AIDP_GOVERNANCE_GATEWAY"
 LAYERS = ("landing", "bronze", "silver", "gold")
+GOVERNANCE_GATEWAY_IMAGE = "ghcr.io/jgangini/oci-aidp-data-governance-gateway"
+GOVERNANCE_DISCOVERY_TAGS = (
+    "enable_ai_data_governance",
+    "governance_gateway_url",
+    "governance_gateway_oidc_authority",
+    "governance_gateway_oidc_issuer",
+    "governance_gateway_oidc_client_id",
+    "governance_gateway_oidc_audience",
+    "governance_gateway_oidc_scopes",
+    "governance_gateway_image",
+    "governance_gateway_runtime",
+)
 RESOURCE_WAIT_ATTEMPTS = 120
 POST_APPLY_BUDGET_SECONDS = 3300
 _post_apply_deadline = 0.0
@@ -1464,6 +1476,104 @@ def wait_for_application(application_url: str, *, attempts: int = 60) -> None:
     raise ReconcileError("Registration application did not become healthy over HTTPS")
 
 
+def _governance_discovery_desired(outputs: dict[str, Any]) -> dict[str, str]:
+    if not bool(outputs.get("enable_ai_data_governance")):
+        return {}
+    image = str(outputs.get("governance_gateway_image") or "")
+    if not re.fullmatch(
+        re.escape(GOVERNANCE_GATEWAY_IMAGE) + r"@sha256:[0-9a-f]{64}", image
+    ):
+        raise ReconcileError("The governance gateway discovery image is not canonical and immutable")
+    desired = {
+        "enable_ai_data_governance": "true",
+        "governance_gateway_url": str(outputs.get("governance_gateway_url") or ""),
+        "governance_gateway_oidc_authority": str(
+            outputs.get("governance_gateway_oidc_authority") or ""
+        ),
+        "governance_gateway_oidc_issuer": str(outputs.get("governance_gateway_oidc_issuer") or ""),
+        "governance_gateway_oidc_client_id": str(
+            outputs.get("governance_gateway_oidc_client_id") or ""
+        ),
+        "governance_gateway_oidc_audience": str(
+            outputs.get("governance_gateway_oidc_audience") or ""
+        ),
+        "governance_gateway_oidc_scopes": str(outputs.get("governance_gateway_oidc_scopes") or ""),
+        "governance_gateway_image": image,
+        "governance_gateway_runtime": "OKE",
+    }
+    missing = sorted(name for name in GOVERNANCE_DISCOVERY_TAGS if not desired[name])
+    if missing:
+        raise ReconcileError(
+            f"Missing non-secret governance discovery output(s): {', '.join(missing)}"
+        )
+    return desired
+
+
+def _merged_governance_discovery_tags(
+    current: dict[str, str], desired: dict[str, str]
+) -> dict[str, str]:
+    if desired:
+        return {**current, **desired}
+    return {
+        name: value
+        for name, value in current.items()
+        if name not in GOVERNANCE_DISCOVERY_TAGS
+    }
+
+
+def _update_governance_discovery_tags(
+    oci_module: Any,
+    client: Any,
+    platform_id: str,
+    desired: dict[str, str],
+) -> bool:
+    for attempt in range(3):
+        response = client.get_ai_data_platform(platform_id)
+        current = dict(getattr(response.data, "freeform_tags", None) or {})
+        merged = _merged_governance_discovery_tags(current, desired)
+        if current == merged:
+            return False
+        details = oci_module.ai_data_platform.models.UpdateAiDataPlatformDetails(
+            freeform_tags=merged
+        )
+        try:
+            client.update_ai_data_platform(
+                platform_id,
+                details,
+                if_match=str((getattr(response, "headers", None) or {}).get("etag") or "") or None,
+            )
+            return True
+        except oci_module.exceptions.ServiceError as exc:
+            if exc.status not in {409, 412} or attempt == 2:
+                raise ReconcileError(
+                    f"AIDP governance discovery tag update failed with OCI {exc.status}"
+                ) from exc
+            _sleep(2**attempt)
+    raise ReconcileError("AIDP governance discovery tags exhausted retries")
+
+
+def ensure_governance_discovery_tags(
+    oci_module: Any,
+    config: dict[str, Any],
+    signer: Any,
+    outputs: dict[str, Any],
+) -> bool:
+    desired = _governance_discovery_desired(outputs)
+    client = oci_module.ai_data_platform.AiDataPlatformClient(config, signer=signer)
+    return _update_governance_discovery_tags(
+        oci_module, client, str(outputs["ai_data_platform_id"]), desired
+    )
+
+
+def _governance_discovery_tag_message(enabled: bool, changed: bool) -> str:
+    return {
+        (True, True): "AIDP governance discovery tags published",
+        (True, False): "AIDP governance discovery tags already current",
+        (False, True): "AIDP governance discovery tags removed",
+        (False, False): "AIDP governance discovery tags already absent",
+    }[(enabled, changed)]
+
+
 def resolve_workbench_url(outputs: dict[str, Any], config: dict[str, Any], signer: Any) -> str:
     direct_url = workbench_url(outputs)
     if direct_url:
@@ -2046,6 +2156,12 @@ def main() -> int:
                 "data_governance access verified for platform administrators and the dedicated JDBC identity; "
                 f"JDBC credential {'rotated' if credential_rotated else 'reused'}"
             )
+        tags_changed = ensure_governance_discovery_tags(oci, oci_config, signer, outputs)
+        messages.append(
+            _governance_discovery_tag_message(
+                bool(outputs.get("enable_ai_data_governance")), tags_changed
+            )
+        )
         aidp_url = resolve_workbench_url(outputs, oci_config, signer)
         if not aidp_url:
             raise ReconcileError("AIDP Workbench direct URL is not published yet")

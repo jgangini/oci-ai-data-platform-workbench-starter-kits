@@ -4,7 +4,7 @@ Oracle AI Data Platform Workbench Starter Kits is a reusable collection of hands
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more starter kits without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current validation target: **v2.1.17**. This release introduces the Starter Kits identity and publishes the AI Data Governance Gateway at `ghcr.io/jgangini/oci-aidp-data-governance-gateway`, while preserving the stable Deploy Studio project contract and the existing `oci_artifact/data_governance` architecture.
+Current validation target: **v2.1.18**. This release adds the administrator-only, direct-to-Object-Storage JDBC installation flow for the AI Data Governance Gateway image at `ghcr.io/jgangini/oci-aidp-data-governance-gateway`, while preserving the stable Deploy Studio project contract and the existing `oci_artifact/data_governance` architecture.
 
 ## What the project provides
 
@@ -117,7 +117,7 @@ The package preserves `catalog_inventory` and `catalog_lineage` and adds `govern
 
 ### AI Data Governance Gateway
 
-The optional **Install AI Data Governance Gateway** add-on deploys a private, least-privilege service on OKE. It is the policy enforcement point for the VS Code SQL editor, governed notebooks, and Agent tools. The authoritative control plane is the `data_governance` Delta schema in the selected standard AIDP catalog:
+The optional **AI Data Governance Gateway** component deploys a private, least-privilege service on OKE. It is the policy enforcement point for the VS Code SQL editor, governed notebooks, and Agent tools. The authoritative control plane is the `data_governance` Delta schema in the selected standard AIDP catalog:
 
 - `data_governance` stores catalog classification, sensitivity, ownership, and review state.
 - `access_policy` stores `ALLOW`, `DENY`, `NULL`, `MASK`, and `TOKENIZE` rules for existing users, groups, and roles.
@@ -138,7 +138,11 @@ flowchart LR
   AG -->|AIDP checkpointer| ADB[(Autonomous AI Database 26ai)]
 ```
 
-OKE uses Workload Identity for OCI access. Deploy Studio creates one private `oci_artifact` Object Storage bucket for governance data and runtime artifacts. Each external Delta table lives at `data_governance/<table-name>` and is published as `aidp_lab.data_governance.<table-name>`; the licensed Oracle AIDP JDBC bundle lives at `data_governance/runtime/aidp-jdbc-driver.zip`. Neither artifact enters Git or Terraform state. A dedicated API key is generated for the technical JDBC user, stored in OCI Vault, and limited to `ADMIN` on the `data_governance` schema, `USE` on the shared cluster, and the documented `read buckets`/`inspect objects` discovery permissions on `oci_artifact`. It cannot read object contents, create objects, manage objects, or delete objects directly. The personal deployment key is never mounted in pods. Public TLS and OIDC terminate at OCI API Gateway; the OKE service remains private. See [`docs/data-governance.md`](docs/data-governance.md) for the complete contract and acceptance gates.
+OKE uses Workload Identity for OCI access. Deploy Studio creates one private `oci_artifact` Object Storage bucket for governance data and runtime artifacts. Each external Delta table lives at `data_governance/<table-name>` and is published as `aidp_lab.data_governance.<table-name>`; the licensed Oracle AIDP JDBC bundle has the fixed object name `data_governance/runtime/aidp-jdbc-driver.zip`. Neither artifact enters Git or Terraform state.
+
+Only an authenticated administrator can request a ten-minute, exact-object write PAR from `POST /v1/admin/jdbc-driver:upload`. The VS Code extension uploads the ZIP directly to Object Storage so the licensed archive never crosses OCI API Gateway, then calls `POST /v1/admin/jdbc-driver:complete` with the opaque upload identifier, declared size, and SHA-256 digest. The gateway revokes the PAR before reading the object, validates size, digest, ZIP structure, and the presence of a JAR, and deletes an invalid object. Its OKE Workload Identity can manage PARs only for the `oci_artifact` bucket and manage only that fixed JDBC object; it cannot manage any other object in the bucket.
+
+A separate technical JDBC API key is generated after apply, stored in OCI Vault, and limited to `ADMIN` on the `data_governance` schema, `USE` on the shared cluster, and the documented `read buckets`/`inspect objects` discovery permissions on `oci_artifact`. The personal deployment key is never mounted in pods. Public TLS and OIDC terminate at OCI API Gateway; the OKE service remains private. See [`docs/data-governance.md`](docs/data-governance.md) for the complete contract and acceptance gates.
 
 ## End-to-end user guide
 
@@ -333,7 +337,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 
 ## OCI Deploy Studio compatibility
 
-The **v2.1.17** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery and encrypted hook-file extensions.
+The **v2.1.18** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery and encrypted hook-file extensions.
 
 Deploy Studio support includes:
 
@@ -348,7 +352,7 @@ Deploy Studio support includes:
 - Post-apply reconciliation of the AIDP workspace, catalog, `aidp_cluster_shared_compute`, AI feature enablement, Identity roles, participant application, and final access artifact. The first Agent assignment reuses the shared `aidp_agent_shared_compute` runtime.
 - Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
 
-The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.17` tag rather than an untagged development commit.
+The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.18` tag rather than an untagged development commit.
 
 Deploy Studio currently applies the Resource Manager plan automatically after planning and does not expose a repository hook between those stages. For controlled deployments, review the generated plan or run `python terraform/release_gate.py --plan-json <plan.json>` in CI before starting the final apply.
 

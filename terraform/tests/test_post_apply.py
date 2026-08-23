@@ -188,6 +188,151 @@ class FakeApi:
         return post_apply.ApiResponse(200, item, {})
 
 
+def test_governance_discovery_tags_merge_without_replacing_existing_tags() -> None:
+    platform = SimpleNamespace(freeform_tags={"owner": "data-team"})
+    updates: list[tuple[dict[str, str], str | None]] = []
+
+    class Client:
+        def get_ai_data_platform(self, platform_id: str) -> SimpleNamespace:
+            assert platform_id == "ocid1.aidataplatform.test"
+            return SimpleNamespace(data=platform, headers={"etag": "etag-1"})
+
+        def update_ai_data_platform(
+            self, platform_id: str, details: SimpleNamespace, *, if_match: str | None
+        ) -> None:
+            assert platform_id == "ocid1.aidataplatform.test"
+            updates.append((details.freeform_tags, if_match))
+            platform.freeform_tags = details.freeform_tags
+
+    class Details:
+        def __init__(self, *, freeform_tags: dict[str, str]) -> None:
+            self.freeform_tags = freeform_tags
+
+    oci_module = SimpleNamespace(
+        ai_data_platform=SimpleNamespace(
+            AiDataPlatformClient=lambda _config, signer: Client(),
+            models=SimpleNamespace(UpdateAiDataPlatformDetails=Details),
+        ),
+        exceptions=SimpleNamespace(ServiceError=RuntimeError),
+    )
+    outputs = {
+        "enable_ai_data_governance": True,
+        "ai_data_platform_id": "ocid1.aidataplatform.test",
+        "governance_gateway_url": "https://governance.example.test",
+        "governance_gateway_oidc_authority": "https://identity.example.test",
+        "governance_gateway_oidc_issuer": "https://identity.example.test/issuer",
+        "governance_gateway_oidc_client_id": "gateway-client",
+        "governance_gateway_oidc_audience": "governance-api",
+        "governance_gateway_oidc_scopes": "openid offline_access governance.all",
+        "governance_gateway_image": (
+            "ghcr.io/jgangini/oci-aidp-data-governance-gateway@sha256:" + "a" * 64
+        ),
+    }
+    assert post_apply.ensure_governance_discovery_tags(
+        oci_module, {"region": "us-chicago-1"}, object(), outputs
+    )
+    assert updates == [({
+        "owner": "data-team",
+        "enable_ai_data_governance": "true",
+        "governance_gateway_url": outputs["governance_gateway_url"],
+        "governance_gateway_oidc_authority": outputs["governance_gateway_oidc_authority"],
+        "governance_gateway_oidc_issuer": outputs["governance_gateway_oidc_issuer"],
+        "governance_gateway_oidc_client_id": outputs["governance_gateway_oidc_client_id"],
+        "governance_gateway_oidc_audience": outputs["governance_gateway_oidc_audience"],
+        "governance_gateway_oidc_scopes": outputs["governance_gateway_oidc_scopes"],
+        "governance_gateway_image": outputs["governance_gateway_image"],
+        "governance_gateway_runtime": "OKE",
+    }, "etag-1")]
+    assert not post_apply.ensure_governance_discovery_tags(
+        oci_module, {"region": "us-chicago-1"}, object(), outputs
+    )
+    outputs["enable_ai_data_governance"] = False
+    assert post_apply.ensure_governance_discovery_tags(
+        oci_module, {"region": "us-chicago-1"}, object(), outputs
+    )
+    assert updates[-1] == ({"owner": "data-team"}, "etag-1")
+    assert set(platform.freeform_tags) == {"owner"}
+
+
+def test_governance_discovery_tags_reject_mutable_images() -> None:
+    with pytest.raises(post_apply.ReconcileError, match="canonical and immutable"):
+        post_apply.ensure_governance_discovery_tags(
+            SimpleNamespace(),
+            {"region": "us-chicago-1"},
+            object(),
+            {
+                "enable_ai_data_governance": True,
+                "ai_data_platform_id": "ocid1.aidataplatform.test",
+                "governance_gateway_image": "ghcr.io/jgangini/oci-aidp-data-governance-gateway:latest",
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    ("enabled", "changed", "expected"),
+    [
+        (True, True, "AIDP governance discovery tags published"),
+        (True, False, "AIDP governance discovery tags already current"),
+        (False, True, "AIDP governance discovery tags removed"),
+        (False, False, "AIDP governance discovery tags already absent"),
+    ],
+)
+def test_governance_discovery_tag_message(
+    enabled: bool, changed: bool, expected: str
+) -> None:
+    assert post_apply._governance_discovery_tag_message(enabled, changed) == expected
+
+
+def test_governance_discovery_tag_cleanup_retries_etag_conflicts(monkeypatch) -> None:
+    tags = {name: "stale" for name in post_apply.GOVERNANCE_DISCOVERY_TAGS}
+    platform = SimpleNamespace(freeform_tags={"owner": "data-team", **tags})
+    if_matches: list[str | None] = []
+    reads = 0
+
+    class ServiceError(Exception):
+        def __init__(self, status: int) -> None:
+            self.status = status
+
+    class Client:
+        def get_ai_data_platform(self, _platform_id: str) -> SimpleNamespace:
+            nonlocal reads
+            reads += 1
+            return SimpleNamespace(data=platform, headers={"etag": f"etag-{reads}"})
+
+        def update_ai_data_platform(
+            self, _platform_id: str, details: SimpleNamespace, *, if_match: str | None,
+        ) -> None:
+            if_matches.append(if_match)
+            if len(if_matches) == 1:
+                raise ServiceError(412)
+            platform.freeform_tags = details.freeform_tags
+
+    class Details:
+        def __init__(self, *, freeform_tags: dict[str, str]) -> None:
+            self.freeform_tags = freeform_tags
+
+    client = Client()
+    oci_module = SimpleNamespace(
+        ai_data_platform=SimpleNamespace(
+            AiDataPlatformClient=lambda _config, signer: client,
+            models=SimpleNamespace(UpdateAiDataPlatformDetails=Details),
+        ),
+        exceptions=SimpleNamespace(ServiceError=ServiceError),
+    )
+    monkeypatch.setattr(post_apply, "_sleep", lambda _seconds: None)
+    assert post_apply.ensure_governance_discovery_tags(
+        oci_module,
+        {"region": "us-chicago-1"},
+        object(),
+        {
+            "enable_ai_data_governance": False,
+            "ai_data_platform_id": "ocid1.aidataplatform.test",
+        },
+    )
+    assert if_matches == ["etag-1", "etag-2"]
+    assert platform.freeform_tags == {"owner": "data-team"}
+
+
 def test_governance_schema_permissions_allow_only_admins_and_dedicated_jdbc_user() -> None:
     api = FakeApi()
     technical_user = "ocid1.user.oc1..governance"

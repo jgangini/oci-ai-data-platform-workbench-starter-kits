@@ -155,7 +155,10 @@ test("settings separate Workbench, application and governance details into acces
   assert.match(governanceSource, /Governance Delta schema/);
   assert.match(governanceSource, /AIDP JDBC driver/);
   assert.match(governanceSource, /Install JDBC Driver/);
+  assert.match(source, /const governanceGatewayInstalled = jdbcDriverAvailable && Boolean\(governanceGatewayUrl\)/);
+  assert.match(governanceSource, /governanceGatewayInstalled \? \(/);
   assert.match(governanceSource, /jdbcDriverAvailable \? \(/);
+  assert.match(governanceSource, /Deployment pending/);
   assert.match(governanceSource, /connect-compute\.html#GUID-B7F594C8-724D-4733-B80D-7A4C9A0CB0A2/);
   assert.match(governanceSource, /jdbcDriverDownloadImage/);
   assert.match(source, /title="Install JDBC driver\?"/);

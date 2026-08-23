@@ -1,6 +1,6 @@
 # AI Data Governance add-on
 
-> Status: `v2.1.17` validation target. Local contracts and the live AIDP schema-owner permission check are implemented; the next acceptance is one clean deployment after all local gates pass.
+> Status: `v2.1.18` validation target. Local contracts and the live AIDP schema-owner permission check are implemented; the next acceptance is one clean deployment after all local gates pass.
 
 ## Runtime boundaries
 
@@ -55,9 +55,11 @@ OCI API Gateway is the only public entry point. It terminates TLS, validates the
 
 Terraform waits once for the exact DevOps pipeline policy to propagate before starting the server-side apply. The DevOps project emits a 30-day OCI service log so a failed manifest or rollout has stage-level evidence. Kubernetes uses `/healthz` for pod availability; `/readyz` remains the stricter operational check and returns `503` until the JDBC runtime, `data_governance` tables, and first catalog synchronization are ready. This allows the gateway to be installed before the licensed driver is uploaded without claiming data access is ready.
 
-OCI APIs are accessed through Workload Identity. Deploy Studio creates the dedicated JDBC API key after Terraform apply and stores its private half only in OCI Vault. The administrator imports the licensed Oracle AIDP JDBC driver from the VM settings page; it is validated, sent directly to `oci_artifact/data_governance/runtime/`, and never stored in Git or Terraform state. The pod materializes both artifacts only on its ephemeral filesystem.
+The gateway uses OKE Workload Identity for OCI access. Deploy Studio creates a separate technical JDBC API key after Terraform apply, stores its private half only in OCI Vault, and never mounts a personal deployment key in the pod. The JDBC identity is limited to `ADMIN` on the `data_governance` schema, `USE` on the shared cluster, and the documented external-table discovery permissions on `oci_artifact`: `read buckets` and `inspect objects`. It cannot read object contents, create objects, manage objects, or delete objects directly.
 
-The technical JDBC identity receives only the documented external-table discovery permissions on `oci_artifact`: `read buckets` and `inspect objects`. It cannot read object contents, create objects, manage objects, or delete objects directly. AIDP's existing service-principal policy remains the only writer for buckets governed by that AIDP instance.
+Licensed driver installation is an administrator-only PAR workflow. `POST /v1/admin/jdbc-driver:upload` accepts the declared `size_bytes` and SHA-256 digest and returns an opaque `upload_id`, an HTTPS `upload_url`, and an expiry. The gateway creates a ten-minute ObjectWrite PAR bound to the private bucket `oci_artifact` and exact object `data_governance/runtime/aidp-jdbc-driver.zip`; the extension uploads the ZIP directly to Object Storage rather than sending the archive through OCI API Gateway. `POST /v1/admin/jdbc-driver:complete` accepts the same size and digest plus the upload identifier. The gateway revokes the PAR before reading the fixed object, validates its size, digest, ZIP structure, and JAR content, deletes the object on failed validation, and resets runtime readiness after success. A developer receives `403` from both administrative endpoints.
+
+The gateway Workload Identity has bucket-scoped `PAR_MANAGE` only on `oci_artifact` because OCI PAR authorization is bucket-scoped, plus `manage objects` constrained to `data_governance/runtime/aidp-jdbc-driver.zip`. It cannot manage any other object in that bucket. AIDP's existing service-principal policy remains the writer for the Delta table objects governed by that AIDP instance. The pod materializes the JDBC bundle and Vault secret only on its ephemeral filesystem.
 
 ## Acceptance gates
 
@@ -65,6 +67,8 @@ The technical JDBC identity receives only the documented external-table discover
 - One gateway, one `data_governance` schema, and one participant Agent are reconciled without duplicates.
 - One Agent redeploy occurs only when the package, source, or tool contract changes.
 - Administrator policy operations succeed; developer operations return `403`.
+- Only administrators can reserve or complete a JDBC upload; the PAR expires after ten minutes, is bound to the fixed JDBC object, and is revoked before validation.
+- Invalid JDBC uploads are deleted, and no driver bytes traverse OCI API Gateway, Git, Terraform state, or logs.
 - SQL, Python, Scala, notebooks, and Agent tools reach the same policy decision.
 - Prompt injection cannot change identity, policy, or tool allowlists.
 - Autonomous stays deployed and the AIDP `checkpointer` path remains enabled.

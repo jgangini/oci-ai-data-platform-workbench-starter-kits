@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
 import stat
 import tempfile
+import uuid
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
@@ -16,7 +19,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 
 _PROFILE = "AIDP_GATEWAY"
-_MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
+MAX_JDBC_DRIVER_BYTES = 128 * 1024 * 1024
+_JDBC_DRIVER_BUCKET = "oci_artifact"
+_JDBC_DRIVER_OBJECT = "data_governance/runtime/aidp-jdbc-driver.zip"
 _MAX_EXPANDED_BYTES = 512 * 1024 * 1024
 _PARAMETER = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
 _DEFAULT_MAX_ROWS = 1_000
@@ -24,6 +29,10 @@ _DEFAULT_MAX_RESULT_BYTES = 5 * 1024 * 1024
 
 
 class JdbcConfigurationError(RuntimeError):
+    pass
+
+
+class JdbcDriverValidationError(JdbcConfigurationError):
     pass
 
 
@@ -66,6 +75,123 @@ class AidpJdbcRuntime:
             cursor.close()
             connection.close()
 
+    def driver_installed(self) -> bool:
+        oci, client, namespace, bucket, object_name = self._object_storage()
+        try:
+            response = client.head_object(namespace, bucket, object_name)
+        except oci.exceptions.ServiceError as exc:
+            if exc.status == 404:
+                return False
+            raise JdbcConfigurationError(f"JDBC driver status failed with OCI {exc.status}.") from exc
+        size = int((getattr(response, "headers", None) or {}).get("content-length", 0))
+        return 1 <= size <= MAX_JDBC_DRIVER_BYTES
+
+    def create_driver_upload(self, size_bytes: int, sha256: str) -> dict[str, Any]:
+        _validate_upload_contract(size_bytes, sha256)
+        oci, client, namespace, bucket, object_name = self._object_storage()
+        expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+        details = oci.object_storage.models.CreatePreauthenticatedRequestDetails(
+            name=f"aidp-jdbc-driver-{size_bytes}-{sha256}-{uuid.uuid4().hex}",
+            access_type="ObjectWrite",
+            object_name=object_name,
+            time_expires=expires,
+        )
+        try:
+            response = client.create_preauthenticated_request(namespace, bucket, details)
+        except oci.exceptions.ServiceError as exc:
+            raise JdbcConfigurationError(f"JDBC driver PAR creation failed with OCI {exc.status}.") from exc
+        access_uri = str(getattr(response.data, "access_uri", "") or "")
+        upload_id = str(getattr(response.data, "id", "") or "")
+        if not access_uri.startswith("/") or re.search(r"[\x00-\x20]", access_uri):
+            raise JdbcConfigurationError("Object Storage returned an invalid JDBC upload URL.")
+        if not re.fullmatch(r"[A-Za-z0-9._~-]{1,512}", upload_id):
+            raise JdbcConfigurationError("Object Storage returned an invalid JDBC upload identifier.")
+        region = self._env["GOVERNANCE_OCI_REGION"].strip()
+        return {
+            "upload_id": upload_id,
+            "upload_url": f"https://objectstorage.{region}.oraclecloud.com{access_uri}",
+            "expires_at": expires.isoformat().replace("+00:00", "Z"),
+        }
+
+    def complete_driver_upload(self, upload_id: str, size_bytes: int, sha256: str) -> None:
+        _validate_upload_contract(size_bytes, sha256)
+        oci, client, namespace, bucket, object_name = self._object_storage()
+        _revoke_driver_upload(
+            oci, client, namespace, bucket, object_name, upload_id, size_bytes, sha256
+        )
+        temporary: Path | None = None
+        try:
+            try:
+                response = client.get_object(namespace, bucket, object_name)
+            except oci.exceptions.ServiceError as exc:
+                if exc.status == 404:
+                    raise JdbcDriverValidationError("The JDBC driver upload was not found.") from exc
+                raise JdbcConfigurationError(f"JDBC driver verification failed with OCI {exc.status}.") from exc
+            declared = int((getattr(response, "headers", None) or {}).get("content-length", 0))
+            if declared != size_bytes or not 1 <= declared <= MAX_JDBC_DRIVER_BYTES:
+                raise JdbcDriverValidationError("The uploaded JDBC driver size does not match the request.")
+            digest = hashlib.sha256()
+            with tempfile.NamedTemporaryFile(prefix="jdbc-verify-", suffix=".zip", delete=False) as handle:
+                temporary = Path(handle.name)
+                remaining = MAX_JDBC_DRIVER_BYTES + 1
+                while remaining:
+                    chunk = response.data.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+            if temporary.stat().st_size != size_bytes or digest.hexdigest() != sha256:
+                raise JdbcDriverValidationError("The uploaded JDBC driver digest does not match the request.")
+            _validate_driver_archive(temporary)
+        except JdbcDriverValidationError:
+            try:
+                client.delete_object(namespace, bucket, object_name)
+            except oci.exceptions.ServiceError as cleanup:
+                raise JdbcConfigurationError(
+                    f"The invalid JDBC driver could not be removed (OCI {cleanup.status})."
+                ) from cleanup
+            raise
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        with self._lock:
+            self._connection = None
+
+    def _object_storage(self) -> tuple[Any, Any, str, str, str]:
+        required = {
+            name: self._env.get(name, "").strip()
+            for name in (
+                "GOVERNANCE_OCI_REGION",
+                "GOVERNANCE_OBJECT_STORAGE_NAMESPACE",
+                "GOVERNANCE_JDBC_DRIVER_BUCKET",
+                "GOVERNANCE_JDBC_DRIVER_OBJECT",
+            )
+        }
+        missing = sorted(name for name, value in required.items() if not value)
+        if missing:
+            raise JdbcConfigurationError(f"Missing governance JDBC setting(s): {', '.join(missing)}")
+        _validate_driver_target(
+            required["GOVERNANCE_JDBC_DRIVER_BUCKET"],
+            required["GOVERNANCE_JDBC_DRIVER_OBJECT"],
+        )
+        import oci
+
+        signer = oci.auth.signers.get_oke_workload_identity_resource_principal_signer()
+        client = oci.object_storage.ObjectStorageClient(
+            {},
+            signer=signer,
+            service_endpoint=f"https://objectstorage.{required['GOVERNANCE_OCI_REGION']}.oraclecloud.com",
+            retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY,
+        )
+        return (
+            oci,
+            client,
+            required["GOVERNANCE_OBJECT_STORAGE_NAMESPACE"],
+            required["GOVERNANCE_JDBC_DRIVER_BUCKET"],
+            required["GOVERNANCE_JDBC_DRIVER_OBJECT"],
+        )
+
     def _prepare(self) -> Callable[[], Any]:
         required = {
             name: self._env.get(name, "").strip()
@@ -81,6 +207,9 @@ class AidpJdbcRuntime:
         missing = sorted(name for name, value in required.items() if not value)
         if missing:
             raise JdbcConfigurationError(f"Missing governance JDBC setting(s): {', '.join(missing)}")
+        _validate_driver_target(
+            required["GOVERNANCE_JDBC_DRIVER_BUCKET"], required["GOVERNANCE_JDBC_DRIVER_OBJECT"]
+        )
 
         import oci
 
@@ -205,18 +334,18 @@ def _download_driver(
     )
     response = client.get_object(namespace, bucket, object_name)
     content_length = int(response.headers.get("content-length", 0))
-    if content_length <= 0 or content_length > _MAX_ARCHIVE_BYTES:
+    if content_length <= 0 or content_length > MAX_JDBC_DRIVER_BYTES:
         raise JdbcConfigurationError("The JDBC driver object size is missing or outside the allowed limit.")
     archive = directory / "driver-download"
     with archive.open("wb") as handle:
-        remaining = _MAX_ARCHIVE_BYTES + 1
+        remaining = MAX_JDBC_DRIVER_BYTES + 1
         while remaining:
             chunk = response.data.read(min(1024 * 1024, remaining))
             if not chunk:
                 break
             handle.write(chunk)
             remaining -= len(chunk)
-    if archive.stat().st_size != content_length or archive.stat().st_size > _MAX_ARCHIVE_BYTES:
+    if archive.stat().st_size != content_length or archive.stat().st_size > MAX_JDBC_DRIVER_BYTES:
         raise JdbcConfigurationError("The JDBC driver object did not match its declared size.")
 
     if object_name.casefold().endswith(".jar"):
@@ -229,6 +358,70 @@ def _download_driver(
     if not jars:
         raise JdbcConfigurationError("The JDBC driver bundle contained no JAR files.")
     return tuple(sorted(jars))
+
+
+def _validate_upload_contract(size: int, sha256: str) -> None:
+    if not 1 <= size <= MAX_JDBC_DRIVER_BYTES or not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        raise JdbcDriverValidationError("The JDBC driver upload metadata is invalid.")
+
+
+def _revoke_driver_upload(
+    oci: Any,
+    client: Any,
+    namespace: str,
+    bucket: str,
+    object_name: str,
+    upload_id: str,
+    size_bytes: int,
+    sha256: str,
+) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9._~-]{1,512}", upload_id):
+        raise JdbcDriverValidationError("The JDBC driver upload identifier is invalid.")
+    try:
+        response = client.get_preauthenticated_request(namespace, bucket, upload_id)
+    except oci.exceptions.ServiceError as exc:
+        if exc.status == 404:
+            raise JdbcDriverValidationError("The JDBC driver upload has expired or does not exist.") from exc
+        raise JdbcConfigurationError(f"JDBC driver PAR lookup failed with OCI {exc.status}.") from exc
+    details = response.data
+    name = str(getattr(details, "name", "") or "")
+    managed = (
+        name.startswith("aidp-jdbc-driver-")
+        and str(getattr(details, "access_type", "") or "") == "ObjectWrite"
+        and str(getattr(details, "object_name", "") or "") == object_name
+    )
+    if not managed:
+        raise JdbcDriverValidationError("The JDBC driver upload identifier is not managed by this gateway.")
+    try:
+        # ponytail: revoke before reading the canonical object so a completed upload cannot be overwritten.
+        client.delete_preauthenticated_request(namespace, bucket, upload_id)
+    except oci.exceptions.ServiceError as exc:
+        raise JdbcConfigurationError(f"JDBC driver PAR revocation failed with OCI {exc.status}.") from exc
+    expected = re.escape(f"aidp-jdbc-driver-{size_bytes}-{sha256}-") + r"[0-9a-f]{32}"
+    if not re.fullmatch(expected, name):
+        raise JdbcDriverValidationError("The JDBC driver upload does not match the original request.")
+
+
+def _validate_driver_target(bucket: str, object_name: str) -> None:
+    if bucket != _JDBC_DRIVER_BUCKET or object_name != _JDBC_DRIVER_OBJECT:
+        raise JdbcConfigurationError(
+            "The governance JDBC target must be "
+            f"{_JDBC_DRIVER_BUCKET}/{_JDBC_DRIVER_OBJECT}."
+        )
+
+
+def _validate_driver_archive(archive: Path) -> None:
+    if archive.stat().st_size <= 0 or archive.stat().st_size > MAX_JDBC_DRIVER_BYTES:
+        raise JdbcDriverValidationError("The JDBC driver ZIP size is invalid.")
+    if not zipfile.is_zipfile(archive):
+        raise JdbcDriverValidationError("The uploaded JDBC driver is not a ZIP archive.")
+    try:
+        with tempfile.TemporaryDirectory(prefix="jdbc-validation-") as directory:
+            jars = _extract_driver_archive(archive, Path(directory), depth=0)
+    except (OSError, zipfile.BadZipFile, JdbcConfigurationError) as exc:
+        raise JdbcDriverValidationError("The uploaded JDBC driver ZIP is invalid.") from exc
+    if not jars:
+        raise JdbcDriverValidationError("The uploaded JDBC driver ZIP contains no JAR files.")
 
 
 def _extract_driver_archive(archive: Path, destination: Path, depth: int) -> list[Path]:
