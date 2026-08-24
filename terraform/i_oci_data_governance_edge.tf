@@ -180,14 +180,20 @@ resource "terraform_data" "governance_vault_dns_wait" {
   provisioner "local-exec" {
     command = <<-EOT
       attempt=1
+      consecutive_successes=0
       while [ "$attempt" -le 90 ]; do
         if python3 -c 'import socket, sys; socket.getaddrinfo(sys.argv[1], 443)' "$GOVERNANCE_VAULT_HOST" >/dev/null 2>&1; then
-          exit 0
+          consecutive_successes=$((consecutive_successes + 1))
+          if [ "$consecutive_successes" -ge 6 ]; then
+            exit 0
+          fi
+        else
+          consecutive_successes=0
         fi
         sleep 10
         attempt=$((attempt + 1))
       done
-      echo "Vault management endpoint DNS was not ready after 900 seconds" >&2
+      echo "Vault management endpoint DNS was not stable after 900 seconds" >&2
       exit 1
     EOT
     environment = {

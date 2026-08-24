@@ -40,7 +40,7 @@ def test_operator_identity_is_reused_and_governance_resources_are_isolated() -> 
     assert 'resource "terraform_data" "governance_vault_dns_wait"' in edge
     assert "socket.getaddrinfo(sys.argv[1], 443)" in edge
     assert 'while [ "$attempt" -le 90 ]' in edge
-    assert "Vault management endpoint DNS was not ready after 900 seconds" in edge
+    assert "Vault management endpoint DNS was not stable after 900 seconds" in edge
     assert 'GOVERNANCE_VAULT_HOST = trimprefix(local.governance_vault_management_endpoint, "https://")' in edge
     assert "depends_on = [terraform_data.validate_governance_inputs]" in edge
     assert "depends_on = [terraform_data.governance_vault_dns_wait]" in edge
