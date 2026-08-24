@@ -35,9 +35,11 @@ from .notebooks import (
 API_VERSION = "20260430"
 SHARED_COMPUTE_NAME = "aidp_cluster_shared_compute"
 AGENT_COMPUTE_NAME = "aidp_agent_shared_compute"
+CATALOG_NAME = "oci_medallion"
 LEGACY_CATALOG_NAME = "aidp_lab"
-LAYOUT_VERSION = 4
+LAYOUT_VERSION = 5
 CONTROL_ROOT = f"{WORKSPACE_ROOT}/.control"
+LEGACY_MEDALLION_ROOT = "/Workspace/medallon"
 LEGACY_WORKSPACE_ROOT = "/Workspace/lab-users"
 LEGACY_LAB_IDS = frozenset({"banking", "telecommunications", "retail", "healthcare"})
 
@@ -45,7 +47,7 @@ LEGACY_LAB_IDS = frozenset({"banking", "telecommunications", "retail", "healthca
 def participant_catalog_name(key: str) -> str:
     if re.fullmatch(r"u[1-9][0-9]*", key) is None or int(key[1:]) < 101:
         raise ValueError("A participant key starting at u101 is required")
-    return f"{key}_aidp"
+    return CATALOG_NAME
 
 
 def catalog_name_for(key: str) -> str:
@@ -1140,12 +1142,12 @@ class AidpClient:
     @staticmethod
     def _legacy_manifest_workspace_path(manifest: dict[str, Any], key: str) -> str:
         workspace_path = str(manifest.get("workspace_path") or "")
-        relative_path = workspace_path.removeprefix(f"{WORKSPACE_ROOT}/")
+        relative_path = workspace_path.removeprefix(f"{LEGACY_MEDALLION_ROOT}/")
         parts = relative_path.split("/")
         if (
             manifest.get("layout_version") != 2
             or manifest.get("participant_key") != key
-            or not workspace_path.startswith(f"{WORKSPACE_ROOT}/")
+            or not workspace_path.startswith(f"{LEGACY_MEDALLION_ROOT}/")
             or len(parts) != 2
             or parts[0] in {"", ".control"}
             or parts[1] not in LEGACY_LAB_IDS
@@ -1175,7 +1177,7 @@ class AidpClient:
             }
         labs = manifest.get("labs")
         if (
-            manifest.get("layout_version") not in {3, LAYOUT_VERSION}
+            manifest.get("layout_version") not in {3, 4, LAYOUT_VERSION}
             or not isinstance(labs, dict)
         ):
             raise AidpProvisionError(
@@ -1200,12 +1202,25 @@ class AidpClient:
         state: dict[str, Any], key: str, lab_id: str, email: str | None = None
     ) -> bool:
         if state.get("pack_version") == "legacy-v2":
-            pattern = rf"{re.escape(WORKSPACE_ROOT)}/(?!\.control(?:/|$))[^/]+/{re.escape(lab_id)}"
+            pattern = rf"{re.escape(LEGACY_MEDALLION_ROOT)}/(?!\.control(?:/|$))[^/]+/{re.escape(lab_id)}"
             return re.fullmatch(pattern, str(state.get("workspace_path") or "")) is not None
         if email is None and re.fullmatch(r"u[1-9][0-9]*", key):
-            pattern = rf"{re.escape(WORKSPACE_ROOT)}/{re.escape(key)}_[^/]+/{re.escape(lab_id)}"
-            return re.fullmatch(pattern, str(state.get("workspace_path") or "")) is not None
-        return str(state.get("workspace_path") or "") == workspace_root(key, lab_id, email)
+            workspace_path = str(state.get("workspace_path") or "")
+            patterns = (
+                rf"{re.escape(WORKSPACE_ROOT)}/{re.escape(lab_id)}/{re.escape(key)}_[^/]+",
+                rf"{re.escape(LEGACY_MEDALLION_ROOT)}/{re.escape(key)}_[^/]+/{re.escape(lab_id)}",
+            )
+            return any(re.fullmatch(pattern, workspace_path) for pattern in patterns)
+        workspace_path = str(state.get("workspace_path") or "")
+        legacy_folder = (
+            f"{key}_{participant_folder(email)}"
+            if email and re.fullmatch(r"u[1-9][0-9]*", key)
+            else key
+        )
+        return workspace_path in {
+            workspace_root(key, lab_id, email),
+            f"{LEGACY_MEDALLION_ROOT}/{legacy_folder}/{lab_id}",
+        }
 
     def _write_manifest(
         self,
@@ -1732,9 +1747,39 @@ class AidpClient:
             for item in current
         ):
             raise AidpProvisionError(
-                "Governed data access is enabled, but this participant still has direct catalog SELECT. "
-                "An AI_DATA_PLATFORM_ADMIN must revoke that permission in AIDP before retrying."
+                "This participant still has direct catalog SELECT. An AI_DATA_PLATFORM_ADMIN "
+                "must revoke that permission before table-level isolation can be enforced."
             )
+
+    def _ensure_lab_table_permissions(
+        self,
+        catalog_key: str,
+        participant_key: str,
+        lab_id: str,
+        user_ocid: str,
+    ) -> bool:
+        pack = load_lab_pack(lab_id)
+        schemas = self._shared_schemas(catalog_key)
+        changed = False
+        for layer, logical_names in pack.tables.items():
+            schema = schemas.get(layer)
+            schema_key = str((schema or {}).get("key") or "")
+            if not schema_key:
+                continue
+            expected = {
+                table_name(participant_key, lab_id, logical_name)
+                for logical_name in logical_names
+            }
+            for table in self._schema_tables(catalog_key, schema_key):
+                table_key = str(table.get("key") or "")
+                if table_key and self._resource_name(table) in expected:
+                    changed = self._ensure_permission(
+                        f"/tables/{table_key}",
+                        "assignTablePermissionDetails",
+                        user_ocid,
+                        "SELECT",
+                    ) or changed
+        return changed
 
     def _ensure_permissions(
         self,
@@ -1743,6 +1788,8 @@ class AidpClient:
         participant_root: str,
         job_key: str,
         catalog_key: str,
+        participant_key: str,
+        lab_id: str,
     ) -> bool:
         root_key = self._workspace_object_key(workspace_key, WORKSPACE_ROOT)
         participant_object_key = self._workspace_object_key(workspace_key, participant_root)
@@ -1761,12 +1808,10 @@ class AidpClient:
             inheritable=True,
         ) or changed
         catalog_path = f"/catalogs/{catalog_key}"
-        if getattr(self.settings, "enforce_governed_data_access", False):
-            self._assert_permission_absent(catalog_path, user_ocid, "SELECT")
-        else:
-            changed = self._ensure_permission(
-                catalog_path, "assignCatalogPermissionDetails", user_ocid, "SELECT"
-            ) or changed
+        self._assert_permission_absent(catalog_path, user_ocid, "SELECT")
+        changed = self._ensure_lab_table_permissions(
+            catalog_key, participant_key, lab_id, user_ocid
+        ) or changed
         changed = self._ensure_permission(
             f"/workspaces/{workspace_key}/jobs/{job_key}",
             "assignJobPermissionDetails",
@@ -1912,7 +1957,8 @@ class AidpClient:
         participant_code = manifest.get("participant_code")
         workspace_key = str(self._workspace()["key"])
         root = str(state["workspace_path"])
-        participant_root = root.rsplit("/", 1)[0]
+        lab_root = root.rsplit("/", 1)[0]
+        participant_root = root
         agent_name = str(pack.agent["name_template"]).format(participant_key=key)
         was_active = False
         if not all(
@@ -1926,7 +1972,7 @@ class AidpClient:
             raise AidpProvisionError("The selected Agent model and regional runtime are incomplete.")
 
         layout_changed = self._ensure_workspace_layout(
-            workspace_key, (WORKSPACE_ROOT, CONTROL_ROOT, participant_root, root)
+            workspace_key, (WORKSPACE_ROOT, CONTROL_ROOT, lab_root, participant_root)
         )
         catalog_name, catalog_key, schema_keys, catalog_changed = (
             self._agent_catalog_contract(key)
@@ -2100,13 +2146,39 @@ class AidpClient:
         ):
             changed = self._ensure_permission(path, action, user_ocid, permission) or changed
         catalog_path = f"/catalogs/{catalog_key}"
-        if getattr(self.settings, "enforce_governed_data_access", False):
-            self._assert_permission_absent(catalog_path, user_ocid, "SELECT")
-        else:
-            changed = self._ensure_permission(
-                catalog_path, "assignCatalogPermissionDetails", user_ocid, "SELECT"
-            ) or changed
+        self._assert_permission_absent(catalog_path, user_ocid, "SELECT")
         return changed
+
+    def _active_lab_material(
+        self,
+        user_ocid: str,
+        email: str,
+        lab_id: str,
+        key: str,
+        state: dict[str, Any],
+        participant_code: Any,
+    ) -> UserMaterial | None:
+        if str(state.get("phase") or "workspace") != "active":
+            return None
+        catalog_name = str(state.get("catalog_name") or catalog_name_for(key))
+        if state.get("pack_version") != "legacy-v2" and catalog_name == CATALOG_NAME:
+            catalog = self._catalog(catalog_name, allow_missing=True)
+            if catalog and self._ensure_lab_table_permissions(
+                str(catalog.get("key") or ""), key, lab_id, user_ocid
+            ):
+                raise AidpProvisionPending(
+                    "Participant table permissions were repaired; final verification is next.",
+                    "permissions",
+                )
+        return UserMaterial(
+            email,
+            lab_id,
+            key,
+            str(state["workspace_path"]),
+            str(state["job_name"]),
+            str(state.get("pack_version") or "legacy-v2"),
+            participant_code=participant_code if isinstance(participant_code, int) else None,
+        )
 
     def _provision_lab(
         self,
@@ -2128,31 +2200,25 @@ class AidpClient:
         state = self._manifest_labs(manifest, owner_key)[lab_id]
         if pack.kind == "governance_agent":
             return self._provision_agent(user_ocid, email, manifest, state, pack)
-        previous_phase = str(state.get("phase") or "workspace")
-        was_active = previous_phase == "active"
+        active_material = self._active_lab_material(
+            user_ocid, email, lab_id, key, state, participant_code
+        )
+        if active_material is not None:
+            return active_material
         root = str(state["workspace_path"])
-        participant_root = root.rsplit("/", 1)[0]
+        lab_root = root.rsplit("/", 1)[0]
+        participant_root = root
         job_name = str(state["job_name"])
-        if was_active:
-            return UserMaterial(
-                email,
-                lab_id,
-                key,
-                root,
-                job_name,
-                str(state.get("pack_version") or "legacy-v2"),
-                participant_code=participant_code if isinstance(participant_code, int) else None,
-            )
         repair_drift = True
 
         compute_key = str(self._shared_compute(workspace_key)["key"])
         workspace_changed = self._ensure_workspace_layout(
             workspace_key,
-            (participant_root, root, f"{root}/source"),
+            (lab_root, participant_root, f"{root}/source"),
         ) or workspace_changed
         self._pending_after_change(
             workspace_changed,
-            was_active,
+            False,
             workspace_key,
             manifest,
             lab_id,
@@ -2169,7 +2235,7 @@ class AidpClient:
         _schemas, schemas_changed = self._ensure_catalog_contract(catalog_key, catalog_name)
         self._pending_after_change(
             catalog_changed or schemas_changed,
-            was_active,
+            False,
             workspace_key,
             manifest,
             lab_id,
@@ -2182,7 +2248,7 @@ class AidpClient:
         )
         self._pending_after_change(
             content_changed,
-            was_active,
+            False,
             workspace_key,
             manifest,
             lab_id,
@@ -2190,18 +2256,15 @@ class AidpClient:
             "Participant content is ready; permissions are next.",
         )
 
-        permissions_changed = self._ensure_permissions(
+        self._ensure_permissions(
             workspace_key,
             user_ocid,
             participant_root,
             job_key,
             catalog_key,
+            key,
+            lab_id,
         )
-        if permissions_changed and was_active:
-            raise AidpProvisionPending(
-                "Participant permissions were repaired; final verification is next.",
-                "permissions",
-            )
         self._advance_lab_manifest(workspace_key, manifest, lab_id, "active")
         return UserMaterial(
             email, lab_id, key, root, job_name, pack.pack_version,
@@ -2595,7 +2658,7 @@ class AidpClient:
     def _cleanup_private_catalog(self, key: str) -> None:
         if re.fullmatch(r"u[1-9][0-9]*", key) is None:
             return
-        name = participant_catalog_name(key)
+        name = f"{key}_aidp"
         catalog = self._catalog(name, allow_missing=True)
         if catalog is None:
             return
@@ -2725,7 +2788,7 @@ class AidpClient:
             key = self._manifest_participant_key(manifest, owner_key)
             labs = self._manifest_labs(manifest, owner_key)
             for lab_id, state in labs.items():
-                participant_roots.add(str(state["workspace_path"]).rsplit("/", 1)[0])
+                participant_roots.add(str(state["workspace_path"]))
                 self._cleanup_lab(workspace_key, key, lab_id, state)
         else:
             key = owner_key

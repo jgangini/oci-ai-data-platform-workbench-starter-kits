@@ -1,7 +1,7 @@
 locals {
   governance_gateway_audience = var.enable_ai_data_governance ? "https://${oci_apigateway_gateway.governance[0].hostname}/governance" : ""
   governance_gateway_scope    = "${local.governance_gateway_audience}/governance.all"
-  governance_jdbc_object      = "data_governance/runtime/aidp-jdbc-driver.zip"
+  governance_jdbc_object      = "oci_artifacts/runtime/aidp-jdbc-driver.zip"
   governance_uses_existing_vault = (
     var.enable_ai_data_governance && var.governance_vault_mode == "existing"
   )
@@ -245,7 +245,7 @@ resource "oci_identity_policy" "governance_jdbc" {
   description    = "Allow only the dedicated JDBC identity to connect to this AIDP instance"
   statements = [
     "Allow any-user to use ai-data-platforms in compartment id ${local.target_compartment} where request.principal.id = '${oci_identity_user.governance_jdbc[0].id}'",
-    "Allow any-user to read buckets in compartment id ${local.target_compartment} where all {request.principal.id = '${oci_identity_user.governance_jdbc[0].id}', target.bucket.name = '${oci_objectstorage_bucket.control[0].name}'}",
-    "Allow any-user to inspect objects in compartment id ${local.target_compartment} where all {request.principal.id = '${oci_identity_user.governance_jdbc[0].id}', target.bucket.name = '${oci_objectstorage_bucket.control[0].name}'}",
+    "Allow any-user to read buckets in compartment id ${local.target_compartment} where all {request.principal.id = '${oci_identity_user.governance_jdbc[0].id}', target.bucket.name = '${local.artifacts_bucket_name}'}",
+    "Allow any-user to inspect objects in compartment id ${local.target_compartment} where all {request.principal.id = '${oci_identity_user.governance_jdbc[0].id}', target.bucket.name = '${local.artifacts_bucket_name}'}",
   ]
 }

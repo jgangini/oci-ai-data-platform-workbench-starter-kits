@@ -89,9 +89,10 @@ def test_governance_cross_variable_contract_defaults_new_and_reuses_only_an_expl
     variables = (ROOT / "terraform/b_variables.tf").read_text(encoding="utf-8")
     gateway = (ROOT / "terraform/i_oci_data_governance_gateway.tf").read_text(encoding="utf-8")
     edge = (ROOT / "terraform/i_oci_data_governance_edge.tf").read_text(encoding="utf-8")
+    manifest = (ROOT / "terraform/deploy-studio.json").read_text(encoding="utf-8")
     assert 'resource "terraform_data" "validate_governance_inputs"' in gateway
-    assert gateway.count("precondition {") == 6
-    assert gateway.count("!var.enable_ai_data_governance ||") == 6
+    assert gateway.count("precondition {") == 8
+    assert gateway.count("!var.enable_ai_data_governance ||") == 8
     assert "!var.enable_ai_data_governance" not in variables
     assert 'variable "governance_vault_mode"' in variables
     assert 'contains(["new", "existing"], var.governance_vault_mode)' in variables
@@ -103,6 +104,9 @@ def test_governance_cross_variable_contract_defaults_new_and_reuses_only_an_expl
     assert 'split(".", local.governance_existing_vault_ocid)[3] == var.region' in edge
     assert 'data.oci_kms_vault.governance_existing[0].state == "ACTIVE"' in gateway
     assert 'data.oci_kms_vault.governance_existing[0].vault_type == "DEFAULT"' in gateway
+    assert 'local.governance_vault_id != ""' in gateway
+    assert 'startswith(local.governance_vault_management_endpoint, "https://")' in gateway
+    assert 'startswith(local.governance_vault_crypto_endpoint, "https://")' in gateway
     assert "local.governance_vault_management_endpoint" in edge
     assert 'resource "terraform_data" "governance_vault_dns_wait"' in edge
     assert "consecutive_successes=$((consecutive_successes + 1))" in edge
@@ -110,6 +114,7 @@ def test_governance_cross_variable_contract_defaults_new_and_reuses_only_an_expl
     assert "consecutive_successes=0" in edge
     assert "vault_id       = local.governance_vault_id" in edge
     assert "oci_kms_vaults" not in edge
+    assert '"options_source": "oci_active_vaults"' in manifest
 
 
 def test_workload_identity_manages_only_the_named_driver_object() -> None:
@@ -118,7 +123,7 @@ def test_workload_identity_manages_only_the_named_driver_object() -> None:
     assert "request.principal.namespace='aidp-governance'" in gateway
     assert "request.principal.service_account='ai-data-governance'" in gateway
     assert "target.secret.id='${oci_vault_secret.governance_jdbc[0].id}'" in gateway
-    assert "target.bucket.name='${oci_objectstorage_bucket.control[0].name}'" in gateway
+    assert "target.bucket.name='${local.artifacts_bucket_name}'" in gateway
     assert "target.object.name='${local.governance_jdbc_object}'" in gateway
     assert "target.key.id='${oci_kms_key.governance[0].id}'" in gateway
     assert "use keys" in gateway
@@ -138,16 +143,18 @@ def test_artifact_bucket_centralizes_data_governance_tables_and_the_jdbc_driver(
     deployment = (ROOT / "terraform/i_oci_data_governance_deployment.tf").read_text(encoding="utf-8")
     edge = (ROOT / "terraform/i_oci_data_governance_edge.tf").read_text(encoding="utf-8")
     manifest = (ROOT / "terraform/templatefile/governance-gateway.yaml").read_text(encoding="utf-8")
-    assert 'resource "oci_objectstorage_bucket" "control"' in storage
-    assert 'count          = var.enable_ai_data_governance ? 1 : 0' in storage
-    assert 'name           = "oci_artifact"' in storage
+    assert 'resource "oci_objectstorage_bucket" "control"' not in storage
+    assert 'name           = "oci_artifact"' not in storage
+    assert 'resource "oci_objectstorage_bucket" "artifacts"' in storage
+    assert 'count          = var.artifacts_bucket_mode == "new" ? 1 : 0' in storage
+    assert 'default = "oci_artifacts"' in (ROOT / "terraform/b_variables.tf").read_text(encoding="utf-8")
     assert 'access_type    = "NoPublicAccess"' in storage
-    assert "oci_objectstorage_bucket.control[0].name" in deployment
-    assert '/data_governance"' in deployment
-    assert 'data_governance/runtime/aidp-jdbc-driver.zip' in edge
+    assert "local.artifacts_bucket_name" in deployment
+    assert '/oci_artifacts"' in deployment
+    assert 'oci_artifacts/runtime/aidp-jdbc-driver.zip' in edge
     assert "GOVERNANCE_CONTROL_LOCATION" in manifest
     assert "to read buckets" in edge and "to inspect objects" in edge
-    assert edge.count("target.bucket.name = '${oci_objectstorage_bucket.control[0].name}'") == 2
+    assert edge.count("target.bucket.name = '${local.artifacts_bucket_name}'") == 2
     assert "to read objects" not in edge and "to manage objects" not in edge
 
 
@@ -162,8 +169,8 @@ def test_production_gateway_uses_delta_not_process_memory() -> None:
 
 def test_jdbc_upload_is_short_lived_exact_and_fail_closed() -> None:
     runtime = (ROOT / "apps/governance_gateway/jdbc.py").read_text(encoding="utf-8")
-    assert '_JDBC_DRIVER_BUCKET = "oci_artifact"' in runtime
-    assert '_JDBC_DRIVER_OBJECT = "data_governance/runtime/aidp-jdbc-driver.zip"' in runtime
+    assert '_JDBC_DRIVER_BUCKET = "oci_artifacts"' in runtime
+    assert '_JDBC_DRIVER_OBJECT = "oci_artifacts/runtime/aidp-jdbc-driver.zip"' in runtime
     assert "timedelta(minutes=10)" in runtime
     assert 'access_type="ObjectWrite"' in runtime
     assert "declared != size_bytes" in runtime

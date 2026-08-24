@@ -58,7 +58,7 @@ def test_catalog_merge_preserves_governance_fields_and_marks_absent_columns() ->
     assert "sensitivity =" not in matched
     assert "review_state =" not in matched
     assert any("source_version <> ?" in statement for statement in statements)
-    assert any("INSERT INTO `aidp_lab`.`data_governance`.sync_state" in statement for statement in statements)
+    assert any("INSERT INTO `aidp_lab`.`oci_artifacts`.data_governance_sync_state" in statement for statement in statements)
     assert result == {"columns": 1, "new": 1, "renamed": 0, "deleted": 0, "lineage_edges": 0}
     assert connection.committed is True
 

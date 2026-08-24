@@ -47,7 +47,7 @@ def test_catalog_snapshot_uses_official_pagination_and_skips_control_schema(monk
         Response({"items": [{"key": "aidp_lab", "displayName": "aidp_lab", "catalogGuid": "guid"}]}),
         Response({"items": [
             {"key": "aidp_lab.gold", "displayName": "gold"},
-            {"key": "aidp_lab.data_governance", "displayName": "data_governance"},
+            {"key": "aidp_lab.oci_artifacts", "displayName": "oci_artifacts"},
         ]}),
         Response({"items": [{"key": "aidp_lab.gold.customers", "displayName": "customers"}]}),
         Response({

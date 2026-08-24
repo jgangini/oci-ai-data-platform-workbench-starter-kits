@@ -80,7 +80,7 @@ class FakeAidp:
     def material(email: str, lab_id: str) -> UserMaterial:
         return UserMaterial(
             email, lab_id, "u101",
-            f"/Workspace/medallon/u101_ada@example.com/{lab_id}",
+            f"/Workspace/{lab_id}/u101_ada@example.com",
             f"wf_u101_{lab_id}", "1.0.0", "active", 101,
         )
 
@@ -147,18 +147,24 @@ class FakeAidp:
         }
 
 
-def make_client(tmp_path: Path, mode: str = "active") -> TestClient:
+def make_client(
+    tmp_path: Path,
+    mode: str = "active",
+    deployment_mode: str = "laboratory",
+) -> TestClient:
     settings = Settings(
         admin_username="lab-admin",
         admin_password_hash=hash_secret("long-admin-password", iterations=1_000, salt=b"admin-test-salt"),
+        deployment_mode=deployment_mode,
         registration_code_hash=hash_secret("ABCD-1234", iterations=1_000, salt=b"code-test-salt"),
+        operator_username="joel.ganggini@oracle.com",
         identity_domain_url="https://identity.example.test",
         developer_group_id="developers", pending_group_id="pending",
         aidp_workbench_url="https://example.datalake.oci.oraclecloud.com#?tenant=test&domain=Default",
         aidp_platform_id="ocid1.aidataplatform.oc1..test",
         aidp_workspace_name="aidp-lab-workspace-test", aidp_region="us-chicago-1",
         governance_gateway_url="https://governance.example.test",
-        governance_control_bucket="oci_artifact",
+        governance_control_bucket="oci_artifacts",
         jdbc_driver_file=str(tmp_path / "aidp-jdbc-driver.zip"),
         oci_config_file="/etc/aidp-lab/oci/config",
         objectstorage_namespace="namespace", bucket_name="aidp-data-test",
@@ -211,7 +217,19 @@ def test_public_catalog_exposes_five_lineage_labs_and_available_agent(tmp_path: 
     assert all(lab["description"].strip() for lab in payload["labs"])
     assert payload["labs"][-1]["status"] == "available"
     assert payload["labs"][-1]["pack_version"] == "2.0.0"
+    assert payload["deployment_mode"] == "laboratory"
     assert "industries" not in payload
+
+
+def test_production_mode_hides_registration_and_preserves_admin_identity(tmp_path: Path) -> None:
+    client = make_client(tmp_path, deployment_mode="production")
+    assert client.get("/api/config").json()["deployment_mode"] == "production"
+    assert client.post("/api/register", json=register_payload()).status_code == 404
+    login(client)
+    assert client.get("/api/admin/session").json() == {
+        "username": "lab-admin",
+        "operator_username": "joel.ganggini@oracle.com",
+    }
 
 
 def test_health_reports_safe_failure_and_recreates_cached_client(tmp_path: Path) -> None:
@@ -248,8 +266,10 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     assert response.json()["compute_name"] == "aidp_cluster_shared_compute"
     assert response.json()["jdbc_url"].startswith("jdbc:spark://")
     assert response.json()["governance_gateway_url"] == "https://governance.example.test"
-    assert response.json()["governance_control_bucket"] == "oci_artifact"
+    assert response.json()["governance_control_bucket"] == "oci_artifacts"
     assert response.json()["jdbc_driver_available"] is False
+    assert response.json()["deployment_mode"] == "laboratory"
+    assert response.json()["operator_username"] == "joel.ganggini@oracle.com"
 
 
 def test_admin_jdbc_driver_download_requires_session_and_existing_vm_file(tmp_path: Path) -> None:

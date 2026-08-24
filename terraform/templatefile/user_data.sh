@@ -136,7 +136,9 @@ use_reachable_base_images
 cat > /opt/aidp-lab/.env <<'EOF'
 ADMIN_USERNAME=${admin_username}
 ADMIN_PASSWORD_HASH=${admin_password_hash}
+DEPLOYMENT_MODE=${deployment_mode}
 REGISTRATION_CODE_HASH=${registration_code_hash}
+OPERATOR_USERNAME=${operator_username}
 IDENTITY_DOMAIN_URL=${identity_domain_url}
 IDENTITY_DEVELOPER_GROUP_ID=${developer_group_id}
 IDENTITY_PENDING_GROUP_ID=${pending_group_id}

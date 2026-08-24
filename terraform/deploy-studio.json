@@ -7,6 +7,7 @@
   },
   "capabilities": {
     "compartment_modes": ["new", "existing"],
+    "default_compartment_name": "oracle-ai-data-platform",
     "requires_genai_region": false,
     "database_profile": "new_or_existing",
     "region_selection": "subscribed_compatible",
@@ -62,6 +63,18 @@
         "group": "application_vm"
       },
       {
+        "name": "deployment_mode",
+        "label": "Deployment mode",
+        "type": "select",
+        "required": true,
+        "default": "laboratory",
+        "group": "application_vm",
+        "options": [
+          {"value": "laboratory", "label": "Laboratory"},
+          {"value": "production", "label": "Production"}
+        ]
+      },
+      {
         "name": "registration_code",
         "label": "Lab registration code",
         "type": "text",
@@ -71,6 +84,7 @@
         "min_length": 9,
         "max_length": 9,
         "transform": "uppercase_pbkdf2_sha256",
+        "visible_when": {"field": "deployment_mode", "equals": "laboratory"},
         "group": "application_vm"
       },
       {
@@ -141,6 +155,156 @@
         "group": "database"
       },
       {
+        "name": "landing_bucket_mode",
+        "label": "Landing bucket mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "medallion",
+        "options": [
+          {"value": "new", "label": "Create new bucket"},
+          {"value": "existing", "label": "Use existing bucket"}
+        ]
+      },
+      {
+        "name": "landing_new_bucket_name",
+        "label": "Landing bucket name",
+        "type": "text",
+        "required": true,
+        "default": "oci_landing",
+        "group": "medallion",
+        "visible_when": {"field": "landing_bucket_mode", "equals": "new"}
+      },
+      {
+        "name": "landing_existing_bucket_name",
+        "label": "Existing landing bucket",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_active_buckets",
+        "group": "medallion",
+        "visible_when": {"field": "landing_bucket_mode", "equals": "existing"}
+      },
+      {
+        "name": "bronze_bucket_mode",
+        "label": "Bronze bucket mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "medallion",
+        "options": [
+          {"value": "new", "label": "Create new bucket"},
+          {"value": "existing", "label": "Use existing bucket"}
+        ]
+      },
+      {
+        "name": "bronze_new_bucket_name",
+        "label": "Bronze bucket name",
+        "type": "text",
+        "required": true,
+        "default": "oci_bronze",
+        "group": "medallion",
+        "visible_when": {"field": "bronze_bucket_mode", "equals": "new"}
+      },
+      {
+        "name": "bronze_existing_bucket_name",
+        "label": "Existing bronze bucket",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_active_buckets",
+        "group": "medallion",
+        "visible_when": {"field": "bronze_bucket_mode", "equals": "existing"}
+      },
+      {
+        "name": "silver_bucket_mode",
+        "label": "Silver bucket mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "medallion",
+        "options": [
+          {"value": "new", "label": "Create new bucket"},
+          {"value": "existing", "label": "Use existing bucket"}
+        ]
+      },
+      {
+        "name": "silver_new_bucket_name",
+        "label": "Silver bucket name",
+        "type": "text",
+        "required": true,
+        "default": "oci_silver",
+        "group": "medallion",
+        "visible_when": {"field": "silver_bucket_mode", "equals": "new"}
+      },
+      {
+        "name": "silver_existing_bucket_name",
+        "label": "Existing silver bucket",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_active_buckets",
+        "group": "medallion",
+        "visible_when": {"field": "silver_bucket_mode", "equals": "existing"}
+      },
+      {
+        "name": "gold_bucket_mode",
+        "label": "Gold bucket mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "medallion",
+        "options": [
+          {"value": "new", "label": "Create new bucket"},
+          {"value": "existing", "label": "Use existing bucket"}
+        ]
+      },
+      {
+        "name": "gold_new_bucket_name",
+        "label": "Gold bucket name",
+        "type": "text",
+        "required": true,
+        "default": "oci_gold",
+        "group": "medallion",
+        "visible_when": {"field": "gold_bucket_mode", "equals": "new"}
+      },
+      {
+        "name": "gold_existing_bucket_name",
+        "label": "Existing gold bucket",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_active_buckets",
+        "group": "medallion",
+        "visible_when": {"field": "gold_bucket_mode", "equals": "existing"}
+      },
+      {
+        "name": "artifacts_bucket_mode",
+        "label": "Artifacts bucket mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "medallion",
+        "options": [
+          {"value": "new", "label": "Create new bucket"},
+          {"value": "existing", "label": "Use existing bucket"}
+        ]
+      },
+      {
+        "name": "artifacts_new_bucket_name",
+        "label": "Artifacts bucket name",
+        "type": "text",
+        "required": true,
+        "default": "oci_artifacts",
+        "group": "medallion",
+        "visible_when": {"field": "artifacts_bucket_mode", "equals": "new"}
+      },
+      {
+        "name": "artifacts_existing_bucket_name",
+        "label": "Existing artifacts bucket",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_active_buckets",
+        "group": "medallion",
+        "visible_when": {"field": "artifacts_bucket_mode", "equals": "existing"}
+      },
+      {
         "name": "enable_ai_data_governance",
         "label": "AI Data Governance Gateway",
         "type": "boolean",
@@ -171,7 +335,7 @@
         "visible_when": {"field": "governance_vault_mode", "equals": "existing"}
       }
     ],
-    "email_access_fields": ["admin_username", "admin_password", "registration_code"]
+    "email_access_fields": ["deployment_mode", "admin_username", "admin_password", "registration_code"]
   },
   "outputs": [
     "application_url",
@@ -183,6 +347,7 @@
     "identity_domain_name",
     "compartment_ocid",
     "bucket_name",
+    "medallion_bucket_names",
     "objectstorage_namespace",
     "medallion_prefixes",
     "ai_data_platform_id",
@@ -217,6 +382,7 @@
     "developer_group_ocid",
     "pending_group_ocid",
     "operator_user_ocid",
+    "operator_username",
     "home_region",
     "aidp_catalog_name",
     "aidp_shared_compute_name",
@@ -233,7 +399,7 @@
     "timeout_seconds": 300,
     "requires_oci_credentials": true,
     "secret_inputs": ["autonomous_database_admin_password", "autonomous_database_wallet_password"],
-    "output_inputs": ["home_region", "operator_user_ocid", "preferred_vm_shape", "availability_domain_index", "governance_gateway_image", "governance_gateway_oidc_authority", "governance_gateway_oidc_issuer", "governance_gateway_oidc_static_jwks_json"],
+    "output_inputs": ["home_region", "operator_user_ocid", "operator_username", "preferred_vm_shape", "availability_domain_index", "governance_gateway_image", "governance_gateway_oidc_authority", "governance_gateway_oidc_issuer", "governance_gateway_oidc_static_jwks_json"],
     "runtime_fields": [
       {
         "name": "home_region",
@@ -251,6 +417,14 @@
         "required": true,
         "pattern": "^ocid1\\.user\\..+$",
         "min_length": 20,
+        "max_length": 255
+      },
+      {
+        "name": "operator_username",
+        "label": "OCI deployment operator name",
+        "type": "text",
+        "required": true,
+        "min_length": 1,
         "max_length": 255
       },
       {

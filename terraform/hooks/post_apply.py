@@ -27,7 +27,8 @@ from oci._vendor import requests
 
 API_VERSION = "20240831"
 GOVERNANCE_API_VERSION = "20260430"
-CATALOG_NAME = "aidp_lab"
+CATALOG_NAME = "oci_medallion"
+GOVERNANCE_SCHEMA_NAME = "oci_artifacts"
 DEVELOPER_ROLE_NAME = "AIDP_DEVELOPER"
 LEGACY_DEVELOPER_ROLE_NAME = "AIDP_LAB_DEVELOPER"
 PENDING_ROLE_NAME = "AIDP_LAB_PENDING"
@@ -936,16 +937,16 @@ def ensure_governance_control_access(
     compute_key: str,
     technical_user_ocid: str,
 ) -> str:
-    """Create only data_governance and grant the runtime only schema ADMIN plus cluster USE."""
+    """Create only oci_artifacts and grant the runtime only schema ADMIN plus cluster USE."""
     if not technical_user_ocid.startswith("ocid1.user."):
         raise ReconcileError("The governance JDBC technical user OCID is invalid")
     schema, _ = ensure_resource(
         api,
         "/schemas",
         "governance control schema",
-        "data_governance",
+        GOVERNANCE_SCHEMA_NAME,
         {
-            "displayName": "data_governance",
+            "displayName": GOVERNANCE_SCHEMA_NAME,
             "description": "Private control plane for AIDP governance extensions",
             "catalogName": catalog_name,
         },
@@ -1007,9 +1008,9 @@ def verify_governance_schema_permissions(
             [
                 item
                 for item in api.list_all("/schemas", params={"catalogKey": catalog_key})
-                if item.get("displayName") == "data_governance"
+                if item.get("displayName") == GOVERNANCE_SCHEMA_NAME
             ],
-            "data_governance",
+            GOVERNANCE_SCHEMA_NAME,
             "governance control schema",
         )
         if schema is not None:
@@ -1017,7 +1018,7 @@ def verify_governance_schema_permissions(
         if attempt + 1 < attempts:
             _sleep(5)
     if schema is None or not schema.get("key"):
-        raise ReconcileError("The governance gateway did not publish the data_governance schema")
+        raise ReconcileError(f"The governance gateway did not publish the {GOVERNANCE_SCHEMA_NAME} schema")
 
     permissions = api.list_all(
         f"/schemas/{quote(str(schema['key']), safe='')}/permissions"
@@ -1043,13 +1044,13 @@ def verify_governance_schema_permissions(
             continue
         inheritance = "inherited " if bool(item.get("isInherited")) else ""
         raise ReconcileError(
-            f"data_governance has an unauthorized {inheritance}grant for {grantee_name}"
+            f"{GOVERNANCE_SCHEMA_NAME} has an unauthorized {inheritance}grant for {grantee_name}"
         )
     if not platform_admin:
-        raise ReconcileError("AI_DATA_PLATFORM_ADMIN must retain ADMIN on data_governance")
+        raise ReconcileError(f"AI_DATA_PLATFORM_ADMIN must retain ADMIN on {GOVERNANCE_SCHEMA_NAME}")
     if not technical_admin:
         raise ReconcileError(
-            "The governance JDBC technical user must inherit or hold ADMIN on data_governance"
+            f"The governance JDBC technical user must inherit or hold ADMIN on {GOVERNANCE_SCHEMA_NAME}"
         )
 
 
@@ -1140,7 +1141,7 @@ def assert_fresh_catalog(
         )
     if external:
         raise ReconcileError(
-            "Fresh-only bootstrap requires zero external volumes in aidp_lab; no resources were deleted"
+            f"Fresh-only bootstrap requires zero external volumes in {CATALOG_NAME}; no resources were deleted"
         )
     return len(global_schemas), len(external)
 
@@ -1282,7 +1283,7 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
         CATALOG_NAME,
         {
             "displayName": CATALOG_NAME,
-            "description": "Legacy compatibility catalog; participant data uses private catalogs",
+            "description": "Medallion catalog for starter-kit data and governance artifacts",
             "catalogType": "INTERNAL",
         },
         {"catalogType": "INTERNAL"},
@@ -1295,7 +1296,7 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
     global_schema_count, external_volume_count = assert_fresh_catalog(
         api, catalog_key, namespace, bucket
     )
-    events.append("Fresh-only catalog verified: zero legacy schemas and zero external volumes")
+    events.append("Fresh-only catalog verified: zero existing schemas and zero external volumes")
     workspace_key = str(workspace["key"])
     shared_compute, compute_created = ensure_resource(
         api,
@@ -2158,7 +2159,7 @@ def main() -> int:
                 str(outputs["operator_user_ocid"]),
             )
             messages.append(
-                "data_governance access verified for platform administrators and the dedicated JDBC identity; "
+                f"{GOVERNANCE_SCHEMA_NAME} access verified for platform administrators and the dedicated JDBC identity; "
                 f"JDBC credential {'rotated' if credential_rotated else 'reused'}"
             )
         tags_changed = ensure_governance_discovery_tags(oci, oci_config, signer, outputs)

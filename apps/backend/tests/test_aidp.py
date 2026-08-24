@@ -20,7 +20,13 @@ from app.aidp import (
 )
 from app.config import Settings
 from app.lab_packs import LabAsset, load_lab_pack
-from app.notebooks import participant_folder, participant_key, workspace_participant_root, workspace_root
+from app.notebooks import (
+    participant_folder,
+    participant_key,
+    table_name,
+    workspace_participant_root,
+    workspace_root,
+)
 
 
 USER_OCID = "ocid1.user.oc1..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -65,15 +71,16 @@ def test_participant_code_names_technical_resources_and_email_names_workspace() 
     owner = "u_" + hashlib.sha256(USER_OCID.encode()).hexdigest()[:16]
     assert participant_owner_key(USER_OCID) == owner
     assert participant_key(101) == "u101"
-    assert workspace_participant_root("u101", EMAIL) == f"/Workspace/medallon/u101_{EMAIL}"
-    assert workspace_root("u101", "banking", EMAIL) == f"/Workspace/medallon/u101_{EMAIL}/banking"
+    assert workspace_participant_root("u101", "banking", EMAIL) == f"/Workspace/banking/u101_{EMAIL}"
+    assert workspace_root("u101", "banking", EMAIL) == f"/Workspace/banking/u101_{EMAIL}"
+    assert table_name("u101", "banking", "accounts") == "u101_banking_accounts"
     assert participant_folder("student/lab@example.com") == "student%2Flab@example.com"
     with pytest.raises(ValueError, match="valid OCI user OCID"):
         participant_owner_key(EMAIL)
     with pytest.raises(ValueError, match="starting at 101"):
         participant_key(100)
     with pytest.raises(ValueError, match="valid participant key"):
-        workspace_participant_root(EMAIL, EMAIL)
+        workspace_participant_root(EMAIL, "banking", EMAIL)
 
 
 def test_governed_access_fails_closed_when_direct_catalog_select_remains() -> None:
@@ -89,6 +96,36 @@ def test_governed_access_accepts_catalog_without_direct_select() -> None:
     client = bare_client()
     client._list = lambda *_args, **_kwargs: []
     client._assert_permission_absent("/catalogs/aidp-lab", USER_OCID, "SELECT")
+
+
+def test_participant_receives_select_only_on_owned_lab_tables() -> None:
+    client = bare_client()
+    pack = load_lab_pack("banking")
+    first_layer, logical_names = next(iter(pack.tables.items()))
+    owned_name = table_name("u101", "banking", logical_names[0])
+    schemas = {
+        layer: {"key": f"schema-{layer}", "displayName": f"oci_{layer}"}
+        for layer in pack.tables
+    }
+    client._shared_schemas = lambda _catalog_key: schemas
+    client._schema_tables = lambda _catalog_key, schema_key: [
+        *([{"key": f"{schema_key}-owned", "displayName": owned_name}]
+          if schema_key == f"schema-{first_layer}" else []),
+        {"key": f"{schema_key}-other", "displayName": "u102_banking_accounts"},
+    ]
+    granted: list[tuple[str, str, str, str]] = []
+    client._ensure_permission = lambda resource, action, principal, permission: granted.append(
+        (resource, action, principal, permission)
+    )
+
+    client._ensure_lab_table_permissions("oci-medallion", "u101", "banking", USER_OCID)
+
+    assert granted == [(
+        f"/tables/schema-{first_layer}-owned",
+        "assignTablePermissionDetails",
+        USER_OCID,
+        "SELECT",
+    )]
 
 
 def test_request_retry_token_covers_binary_content_and_identity_headers() -> None:
@@ -386,7 +423,7 @@ def test_two_participants_upload_identical_pack_assets_with_isolated_job_identit
     assert first[2] != second[2]
 
 
-def test_v2_manifest_migrates_to_v4_without_updating_assets() -> None:
+def test_v2_manifest_migrates_to_v5_without_updating_assets() -> None:
     client = bare_client()
     key = participant_owner_key(USER_OCID)
     old_root = f"/Workspace/medallon/{participant_folder(EMAIL)}/banking"
@@ -401,7 +438,7 @@ def test_v2_manifest_migrates_to_v4_without_updating_assets() -> None:
     client._manifest = lambda _workspace, _key: manifest if not writes else writes[-1]
     client._write_manifest = lambda _workspace, _key, value: writes.append(json.loads(json.dumps(value)))
     migrated = client._ensure_manifest("workspace", key, EMAIL, 101, "banking")
-    assert migrated["layout_version"] == 4
+    assert migrated["layout_version"] == 5
     assert migrated["labs"]["banking"] == {
         "pack_version": "legacy-v2",
         "pack_hash": "",
@@ -421,7 +458,7 @@ def test_v2_manifest_migrates_to_v4_without_updating_assets() -> None:
     assert client._provision_lab(USER_OCID, EMAIL, "banking", migrated).pack_version == "legacy-v2"
 
 
-def test_new_v4_manifest_uses_code_and_email_workspace_paths() -> None:
+def test_new_v5_manifest_uses_code_and_email_workspace_paths() -> None:
     client = bare_client()
     owner_key = participant_owner_key(USER_OCID)
     key = participant_key(101)
@@ -446,8 +483,8 @@ def test_new_v4_manifest_uses_code_and_email_workspace_paths() -> None:
     assert manifest["owner_key"] == owner_key
     assert manifest["participant_code"] == 101
     assert manifest["participant_email"] == "student+alias@example.com"
-    assert manifest["layout_version"] == 4
-    assert manifest["catalog"]["name"] == "u101_aidp"
+    assert manifest["layout_version"] == 5
+    assert manifest["catalog"]["name"] == "oci_medallion"
 
 
 def test_local_multi_lab_lifecycle_is_idempotent_and_protects_last_lab() -> None:

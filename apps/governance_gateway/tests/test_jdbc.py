@@ -144,11 +144,11 @@ def test_driver_archive_requires_and_accepts_a_jar(tmp_path: Path) -> None:
 
 
 def test_driver_target_is_fixed_to_the_governance_artifact() -> None:
-    _validate_driver_target("oci_artifact", "data_governance/runtime/aidp-jdbc-driver.zip")
-    with pytest.raises(JdbcConfigurationError, match="must be oci_artifact"):
-        _validate_driver_target("other", "data_governance/runtime/aidp-jdbc-driver.zip")
-    with pytest.raises(JdbcConfigurationError, match="must be oci_artifact"):
-        _validate_driver_target("oci_artifact", "other.zip")
+    _validate_driver_target("oci_artifacts", "oci_artifacts/runtime/aidp-jdbc-driver.zip")
+    with pytest.raises(JdbcConfigurationError, match="must be oci_artifacts"):
+        _validate_driver_target("other", "oci_artifacts/runtime/aidp-jdbc-driver.zip")
+    with pytest.raises(JdbcConfigurationError, match="must be oci_artifacts"):
+        _validate_driver_target("oci_artifacts", "other.zip")
 
 
 class FakeServiceError(Exception):
@@ -204,7 +204,7 @@ def driver_runtime(payload: bytes) -> tuple[AidpJdbcRuntime, FakeDriverClient]:
     client = FakeDriverClient(payload)
     runtime = AidpJdbcRuntime({"GOVERNANCE_OCI_REGION": "us-chicago-1"})
     runtime._object_storage = lambda: (  # type: ignore[method-assign]
-        oci, client, "namespace", "oci_artifact", "data_governance/runtime/aidp-jdbc-driver.zip",
+        oci, client, "namespace", "oci_artifacts", "oci_artifacts/runtime/aidp-jdbc-driver.zip",
     )
     return runtime, client
 

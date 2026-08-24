@@ -18,7 +18,7 @@ test("browser storage is limited to the non-secret lab operation", () => {
 });
 
 test("registration has no password field while administrator login remains protected", () => {
-  assert.match(source, /type="password"/);
+  assert.match(source, /type=\{showPassword \? "text" : "password"\}/);
   assert.match(source, /Registration code/);
   assert.match(source, /function AdminLogin/);
   assert.match(source, /Starter kits/);
@@ -35,6 +35,31 @@ test("registration has no password field while administrator login remains prote
   assert.match(styles, /\.lab-combobox-menu \{[^}]*max-height: 320px/);
   assert.match(styles, /\.lab-combobox-menu \{[^}]*overflow-y: auto/);
   assert.doesNotMatch(source, /Generate password/);
+});
+
+test("deployment mode selects registration or inline administrator login", () => {
+  assert.match(source, /function RegisterPage\(\{[\s\S]*initialAdminLogin = false/);
+  assert.match(source, /const \[adminLoginVisible, setAdminLoginVisible\] = useState\(initialAdminLogin\)/);
+  assert.match(source, /const production = publicConfig\?\.deployment_mode === "production"/);
+  assert.match(source, /function registrationAccessView[\s\S]*showAdminLogin: !configLoaded \|\| production \|\| adminLoginVisible/);
+  assert.match(source, /onAdminLogin=\{accessView\.showAdminLink \? showAdminLogin : undefined\}/);
+  assert.match(source, /onHome=\{accessView\.showHomeLink \? showRegistration : undefined\}/);
+  assert.match(source, /accessView\.showAdminLogin \? \([\s\S]*<AdminLoginCard \/>/);
+  assert.match(source, /aria-label="Administrator login"/);
+  assert.match(source, /aria-label="Return to starter kit registration"/);
+  assert.doesNotMatch(source, /href="\/admin\/login"/);
+  assert.match(source, /window\.history\.replaceState\(null, "", "\/"\)/);
+  assert.match(source, /window\.location\.pathname === "\/admin\/login"\)[\s\S]*<RegisterPage initialAdminLogin \/>/);
+  assert.match(source, /autoComplete="off" onSubmit=\{submit\}/);
+  assert.match(source, /autoComplete="new-password"/);
+  assert.match(source, /aria-pressed=\{showPassword\}/);
+  assert.match(source, /title=\{showPassword \? "Hide password" : "Show password"\}/);
+  assert.match(source, /<circle cx="12" cy="12" r="3" \/>/);
+  assert.doesNotMatch(source, /\{showPassword \? "Hide" : "Show"\}/);
+  assert.match(source, /htmlFor="aidp-admin-password"/);
+  assert.match(source, /id="aidp-admin-password"/);
+  assert.match(styles, /\.admin-link \{[^}]*background: transparent/);
+  assert.match(styles, /\.login-password-control \{[^}]*46px/);
 });
 
 test("registration code uses eight accessible segmented inputs", () => {
@@ -148,9 +173,10 @@ test("settings separate Workbench, application and governance details into acces
   const workbenchOcid = workbenchSource.indexOf("AI Data Platform Workbench OCID");
   assert.ok(serviceEndpoint < workbenchUrl && workbenchUrl < workbenchOcid);
   assert.doesNotMatch(workbenchSource, /Shared compute/);
-  assert.match(applicationSource, /<SettingsRegistrationCodeField/);
+  assert.match(applicationSource, /<ApplicationAccessSettings/);
+  assert.match(source, /function ApplicationAccessSettings[\s\S]*<SettingsRegistrationCodeField/);
   assert.doesNotMatch(applicationSource, /AIDP JDBC driver/);
-  assert.match(applicationSource, />\s*Save Settings\s*</);
+  assert.match(source, /function ApplicationAccessSettings[\s\S]*>\s*Save Settings\s*</);
   assert.match(governanceSource, /Governance artifact bucket/);
   assert.match(governanceSource, /Governance Delta schema/);
   assert.match(governanceSource, /AIDP JDBC driver/);

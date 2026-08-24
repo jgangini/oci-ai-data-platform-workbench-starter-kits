@@ -68,8 +68,15 @@ type AdminSettingsResponse = {
   jdbc_driver_available: boolean;
   governance_gateway_url: string;
   governance_control_bucket: string;
+  deployment_mode: "laboratory" | "production";
+  operator_username: string;
   registration_code_configured: boolean;
 };
+type PublicConfig = {
+  deployment_mode: "laboratory" | "production";
+  labs: CatalogLab[];
+};
+type AdminSession = { username: string; operator_username: string };
 const fallbackCatalog: CatalogLab[] = [
   { lab_id: "banking", display_name: "Banking", description: "Explore customer accounts, branches and transactions through a governed medallion pipeline.", pack_version: "2.0.0", status: "available", available: true },
   { lab_id: "telecommunications", display_name: "Telecommunications", description: "Analyze subscribers, plans, network sites and usage events for service and network insights.", pack_version: "2.0.0", status: "available", available: true },
@@ -627,14 +634,28 @@ function LabManagerModal({
   );
 }
 
-function useLabCatalog() {
-  const [catalog, setCatalog] = useState<CatalogLab[]>(fallbackCatalog);
+function usePublicConfig() {
+  const [config, setConfig] = useState<PublicConfig | null>(null);
   useEffect(() => {
-    void api<{ labs: CatalogLab[] }>("/api/config")
-      .then(({ labs }) => setCatalog(labs))
+    void api<PublicConfig>("/api/config")
+      .then(setConfig)
       .catch(() => undefined);
   }, []);
-  return catalog;
+  return config;
+}
+
+function useLabCatalog() {
+  return usePublicConfig()?.labs ?? fallbackCatalog;
+}
+
+function useAdminSession() {
+  const [session, setSession] = useState<AdminSession | null>(null);
+  useEffect(() => {
+    void api<AdminSession>("/api/admin/session")
+      .then(setSession)
+      .catch(() => undefined);
+  }, []);
+  return session;
 }
 
 function OracleMark() {
@@ -670,6 +691,23 @@ function AdminLoginIcon() {
         strokeLinejoin="round"
         d="M2 12.88v-1.76c0-1.04.85-1.9 1.9-1.9 1.81 0 2.55-1.28 1.64-2.85a1.9 1.9 0 0 1 .7-2.59l1.73-.99a1.9 1.9 0 0 1 2.28.6l.11.19c.9 1.57 2.38 1.57 3.29 0l.11-.19a1.9 1.9 0 0 1 2.28-.6l1.73.99a1.9 1.9 0 0 1 .7 2.59c-.91 1.57-.17 2.85 1.64 2.85 1.04 0 1.9.85 1.9 1.9v1.76c0 1.04-.85 1.9-1.9 1.9-1.81 0-2.55 1.28-1.64 2.85a1.9 1.9 0 0 1-.7 2.59l-1.73.99a1.9 1.9 0 0 1-2.28-.6l-.11-.19c-.9-1.57-2.38-1.57-3.29 0l-.11.19a1.9 1.9 0 0 1-2.28.6l-1.73-.99a1.9 1.9 0 0 1-.7-2.59c.91-1.57.17-2.85-1.64-2.85-1.05 0-1.9-.85-1.9-1.9Z"
       />
+    </svg>
+  );
+}
+
+function HomeIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m3 11 9-8 9 8" />
+      <path d="M5 10v10h14V10M9 20v-6h6v6" />
     </svg>
   );
 }
@@ -832,12 +870,16 @@ function Brand() {
 
 function Shell({
   children,
-  adminLink = true,
   onSignOut,
+  onAdminLogin,
+  onHome,
+  operatorUsername,
 }: {
   children: React.ReactNode;
-  adminLink?: boolean;
   onSignOut?: () => void;
+  onAdminLogin?: () => void;
+  onHome?: () => void;
+  operatorUsername?: string;
 }) {
   const currentPath = window.location.pathname;
   return (
@@ -866,6 +908,11 @@ function Shell({
             </nav>
           )}
           <div className="header-actions">
+            {operatorUsername && (
+              <span className="operator-identity" title={operatorUsername}>
+                Deployed by {operatorUsername}
+              </span>
+            )}
             {onSignOut ? (
               <button
                 className="header-signout"
@@ -876,18 +923,27 @@ function Shell({
               >
                 <LogoutIcon />
               </button>
-            ) : (
-              adminLink && (
-                <a
-                  className="admin-link"
-                  href="/admin/login"
-                  aria-label="Administrator login"
-                  title="Administrator login"
-                >
-                  <AdminLoginIcon />
-                </a>
-              )
-            )}
+            ) : onHome ? (
+              <button
+                className="admin-link"
+                type="button"
+                onClick={onHome}
+                aria-label="Return to starter kit registration"
+                title="Return to starter kit registration"
+              >
+                <HomeIcon />
+              </button>
+            ) : onAdminLogin ? (
+              <button
+                className="admin-link"
+                type="button"
+                onClick={onAdminLogin}
+                aria-label="Administrator login"
+                title="Administrator login"
+              >
+                <AdminLoginIcon />
+              </button>
+            ) : null}
           </div>
         </header>
       </div>
@@ -916,8 +972,29 @@ function Shell({
   );
 }
 
-function RegisterPage() {
-  const catalog = useLabCatalog();
+function registrationAccessView(
+  configLoaded: boolean,
+  production: boolean,
+  adminLoginVisible: boolean,
+) {
+  const canSwitch = configLoaded && !production;
+  return {
+    showAdminLogin: !configLoaded || production || adminLoginVisible,
+    showAdminLink: canSwitch && !adminLoginVisible,
+    showHomeLink: canSwitch && adminLoginVisible,
+  };
+}
+
+function RegisterPage({
+  initialAdminLogin = false,
+}: {
+  initialAdminLogin?: boolean;
+}) {
+  const publicConfig = usePublicConfig();
+  const catalog = publicConfig?.labs ?? fallbackCatalog;
+  const production = publicConfig?.deployment_mode === "production";
+  const configLoaded = publicConfig !== null;
+  const [adminLoginVisible, setAdminLoginVisible] = useState(initialAdminLogin);
   const [form, setForm] = useState({ name: "", email: "" });
   const [labIds, setLabIds] = useState<string[]>(["banking"]);
   const [labPickerOpen, setLabPickerOpen] = useState(false);
@@ -1075,8 +1152,27 @@ function RegisterPage() {
     }
   }
 
+  const showAdminLogin = () => {
+    setLabPickerOpen(false);
+    setAdminLoginVisible(true);
+  };
+  const showRegistration = () => {
+    if (production) return;
+    setAdminLoginVisible(false);
+    if (window.location.pathname === "/admin/login")
+      window.history.replaceState(null, "", "/");
+  };
+  const accessView = registrationAccessView(
+    configLoaded,
+    production,
+    adminLoginVisible,
+  );
+
   return (
-    <Shell>
+    <Shell
+      onAdminLogin={accessView.showAdminLink ? showAdminLogin : undefined}
+      onHome={accessView.showHomeLink ? showRegistration : undefined}
+    >
       <section className="hero-grid">
         <div className="hero-copy">
           <p className="eyebrow">
@@ -1111,11 +1207,14 @@ function RegisterPage() {
             </li>
           </ol>
         </div>
-        <form
-          className="card"
-          onSubmit={submit}
-          aria-busy={state.status === "processing"}
-        >
+        {accessView.showAdminLogin ? (
+          <AdminLoginCard />
+        ) : (
+          <form
+            className="card"
+            onSubmit={submit}
+            aria-busy={state.status === "processing"}
+          >
           <div>
             <p className="eyebrow">Starter kit access</p>
             <h2>Create your account</h2>
@@ -1254,7 +1353,8 @@ function RegisterPage() {
               ? "Creating account…"
               : "Create account"}
           </button>
-        </form>
+          </form>
+        )}
       </section>
       {state.status === "processing" && (
         <ProvisioningOverlay phase={state.phase} message={state.message} />
@@ -1309,9 +1409,10 @@ function RegisterPage() {
   );
 }
 
-function AdminLogin() {
+function AdminLoginCard() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -1329,45 +1430,71 @@ function AdminLogin() {
     }
   }
   return (
-    <Shell adminLink={false}>
-      <section className="centered">
-        <form className="card narrow" onSubmit={submit}>
-          <h1>Login</h1>
-          <label>
-            Username
-            <input
-              autoComplete="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
-          </label>
-          <label>
-            Password
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </label>
-          {error && (
-            <p className="notice error" role="alert">
-              {error}
-            </p>
-          )}
-          <button>Sign in</button>
-          <a className="quiet-link" href="/">
-            Return to registration
-          </a>
-        </form>
-      </section>
-    </Shell>
+    <form className="card" autoComplete="off" onSubmit={submit}>
+      <div>
+        <p className="eyebrow">Administrator access</p>
+        <h2>Sign in</h2>
+        <p>Manage starter kit users and application settings.</p>
+      </div>
+      <label>
+        Username
+        <input
+          autoComplete="off"
+          autoFocus
+          name="aidp-admin-username"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          required
+        />
+      </label>
+      <div className="login-password-field">
+        <label htmlFor="aidp-admin-password">Password</label>
+        <span className="password-control login-password-control">
+          {/* ponytail: local previews reuse one origin while deployment passwords rotate. */}
+          <input
+            id="aidp-admin-password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="new-password"
+            name="aidp-admin-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            required
+          />
+          <button
+            className="password-action"
+            type="button"
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            aria-pressed={showPassword}
+            title={showPassword ? "Hide password" : "Show password"}
+            onClick={() => setShowPassword((visible) => !visible)}
+          >
+            {showPassword ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+                <path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+                <line x1="2" x2="22" y1="2" y2="22" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M2.06 12.35a1 1 0 0 1 0-.7C3.73 7.6 7.59 5 12 5c4.41 0 8.27 2.6 9.94 6.65a1 1 0 0 1 0 .7C20.27 16.4 16.41 19 12 19c-4.41 0-8.27-2.6-9.94-6.65" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            )}
+          </button>
+        </span>
+      </div>
+      {error && (
+        <p className="notice error" role="alert">
+          {error}
+        </p>
+      )}
+      <button>Sign in</button>
+    </form>
   );
 }
 
 function AdminUsers() {
+  const adminSession = useAdminSession();
   const catalog = useLabCatalog();
   const [users, setUsers] = useState<LabUser[]>([]);
   const [search, setSearch] = useState("");
@@ -1652,7 +1779,10 @@ function AdminUsers() {
   }
   return (
     <>
-      <Shell adminLink={false} onSignOut={() => setLogoutOpen(true)}>
+      <Shell
+        onSignOut={() => setLogoutOpen(true)}
+        operatorUsername={adminSession?.operator_username || adminSession?.username}
+      >
         <section className="admin" aria-busy={operating || creating} inert={operating || creating}>
           <div className="admin-panel">
             <div className="admin-panel-heading">
@@ -1984,7 +2114,58 @@ function SettingsRegistrationCodeField({
   );
 }
 
+function ApplicationAccessSettings({
+  deploymentMode,
+  registrationCode,
+  registrationCodeConfigured,
+  onRegistrationCodeChange,
+  onSave,
+}: {
+  deploymentMode: "laboratory" | "production";
+  registrationCode: string;
+  registrationCodeConfigured: boolean;
+  onRegistrationCodeChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  if (deploymentMode === "production") {
+    return (
+      <p className="settings-mode-note">
+        Production mode uses administrator access only. Participant registration is disabled.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <SettingsRegistrationCodeField
+        value={registrationCode}
+        configured={registrationCodeConfigured}
+        onChange={onRegistrationCodeChange}
+      />
+      <div className="settings-actions">
+        <button
+          type="button"
+          className="settings-save"
+          onClick={onSave}
+          disabled={!registrationCode}
+        >
+          Save Settings
+        </button>
+      </div>
+    </>
+  );
+}
+
+function GatewayInstallationStatus({ installed }: { installed: boolean }) {
+  return (
+    <span className={`settings-status ${installed ? "available" : "unavailable"}`}>
+      {installed ? "Installed" : "Not installed"}
+    </span>
+  );
+}
+
 function AdminSettings() {
+  const adminSession = useAdminSession();
   type SettingsTab = "workbench" | "application" | "governance";
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("workbench");
   const [aidpServiceEndpoint, setAidpServiceEndpoint] = useState("");
@@ -1995,6 +2176,7 @@ function AdminSettings() {
   const [jdbcDriverAvailable, setJdbcDriverAvailable] = useState(false);
   const [governanceGatewayUrl, setGovernanceGatewayUrl] = useState("");
   const [governanceControlBucket, setGovernanceControlBucket] = useState("");
+  const [deploymentMode, setDeploymentMode] = useState<"laboratory" | "production">("laboratory");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
   const [pendingDriverFile, setPendingDriverFile] = useState<File | null>(null);
@@ -2020,6 +2202,7 @@ function AdminSettings() {
     setJdbcDriverAvailable(result.jdbc_driver_available);
     setGovernanceGatewayUrl(result.governance_gateway_url);
     setGovernanceControlBucket(result.governance_control_bucket);
+    setDeploymentMode(result.deployment_mode);
     setRegistrationCodeConfigured(result.registration_code_configured);
   }
   useEffect(() => {
@@ -2115,7 +2298,7 @@ function AdminSettings() {
         },
       );
       setJdbcDriverAvailable(result.jdbc_driver_available);
-      setToast("AIDP JDBC driver synchronized to oci_artifact and the lab VM.");
+      setToast("AIDP JDBC driver synchronized to oci_artifacts and the lab VM.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to store the JDBC driver");
     } finally {
@@ -2138,7 +2321,10 @@ function AdminSettings() {
     if (driverInputRef.current) driverInputRef.current.value = "";
   }
   return (
-    <Shell adminLink={false} onSignOut={logout}>
+    <Shell
+      onSignOut={logout}
+      operatorUsername={adminSession?.operator_username || adminSession?.username}
+    >
       <section className="settings-page">
         <div className="settings-heading">
           <h1>Settings</h1>
@@ -2307,16 +2493,13 @@ function AdminSettings() {
                 <p>Manage participant access to these starter kits.</p>
               </div>
             </div>
-            <SettingsRegistrationCodeField
-              value={registrationCode}
-              configured={registrationCodeConfigured}
-              onChange={setRegistrationCode}
+            <ApplicationAccessSettings
+              deploymentMode={deploymentMode}
+              registrationCode={registrationCode}
+              registrationCodeConfigured={registrationCodeConfigured}
+              onRegistrationCodeChange={setRegistrationCode}
+              onSave={() => void saveSettings("application")}
             />
-            <div className="settings-actions">
-              <button type="button" className="settings-save" onClick={() => void saveSettings("application")} disabled={!registrationCode}>
-                Save Settings
-              </button>
-            </div>
           </section>
           <section
             id="settings-panel-governance"
@@ -2332,9 +2515,7 @@ function AdminSettings() {
               <div>
                 <div className="settings-title-row">
                   <strong>AI Data Governance Gateway</strong>
-                  <span className={`settings-status ${governanceGatewayInstalled ? "available" : "unavailable"}`}>
-                    {governanceGatewayInstalled ? "Installed" : "Not installed"}
-                  </span>
+                  <GatewayInstallationStatus installed={governanceGatewayInstalled} />
                 </div>
                 <p>Review governed data access, runtime artifacts and JDBC connectivity.</p>
               </div>
@@ -2362,7 +2543,7 @@ function AdminSettings() {
                 </label>
                 <label className="settings-field">
                   Governance Delta schema
-                  <input value="data_governance" readOnly spellCheck={false} aria-label="Governance Delta schema" />
+                  <input value="oci_artifacts" readOnly spellCheck={false} aria-label="Governance Delta schema" />
                 </label>
                 <div className="settings-intro settings-connection-intro">
                   <div>
@@ -2388,7 +2569,7 @@ function AdminSettings() {
                   <div className="settings-driver-card">
                     <div>
                       <strong>Available</strong>
-                      <p>The driver is synchronized to oci_artifact and the lab VM.</p>
+                      <p>The driver is synchronized to oci_artifacts and the lab VM.</p>
                     </div>
                     <div className="settings-driver-actions">
                       <a className="settings-link" href="/api/admin/aidp/jdbc-driver" download>
@@ -2462,7 +2643,7 @@ function AdminSettings() {
           phase="content"
           label="Installing JDBC driver"
           indeterminate
-          message="Validating the ZIP and synchronizing the driver to oci_artifact and the lab VM."
+          message="Validating the ZIP and synchronizing the driver to oci_artifacts and the lab VM."
         />
       )}
       <Toast message={toast} onDismiss={() => setToast("")} />
@@ -2472,7 +2653,8 @@ function AdminSettings() {
 
 export function App() {
   if (window.location.pathname === "/admin/settings") return <AdminSettings />;
-  if (window.location.pathname === "/admin/login") return <AdminLogin />;
+  if (window.location.pathname === "/admin/login")
+    return <RegisterPage initialAdminLogin />;
   if (window.location.pathname === "/admin/users") return <AdminUsers />;
   return <RegisterPage />;
 }

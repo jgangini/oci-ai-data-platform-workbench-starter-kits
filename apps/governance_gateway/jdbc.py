@@ -20,8 +20,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 _PROFILE = "AIDP_GATEWAY"
 MAX_JDBC_DRIVER_BYTES = 128 * 1024 * 1024
-_JDBC_DRIVER_BUCKET = "oci_artifact"
-_JDBC_DRIVER_OBJECT = "data_governance/runtime/aidp-jdbc-driver.zip"
+_JDBC_DRIVER_BUCKET = "oci_artifacts"
+_JDBC_DRIVER_OBJECT = "oci_artifacts/runtime/aidp-jdbc-driver.zip"
 _MAX_EXPANDED_BYTES = 512 * 1024 * 1024
 _PARAMETER = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
 _DEFAULT_MAX_ROWS = 1_000

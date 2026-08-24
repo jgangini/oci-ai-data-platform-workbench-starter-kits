@@ -234,11 +234,11 @@ def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
     assert all(case["required_concepts"] for case in cases)
 
 
-def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror() -> None:
+def test_agent_provisions_from_shared_master_catalog_without_autonomous_mirror() -> None:
     client = bare_client()
     pack = load_lab_pack("agent")
     manifest = {
-        "layout_version": 4,
+        "layout_version": 5,
         "owner_key": participant_owner_key(USER_OCID),
         "participant_key": "u101",
         "participant_code": 101,
@@ -248,7 +248,7 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
             "agent": {
                 "pack_version": pack.pack_version,
                 "pack_hash": pack.pack_sha256,
-                "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/agent",
+                "workspace_path": f"/Workspace/agent/u101_{EMAIL}",
                 "job_name": "u101_agent_data_governance",
                 "phase": "workspace",
                 "operation": None,
@@ -261,7 +261,7 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
     client._ensure_workspace_layout = lambda *_args: False
     client._ensure_catalog = lambda name: (
         ({"key": "u101-catalog-key"}, False)
-        if name == "u101_aidp"
+        if name == "oci_medallion"
         else (_ for _ in ()).throw(AssertionError("unexpected catalog"))
     )
     client._ensure_catalog_contract = lambda key, name: (
@@ -274,7 +274,7 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
             },
             False,
         )
-        if (key, name) == ("u101-catalog-key", "u101_aidp")
+        if (key, name) == ("u101-catalog-key", "oci_medallion")
         else (_ for _ in ()).throw(AssertionError("unexpected schema contract"))
     )
     client._ensure_agent_compute = lambda workspace: ({"key": "ai-compute-key"}, False)
@@ -292,6 +292,10 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
     permission_paths: list[str] = []
     client._ensure_permission = lambda path, *_args, **_kwargs: (
         permission_paths.append(path) or False
+    )
+    absent_permissions: list[tuple[str, str]] = []
+    client._assert_permission_absent = lambda path, _user, permission: absent_permissions.append(
+        (path, permission)
     )
     client._ensure_agent_deployment = lambda *_args, **_kwargs: (
         {"key": "deployment-key", "lifecycleState": "ACTIVE"},
@@ -317,11 +321,10 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
     assert material.participant_key == "u101"
     assert manifest["labs"]["agent"]["phase"] == "active"
     assert manifest["external_catalog"] is None
-    assert {"/workspaces/workspace/clusters/ai-compute-key", "/catalogs/u101-catalog-key"} <= set(
-        permission_paths
-    )
+    assert "/workspaces/workspace/clusters/ai-compute-key" in permission_paths
+    assert ("/catalogs/u101-catalog-key", "SELECT") in absent_permissions
     source = str(captured["source"])
-    assert "u101_aidp" in source and "shared-spark-key" not in source
+    assert "oci_medallion" in source and "shared-spark-key" not in source
     assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
     assert captured["descriptor"]["participant_key"] == "u101"
     assert captured["descriptor"]["entry_file"] == "governance_agent.py"
@@ -336,7 +339,7 @@ def test_agent_provisions_from_private_master_catalog_without_autonomous_mirror(
     assert manifest["labs"]["agent"]["deployment_source_hash"] == captured[
         "descriptor"
     ]["entry_sha256"]
-    assert writes[-1]["agent"]["catalog_name"] == "u101_aidp"
+    assert writes[-1]["agent"]["catalog_name"] == "oci_medallion"
 
 
 def test_active_agent_verifies_deployment_without_rotating_database_credentials() -> None:

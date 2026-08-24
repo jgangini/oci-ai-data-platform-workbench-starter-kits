@@ -168,7 +168,7 @@ class FakeApi:
             return "FOLDER", base_path.rsplit("/", 1)[-1]
         if base_path.startswith("/workspaces/"):
             return "WORKSPACE", "ws"
-        return "CATALOG", "aidp_lab"
+        return "CATALOG", "oci_medallion"
 
     def _create_workspace_object(self, headers: dict) -> post_apply.ApiResponse:
         object_path = headers["path"]
@@ -357,9 +357,9 @@ def test_governance_schema_permissions_allow_only_admins_and_dedicated_jdbc_user
     technical_user = "ocid1.user.oc1..governance"
     operator_user = "ocid1.user.oc1..operator"
     api.resources["/schemas"] = [
-        {"displayName": "data_governance", "key": "aidp_lab.data_governance"}
+        {"displayName": "oci_artifacts", "key": "oci_medallion.oci_artifacts"}
     ]
-    api.actions["/schemas/aidp_lab.data_governance/permissions"] = [
+    api.actions["/schemas/oci_medallion.oci_artifacts/permissions"] = [
         {
             "grantee": "AI_DATA_PLATFORM_ADMIN",
             "granteeName": "AI_DATA_PLATFORM_ADMIN",
@@ -390,7 +390,7 @@ def test_governance_schema_permissions_allow_only_admins_and_dedicated_jdbc_user
         },
     ]
     post_apply.verify_governance_schema_permissions(
-        api, "aidp_lab-key", technical_user, operator_user, attempts=1
+        api, "oci_medallion-key", technical_user, operator_user, attempts=1
     )
 
 
@@ -398,9 +398,9 @@ def test_governance_schema_permissions_fail_closed_for_developer_access() -> Non
     api = FakeApi()
     technical_user = "ocid1.user.oc1..governance"
     api.resources["/schemas"] = [
-        {"displayName": "data_governance", "key": "aidp_lab.data_governance"}
+        {"displayName": "oci_artifacts", "key": "oci_medallion.oci_artifacts"}
     ]
-    api.actions["/schemas/aidp_lab.data_governance/permissions"] = [
+    api.actions["/schemas/oci_medallion.oci_artifacts/permissions"] = [
         {
             "grantee": technical_user,
             "granteeType": "USER",
@@ -416,7 +416,7 @@ def test_governance_schema_permissions_fail_closed_for_developer_access() -> Non
     ]
     with pytest.raises(post_apply.ReconcileError, match="unauthorized inherited grant"):
         post_apply.verify_governance_schema_permissions(
-            api, "aidp_lab-key", technical_user, "ocid1.user.oc1..operator", attempts=1
+            api, "oci_medallion-key", technical_user, "ocid1.user.oc1..operator", attempts=1
         )
 
 
@@ -424,9 +424,9 @@ def test_governance_schema_permissions_reject_unrelated_admin_user() -> None:
     api = FakeApi()
     technical_user = "ocid1.user.oc1..governance"
     api.resources["/schemas"] = [
-        {"displayName": "data_governance", "key": "aidp_lab.data_governance"}
+        {"displayName": "oci_artifacts", "key": "oci_medallion.oci_artifacts"}
     ]
-    api.actions["/schemas/aidp_lab.data_governance/permissions"] = [
+    api.actions["/schemas/oci_medallion.oci_artifacts/permissions"] = [
         {
             "grantee": "AI_DATA_PLATFORM_ADMIN",
             "granteeName": "AI_DATA_PLATFORM_ADMIN",
@@ -449,7 +449,7 @@ def test_governance_schema_permissions_reject_unrelated_admin_user() -> None:
     with pytest.raises(post_apply.ReconcileError, match="unauthorized grant"):
         post_apply.verify_governance_schema_permissions(
             api,
-            "aidp_lab-key",
+            "oci_medallion-key",
             technical_user,
             "ocid1.user.oc1..operator",
             attempts=1,
@@ -461,20 +461,20 @@ def test_governance_runtime_gets_only_schema_admin_and_cluster_use() -> None:
     technical_user = "ocid1.user.oc1..governance"
     api.resources["/schemas"] = [
         {
-            "displayName": "data_governance",
-            "key": "aidp_lab.data_governance",
+            "displayName": "oci_artifacts",
+            "key": "oci_medallion.oci_artifacts",
         }
     ]
     schema_key = post_apply.ensure_governance_control_access(
         api,
-        "aidp_lab-key",
-        "aidp_lab",
+        "oci_medallion-key",
+        "oci_medallion",
         "ws-key",
         "aidp_cluster_shared_compute-key",
         technical_user,
     )
-    assert schema_key == "aidp_lab.data_governance"
-    assert ("/schemas", {"displayName": "data_governance", "catalogKey": "aidp_lab-key"}) in api.list_calls
+    assert schema_key == "oci_medallion.oci_artifacts"
+    assert ("/schemas", {"displayName": "oci_artifacts", "catalogKey": "oci_medallion-key"}) in api.list_calls
     assert not any(method == "POST" and path == "/schemas" for method, path, _payload, _headers in api.calls)
     permissions = [
         (path, next(iter(payload.values()))["permissions"])
@@ -482,7 +482,7 @@ def test_governance_runtime_gets_only_schema_admin_and_cluster_use() -> None:
         if method == "POST" and payload and "/actions/managePermission" in path
     ]
     assert permissions == [
-        ("/schemas/aidp_lab.data_governance/actions/managePermission", ["ADMIN"]),
+        ("/schemas/oci_medallion.oci_artifacts/actions/managePermission", ["ADMIN"]),
         (
             "/workspaces/ws-key/clusters/aidp_cluster_shared_compute-key/actions/managePermission",
             ["USE"],
@@ -578,8 +578,8 @@ def test_reconcile_leaves_legacy_catalog_empty_for_private_participant_catalogs(
 
 
 def _assert_empty_legacy_catalog(api: FakeApi, reconciled: dict, events: list[str]) -> None:
-    assert reconciled["catalog_key"] == "aidp_lab-key"
-    assert reconciled["catalog_name"] == "aidp_lab"
+    assert reconciled["catalog_key"] == "oci_medallion-key"
+    assert reconciled["catalog_name"] == "oci_medallion"
     assert reconciled["global_schema_count"] == 0
     assert reconciled["external_volume_count"] == 0
     schema_posts = [
@@ -591,7 +591,7 @@ def _assert_empty_legacy_catalog(api: FakeApi, reconciled: dict, events: list[st
     assert not any(method == "POST" and path == "/volumes" for method, path, _, _ in api.calls)
     schema_queries = [params for path, params in api.list_calls if path == "/schemas"]
     volume_queries = [params for path, params in api.list_calls if path == "/volumes"]
-    assert schema_queries == [{"catalogKey": "aidp_lab-key"}]
+    assert schema_queries == [{"catalogKey": "oci_medallion-key"}]
     assert volume_queries == []
     role_queries = [params for path, params in api.list_calls if path == "/roles"]
     assert {query["displayName"] for query in role_queries} == {
@@ -600,7 +600,7 @@ def _assert_empty_legacy_catalog(api: FakeApi, reconciled: dict, events: list[st
         "AIDP_LAB_DEVELOPER",
         "AIDP_LAB_PENDING",
     }
-    assert any("zero legacy schemas and zero external volumes" in event for event in events)
+    assert any("zero existing schemas and zero external volumes" in event for event in events)
 
 
 def _assert_shared_compute(api: FakeApi, reconciled: dict) -> None:
@@ -627,7 +627,7 @@ def _assert_workspace_permissions(api: FakeApi) -> None:
         ("AIDP_DEVELOPER", ("USER",)),
         ("AIDP_LAB_PENDING", ("USER",)),
     }
-    assert "/catalogs/aidp_lab-key/permissions" not in api.actions
+    assert "/catalogs/oci_medallion-key/permissions" not in api.actions
     compute_permissions = api.actions[
         "/workspaces/ws-key/clusters/aidp_cluster_shared_compute-key/permissions"
     ]

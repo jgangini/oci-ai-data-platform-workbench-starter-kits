@@ -10,11 +10,20 @@ from urllib.parse import urlparse
 from .security import hash_secret
 
 
+def _deployment_mode(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in {"laboratory", "production"}:
+        raise ValueError("DEPLOYMENT_MODE must be laboratory or production")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     admin_username: str = "admin"
     admin_password_hash: str = ""
+    deployment_mode: str = "laboratory"
     registration_code_hash: str = ""
+    operator_username: str = ""
     identity_domain_url: str = ""
     developer_group_id: str = ""
     pending_group_id: str = ""
@@ -29,7 +38,7 @@ class Settings:
     governance_gateway_url: str = ""
     governance_control_bucket: str = ""
     jdbc_driver_file: str = "/var/lib/aidp-lab/drivers/aidp-jdbc-driver.zip"
-    governance_jdbc_driver_object: str = "data_governance/runtime/aidp-jdbc-driver.zip"
+    governance_jdbc_driver_object: str = "oci_artifacts/runtime/aidp-jdbc-driver.zip"
     enforce_governed_data_access: bool = False
     oci_config_file: str = "/etc/aidp-lab/oci/config"
     objectstorage_namespace: str = ""
@@ -45,7 +54,9 @@ class Settings:
         return cls(
             admin_username=os.getenv("ADMIN_USERNAME", "admin"),
             admin_password_hash=os.getenv("ADMIN_PASSWORD_HASH", ""),
+            deployment_mode=_deployment_mode(os.getenv("DEPLOYMENT_MODE", "laboratory")),
             registration_code_hash=os.getenv("REGISTRATION_CODE_HASH", ""),
+            operator_username=os.getenv("OPERATOR_USERNAME", "").strip(),
             identity_domain_url=os.getenv("IDENTITY_DOMAIN_URL", "").rstrip("/"),
             developer_group_id=os.getenv("IDENTITY_DEVELOPER_GROUP_ID", ""),
             pending_group_id=os.getenv("IDENTITY_PENDING_GROUP_ID", ""),
@@ -68,7 +79,7 @@ class Settings:
             ),
             governance_jdbc_driver_object=os.getenv(
                 "GOVERNANCE_JDBC_DRIVER_OBJECT",
-                "data_governance/runtime/aidp-jdbc-driver.zip",
+                "oci_artifacts/runtime/aidp-jdbc-driver.zip",
             ),
             enforce_governed_data_access=os.getenv("ENFORCE_GOVERNED_DATA_ACCESS", "false").lower()
             in {"1", "true", "yes"},
@@ -128,6 +139,8 @@ class SettingsStore:
             "governance_control_bucket": self._settings.governance_control_bucket,
             "jdbc_driver_available": Path(self._settings.jdbc_driver_file).is_file(),
             "jdbc_authentication": "OCI API key or browser authorization token",
+            "deployment_mode": self._settings.deployment_mode,
+            "operator_username": self._settings.operator_username,
             "registration_code_configured": bool(values["registration_code_hash"]),
         }
 
@@ -147,6 +160,8 @@ class SettingsStore:
                 raise ValueError("Enter a valid HTTPS Oracle AI Data Platform Workbench URL")
             values["aidp_workbench_url"] = normalized
         if registration_code is not None:
+            if self._settings.deployment_mode != "laboratory":
+                raise ValueError("Registration codes are available only in Laboratory mode")
             values["registration_code_hash"] = hash_secret(registration_code)
         self._write(values)
         return self.get_admin_settings()

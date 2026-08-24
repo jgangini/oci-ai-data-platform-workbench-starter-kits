@@ -19,20 +19,21 @@ def test_registered_query_is_governed_and_audited_without_sql_or_rows() -> None:
 
 def test_delta_contract_contains_every_generic_control_table() -> None:
     ddl = "\n".join(delta_schema_ddl("aidp_lab"))
-    assert all(f".data_governance.{table}" in ddl.replace("`", "") for table in CONTROL_TABLES)
+    assert all(f".oci_artifacts.{table}" in ddl.replace("`", "") for table in CONTROL_TABLES)
+    assert all(table.startswith("data_governance_") for table in CONTROL_TABLES)
     assert "referenced_object_ids ARRAY<STRING>" in ddl
     assert "classification STRING" in ddl
     assert "lineage_propagation" in ddl and "source_version STRING" in ddl
 
 
 def test_delta_contract_uses_a_separate_object_storage_path_per_control_table() -> None:
-    location = "oci://oci_artifact@namespace/data_governance"
+    location = "oci://oci_artifacts@namespace/oci_artifacts"
     ddl = delta_schema_ddl("aidp_lab", location)
     for table in CONTROL_TABLES:
         assert any(f"LOCATION '{location}/{table}'" in statement for statement in ddl)
     unsafe_locations = (
-        "oci://oci_artifact@namespace/data_governance'; DROP TABLE secrets; --",
-        "oci://oci_artifact:secret@namespace/data_governance",
+        "oci://oci_artifacts@namespace/oci_artifacts'; DROP TABLE secrets; --",
+        "oci://oci_artifacts:secret@namespace/oci_artifacts",
     )
     for unsafe_location in unsafe_locations:
         try:

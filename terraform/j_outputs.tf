@@ -36,7 +36,12 @@ output "compartment_ocid" {
 }
 
 output "bucket_name" {
-  value = oci_objectstorage_bucket.data.name
+  value = local.bootstrap_bucket_name
+}
+
+output "medallion_bucket_names" {
+  description = "Resolved landing, bronze, silver, gold, and artifacts Object Storage bucket names."
+  value       = local.medallion_bucket_names
 }
 
 output "objectstorage_namespace" {
@@ -131,16 +136,16 @@ output "governance_gateway_jdbc_secret_ocid" {
 }
 
 output "governance_gateway_jdbc_driver_bucket" {
-  value = try(oci_objectstorage_bucket.control[0].name, null)
+  value = var.enable_ai_data_governance ? local.artifacts_bucket_name : null
 }
 
 output "governance_control_bucket" {
-  description = "Private oci_artifact Object Storage bucket for the data_governance Delta schema and governance runtime artifacts."
-  value       = try(oci_objectstorage_bucket.control[0].name, null)
+  description = "Private oci_artifacts Object Storage bucket for the oci_artifacts Delta schema and governance runtime artifacts."
+  value       = var.enable_ai_data_governance ? local.artifacts_bucket_name : null
 }
 
 output "governance_control_delta_location" {
-  value = var.enable_ai_data_governance ? "oci://${oci_objectstorage_bucket.control[0].name}@${var.objectstorage_namespace}/data_governance" : null
+  value = var.enable_ai_data_governance ? "oci://${local.artifacts_bucket_name}@${var.objectstorage_namespace}/oci_artifacts" : null
 }
 
 output "governance_gateway_jdbc_driver_object" {
@@ -180,13 +185,18 @@ output "operator_user_ocid" {
   value       = var.operator_user_ocid
 }
 
+output "operator_username" {
+  description = "Display name or email of the OCI user that created the deployment."
+  value       = var.operator_username
+}
+
 output "home_region" {
   description = "Tenancy home region used for Identity Domains operations."
   value       = var.home_region
 }
 
 output "aidp_catalog_name" {
-  value = "aidp_lab"
+  value = "oci_medallion"
 }
 
 output "aidp_shared_compute_name" {
@@ -194,7 +204,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Fresh-only v2.1.20 contract: post-apply creates no external volumes."
+  description = "Fresh-only v2.1.21 contract: post-apply creates no external volumes."
   value       = 0
 }
 

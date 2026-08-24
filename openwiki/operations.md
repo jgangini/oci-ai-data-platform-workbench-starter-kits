@@ -30,12 +30,12 @@ docker compose -f docker/docker-compose.dev.yml down
 The bootstrap helper [`scripts/bootstrap_local_oci_env.py`](../scripts/bootstrap_local_oci_env.py) discovers the live lab resources and writes a local `.env` without printing credentials. It can also self-check its env rendering and escaping behavior.
 
 ```powershell
-.\.venv\Scripts\python.exe .\scripts\bootstrap_local_oci_env.py --config <oci-config> --key <oci-key.pem>
+.\.venv\Scripts\python.exe .\scripts\bootstrap_local_oci_env.py --config <oci-config> --key <oci-key.pem> --access-email <deployment-email.html>
 docker compose --env-file .env -f docker/docker-compose.oci-local.yml config --quiet
 docker compose --env-file .env -f docker/docker-compose.oci-local.yml up --build --detach
 ```
 
-The generated `.env` includes `IDENTITY_DOMAIN_URL`, `OCI_CONFIG_FILE=/etc/aidp-lab/oci/config`, `OBJECTSTORAGE_NAMESPACE`, `BUCKET_NAME`, and two host paths used only for Compose binds. The helper also writes a sanitized, non-secret `.tmp/oci-local/<suffix>/config` whose `key_file` points inside the container. Compose mounts that config and the original operator key as read-only files; it never copies or prints the private key. Identity Domains and AIDP requests are signed with that profile; the container has no OAuth or instance-principal fallback. OCI-local rejects a config passphrase instead of copying it, so the supplied operator API key must be unencrypted.
+The generated `.env` includes `IDENTITY_DOMAIN_URL`, `OCI_CONFIG_FILE=/etc/aidp-lab/oci/config`, `OBJECTSTORAGE_NAMESPACE`, `BUCKET_NAME`, and two host paths used only for Compose binds. With `--access-email`, it also derives the same administrator and registration verifiers used by the deployment; plaintext access values are neither printed nor written to the generated environment. The helper also writes a sanitized, non-secret `.tmp/oci-local/<suffix>/config` whose `key_file` points inside the container. Compose mounts that config and the original operator key as read-only files; it never copies or prints the private key. Identity Domains and AIDP requests are signed with that profile; the container has no OAuth or instance-principal fallback. OCI-local rejects a config passphrase instead of copying it, so the supplied operator API key must be unencrypted.
 
 ## Operational scripts
 - [`scripts/arch-preflight.ps1`](../scripts/arch-preflight.ps1) — preflight checks before substantial changes

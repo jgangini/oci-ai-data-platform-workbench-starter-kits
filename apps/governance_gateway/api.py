@@ -311,7 +311,7 @@ def _register_catalog_admin_routes(
         status = _gateway_status(identity, readiness, jdbc_installed, runtime_image)
         return {
             **status,
-            "control_schema": os.getenv("GOVERNANCE_CONTROL_SCHEMA", "data_governance"),
+            "control_schema": os.getenv("GOVERNANCE_CONTROL_SCHEMA", "oci_artifacts"),
             "catalog_sync": (
                 service.store.sync_status()
                 if status["state"] == "ready"
@@ -568,7 +568,7 @@ def production_app() -> FastAPI:
     runtime = AidpJdbcRuntime()
     store = JdbcControlStore(
         runtime.connect,
-        os.environ.get("GOVERNANCE_CONTROL_CATALOG", "aidp_lab"),
+        os.environ.get("GOVERNANCE_CONTROL_CATALOG", "oci_medallion"),
         os.environ.get("GOVERNANCE_CONTROL_LOCATION", ""),
     )
     tokenizer = VaultTokenizer(store, OciKmsCipher(KmsSettings.from_environment()))

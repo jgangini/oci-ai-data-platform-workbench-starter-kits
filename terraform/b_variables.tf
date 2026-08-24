@@ -27,6 +27,15 @@ variable "operator_user_ocid" {
   }
 }
 
+variable "operator_username" {
+  description = "Display name or email of the OCI user that created the deployment."
+  type        = string
+  validation {
+    condition     = length(trimspace(var.operator_username)) > 0 && length(var.operator_username) <= 255
+    error_message = "operator_username must identify the OCI deployment operator."
+  }
+}
+
 variable "compartment_ocid" {
   description = "Target compartment already created or resolved by Deploy Studio."
   type        = string
@@ -67,13 +76,24 @@ variable "admin_password_hash" {
   }
 }
 
+variable "deployment_mode" {
+  description = "Application access mode: participant registration for laboratory or administrator-only production."
+  type        = string
+  default     = "laboratory"
+  validation {
+    condition     = contains(["laboratory", "production"], var.deployment_mode)
+    error_message = "deployment_mode must be laboratory or production."
+  }
+}
+
 variable "registration_code_hash" {
   description = "PBKDF2 hash of the normalized registration code."
   type        = string
   sensitive   = true
+  default     = ""
   validation {
-    condition     = startswith(var.registration_code_hash, "pbkdf2_sha256$")
-    error_message = "registration_code_hash must use the Deploy Studio PBKDF2 format."
+    condition     = var.deployment_mode == "production" ? var.registration_code_hash == "" : startswith(var.registration_code_hash, "pbkdf2_sha256$")
+    error_message = "registration_code_hash must use Deploy Studio PBKDF2 in laboratory mode and be empty in production mode."
   }
 }
 
@@ -162,6 +182,101 @@ variable "enable_ai_data_governance" {
   description = "Install the optional AI Data Governance Gateway in a private OKE cluster."
   type        = bool
   default     = false
+}
+
+variable "landing_bucket_mode" {
+  type    = string
+  default = "new"
+  validation {
+    condition     = contains(["new", "existing"], var.landing_bucket_mode)
+    error_message = "landing_bucket_mode must be new or existing."
+  }
+}
+
+variable "landing_new_bucket_name" {
+  type    = string
+  default = "oci_landing"
+}
+
+variable "landing_existing_bucket_name" {
+  type    = string
+  default = ""
+}
+
+variable "bronze_bucket_mode" {
+  type    = string
+  default = "new"
+  validation {
+    condition     = contains(["new", "existing"], var.bronze_bucket_mode)
+    error_message = "bronze_bucket_mode must be new or existing."
+  }
+}
+
+variable "bronze_new_bucket_name" {
+  type    = string
+  default = "oci_bronze"
+}
+
+variable "bronze_existing_bucket_name" {
+  type    = string
+  default = ""
+}
+
+variable "silver_bucket_mode" {
+  type    = string
+  default = "new"
+  validation {
+    condition     = contains(["new", "existing"], var.silver_bucket_mode)
+    error_message = "silver_bucket_mode must be new or existing."
+  }
+}
+
+variable "silver_new_bucket_name" {
+  type    = string
+  default = "oci_silver"
+}
+
+variable "silver_existing_bucket_name" {
+  type    = string
+  default = ""
+}
+
+variable "gold_bucket_mode" {
+  type    = string
+  default = "new"
+  validation {
+    condition     = contains(["new", "existing"], var.gold_bucket_mode)
+    error_message = "gold_bucket_mode must be new or existing."
+  }
+}
+
+variable "gold_new_bucket_name" {
+  type    = string
+  default = "oci_gold"
+}
+
+variable "gold_existing_bucket_name" {
+  type    = string
+  default = ""
+}
+
+variable "artifacts_bucket_mode" {
+  type    = string
+  default = "new"
+  validation {
+    condition     = contains(["new", "existing"], var.artifacts_bucket_mode)
+    error_message = "artifacts_bucket_mode must be new or existing."
+  }
+}
+
+variable "artifacts_new_bucket_name" {
+  type    = string
+  default = "oci_artifacts"
+}
+
+variable "artifacts_existing_bucket_name" {
+  type    = string
+  default = ""
 }
 
 variable "governance_vault_mode" {

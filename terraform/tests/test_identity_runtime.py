@@ -37,6 +37,12 @@ def test_operator_identity_is_reused_and_governance_resources_are_isolated() -> 
     assert "fqs = local.governance_gateway_scope" not in edge
     assert 'methods = ["GET", "POST", "PUT", "DELETE"]' in edge
     assert 'email          = "governance-jdbc-${local.suffix}@example.invalid"' in edge
+    assert "vault_id = local.governance_existing_vault_ocid" in edge
+    assert "split(\".\", local.governance_existing_vault_ocid)[3] == var.region" in edge
+    assert "local.governance_vault_management_endpoint" in edge
+    assert "local.governance_vault_crypto_endpoint" in (
+        ROOT / "terraform/i_oci_data_governance_deployment.tf"
+    ).read_text(encoding="utf-8")
     assert 'resource "terraform_data" "governance_vault_dns_wait"' in edge
     assert "socket.getaddrinfo(sys.argv[1], 443)" in edge
     assert 'while [ "$attempt" -le 90 ]' in edge

@@ -332,11 +332,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return forwarded or (request.client.host if request.client else "unknown")
 
     def require_identity() -> None:
-        if not settings.identity_ready() or not app.state.settings_store.get_registration_code_hash():
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Registration is not configured")
+        if not settings.identity_ready():
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Identity is not configured")
 
     def require_registration_ready() -> None:
+        if settings.deployment_mode != "laboratory":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Participant registration is disabled")
         require_identity()
+        if not app.state.settings_store.get_registration_code_hash():
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Registration is not configured")
         if not settings.aidp_ready():
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
 
@@ -467,7 +471,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/public/config")
     async def public_config() -> dict[str, Any]:
         return {
-            "lab_name": "OCI AI Data Platform Lab",
+            "lab_name": "Oracle AI Data Platform Workbench Starter Kits",
+            "deployment_mode": settings.deployment_mode,
             "registration_code_pattern": "AAAA-0000",
             "labs": public_lab_catalog(),
         }
@@ -530,7 +535,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/admin/session")
     async def admin_session(username: str = Depends(require_admin)) -> dict[str, str]:
-        return {"username": username}
+        return {"username": username, "operator_username": settings.operator_username}
 
     async def admin_settings_payload() -> dict[str, str | bool]:
         driver = Path(settings.jdbc_driver_file)

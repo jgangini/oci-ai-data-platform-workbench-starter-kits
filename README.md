@@ -4,15 +4,15 @@ Oracle AI Data Platform Workbench Starter Kits is a reusable collection of hands
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more starter kits without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current validation target: **v2.1.20**. This release makes new-Vault deployments wait for a stable regional KMS DNS endpoint before creating the governance key. It retains the explicit OCI Vault mode, the administrator-only direct-to-Object-Storage JDBC installation flow, and AIDP discovery tags within OCI's ten-tag limit.
+Current validation target: **v2.1.21**. This release standardizes the required Medallion Architecture on five reusable Object Storage buckets, adds Laboratory and Production deployment modes, publishes the `oci_medallion` Master Catalog, and keeps the AI Data Governance Gateway optional. New-Vault deployments also wait for a stable regional KMS DNS endpoint before creating the governance key.
 
 ## What the project provides
 
-- A shared AIDP workspace with `aidp_cluster_shared_compute` for Spark workflows, plus a private catalog with four medallion schemas per participant.
+- A shared AIDP workspace with `aidp_cluster_shared_compute` for Spark workflows, plus the private `oci_medallion` catalog.
 - A shared `aidp_agent_shared_compute` AI Compute runtime for participant-specific governance Agents.
-- An optional private AI Data Governance Gateway on OKE, backed by the `data_governance` Delta schema in `oci_artifact`.
+- An optional private AI Data Governance Gateway on OKE, backed by `data_governance_*` Delta tables in `oci_medallion.oci_artifacts`.
 - Autonomous AI Database 26ai for the AI Compute Agent memory/checkpointer contract.
-- A private Object Storage bucket organized as `01_landing/`, `02_bronze/`, `03_silver/`, and `04_gold/`.
+- Five required private Object Storage buckets: `oci_landing`, `oci_bronze`, `oci_silver`, `oci_gold`, and `oci_artifacts`. Each bucket can be created or connected to an existing bucket during deployment.
 - A registration and administration web application hosted on an OCI Compute VM.
 - Identity Domains onboarding with pending and active participant groups.
 - Versioned starter kit packages containing canonical CSV files, notebooks, task dependencies, expected results, and SHA-256 hashes.
@@ -111,43 +111,43 @@ The optional Agent starter kit creates or reconciles `u101_agent_data_governance
 
 The package includes a versioned acceptance matrix covering catalog scope, quality, entity and column lineage, stewardship gaps, DAMA control mapping, participant isolation, unsupported certification claims, and arbitrary-SQL refusal. Candidate releases execute these questions live and retain the tool trace and response text as structured evidence without participant data from another catalog.
 
-Each participant receives an independent Agent definition, but all participant Agents reuse `aidp_agent_shared_compute`. AIDP injects the Agent `checkpointer`; Autonomous AI Database remains deployed because AI Compute uses it for persistent Agent memory. The governance gateway never replaces that memory path. It evaluates the effective user token supplied as a required, non-logged AIDP session variable and never gives the Agent direct access to `data_governance`.
+Each participant receives an independent Agent definition, but all participant Agents reuse `aidp_agent_shared_compute`. AIDP injects the Agent `checkpointer`; Autonomous AI Database remains deployed because AI Compute uses it for persistent Agent memory. The governance gateway never replaces that memory path. It evaluates the effective user token supplied as a required, non-logged AIDP session variable and never gives the Agent direct access to `oci_medallion.oci_artifacts`.
 
 The package preserves `catalog_inventory` and `catalog_lineage` and adds `governance_policy_explain` and `governed_query`. A source, package, or tool-contract hash change causes one controlled redeploy; an unchanged Agent is reused. A participant deletion removes only that participant's Agent and legacy participant-scoped mirror artifacts. It does not remove the shared Autonomous deployment or shared AI Compute.
 
 ### AI Data Governance Gateway
 
-The optional **AI Data Governance Gateway** component deploys a private, least-privilege service on OKE. It is the policy enforcement point for the VS Code SQL editor, governed notebooks, and Agent tools. Workspaces, Master Catalog browsing, clusters, notebooks, starter kits, and shared AIDP Agents remain available when the Gateway is not installed. The authoritative control plane is the `data_governance` Delta schema in the selected standard AIDP catalog:
+The optional **AI Data Governance Gateway** component deploys a private, least-privilege service on OKE. It is the policy enforcement point for the VS Code SQL editor, governed notebooks, and Agent tools. Workspaces, Master Catalog browsing, clusters, notebooks, starter kits, and shared AIDP Agents remain available when the Gateway is not installed. The authoritative control plane uses `data_governance_*` Delta tables in `oci_medallion.oci_artifacts`:
 
-- `data_governance` stores catalog classification, sensitivity, ownership, and review state.
-- `access_policy` stores `ALLOW`, `DENY`, `NULL`, `MASK`, and `TOKENIZE` rules for existing users, groups, and roles.
-- `lineage_propagation` records deterministic propagation rules and conflicts.
-- `query_registry` stores approved parameterized query definitions.
-- `token_vault` stores token references, never plaintext source values.
-- `governance_audit` records policy changes and effective query decisions.
-- `sync_state` records versioned Master Catalog snapshots and tombstones.
+- `data_governance_metadata` stores catalog classification, sensitivity, ownership, and review state.
+- `data_governance_access_policy` stores `ALLOW`, `DENY`, `NULL`, `MASK`, and `TOKENIZE` rules for existing users, groups, and roles.
+- `data_governance_lineage_propagation` records deterministic propagation rules and conflicts.
+- `data_governance_query_registry` stores approved parameterized query definitions.
+- `data_governance_token_vault` stores token references, never plaintext source values.
+- `data_governance_audit` records policy changes and effective query decisions.
+- `data_governance_sync_state` records versioned Master Catalog snapshots and tombstones.
 
-`AI_DATA_PLATFORM_ADMIN` can manage policies. `AIDP_DEVELOPER` cannot read `data_governance`; the Permissions UI is disabled and the API returns `403`. New or unclassified columns fail closed. `SELECT *` omits denied columns, while an explicit denied reference returns `403` and names the restricted columns. Masking and tokenization happen before results, previews, logs, or Agent responses leave the gateway.
+`AI_DATA_PLATFORM_ADMIN` can manage policies. `AIDP_DEVELOPER` cannot read `oci_medallion.oci_artifacts`; the Permissions UI is disabled and the API returns `403`. New or unclassified columns fail closed. `SELECT *` omits denied columns, while an explicit denied reference returns `403` and names the restricted columns. Masking and tokenization happen before results, previews, logs, or Agent responses leave the gateway.
 
 ```mermaid
 flowchart LR
   VS[VS Code extension] -->|OAuth user token| GW[Private governance gateway on OKE]
   AG[AIDP governance Agent] -->|non-logged session token| GW
   GW -->|registered query / JDBC| AIDP[AIDP compute and Master Catalog]
-  GW -->|policy and audit| CTRL[(oci_artifact / data_governance)]
+  GW -->|policy and audit| CTRL[(oci_artifacts / oci_medallion.oci_artifacts)]
   AG -->|AIDP checkpointer| ADB[(Autonomous AI Database 26ai)]
 ```
 
-OKE uses Workload Identity for OCI access. Deploy Studio creates one private `oci_artifact` Object Storage bucket for governance data and runtime artifacts. Each external Delta table lives at `data_governance/<table-name>` and is published as `aidp_lab.data_governance.<table-name>`; the licensed Oracle AIDP JDBC bundle has the fixed object name `data_governance/runtime/aidp-jdbc-driver.zip`. Neither artifact enters Git or Terraform state.
+OKE uses Workload Identity for OCI access. The required `oci_artifacts` bucket centralizes governed Delta data and runtime artifacts. Each external Delta table lives under `oci_artifacts/<table-name>` and is published as `oci_medallion.oci_artifacts.data_governance_<name>`; the licensed Oracle AIDP JDBC bundle has the fixed object name `oci_artifacts/runtime/aidp-jdbc-driver.zip`. Neither artifact enters Git or Terraform state.
 
 JDBC installation is restricted to authenticated administrators and is available through two interfaces:
 
 - In the registration VM, open **Settings → AI Data Governance Gateway → Install JDBC Driver**. `PUT /api/admin/aidp/jdbc-driver` validates the ZIP, synchronizes the fixed Object Storage artifact, and keeps an owner-only VM copy for recovery and authorized download.
 - In the VS Code extension, an administrator requests a ten-minute, exact-object write PAR from `POST /v1/admin/jdbc-driver:upload`, uploads the ZIP directly to Object Storage, and completes the operation through `POST /v1/admin/jdbc-driver:complete` with the opaque upload identifier, declared size, and SHA-256 digest.
 
-Both paths validate size, digest or archive structure, and the presence of a JAR before the driver becomes available. The gateway revokes the PAR before reading the extension upload and deletes invalid objects. Its OKE Workload Identity can manage PARs only for the `oci_artifact` bucket and manage only that fixed JDBC object; it cannot manage any other object in the bucket.
+Both paths validate size, digest or archive structure, and the presence of a JAR before the driver becomes available. The gateway revokes the PAR before reading the extension upload and deletes invalid objects. Its OKE Workload Identity can manage PARs only for the `oci_artifacts` bucket and manage only that fixed JDBC object; it cannot manage any other object in the bucket.
 
-A separate technical JDBC API key is generated after apply, stored in OCI Vault, and limited to `ADMIN` on the `data_governance` schema, `USE` on the shared cluster, and the documented `read buckets`/`inspect objects` discovery permissions on `oci_artifact`. The personal deployment key is never mounted in pods. Public TLS and OIDC terminate at OCI API Gateway; the OKE service remains private. See [`docs/data-governance.md`](docs/data-governance.md) for the complete contract and acceptance gates.
+A separate technical JDBC API key is generated after apply, stored in OCI Vault, and limited to `ADMIN` on the `oci_artifacts` schema, `USE` on the shared cluster, and the documented `read buckets`/`inspect objects` discovery permissions on `oci_artifacts`. The personal deployment key is never mounted in pods. Public TLS and OIDC terminate at OCI API Gateway; the OKE service remains private. See [`docs/data-governance.md`](docs/data-governance.md) for the complete contract and acceptance gates.
 
 ## End-to-end user guide
 
@@ -155,7 +155,14 @@ A separate technical JDBC API key is generated after apply, stored in OCI Vault,
 
 Use OCI Deploy Studio with an immutable validated release. Deploy Studio discovers subscribed regions and compatible AIDP, Autonomous AI Database 26ai DW, and OCI Generative AI Chat capabilities before provisioning the network, private data bucket, registration VM, Identity Domains groups and policies, AIDP workspace, compute, and permissions.
 
-For a clean `v2.1.20` validation, select **New compartment**, use a unique compartment name, and treat the run as an independent installation rather than an upgrade. When **AI Data Governance Gateway** is selected, keep **OCI Vault mode** at **Create new Vault** for an isolated installation, or choose **Use existing Vault** and select an accessible `ACTIVE` `DEFAULT` Vault in the deployment region.
+For a clean `v2.1.21` validation, select **New compartment**, use the default `oracle-ai-data-platform` name or another unique name, and treat the run as an independent installation rather than an upgrade. In **Medallion Architecture**, choose **Create new bucket** or **Use existing bucket** independently for Landing, Bronze, Silver, Gold, and Artifacts. When **AI Data Governance Gateway** is selected, keep **OCI Vault mode** at **Create new Vault** for an isolated installation, or choose **Use existing Vault** and select an accessible regional `ACTIVE` `DEFAULT` Vault.
+
+Select the deployment mode before validation:
+
+- **Laboratory** enables the registration code and participant self-registration page.
+- **Production** disables public registration and opens directly on the administrator sign-in form. The public home toggle is not shown.
+
+After administrator sign-in, the application identifies the OCI user that created the environment so operators can confirm which principal owns the deployment.
 
 When the deployment completes, retain these outputs:
 
@@ -168,14 +175,16 @@ See [OCI Deploy Studio compatibility](#oci-deploy-studio-compatibility) for the 
 
 ### 2. Create or register a participant
 
-There are two onboarding paths:
+In **Laboratory** mode there are two onboarding paths:
 
 1. A participant opens the application URL, enters the registration code, full name, email address, and one or more available starter kits.
 2. An administrator opens the administrator URL, selects **Users**, chooses **Add user**, enters the participant details, and selects starter kits from the catalog table.
 
 The email address is also the OCI Identity Domains username. It is never rewritten with aliases or release-specific suffixes.
 
-Registration progresses through Identity, Workspace, Schemas, Content, and Permissions. The participant remains pending until every initially selected starter kit is active. The application can resume a retryable operation by its operation ID, so a browser timeout does not require creating another participant.
+In **Production** mode, public registration is disabled; administrators provision participants from the **Users** page.
+
+Provisioning progresses through Identity, Workspace, Schemas, Content, and Permissions. The participant remains pending until every initially selected starter kit is active. The application can resume a retryable operation by its operation ID, so a browser timeout does not require creating another participant.
 
 ### 3. Activate the OCI account
 
@@ -184,7 +193,7 @@ The participant receives the standard OCI Identity Domains welcome email and set
 Participant codes begin at `101`. The first participant receives `u101`, the next receives `u102`, and so on. A participant workspace follows this convention:
 
 ```text
-/Workspace/medallon/u101_participant@example.com/<lab_id>
+/Workspace/<starter_kit>/u101_participant@example.com
 ```
 
 The code is used for technical isolation; the email makes the participant folder easy for an instructor to identify.
@@ -193,8 +202,8 @@ The code is used for technical isolation; the email makes the participant folder
 
 In AIDP Workbench:
 
-1. Open the participant folder under `/Workspace/medallon`.
-2. Select the starter kit folder.
+1. Open the starter kit folder under `/Workspace`.
+2. Select the participant folder named `<participant_key>_<email>`.
 3. Review the canonical source files and notebooks.
 4. Open the workflow named `wf_<participant_key>_<lab_id>`.
 5. Confirm that the shared Spark compute is running.
@@ -205,11 +214,13 @@ Notebooks receive `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, 
 
 ### 5. Inspect tables and lineage
 
-Each participant receives a private catalog such as `u101_aidp`, containing governed `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas. Table names include the participant key and starter kit ID, for example:
+All starter kits use the shared `oci_medallion` Master Catalog with governed `oci_landing`, `oci_bronze`, `oci_silver`, and `oci_gold` schemas. Every table name includes its participant key and starter kit ID, for example:
 
 ```text
 u101_telco_lineage_customer_360
 ```
+
+The participant receives `SELECT` only on their declared starter-kit tables. Other participants receive no table grant, while `AI_DATA_PLATFORM_ADMIN` retains administrative access. This keeps the shared catalog discoverable without exposing another participant's data.
 
 After a successful workflow:
 
@@ -237,7 +248,7 @@ At least one starter kit must remain assigned. To remove the final starter kit, 
 The **Settings** page is divided into three sections:
 
 - **AI Data Platform Workbench** shows the service endpoint, Workbench URL, and platform OCID.
-- **Application** lets an administrator replace the registration code without displaying the current secret.
+- **Application** shows the deployment owner and, in Laboratory mode, lets an administrator replace the registration code without displaying the current secret. Production mode does not expose registration settings.
 - **AI Data Governance Gateway** shows installation and connectivity state. Only administrators can install or replace the JDBC driver; non-administrators cannot access this operation.
 
 ## Reproducibility and participant isolation
@@ -252,7 +263,7 @@ Every active package is immutable for its declared version:
 Only technical locations and permissions differ:
 
 ```text
-Workspace:      /Workspace/medallon/<participant_key>_<email>/<lab_id>
+Workspace:      /Workspace/<starter_kit>/<participant_key>_<email>
 Object Storage: <layer>/users/<participant_key>/<lab_id>/...
 Table:          <participant_key>_<lab_id>_<dataset>
 Workflow:       wf_<participant_key>_<lab_id>
@@ -357,14 +368,14 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 - Deploy Studio does not package OCI credentials in the Terraform source or state.
 - The VM receives the operator profile once through an encrypted bootstrap object, validates it, installs it with restrictive permissions, and deletes the bootstrap object.
 - The Autonomous wallet is stored only on the registration VM at `/opt/aidp-lab/autonomous` with owner-only permissions and is mounted read-only into the application container. The ADMIN password stays in the post-apply process; the VM receives only a rotated `EXECUTE`-only database operator and the wallet credentials required for participant lifecycle operations.
-- Autonomous AI Database remains part of every deployment that hosts AI Compute Agents: AIDP uses it for Agent memory/checkpointing. Governance policies and audit records live separately in Delta `data_governance`; neither store is a fallback for the other.
+- Autonomous AI Database remains part of every deployment that hosts AI Compute Agents: AIDP uses it for Agent memory/checkpointing. Governance policies and audit records live separately in `oci_medallion.oci_artifacts`; neither store is a fallback for the other.
 - New Agent assignments do not copy Master Catalog metadata into Autonomous. The VM retains the allowlisted database operator for AI bootstrap and exact cleanup of legacy participant mirrors.
 - Participants receive access only to their folder, workflow, namespaced objects, and namespaced tables.
 - The data bucket uses Oracle-managed encryption and remains private.
 
 ## OCI Deploy Studio compatibility
 
-The **v2.1.20** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery and encrypted hook-file extensions.
+The **v2.1.21** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery and encrypted hook-file extensions.
 
 Deploy Studio support includes:
 
@@ -380,7 +391,7 @@ Deploy Studio support includes:
 - Post-apply reconciliation of the AIDP workspace, catalog, `aidp_cluster_shared_compute`, AI feature enablement, Identity roles, participant application, and final access artifact. The first Agent assignment reuses the shared `aidp_agent_shared_compute` runtime.
 - Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
 
-The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.20` tag rather than an untagged development commit.
+The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.21` tag rather than an untagged development commit.
 
 Deploy Studio currently applies the Resource Manager plan automatically after planning and does not expose a repository hook between those stages. For controlled deployments, review the generated plan or run `python terraform/release_gate.py --plan-json <plan.json>` in CI before starting the final apply.
 

@@ -12,9 +12,16 @@ from .policy import ColumnPolicy, ColumnRef, PolicyAction, Principal
 from .catalog import CatalogColumn, CatalogSnapshot, new_object_id
 
 
+CONTROL_SCHEMA = "oci_artifacts"
 CONTROL_TABLES = (
-    "data_governance", "access_policy", "lineage_propagation", "query_registry",
-    "token_vault", "governance_audit", "sync_state", "sql_access",
+    "data_governance_metadata",
+    "data_governance_access_policy",
+    "data_governance_lineage_propagation",
+    "data_governance_query_registry",
+    "data_governance_token_vault",
+    "data_governance_audit",
+    "data_governance_sync_state",
+    "data_governance_sql_access",
 )
 
 
@@ -282,7 +289,7 @@ class MemoryControlStore:
 
 
 def delta_schema_ddl(catalog: str, control_location: str = "") -> tuple[str, ...]:
-    prefix = f"`{catalog}`.`data_governance`"
+    prefix = f"`{catalog}`.`{CONTROL_SCHEMA}`"
     location = _control_location(control_location)
 
     def table(name: str, columns: str) -> str:
@@ -291,14 +298,14 @@ def delta_schema_ddl(catalog: str, control_location: str = "") -> tuple[str, ...
 
     return (
         f"CREATE SCHEMA IF NOT EXISTS {prefix}",
-        table("data_governance", "object_id STRING, catalog_name STRING, schema_name STRING, table_name STRING, column_name STRING, classification STRING, sensitivity STRING, owner STRING, review_state STRING, deleted BOOLEAN, source_version STRING, updated_at TIMESTAMP, source_system STRING, source_catalog_key STRING, source_catalog_guid STRING, source_schema_key STRING, source_table_key STRING, source_table_fingerprint STRING, source_column_ordinal INT, source_column_type STRING, source_column_description STRING, source_entity_type STRING, source_created_at STRING, source_created_by STRING, identity_status STRING, first_seen_at TIMESTAMP"),
-        table("access_policy", "policy_id STRING, object_id STRING, principal_type STRING, principal_name STRING, action STRING, priority INT, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP"),
-        table("lineage_propagation", "rule_id STRING, source_object_id STRING, target_object_id STRING, action STRING, priority INT, enabled BOOLEAN, updated_at TIMESTAMP, source_system STRING, source_version STRING, deleted BOOLEAN, updated_by STRING"),
-        table("query_registry", "query_id STRING, statement STRING, parameter_schema STRING, referenced_object_ids ARRAY<STRING>, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP"),
-        table("token_vault", "token_id STRING, ciphertext STRING, key_version STRING, created_at TIMESTAMP"),
-        table("governance_audit", "event_id STRING, principal STRING, decision STRING, query_id STRING, affected_columns ARRAY<STRING>, policy_version STRING, event_time TIMESTAMP"),
-        table("sync_state", "source STRING, snapshot_version STRING, content_hash STRING, status STRING, updated_at TIMESTAMP"),
-        table("sql_access", "grant_id STRING, principal_type STRING, principal_name STRING, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP"),
+        table("data_governance_metadata", "object_id STRING, catalog_name STRING, schema_name STRING, table_name STRING, column_name STRING, classification STRING, sensitivity STRING, owner STRING, review_state STRING, deleted BOOLEAN, source_version STRING, updated_at TIMESTAMP, source_system STRING, source_catalog_key STRING, source_catalog_guid STRING, source_schema_key STRING, source_table_key STRING, source_table_fingerprint STRING, source_column_ordinal INT, source_column_type STRING, source_column_description STRING, source_entity_type STRING, source_created_at STRING, source_created_by STRING, identity_status STRING, first_seen_at TIMESTAMP"),
+        table("data_governance_access_policy", "policy_id STRING, object_id STRING, principal_type STRING, principal_name STRING, action STRING, priority INT, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP"),
+        table("data_governance_lineage_propagation", "rule_id STRING, source_object_id STRING, target_object_id STRING, action STRING, priority INT, enabled BOOLEAN, updated_at TIMESTAMP, source_system STRING, source_version STRING, deleted BOOLEAN, updated_by STRING"),
+        table("data_governance_query_registry", "query_id STRING, statement STRING, parameter_schema STRING, referenced_object_ids ARRAY<STRING>, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP"),
+        table("data_governance_token_vault", "token_id STRING, ciphertext STRING, key_version STRING, created_at TIMESTAMP"),
+        table("data_governance_audit", "event_id STRING, principal STRING, decision STRING, query_id STRING, affected_columns ARRAY<STRING>, policy_version STRING, event_time TIMESTAMP"),
+        table("data_governance_sync_state", "source STRING, snapshot_version STRING, content_hash STRING, status STRING, updated_at TIMESTAMP"),
+        table("data_governance_sql_access", "grant_id STRING, principal_type STRING, principal_name STRING, enabled BOOLEAN, updated_by STRING, updated_at TIMESTAMP"),
     )
 
 
@@ -309,7 +316,7 @@ class JdbcControlStore:
         self._connect = connect
         self._catalog = _identifier(catalog)
         self._control_location = _control_location(control_location)
-        self._prefix = f"`{self._catalog}`.`data_governance`"
+        self._prefix = f"`{self._catalog}`.`{CONTROL_SCHEMA}`"
 
     def initialize(self) -> None:
         self._write_many(delta_schema_ddl(self._catalog, self._control_location))
@@ -325,7 +332,7 @@ class JdbcControlStore:
             for column, object_id, identity_status in resolved:
                 cursor.execute(
                     f"""
-                    MERGE INTO {self._prefix}.data_governance target
+                    MERGE INTO {self._prefix}.data_governance_metadata target
                     USING (SELECT ? object_id) source
                     ON target.object_id = source.object_id
                     WHEN MATCHED THEN UPDATE SET
@@ -353,7 +360,7 @@ class JdbcControlStore:
 
             cursor.execute(
                 f"""
-                UPDATE {self._prefix}.data_governance
+                UPDATE {self._prefix}.data_governance_metadata
                 SET deleted = true, updated_at = current_timestamp()
                 WHERE source_system = ? AND source_version <> ? AND deleted = false
                 """,
@@ -392,7 +399,7 @@ class JdbcControlStore:
         rows = self._read(
             f"""
             SELECT source, snapshot_version, content_hash, status
-            FROM {self._prefix}.sync_state
+            FROM {self._prefix}.data_governance_sync_state
             WHERE source = ?
             ORDER BY updated_at DESC
             LIMIT 1
@@ -413,8 +420,8 @@ class JdbcControlStore:
         rows = self._read(
             f"""
             SELECT DISTINCT g.catalog_name, g.schema_name, g.table_name, g.column_name
-            FROM {self._prefix}.query_registry q
-            JOIN {self._prefix}.data_governance g
+            FROM {self._prefix}.data_governance_query_registry q
+            JOIN {self._prefix}.data_governance_metadata g
               ON array_contains(q.referenced_object_ids, g.object_id)
             WHERE q.query_id = ? AND q.enabled = true AND g.deleted = false
             ORDER BY g.catalog_name, g.schema_name, g.table_name, g.column_name
@@ -428,8 +435,8 @@ class JdbcControlStore:
             f"""
             SELECT g.object_id, g.catalog_name, g.schema_name, g.table_name, g.column_name,
                    p.action, p.principal_type, p.principal_name, p.priority
-            FROM {self._prefix}.access_policy p
-            JOIN {self._prefix}.data_governance g ON p.object_id = g.object_id
+            FROM {self._prefix}.data_governance_access_policy p
+            JOIN {self._prefix}.data_governance_metadata g ON p.object_id = g.object_id
             WHERE p.enabled = true AND g.deleted = false
             """
         )
@@ -446,7 +453,7 @@ class JdbcControlStore:
             f"""
             SELECT object_id, catalog_name, schema_name, table_name, column_name, classification,
                    sensitivity, owner, review_state, source_column_type, identity_status, deleted
-            FROM {self._prefix}.data_governance
+            FROM {self._prefix}.data_governance_metadata
             WHERE source_system = ?
             ORDER BY catalog_name, schema_name, table_name, source_column_ordinal, column_name
             """,
@@ -466,7 +473,7 @@ class JdbcControlStore:
         cursor = connection.cursor()
         try:
             cursor.execute(
-                f"SELECT object_id FROM {self._prefix}.data_governance WHERE object_id = ? AND deleted = false",
+                f"SELECT object_id FROM {self._prefix}.data_governance_metadata WHERE object_id = ? AND deleted = false",
                 (object_id,),
             )
             rows = cursor.fetchall()
@@ -474,7 +481,7 @@ class JdbcControlStore:
                 raise KeyError("The catalog column does not exist or is deleted.")
             cursor.execute(
                 f"""
-                UPDATE {self._prefix}.data_governance
+                UPDATE {self._prefix}.data_governance_metadata
                 SET classification = ?, sensitivity = ?, owner = ?, review_state = ?, updated_at = current_timestamp()
                 WHERE object_id = ? AND deleted = false
                 """,
@@ -482,7 +489,7 @@ class JdbcControlStore:
             )
             cursor.execute(
                 f"""
-                INSERT INTO {self._prefix}.governance_audit
+                INSERT INTO {self._prefix}.data_governance_audit
                 SELECT ?, ?, 'CLASSIFICATION_UPDATED', '', from_json(?, 'array<string>'), 'current', current_timestamp()
                 """,
                 (str(uuid.uuid4()), principal_hash, json.dumps([object_id], separators=(",", ":"))),
@@ -502,8 +509,8 @@ class JdbcControlStore:
             f"""
             SELECT p.policy_id, p.object_id, g.catalog_name, g.schema_name, g.table_name, g.column_name,
                    p.principal_type, p.principal_name, p.action, p.priority, p.enabled, p.updated_at
-            FROM {self._prefix}.access_policy p
-            JOIN {self._prefix}.data_governance g ON p.object_id = g.object_id
+            FROM {self._prefix}.data_governance_access_policy p
+            JOIN {self._prefix}.data_governance_metadata g ON p.object_id = g.object_id
             {where}
             ORDER BY g.catalog_name, g.schema_name, g.table_name, g.column_name,
                      p.principal_type, p.principal_name, p.priority DESC, p.policy_id
@@ -524,14 +531,14 @@ class JdbcControlStore:
         cursor = connection.cursor()
         try:
             cursor.execute(
-                f"SELECT object_id FROM {self._prefix}.data_governance WHERE object_id = ? AND deleted = false",
+                f"SELECT object_id FROM {self._prefix}.data_governance_metadata WHERE object_id = ? AND deleted = false",
                 (object_id,),
             )
             if len(cursor.fetchall()) != 1:
                 raise KeyError("The catalog column does not exist or is deleted.")
             if policy_id is not None:
                 cursor.execute(
-                    f"SELECT policy_id FROM {self._prefix}.access_policy WHERE policy_id = ?",
+                    f"SELECT policy_id FROM {self._prefix}.data_governance_access_policy WHERE policy_id = ?",
                     (policy_id,),
                 )
                 if len(cursor.fetchall()) != 1:
@@ -539,7 +546,7 @@ class JdbcControlStore:
             identifier = policy_id or str(uuid.uuid4())
             cursor.execute(
                 f"""
-                MERGE INTO {self._prefix}.access_policy target
+                MERGE INTO {self._prefix}.data_governance_access_policy target
                 USING (SELECT ? policy_id) source
                 ON target.policy_id = source.policy_id
                 WHEN MATCHED THEN UPDATE SET object_id = ?, principal_type = ?, principal_name = ?, action = ?,
@@ -555,7 +562,7 @@ class JdbcControlStore:
             )
             cursor.execute(
                 f"""
-                INSERT INTO {self._prefix}.governance_audit
+                INSERT INTO {self._prefix}.data_governance_audit
                 SELECT ?, ?, ?, '', from_json(?, 'array<string>'), ?, current_timestamp()
                 """,
                 (
@@ -580,7 +587,7 @@ class JdbcControlStore:
         cursor = connection.cursor()
         try:
             cursor.execute(
-                f"SELECT object_id FROM {self._prefix}.access_policy WHERE policy_id = ?",
+                f"SELECT object_id FROM {self._prefix}.data_governance_access_policy WHERE policy_id = ?",
                 (policy_id,),
             )
             rows = cursor.fetchall()
@@ -589,7 +596,7 @@ class JdbcControlStore:
             object_id = str(rows[0][0])
             cursor.execute(
                 f"""
-                UPDATE {self._prefix}.access_policy
+                UPDATE {self._prefix}.data_governance_access_policy
                 SET enabled = false, updated_by = ?, updated_at = current_timestamp()
                 WHERE policy_id = ?
                 """,
@@ -597,7 +604,7 @@ class JdbcControlStore:
             )
             cursor.execute(
                 f"""
-                INSERT INTO {self._prefix}.governance_audit
+                INSERT INTO {self._prefix}.data_governance_audit
                 SELECT ?, ?, 'POLICY_DISABLED', '', from_json(?, 'array<string>'), ?, current_timestamp()
                 """,
                 (
@@ -614,13 +621,13 @@ class JdbcControlStore:
 
     def save_token(self, token_id: str, ciphertext: str, key_version: str) -> None:
         self._write(
-            f"INSERT INTO {self._prefix}.token_vault VALUES (?, ?, ?, current_timestamp())",
+            f"INSERT INTO {self._prefix}.data_governance_token_vault VALUES (?, ?, ?, current_timestamp())",
             (token_id, ciphertext, key_version),
         )
 
     def load_token(self, token_id: str) -> tuple[str, str]:
         rows = self._read(
-            f"SELECT ciphertext, key_version FROM {self._prefix}.token_vault WHERE token_id = ?",
+            f"SELECT ciphertext, key_version FROM {self._prefix}.data_governance_token_vault WHERE token_id = ?",
             (token_id,),
         )
         if len(rows) != 1:
@@ -631,7 +638,7 @@ class JdbcControlStore:
         rows = self._read(
             f"""
             SELECT catalog_name, schema_name, table_name, column_name
-            FROM {self._prefix}.data_governance
+            FROM {self._prefix}.data_governance_metadata
             WHERE deleted = false
             ORDER BY catalog_name, schema_name, table_name, source_column_ordinal, column_name
             """
@@ -642,7 +649,7 @@ class JdbcControlStore:
         rows = self._read(
             f"""
             SELECT query_id, parameter_schema
-            FROM {self._prefix}.query_registry
+            FROM {self._prefix}.data_governance_query_registry
             WHERE enabled = true
             ORDER BY query_id
             """
@@ -660,7 +667,7 @@ class JdbcControlStore:
         return any(
             bool(enabled) and _principal_matches(str(kind), str(name), principal)
             for kind, name, enabled in self._read(
-                f"SELECT principal_type, principal_name, enabled FROM {self._prefix}.sql_access"
+                f"SELECT principal_type, principal_name, enabled FROM {self._prefix}.data_governance_sql_access"
             )
         )
 
@@ -668,7 +675,7 @@ class JdbcControlStore:
         rows = self._read(
             f"""
             SELECT grant_id, principal_type, principal_name, enabled, updated_at
-            FROM {self._prefix}.sql_access
+            FROM {self._prefix}.data_governance_sql_access
             ORDER BY principal_type, principal_name, grant_id
             """
         )
@@ -683,12 +690,12 @@ class JdbcControlStore:
         cursor = connection.cursor()
         try:
             if grant_id is not None:
-                cursor.execute(f"SELECT grant_id FROM {self._prefix}.sql_access WHERE grant_id = ?", (grant_id,))
+                cursor.execute(f"SELECT grant_id FROM {self._prefix}.data_governance_sql_access WHERE grant_id = ?", (grant_id,))
                 if len(cursor.fetchall()) != 1:
                     raise KeyError("The free SQL grant does not exist.")
             cursor.execute(
                 f"""
-                MERGE INTO {self._prefix}.sql_access target
+                MERGE INTO {self._prefix}.data_governance_sql_access target
                 USING (SELECT ? grant_id) source ON target.grant_id = source.grant_id
                 WHEN MATCHED THEN UPDATE SET principal_type = ?, principal_name = ?, enabled = ?,
                   updated_by = ?, updated_at = current_timestamp()
@@ -720,12 +727,12 @@ class JdbcControlStore:
         connection = self._connect()
         cursor = connection.cursor()
         try:
-            cursor.execute(f"SELECT grant_id FROM {self._prefix}.sql_access WHERE grant_id = ?", (grant_id,))
+            cursor.execute(f"SELECT grant_id FROM {self._prefix}.data_governance_sql_access WHERE grant_id = ?", (grant_id,))
             if len(cursor.fetchall()) != 1:
                 raise KeyError("The free SQL grant does not exist.")
             cursor.execute(
                 f"""
-                UPDATE {self._prefix}.sql_access
+                UPDATE {self._prefix}.data_governance_sql_access
                 SET enabled = false, updated_by = ?, updated_at = current_timestamp()
                 WHERE grant_id = ?
                 """,
@@ -745,7 +752,7 @@ class JdbcControlStore:
 
     def registered_query(self, query_id: str) -> str | None:
         rows = self._read(
-            f"SELECT statement FROM {self._prefix}.query_registry WHERE query_id = ? AND enabled = true",
+            f"SELECT statement FROM {self._prefix}.data_governance_query_registry WHERE query_id = ? AND enabled = true",
             (query_id,),
         )
         if len(rows) > 1:
@@ -754,7 +761,7 @@ class JdbcControlStore:
 
     def query_parameter_schema(self, query_id: str) -> dict[str, Any]:
         rows = self._read(
-            f"SELECT parameter_schema FROM {self._prefix}.query_registry WHERE query_id = ? AND enabled = true",
+            f"SELECT parameter_schema FROM {self._prefix}.data_governance_query_registry WHERE query_id = ? AND enabled = true",
             (query_id,),
         )
         if len(rows) > 1:
@@ -788,7 +795,7 @@ class JdbcControlStore:
             raise TypeError("affected_columns must contain only strings")
         cursor.execute(
             f"""
-            INSERT INTO {self._prefix}.governance_audit
+            INSERT INTO {self._prefix}.data_governance_audit
             SELECT ?, ?, ?, ?, from_json(?, 'array<string>'), ?, current_timestamp()
             """,
             (
@@ -805,11 +812,11 @@ class JdbcControlStore:
         connection = self._connect()
         cursor = connection.cursor()
         try:
-            cursor.execute(f"DESCRIBE TABLE {self._prefix}.data_governance")
+            cursor.execute(f"DESCRIBE TABLE {self._prefix}.data_governance_metadata")
             existing = {str(row[0]).casefold() for row in cursor.fetchall() if row and row[0]}
             missing = [definition for name, definition in _CATALOG_COLUMNS if name.casefold() not in existing]
             if missing:
-                cursor.execute(f"ALTER TABLE {self._prefix}.data_governance ADD COLUMNS ({', '.join(missing)})")
+                cursor.execute(f"ALTER TABLE {self._prefix}.data_governance_metadata ADD COLUMNS ({', '.join(missing)})")
             connection.commit()
         finally:
             cursor.close()
@@ -819,11 +826,11 @@ class JdbcControlStore:
         connection = self._connect()
         cursor = connection.cursor()
         try:
-            cursor.execute(f"DESCRIBE TABLE {self._prefix}.lineage_propagation")
+            cursor.execute(f"DESCRIBE TABLE {self._prefix}.data_governance_lineage_propagation")
             existing = {str(row[0]).casefold() for row in cursor.fetchall() if row and row[0]}
             missing = [definition for name, definition in _LINEAGE_COLUMNS if name.casefold() not in existing]
             if missing:
-                cursor.execute(f"ALTER TABLE {self._prefix}.lineage_propagation ADD COLUMNS ({', '.join(missing)})")
+                cursor.execute(f"ALTER TABLE {self._prefix}.data_governance_lineage_propagation ADD COLUMNS ({', '.join(missing)})")
             connection.commit()
         finally:
             cursor.close()
@@ -857,7 +864,7 @@ class JdbcControlStore:
             rule_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{snapshot.source}:{source}:{target}"))
             cursor.execute(
                 f"""
-                MERGE INTO {self._prefix}.lineage_propagation target
+                MERGE INTO {self._prefix}.data_governance_lineage_propagation target
                 USING (SELECT ? rule_id) source
                 ON target.rule_id = source.rule_id
                 WHEN MATCHED THEN UPDATE SET source_object_id = ?, target_object_id = ?, action = 'INHERIT',
@@ -876,7 +883,7 @@ class JdbcControlStore:
             applied += 1
         cursor.execute(
             f"""
-            UPDATE {self._prefix}.lineage_propagation
+            UPDATE {self._prefix}.data_governance_lineage_propagation
             SET deleted = true, updated_at = current_timestamp()
             WHERE source_system = ? AND source_version <> ? AND coalesce(deleted, false) = false
             """,
@@ -889,7 +896,7 @@ class JdbcControlStore:
             f"""
             SELECT object_id, source_table_fingerprint, source_table_key, column_name,
                    source_column_ordinal, source_column_type, deleted
-            FROM {self._prefix}.data_governance
+            FROM {self._prefix}.data_governance_metadata
             WHERE source_system = ?
             """,
             (source,),
@@ -911,7 +918,7 @@ class JdbcControlStore:
         object_rows = self._read(
             f"""
             SELECT object_id, catalog_name, schema_name, table_name, column_name
-            FROM {self._prefix}.data_governance
+            FROM {self._prefix}.data_governance_metadata
             WHERE deleted = false
             """
         )
@@ -922,7 +929,7 @@ class JdbcControlStore:
         edge_rows = self._read(
             f"""
             SELECT source_object_id, target_object_id, action, priority
-            FROM {self._prefix}.lineage_propagation
+            FROM {self._prefix}.data_governance_lineage_propagation
             WHERE enabled = true AND coalesce(deleted, false) = false
             ORDER BY source_object_id, target_object_id, priority DESC
             """
@@ -961,7 +968,7 @@ class JdbcControlStore:
     ) -> None:
         cursor.execute(
             f"""
-            INSERT INTO {self._prefix}.sync_state
+            INSERT INTO {self._prefix}.data_governance_sync_state
             VALUES (?, ?, ?, ?, current_timestamp())
             """,
             (source, snapshot_version, content_hash, status),

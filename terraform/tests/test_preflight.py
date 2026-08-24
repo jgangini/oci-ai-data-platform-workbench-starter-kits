@@ -29,6 +29,9 @@ SPEC.loader.exec_module(preflight)
 
 
 class Identity:
+    def get_user(self, _user_ocid: str) -> Any:
+        return SimpleNamespace(data=SimpleNamespace(name="joel.ganggini@oracle.com"))
+
     def get_tenancy(self, _tenancy_id: str) -> Any:
         return SimpleNamespace(data=SimpleNamespace(home_region_key="IAD"))
 
@@ -116,7 +119,7 @@ class ObjectStorage:
 
     def get_bucket(self, **_kwargs: Any) -> Any:
         if self.bucket_exists:
-            return SimpleNamespace(data=SimpleNamespace(name="oci_artifact"))
+            return SimpleNamespace(data=SimpleNamespace(name="oci_artifacts"))
         raise preflight.oci.exceptions.ServiceError(
             status=404,
             code="BucketNotFound",
@@ -204,6 +207,7 @@ def test_preflight_selects_e5_and_discovers_home_region() -> None:
     assert result["inputs"] == {
         "home_region": "us-ashburn-1",
         "operator_user_ocid": "ocid1.user.oc1..operator",
+        "operator_username": "joel.ganggini@oracle.com",
         "preferred_vm_shape": preflight.E5_SHAPE,
         "availability_domain_index": 0,
     }
@@ -266,7 +270,7 @@ def test_preflight_resolves_governance_identity_and_immutable_image(monkeypatch)
 
 def test_preflight_rejects_second_governance_installation_in_namespace() -> None:
     available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
-    with pytest.raises(RuntimeError, match="oci_artifact already exists"):
+    with pytest.raises(RuntimeError, match="oci_artifacts already exists"):
         _select(
             {preflight.E5_SHAPE: (available, "1")},
             input_overrides={"enable_ai_data_governance": True},
@@ -505,6 +509,7 @@ def test_preflight_checks_all_availability_domains_for_standard_shape() -> None:
         aidp_factory=lambda _config: Aidp(),
         database_factory=lambda _config: Database(),
         genai_factory=lambda _config: Genai(),
+        object_storage_factory=lambda _config: ObjectStorage(),
     )
     assert result["inputs"]["availability_domain_index"] == 1
 
@@ -556,6 +561,7 @@ def test_preflight_accepts_any_available_fault_domain() -> None:
         aidp_factory=lambda _config: Aidp(),
         database_factory=lambda _config: Database(),
         genai_factory=lambda _config: Genai(),
+        object_storage_factory=lambda _config: ObjectStorage(),
     )
     assert result["inputs"]["preferred_vm_shape"] == preflight.E5_SHAPE
 

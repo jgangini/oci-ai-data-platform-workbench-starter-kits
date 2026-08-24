@@ -1,6 +1,17 @@
 resource "terraform_data" "validate_governance_inputs" {
   lifecycle {
     precondition {
+      condition     = !var.enable_ai_data_governance || local.governance_vault_id != ""
+      error_message = "The governance Vault must resolve to an OCI Vault OCID before gateway deployment."
+    }
+    precondition {
+      condition = !var.enable_ai_data_governance || (
+        startswith(local.governance_vault_management_endpoint, "https://") &&
+        startswith(local.governance_vault_crypto_endpoint, "https://")
+      )
+      error_message = "The governance Vault must expose OCI-managed HTTPS management and crypto endpoints."
+    }
+    precondition {
       condition = !var.enable_ai_data_governance || can(regex(
         "^[a-z0-9./_-]+(?:\\.[a-z0-9.-]+)?/[a-z0-9./_-]+@sha256:[0-9a-f]{64}$",
         var.governance_gateway_image,
@@ -187,8 +198,8 @@ resource "oci_identity_policy" "governance_workload" {
   description    = "Minimum OCI access for the OKE data-governance workload identity"
   statements = [
     "Allow any-user to read secret-bundles in compartment id ${local.target_compartment} where all {request.principal.type='workload', request.principal.namespace='aidp-governance', request.principal.service_account='ai-data-governance', request.principal.cluster_id='${oci_containerengine_cluster.governance[0].id}', target.secret.id='${oci_vault_secret.governance_jdbc[0].id}'}",
-    "Allow any-user to manage buckets in compartment id ${local.target_compartment} where all {request.principal.type='workload', request.principal.namespace='aidp-governance', request.principal.service_account='ai-data-governance', request.principal.cluster_id='${oci_containerengine_cluster.governance[0].id}', target.bucket.name='${oci_objectstorage_bucket.control[0].name}', request.permission='PAR_MANAGE'}",
-    "Allow any-user to manage objects in compartment id ${local.target_compartment} where all {request.principal.type='workload', request.principal.namespace='aidp-governance', request.principal.service_account='ai-data-governance', request.principal.cluster_id='${oci_containerengine_cluster.governance[0].id}', target.bucket.name='${oci_objectstorage_bucket.control[0].name}', target.object.name='${local.governance_jdbc_object}'}",
+    "Allow any-user to manage buckets in compartment id ${local.target_compartment} where all {request.principal.type='workload', request.principal.namespace='aidp-governance', request.principal.service_account='ai-data-governance', request.principal.cluster_id='${oci_containerengine_cluster.governance[0].id}', target.bucket.name='${local.artifacts_bucket_name}', request.permission='PAR_MANAGE'}",
+    "Allow any-user to manage objects in compartment id ${local.target_compartment} where all {request.principal.type='workload', request.principal.namespace='aidp-governance', request.principal.service_account='ai-data-governance', request.principal.cluster_id='${oci_containerengine_cluster.governance[0].id}', target.bucket.name='${local.artifacts_bucket_name}', target.object.name='${local.governance_jdbc_object}'}",
     "Allow any-user to use keys in compartment id ${local.target_compartment} where all {request.principal.type='workload', request.principal.namespace='aidp-governance', request.principal.service_account='ai-data-governance', request.principal.cluster_id='${oci_containerengine_cluster.governance[0].id}', target.key.id='${oci_kms_key.governance[0].id}'}",
     "Allow any-user to use ai-data-platforms in compartment id ${local.target_compartment} where all {request.principal.type='workload', request.principal.namespace='aidp-governance', request.principal.service_account='ai-data-governance', request.principal.cluster_id='${oci_containerengine_cluster.governance[0].id}'}"
   ]

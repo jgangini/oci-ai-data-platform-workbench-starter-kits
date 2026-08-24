@@ -15,6 +15,7 @@ def test_deploy_studio_manifest_contract() -> None:
     assert manifest["terraform"] == {"path": "terraform", "package_oci_credentials": False}
     assert manifest["capabilities"] == {
         "compartment_modes": ["new", "existing"],
+        "default_compartment_name": "oracle-ai-data-platform",
         "requires_genai_region": False,
         "database_profile": "new_or_existing",
         "region_selection": "subscribed_compatible",
@@ -73,13 +74,31 @@ def test_deploy_studio_manifest_contract() -> None:
         "field": "governance_vault_mode",
         "equals": "existing",
     }
+    for layer in ("landing", "bronze", "silver", "gold", "artifacts"):
+        assert fields[f"{layer}_bucket_mode"]["group"] == "medallion"
+        assert fields[f"{layer}_new_bucket_name"]["default"] == f"oci_{layer}"
+        assert fields[f"{layer}_existing_bucket_name"]["options_source"] == "oci_active_buckets"
+    assert "enable_medallion_architecture" not in fields
     assert not any(name.startswith("governance_gateway_") for name in fields)
     assert fields["admin_username"]["group"] == "application_vm"
     assert manifest["post_apply"]["secret_inputs"] == [
         "autonomous_database_admin_password",
         "autonomous_database_wallet_password",
     ]
-    assert manifest["form"]["email_access_fields"] == ["admin_username", "admin_password", "registration_code"]
+    assert fields["deployment_mode"]["options"] == [
+        {"value": "laboratory", "label": "Laboratory"},
+        {"value": "production", "label": "Production"},
+    ]
+    assert fields["registration_code"]["visible_when"] == {
+        "field": "deployment_mode",
+        "equals": "laboratory",
+    }
+    assert manifest["form"]["email_access_fields"] == [
+        "deployment_mode",
+        "admin_username",
+        "admin_password",
+        "registration_code",
+    ]
     assert manifest["presentation"]["title"] == "Oracle AI Data Platform Workbench Starter Kits"
     assert manifest["presentation"]["summary"].startswith("Deploys reusable Oracle AI Data Platform Workbench starter kits")
     assert manifest["presentation"]["href"] == "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
@@ -107,6 +126,7 @@ def test_deploy_studio_manifest_contract() -> None:
     assert [field["name"] for field in manifest["preflight"]["runtime_fields"]] == [
         "home_region",
         "operator_user_ocid",
+        "operator_username",
         "preferred_vm_shape",
         "availability_domain_index",
         "governance_gateway_image",
@@ -117,6 +137,7 @@ def test_deploy_studio_manifest_contract() -> None:
     assert manifest["preflight"]["output_inputs"] == [
         "home_region",
         "operator_user_ocid",
+        "operator_username",
         "preferred_vm_shape",
         "availability_domain_index",
         "governance_gateway_image",
@@ -188,7 +209,7 @@ def test_hook_result_matches_runner_and_manifest_contract() -> None:
     }
     resources = {
         "catalog_key": "catalog",
-        "catalog_name": "aidp_lab",
+        "catalog_name": "oci_medallion",
         "shared_compute_name": "aidp_cluster_shared_compute",
         "external_volume_count": 0,
         "runtime_ready": True,
@@ -199,7 +220,7 @@ def test_hook_result_matches_runner_and_manifest_contract() -> None:
     assert set(result) == {"events", "artifacts", "outputs"}
     assert result["outputs"] == {
         "aidp_workbench_url": "https://aidp.example.test",
-        "aidp_catalog_name": "aidp_lab",
+        "aidp_catalog_name": "oci_medallion",
         "aidp_shared_compute_name": "aidp_cluster_shared_compute",
         "aidp_runtime_ready": True,
         "aidp_external_volume_count": 0,

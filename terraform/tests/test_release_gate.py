@@ -24,7 +24,7 @@ def _context() -> dict[str, object]:
         "compartment_mode": "new",
         "source": {
             "repository": "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits.git",
-            "ref": "v2.1.20",
+            "ref": "v2.1.21",
             "commit_sha": "0123456789abcdef0123456789abcdef01234567",
         },
     }
@@ -62,7 +62,7 @@ def test_context_requires_current_release_source() -> None:
     release_gate.validate_context(_context())
     invalid = _context()
     invalid["source"] = {**invalid["source"], "ref": "main"}  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="v2.1.20"):
+    with pytest.raises(ValueError, match="v2.1.21"):
         release_gate.validate_context(invalid)
 
 
@@ -152,13 +152,12 @@ def test_source_accepts_minimal_safe_deployment(tmp_path: Path) -> None:
     release_gate.validate_source(_source(tmp_path))
 
 
-def test_source_accepts_only_named_governance_control_resources(tmp_path: Path) -> None:
+def test_source_accepts_only_named_governance_key_secret_and_public_client(tmp_path: Path) -> None:
     root = _source(tmp_path)
     (root / "i_oci_data_governance_edge.tf").write_text(
         '\n'.join(
             (
                 'resource "oci_identity_domains_app" "governance_public_client" {}',
-                'resource "oci_kms_vault" "governance" {}',
                 'resource "oci_kms_key" "governance" {}',
                 'resource "oci_vault_secret" "governance_jdbc" {}',
             )
@@ -166,6 +165,16 @@ def test_source_accepts_only_named_governance_control_resources(tmp_path: Path) 
         encoding="utf-8",
     )
     release_gate.validate_source(root)
+
+
+def test_source_rejects_a_managed_governance_vault(tmp_path: Path) -> None:
+    root = _source(tmp_path)
+    (root / "i_oci_data_governance_edge.tf").write_text(
+        'resource "oci_kms_vault" "governance" {}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="OCI Vault"):
+        release_gate.validate_source(root)
 
 
 def test_source_accepts_developer_pending_groups_and_ignores_docs(tmp_path: Path) -> None:
@@ -207,9 +216,15 @@ def test_plan_rejects_forbidden_resource_and_customer_managed_bucket_key() -> No
         release_gate.validate_plan(bucket_plan)
 
 
-def test_plan_accepts_only_named_governance_control_resources() -> None:
+def test_plan_rejects_even_the_previously_named_managed_governance_vault() -> None:
+    with pytest.raises(ValueError, match="OCI Vault"):
+        release_gate.validate_plan(
+            _plan(resource_type="oci_kms_vault", address="oci_kms_vault.governance[0]")
+        )
+
+
+def test_plan_accepts_only_named_governance_key_secret_and_public_client() -> None:
     for resource_type, address in (
-        ("oci_kms_vault", "oci_kms_vault.governance[0]"),
         ("oci_kms_key", "oci_kms_key.governance[0]"),
         ("oci_vault_secret", "oci_vault_secret.governance_jdbc[0]"),
         ("oci_identity_domains_app", "oci_identity_domains_app.governance_public_client[0]"),

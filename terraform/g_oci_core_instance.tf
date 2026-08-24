@@ -49,10 +49,10 @@ resource "oci_identity_policy" "vm_bootstrap" {
   statements = concat(
     [
       "Allow dynamic-group ${oci_identity_dynamic_group.vm.name} to use instance-agent-command-execution-family in compartment id ${local.target_compartment} where request.instance.id=target.instance.id",
-      "Allow dynamic-group ${oci_identity_dynamic_group.vm.name} to manage objects in compartment id ${local.target_compartment} where all {target.bucket.name = '${oci_objectstorage_bucket.data.name}', target.object.name = '.bootstrap/operator-credentials.json'}"
+      "Allow dynamic-group ${oci_identity_dynamic_group.vm.name} to manage objects in compartment id ${local.target_compartment} where all {target.bucket.name = '${local.bootstrap_bucket_name}', target.object.name = '.bootstrap/operator-credentials.json'}"
     ],
     var.enable_ai_data_governance ? [
-      "Allow dynamic-group ${oci_identity_dynamic_group.vm.name} to manage objects in compartment id ${local.target_compartment} where all {target.bucket.name = '${oci_objectstorage_bucket.control[0].name}', target.object.name = '${local.governance_jdbc_object}'}"
+      "Allow dynamic-group ${oci_identity_dynamic_group.vm.name} to manage objects in compartment id ${local.target_compartment} where all {target.bucket.name = '${local.artifacts_bucket_name}', target.object.name = '${local.governance_jdbc_object}'}"
     ] : []
   )
 }
@@ -96,14 +96,16 @@ resource "oci_core_instance" "lab" {
     user_data = base64encode(templatefile("${path.module}/templatefile/user_data.sh", {
       admin_username                = var.admin_username
       admin_password_hash           = var.admin_password_hash
+      deployment_mode               = var.deployment_mode
       registration_code_hash        = var.registration_code_hash
       identity_domain_url           = local.default_domain.url
       developer_group_id            = oci_identity_domains_group.developers.id
       pending_group_id              = oci_identity_domains_group.pending.id
       operator_user_ocid            = var.operator_user_ocid
+      operator_username             = var.operator_username
       tenancy_ocid                  = var.tenancy_ocid
       objectstorage_namespace       = var.objectstorage_namespace
-      bucket_name                   = oci_objectstorage_bucket.data.name
+      bucket_name                   = local.bootstrap_bucket_name
       aidp_workbench_url            = local.aidp_workbench_url
       aidp_platform_id              = oci_ai_data_platform_ai_data_platform.lab.id
       aidp_workspace_name           = oci_ai_data_platform_ai_data_platform.lab.default_workspace_name
@@ -113,7 +115,7 @@ resource "oci_core_instance" "lab" {
       agent_model_id                = var.agent_model_id
       enforce_governed_data_access  = var.enable_ai_data_governance
       governance_gateway_url        = try(oci_apigateway_deployment.governance[0].endpoint, "")
-      governance_control_bucket     = try(oci_objectstorage_bucket.control[0].name, "")
+      governance_control_bucket     = local.artifacts_bucket_name
       governance_jdbc_driver_object = local.governance_jdbc_object
       lab_marker                    = local.name_prefix
       source_repo_url               = var.source_repository_url

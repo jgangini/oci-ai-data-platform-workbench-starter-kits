@@ -22,8 +22,8 @@ SUPPORTED_SHAPES = (E5_SHAPE, E4_SHAPE, E3_SHAPE)
 ACTIVE_WORK_REQUEST_STATES = {"ACCEPTED", "IN_PROGRESS", "WAITING", "NEEDS_ATTENTION", "CANCELING"}
 MODEL_TYPE_BASE = "BASE"
 GOVERNANCE_IMAGE_REPOSITORY = "ghcr.io/jgangini/oci-aidp-data-governance-gateway"
-GOVERNANCE_IMAGE_TAG = "v2.1.20"
-GOVERNANCE_CONTROL_BUCKET = "oci_artifact"
+GOVERNANCE_IMAGE_TAG = "v2.1.21"
+DEFAULT_ARTIFACTS_BUCKET = "oci_artifacts"
 MAX_PUBLIC_DOCUMENT_BYTES = 1024 * 1024
 
 
@@ -174,22 +174,22 @@ def _governance_runtime_inputs(
     ]
 
 
-def _require_governance_bucket_available(object_storage: Any) -> str:
+def _require_new_bucket_available(object_storage: Any, bucket_name: str) -> str:
     namespace = str(object_storage.get_namespace().data or "").strip()
     if not namespace:
         raise RuntimeError("OCI did not return an Object Storage namespace")
     try:
         object_storage.get_bucket(
             namespace_name=namespace,
-            bucket_name=GOVERNANCE_CONTROL_BUCKET,
+            bucket_name=bucket_name,
         )
     except oci.exceptions.ServiceError as exc:
         if exc.status == 404 and exc.code == "BucketNotFound":
-            return f"{GOVERNANCE_CONTROL_BUCKET} is available in the Object Storage namespace"
+            return f"{bucket_name} is available in the Object Storage namespace"
         raise
     raise RuntimeError(
-        f"{GOVERNANCE_CONTROL_BUCKET} already exists in this Object Storage namespace; "
-        "reuse or upgrade the existing governance installation"
+        f"{bucket_name} already exists in this Object Storage namespace; "
+        "select Use existing bucket or choose another name"
     )
 
 
@@ -243,6 +243,14 @@ def _home_region(identity: Any, tenancy_id: str) -> str:
     if len(matches) != 1 or not matches[0].region_name:
         raise RuntimeError("OCI did not return one unambiguous tenancy home region")
     return str(matches[0].region_name)
+
+
+def _operator_username(identity: Any, user_ocid: str) -> str:
+    user = identity.get_user(user_ocid).data
+    value = str(getattr(user, "email", "") or getattr(user, "name", "") or "").strip()
+    if not value:
+        raise RuntimeError("OCI did not return a display name for the deployment operator")
+    return value
 
 
 def _require_ready_region(identity: Any, tenancy_id: str, region: str) -> None:
@@ -424,6 +432,7 @@ def select_inputs(
     regional_config["region"] = region
     identity = identity_factory(regional_config)
     _require_ready_region(identity, tenancy_id, region)
+    operator_username = _operator_username(identity, operator_user_ocid)
     inputs = context.get("inputs") if isinstance(context.get("inputs"), dict) else {}
     governance_enabled = _is_enabled(inputs, "enable_ai_data_governance")
     governance_vault_mode = str(inputs.get("governance_vault_mode") or "new").strip().lower()
@@ -436,9 +445,13 @@ def select_inputs(
         if governance_enabled
         else ""
     )
-    governance_bucket_message = (
-        _require_governance_bucket_available(object_storage_factory(regional_config))
-        if governance_enabled
+    artifacts_mode = str(inputs.get("artifacts_bucket_mode") or "new").strip().lower()
+    artifacts_bucket_message = (
+        _require_new_bucket_available(
+            object_storage_factory(regional_config),
+            str(inputs.get("artifacts_new_bucket_name") or DEFAULT_ARTIFACTS_BUCKET).strip(),
+        )
+        if artifacts_mode == "new"
         else ""
     )
     model_id = str(inputs.get("agent_model_id") or "").strip()
@@ -487,15 +500,16 @@ def select_inputs(
                 "inputs": {
                     "home_region": home_region,
                     "operator_user_ocid": operator_user_ocid,
+                    "operator_username": operator_username,
                     "preferred_vm_shape": selected,
                     "availability_domain_index": availability_domain_index,
                     **governance_inputs,
                 },
                 "events": [
                     {
-                        "name": "Immutable v2.1.20 source",
+                        "name": "Immutable v2.1.21 source",
                         "status": "passed",
-                        "message": "v2.1.20 source context and deployment source passed",
+                        "message": "v2.1.21 source context and deployment source passed",
                     },
                     {
                         "name": "Compartment availability",
@@ -516,14 +530,20 @@ def select_inputs(
                                 "name": "OCI Vault",
                                 "status": "passed",
                                 "message": governance_vault_message,
-                            },
-                            {
-                                "name": "Governance control bucket",
-                                "status": "passed",
-                                "message": governance_bucket_message,
                             }
                         ]
                         if governance_enabled
+                        else []
+                    ),
+                    *(
+                        [
+                            {
+                                "name": "Medallion artifacts bucket",
+                                "status": "passed",
+                                "message": artifacts_bucket_message,
+                            }
+                        ]
+                        if artifacts_mode == "new"
                         else []
                     ),
                     *governance_event,
