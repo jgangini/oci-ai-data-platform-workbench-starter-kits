@@ -104,6 +104,10 @@ def test_governance_cross_variable_contract_defaults_new_and_reuses_only_an_expl
     assert 'data.oci_kms_vault.governance_existing[0].state == "ACTIVE"' in gateway
     assert 'data.oci_kms_vault.governance_existing[0].vault_type == "DEFAULT"' in gateway
     assert "local.governance_vault_management_endpoint" in edge
+    assert 'resource "terraform_data" "governance_vault_dns_wait"' in edge
+    assert "consecutive_successes=$((consecutive_successes + 1))" in edge
+    assert '[ "$consecutive_successes" -ge 6 ]' in edge
+    assert "consecutive_successes=0" in edge
     assert "vault_id       = local.governance_vault_id" in edge
     assert "oci_kms_vaults" not in edge
 
