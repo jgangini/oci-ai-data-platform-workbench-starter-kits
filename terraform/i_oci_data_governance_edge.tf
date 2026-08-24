@@ -2,6 +2,41 @@ locals {
   governance_gateway_audience = var.enable_ai_data_governance ? "https://${oci_apigateway_gateway.governance[0].hostname}/governance" : ""
   governance_gateway_scope    = "${local.governance_gateway_audience}/governance.all"
   governance_jdbc_object      = "data_governance/runtime/aidp-jdbc-driver.zip"
+  governance_uses_existing_vault = (
+    var.enable_ai_data_governance && var.governance_vault_mode == "existing"
+  )
+  governance_existing_vault_ocid = trimspace(var.existing_governance_vault_ocid)
+  governance_existing_vault_is_regional = try(
+    can(regex(
+      "^ocid1\\.vault\\.oc[1-9][0-9]*\\.[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*\\..+$",
+      local.governance_existing_vault_ocid,
+    )) && split(".", local.governance_existing_vault_ocid)[3] == var.region,
+    false,
+  )
+  governance_vault_id = !var.enable_ai_data_governance ? "" : (
+    local.governance_uses_existing_vault
+    ? try(data.oci_kms_vault.governance_existing[0].id, "")
+    : try(oci_kms_vault.governance[0].id, "")
+  )
+  governance_vault_management_endpoint = !var.enable_ai_data_governance ? "" : (
+    local.governance_uses_existing_vault
+    ? try(data.oci_kms_vault.governance_existing[0].management_endpoint, "")
+    : try(oci_kms_vault.governance[0].management_endpoint, "")
+  )
+  governance_vault_crypto_endpoint = !var.enable_ai_data_governance ? "" : (
+    local.governance_uses_existing_vault
+    ? try(data.oci_kms_vault.governance_existing[0].crypto_endpoint, "")
+    : try(oci_kms_vault.governance[0].crypto_endpoint, "")
+  )
+}
+
+data "oci_kms_vault" "governance_existing" {
+  count = (
+    local.governance_uses_existing_vault && local.governance_existing_vault_is_regional
+    ? 1
+    : 0
+  )
+  vault_id = local.governance_existing_vault_ocid
 }
 
 resource "oci_identity_domains_app" "governance_public_client" {
@@ -131,7 +166,7 @@ resource "oci_identity_user" "governance_jdbc" {
 }
 
 resource "oci_kms_vault" "governance" {
-  count          = var.enable_ai_data_governance ? 1 : 0
+  count          = var.enable_ai_data_governance && var.governance_vault_mode == "new" ? 1 : 0
   compartment_id = local.target_compartment
   display_name   = "${local.name_prefix}-governance"
   vault_type     = "DEFAULT"
@@ -140,7 +175,7 @@ resource "oci_kms_vault" "governance" {
 # ponytail: OCI publishes a new vault's regional DNS asynchronously; replace this bounded poll when the provider exposes an endpoint-ready waiter.
 resource "terraform_data" "governance_vault_dns_wait" {
   count            = var.enable_ai_data_governance ? 1 : 0
-  triggers_replace = [oci_kms_vault.governance[0].id]
+  triggers_replace = [local.governance_vault_id]
 
   provisioner "local-exec" {
     command = <<-EOT
@@ -156,16 +191,18 @@ resource "terraform_data" "governance_vault_dns_wait" {
       exit 1
     EOT
     environment = {
-      GOVERNANCE_VAULT_HOST = trimprefix(oci_kms_vault.governance[0].management_endpoint, "https://")
+      GOVERNANCE_VAULT_HOST = trimprefix(local.governance_vault_management_endpoint, "https://")
     }
   }
+
+  depends_on = [terraform_data.validate_governance_inputs]
 }
 
 resource "oci_kms_key" "governance" {
   count               = var.enable_ai_data_governance ? 1 : 0
   compartment_id      = local.target_compartment
   display_name        = "${local.name_prefix}-governance"
-  management_endpoint = oci_kms_vault.governance[0].management_endpoint
+  management_endpoint = local.governance_vault_management_endpoint
   protection_mode     = "HSM"
 
   key_shape {
@@ -179,7 +216,7 @@ resource "oci_kms_key" "governance" {
 resource "oci_vault_secret" "governance_jdbc" {
   count          = var.enable_ai_data_governance ? 1 : 0
   compartment_id = local.target_compartment
-  vault_id       = oci_kms_vault.governance[0].id
+  vault_id       = local.governance_vault_id
   key_id         = oci_kms_key.governance[0].id
   secret_name    = "${local.name_prefix}-governance-jdbc"
   description    = "Runtime credential generated after AIDP reconciliation"

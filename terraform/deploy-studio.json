@@ -147,6 +147,28 @@
         "required": false,
         "default": false,
         "group": "optional_addons"
+      },
+      {
+        "name": "governance_vault_mode",
+        "label": "OCI Vault mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "optional_addons",
+        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
+        "options": [
+          {"value": "new", "label": "Create new Vault"},
+          {"value": "existing", "label": "Use existing Vault"}
+        ]
+      },
+      {
+        "name": "existing_governance_vault_ocid",
+        "label": "Existing OCI Vault",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_active_vaults",
+        "group": "optional_addons",
+        "visible_when": {"field": "governance_vault_mode", "equals": "existing"}
       }
     ],
     "email_access_fields": ["admin_username", "admin_password", "registration_code"]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlencode, urlparse
@@ -21,7 +22,7 @@ SUPPORTED_SHAPES = (E5_SHAPE, E4_SHAPE, E3_SHAPE)
 ACTIVE_WORK_REQUEST_STATES = {"ACCEPTED", "IN_PROGRESS", "WAITING", "NEEDS_ATTENTION", "CANCELING"}
 MODEL_TYPE_BASE = "BASE"
 GOVERNANCE_IMAGE_REPOSITORY = "ghcr.io/jgangini/oci-aidp-data-governance-gateway"
-GOVERNANCE_IMAGE_TAG = "v2.1.18"
+GOVERNANCE_IMAGE_TAG = "v2.1.19"
 GOVERNANCE_CONTROL_BUCKET = "oci_artifact"
 MAX_PUBLIC_DOCUMENT_BYTES = 1024 * 1024
 
@@ -190,6 +191,40 @@ def _require_governance_bucket_available(object_storage: Any) -> str:
         f"{GOVERNANCE_CONTROL_BUCKET} already exists in this Object Storage namespace; "
         "reuse or upgrade the existing governance installation"
     )
+
+
+def _require_regional_vault_ocid(value: object, region: str) -> str:
+    vault_id = str(value or "").strip()
+    if re.fullmatch(rf"ocid1\.vault\.oc[1-9][0-9]*\.{re.escape(region)}\.[^.]+", vault_id) is None:
+        raise ValueError("existing OCI Vault OCID must identify a Vault in the deployment region")
+    return vault_id
+
+
+def _require_active_default_vault(vault: Any, vault_id: str) -> None:
+    item = vault.get_vault(vault_id).data
+    state = str(getattr(item, "lifecycle_state", "")).upper()
+    vault_type = str(getattr(item, "vault_type", "")).upper()
+    if str(getattr(item, "id", "")) != vault_id:
+        raise RuntimeError("OCI returned a different Vault than the one selected")
+    if state != "ACTIVE":
+        raise RuntimeError(f"the selected OCI Vault is {state or 'not ACTIVE'}")
+    if vault_type != "DEFAULT":
+        raise RuntimeError("the selected OCI Vault must use the DEFAULT vault type")
+    if any(not str(getattr(item, name, "")).startswith("https://") for name in ("management_endpoint", "crypto_endpoint")):
+        raise RuntimeError("the selected OCI Vault does not expose usable regional HTTPS endpoints")
+
+
+def _require_governance_vault(vault: Any | None, region: str, inputs: dict[str, Any]) -> str:
+    mode = str(inputs.get("governance_vault_mode") or "new").strip().lower()
+    if mode == "new":
+        return f"new DEFAULT OCI Vault will be created in {region}"
+    if mode != "existing":
+        raise ValueError("governance_vault_mode must be new or existing")
+    vault_id = _require_regional_vault_ocid(inputs.get("existing_governance_vault_ocid"), region)
+    if vault is None:
+        raise RuntimeError("OCI Vault client is unavailable")
+    _require_active_default_vault(vault, vault_id)
+    return f"selected OCI Vault is ACTIVE DEFAULT in {region}"
 
 
 def _safe_error_message(exc: Exception) -> str:
@@ -372,6 +407,7 @@ def select_inputs(
         service_endpoint=endpoint,
     ),
     object_storage_factory: Callable[[dict[str, Any]], Any] = oci.object_storage.ObjectStorageClient,
+    vault_factory: Callable[[dict[str, Any]], Any] = oci.key_management.KmsVaultClient,
     governance_image_resolver: Callable[[], str] = _resolve_governance_image,
 ) -> dict[str, Any]:
     target, mode = compartment_target(context)
@@ -390,6 +426,16 @@ def select_inputs(
     _require_ready_region(identity, tenancy_id, region)
     inputs = context.get("inputs") if isinstance(context.get("inputs"), dict) else {}
     governance_enabled = _is_enabled(inputs, "enable_ai_data_governance")
+    governance_vault_mode = str(inputs.get("governance_vault_mode") or "new").strip().lower()
+    governance_vault_message = (
+        _require_governance_vault(
+            vault_factory(regional_config) if governance_vault_mode == "existing" else None,
+            region,
+            inputs,
+        )
+        if governance_enabled
+        else ""
+    )
     governance_bucket_message = (
         _require_governance_bucket_available(object_storage_factory(regional_config))
         if governance_enabled
@@ -447,9 +493,9 @@ def select_inputs(
                 },
                 "events": [
                     {
-                        "name": "Immutable v2.1.18 source",
+                        "name": "Immutable v2.1.19 source",
                         "status": "passed",
-                        "message": "v2.1.18 source context and deployment source passed",
+                        "message": "v2.1.19 source context and deployment source passed",
                     },
                     {
                         "name": "Compartment availability",
@@ -466,6 +512,11 @@ def select_inputs(
                     },
                     *(
                         [
+                            {
+                                "name": "OCI Vault",
+                                "status": "passed",
+                                "message": governance_vault_message,
+                            },
                             {
                                 "name": "Governance control bucket",
                                 "status": "passed",

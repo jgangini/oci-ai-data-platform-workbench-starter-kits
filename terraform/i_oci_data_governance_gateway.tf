@@ -32,6 +32,29 @@ resource "terraform_data" "validate_governance_inputs" {
       )
       error_message = "governance_gateway_oidc_static_jwks_json must contain 1-10 RS256 public RSA keys."
     }
+    precondition {
+      condition = (
+        !var.enable_ai_data_governance ||
+        var.governance_vault_mode == "new" ||
+        local.governance_existing_vault_is_regional
+      )
+      error_message = "existing_governance_vault_ocid must identify a Vault in the deployment region when existing mode is selected."
+    }
+    precondition {
+      condition = (
+        !var.enable_ai_data_governance ||
+        var.governance_vault_mode == "new" ||
+        try(
+          data.oci_kms_vault.governance_existing[0].id == local.governance_existing_vault_ocid &&
+          data.oci_kms_vault.governance_existing[0].state == "ACTIVE" &&
+          data.oci_kms_vault.governance_existing[0].vault_type == "DEFAULT" &&
+          startswith(data.oci_kms_vault.governance_existing[0].management_endpoint, "https://") &&
+          startswith(data.oci_kms_vault.governance_existing[0].crypto_endpoint, "https://"),
+          false,
+        )
+      )
+      error_message = "the selected existing OCI Vault must be ACTIVE, DEFAULT, and expose regional HTTPS endpoints."
+    }
   }
 }
 

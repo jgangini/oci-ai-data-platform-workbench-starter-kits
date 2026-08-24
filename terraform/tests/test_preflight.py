@@ -125,6 +125,32 @@ class ObjectStorage:
         )
 
 
+class Vault:
+    def __init__(
+        self,
+        *,
+        vault_id: str = "ocid1.vault.oc1.us-chicago-1.amaaaaaatestvault",
+        lifecycle_state: str = "ACTIVE",
+        vault_type: str = "DEFAULT",
+    ) -> None:
+        self.vault_id = vault_id
+        self.lifecycle_state = lifecycle_state
+        self.vault_type = vault_type
+        self.requested_ids: list[str] = []
+
+    def get_vault(self, vault_id: str) -> Any:
+        self.requested_ids.append(vault_id)
+        return SimpleNamespace(
+            data=SimpleNamespace(
+                id=self.vault_id,
+                lifecycle_state=self.lifecycle_state,
+                vault_type=self.vault_type,
+                management_endpoint="https://management.kms.us-chicago-1.oraclecloud.com",
+                crypto_endpoint="https://crypto.kms.us-chicago-1.oraclecloud.com",
+            )
+        )
+
+
 def _select(
     statuses: dict[str, tuple[str, str]],
     *,
@@ -135,6 +161,7 @@ def _select(
     input_overrides: dict[str, Any] | None = None,
     identity_domains_factory: Any | None = None,
     object_storage: ObjectStorage | None = None,
+    vault: Vault | None = None,
     governance_image_resolver: Any | None = None,
 ) -> tuple[dict[str, Any], Compute]:
     compute = Compute(statuses)
@@ -165,6 +192,7 @@ def _select(
         database_factory=lambda _config: Database(),
         genai_factory=lambda _config: Genai(),
         object_storage_factory=lambda _config: object_storage or ObjectStorage(),
+        vault_factory=lambda _config: vault or Vault(),
         **kwargs,
     )
     return result, compute
@@ -243,6 +271,66 @@ def test_preflight_rejects_second_governance_installation_in_namespace() -> None
             {preflight.E5_SHAPE: (available, "1")},
             input_overrides={"enable_ai_data_governance": True},
             object_storage=ObjectStorage(bucket_exists=True),
+        )
+
+
+def test_preflight_accepts_explicit_active_default_vault_in_deployment_region(monkeypatch) -> None:
+    monkeypatch.setattr(preflight, "_governance_runtime_inputs", lambda *_args: ({}, []))
+    available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
+    vault = Vault()
+    result, _ = _select(
+        {preflight.E5_SHAPE: (available, "1")},
+        input_overrides={
+            "enable_ai_data_governance": True,
+            "governance_vault_mode": "existing",
+            "existing_governance_vault_ocid": vault.vault_id,
+        },
+        vault=vault,
+    )
+    assert vault.requested_ids == [vault.vault_id]
+    event = next(item for item in result["events"] if item["name"] == "OCI Vault")
+    assert event["message"] == "selected OCI Vault is ACTIVE DEFAULT in us-chicago-1"
+
+
+def test_preflight_defaults_to_creating_a_new_default_vault() -> None:
+    assert preflight._require_governance_vault(None, "us-chicago-1", {}) == (
+        "new DEFAULT OCI Vault will be created in us-chicago-1"
+    )
+
+
+def test_preflight_rejects_existing_vault_from_another_region_without_lookup() -> None:
+    with pytest.raises(ValueError, match="deployment region"):
+        preflight._require_governance_vault(
+            None,
+            "us-chicago-1",
+            {
+                "governance_vault_mode": "existing",
+                "existing_governance_vault_ocid": "ocid1.vault.oc1.us-ashburn-1.amaaaaaatestvault",
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    ("lifecycle_state", "vault_type", "message"),
+    [
+        ("CREATING", "DEFAULT", "CREATING"),
+        ("ACTIVE", "VIRTUAL_PRIVATE", "DEFAULT vault type"),
+    ],
+)
+def test_preflight_rejects_existing_vault_that_is_not_active_default(
+    lifecycle_state: str,
+    vault_type: str,
+    message: str,
+) -> None:
+    vault = Vault(lifecycle_state=lifecycle_state, vault_type=vault_type)
+    with pytest.raises(RuntimeError, match=message):
+        preflight._require_governance_vault(
+            vault,
+            "us-chicago-1",
+            {
+                "governance_vault_mode": "existing",
+                "existing_governance_vault_ocid": vault.vault_id,
+            },
         )
 
 

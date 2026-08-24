@@ -15,7 +15,7 @@ locals {
       object_storage_namespace     = var.objectstorage_namespace
       control_delta_location       = "oci://${oci_objectstorage_bucket.control[0].name}@${var.objectstorage_namespace}/data_governance"
       tokenization_key_ocid        = oci_kms_key.governance[0].id
-      tokenization_crypto_endpoint = oci_kms_vault.governance[0].crypto_endpoint
+      tokenization_crypto_endpoint = local.governance_vault_crypto_endpoint
       gateway_backend_ip           = var._oci_governance.gateway_backend_ip
       gateway_subnet_cidr          = var._oci_governance.gateway_subnet_cidr
     }

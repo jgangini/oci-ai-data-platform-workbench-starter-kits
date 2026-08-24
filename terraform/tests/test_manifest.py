@@ -55,6 +55,24 @@ def test_deploy_studio_manifest_contract() -> None:
         "equals": "existing",
     }
     assert fields["enable_ai_data_governance"]["group"] == "optional_addons"
+    assert fields["governance_vault_mode"] == {
+        "name": "governance_vault_mode",
+        "label": "OCI Vault mode",
+        "type": "select",
+        "required": True,
+        "default": "new",
+        "group": "optional_addons",
+        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
+        "options": [
+            {"value": "new", "label": "Create new Vault"},
+            {"value": "existing", "label": "Use existing Vault"},
+        ],
+    }
+    assert fields["existing_governance_vault_ocid"]["options_source"] == "oci_active_vaults"
+    assert fields["existing_governance_vault_ocid"]["visible_when"] == {
+        "field": "governance_vault_mode",
+        "equals": "existing",
+    }
     assert not any(name.startswith("governance_gateway_") for name in fields)
     assert fields["admin_username"]["group"] == "application_vm"
     assert manifest["post_apply"]["secret_inputs"] == [

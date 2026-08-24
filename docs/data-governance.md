@@ -1,6 +1,8 @@
 # AI Data Governance add-on
 
-> Status: `v2.1.18` validation target. Local contracts and the live AIDP schema-owner permission check are implemented; the next acceptance is one clean deployment after all local gates pass.
+> Status: `v2.1.19` validation target. Local contracts and the live AIDP schema-owner permission check are implemented; the next acceptance is one clean deployment after all local gates pass.
+
+Deploy Studio exposes an explicit **OCI Vault mode** only when this add-on is selected. **Create new Vault** is the safe default for installation isolation. **Use existing Vault** requires an explicitly selected regional Vault that preflight and Terraform both verify as `ACTIVE` and `DEFAULT`; the installer never chooses a Vault silently.
 
 ## Runtime boundaries
 

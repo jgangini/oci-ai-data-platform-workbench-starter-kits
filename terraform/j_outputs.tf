@@ -152,7 +152,7 @@ output "governance_gateway_tokenization_key_ocid" {
 }
 
 output "governance_gateway_tokenization_crypto_endpoint" {
-  value = try(oci_kms_vault.governance[0].crypto_endpoint, null)
+  value = var.enable_ai_data_governance ? local.governance_vault_crypto_endpoint : null
 }
 
 output "governance_gateway_api_gateway_id" {
@@ -194,7 +194,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Fresh-only v2.1.18 contract: post-apply creates no external volumes."
+  description = "Fresh-only v2.1.19 contract: post-apply creates no external volumes."
   value       = 0
 }
 

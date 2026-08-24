@@ -164,6 +164,29 @@ variable "enable_ai_data_governance" {
   default     = false
 }
 
+variable "governance_vault_mode" {
+  description = "Whether the governance gateway creates a DEFAULT OCI Vault or reuses one selected explicitly."
+  type        = string
+  default     = "new"
+  validation {
+    condition     = contains(["new", "existing"], var.governance_vault_mode)
+    error_message = "governance_vault_mode must be new or existing."
+  }
+}
+
+variable "existing_governance_vault_ocid" {
+  description = "Explicit OCID of an existing regional ACTIVE DEFAULT Vault when governance_vault_mode is existing."
+  type        = string
+  default     = ""
+  validation {
+    condition = (
+      trimspace(var.existing_governance_vault_ocid) == "" ||
+      can(regex("^ocid1\\.vault\\.oc[1-9][0-9]*\\.[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*\\..+$", trimspace(var.existing_governance_vault_ocid)))
+    )
+    error_message = "existing_governance_vault_ocid must be empty or a regional OCI Vault OCID."
+  }
+}
+
 variable "governance_gateway_image" {
   description = "Immutable gateway image resolved by the authenticated deployment preflight."
   type        = string

@@ -28,6 +28,7 @@ def test_operator_identity_is_reused_and_governance_resources_are_isolated() -> 
     assert "secret-bundles" not in compute
     assert edge.count('resource "oci_identity_domains_app" "governance_public_client"') == 1
     assert edge.count('resource "oci_kms_vault" "governance"') == 1
+    assert edge.count('data "oci_kms_vault" "governance_existing"') == 1
     assert edge.count('resource "oci_kms_key" "governance"') == 1
     assert edge.count('resource "oci_vault_secret" "governance_jdbc"') == 1
     assert "client_secret" not in edge
@@ -40,7 +41,8 @@ def test_operator_identity_is_reused_and_governance_resources_are_isolated() -> 
     assert "socket.getaddrinfo(sys.argv[1], 443)" in edge
     assert 'while [ "$attempt" -le 90 ]' in edge
     assert "Vault management endpoint DNS was not ready after 900 seconds" in edge
-    assert 'GOVERNANCE_VAULT_HOST = trimprefix(oci_kms_vault.governance[0].management_endpoint, "https://")' in edge
+    assert 'GOVERNANCE_VAULT_HOST = trimprefix(local.governance_vault_management_endpoint, "https://")' in edge
+    assert "depends_on = [terraform_data.validate_governance_inputs]" in edge
     assert "depends_on = [terraform_data.governance_vault_dns_wait]" in edge
 
 

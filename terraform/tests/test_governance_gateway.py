@@ -85,13 +85,27 @@ def test_oke_private_network_allows_worker_registration() -> None:
     assert 'description = "Allow OKE path MTU discovery"' in workers
 
 
-def test_governance_cross_variable_contract_uses_terraform_15_preconditions() -> None:
+def test_governance_cross_variable_contract_defaults_new_and_reuses_only_an_explicit_active_regional_vault() -> None:
     variables = (ROOT / "terraform/b_variables.tf").read_text(encoding="utf-8")
     gateway = (ROOT / "terraform/i_oci_data_governance_gateway.tf").read_text(encoding="utf-8")
+    edge = (ROOT / "terraform/i_oci_data_governance_edge.tf").read_text(encoding="utf-8")
     assert 'resource "terraform_data" "validate_governance_inputs"' in gateway
-    assert gateway.count("precondition {") == 4
-    assert gateway.count("!var.enable_ai_data_governance ||") == 4
+    assert gateway.count("precondition {") == 6
+    assert gateway.count("!var.enable_ai_data_governance ||") == 6
     assert "!var.enable_ai_data_governance" not in variables
+    assert 'variable "governance_vault_mode"' in variables
+    assert 'contains(["new", "existing"], var.governance_vault_mode)' in variables
+    assert 'variable "existing_governance_vault_ocid"' in variables
+    assert 'data "oci_kms_vault" "governance_existing"' in edge
+    assert 'resource "oci_kms_vault" "governance"' in edge
+    assert 'var.enable_ai_data_governance && var.governance_vault_mode == "new" ? 1 : 0' in edge
+    assert "governance_existing_vault_is_regional" in edge
+    assert 'split(".", local.governance_existing_vault_ocid)[3] == var.region' in edge
+    assert 'data.oci_kms_vault.governance_existing[0].state == "ACTIVE"' in gateway
+    assert 'data.oci_kms_vault.governance_existing[0].vault_type == "DEFAULT"' in gateway
+    assert "local.governance_vault_management_endpoint" in edge
+    assert "vault_id       = local.governance_vault_id" in edge
+    assert "oci_kms_vaults" not in edge
 
 
 def test_workload_identity_manages_only_the_named_driver_object() -> None:
