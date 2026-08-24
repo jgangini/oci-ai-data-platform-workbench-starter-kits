@@ -253,3 +253,22 @@ run "authorized_e3_fallback_contract" {
     error_message = "The authorized fallback can use E3 with the same flexible configuration."
   }
 }
+
+run "production_rejects_registration_code" {
+  command = plan
+
+  variables {
+    tenancy_ocid            = "ocid1.tenancy.oc1..test"
+    home_region             = "us-ashburn-1"
+    operator_user_ocid      = "ocid1.user.oc1..operator"
+    compartment_ocid        = "ocid1.compartment.oc1..test"
+    objectstorage_namespace = "testnamespace"
+    deployment_suffix       = "test1234"
+    admin_password_hash     = "pbkdf2_sha256$600000$salt$digest"
+    deployment_mode         = "production"
+    registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
+  }
+
+  expect_failures = [oci_core_instance.lab]
+}
