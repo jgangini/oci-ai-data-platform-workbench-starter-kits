@@ -189,7 +189,13 @@ class FakeApi:
 
 
 def test_governance_discovery_tags_merge_without_replacing_existing_tags() -> None:
-    platform = SimpleNamespace(freeform_tags={"owner": "data-team"})
+    platform = SimpleNamespace(
+        freeform_tags={
+            "managed-by": "deploy-studio",
+            "workload": "migration-lab",
+            "governance_gateway_runtime": "OKE",
+        }
+    )
     updates: list[tuple[dict[str, str], str | None]] = []
 
     class Client:
@@ -232,7 +238,8 @@ def test_governance_discovery_tags_merge_without_replacing_existing_tags() -> No
         oci_module, {"region": "us-chicago-1"}, object(), outputs
     )
     assert updates == [({
-        "owner": "data-team",
+        "managed-by": "deploy-studio",
+        "workload": "migration-lab",
         "enable_ai_data_governance": "true",
         "governance_gateway_url": outputs["governance_gateway_url"],
         "governance_gateway_oidc_authority": outputs["governance_gateway_oidc_authority"],
@@ -241,8 +248,8 @@ def test_governance_discovery_tags_merge_without_replacing_existing_tags() -> No
         "governance_gateway_oidc_audience": outputs["governance_gateway_oidc_audience"],
         "governance_gateway_oidc_scopes": outputs["governance_gateway_oidc_scopes"],
         "governance_gateway_image": outputs["governance_gateway_image"],
-        "governance_gateway_runtime": "OKE",
     }, "etag-1")]
+    assert len(updates[0][0]) == 10
     assert not post_apply.ensure_governance_discovery_tags(
         oci_module, {"region": "us-chicago-1"}, object(), outputs
     )
@@ -250,8 +257,20 @@ def test_governance_discovery_tags_merge_without_replacing_existing_tags() -> No
     assert post_apply.ensure_governance_discovery_tags(
         oci_module, {"region": "us-chicago-1"}, object(), outputs
     )
-    assert updates[-1] == ({"owner": "data-team"}, "etag-1")
-    assert set(platform.freeform_tags) == {"owner"}
+    assert updates[-1] == (
+        {"managed-by": "deploy-studio", "workload": "migration-lab"},
+        "etag-1",
+    )
+    assert set(platform.freeform_tags) == {"managed-by", "workload"}
+
+
+def test_governance_discovery_tags_fail_before_oci_when_the_platform_has_no_capacity() -> None:
+    desired = {name: "value" for name in post_apply.GOVERNANCE_DISCOVERY_TAGS}
+    desired.pop("governance_gateway_runtime")
+    current = {f"unrelated-{index}": "value" for index in range(3)}
+
+    with pytest.raises(post_apply.ReconcileError, match="OCI permits at most 10"):
+        post_apply._merged_governance_discovery_tags(current, desired)
 
 
 def test_governance_discovery_tags_reject_mutable_images() -> None:

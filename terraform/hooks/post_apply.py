@@ -40,6 +40,7 @@ GOVERNANCE_CREDENTIAL_NAME = "AidpGovernanceOperator"
 GOVERNANCE_JDBC_PURPOSE = "AIDP_GOVERNANCE_GATEWAY"
 LAYERS = ("landing", "bronze", "silver", "gold")
 GOVERNANCE_GATEWAY_IMAGE = "ghcr.io/jgangini/oci-aidp-data-governance-gateway"
+OCI_FREEFORM_TAG_LIMIT = 10
 GOVERNANCE_DISCOVERY_TAGS = (
     "enable_ai_data_governance",
     "governance_gateway_url",
@@ -1499,9 +1500,8 @@ def _governance_discovery_desired(outputs: dict[str, Any]) -> dict[str, str]:
         ),
         "governance_gateway_oidc_scopes": str(outputs.get("governance_gateway_oidc_scopes") or ""),
         "governance_gateway_image": image,
-        "governance_gateway_runtime": "OKE",
     }
-    missing = sorted(name for name in GOVERNANCE_DISCOVERY_TAGS if not desired[name])
+    missing = sorted(name for name, value in desired.items() if not value)
     if missing:
         raise ReconcileError(
             f"Missing non-secret governance discovery output(s): {', '.join(missing)}"
@@ -1512,13 +1512,18 @@ def _governance_discovery_desired(outputs: dict[str, Any]) -> dict[str, str]:
 def _merged_governance_discovery_tags(
     current: dict[str, str], desired: dict[str, str]
 ) -> dict[str, str]:
-    if desired:
-        return {**current, **desired}
-    return {
+    retained = {
         name: value
         for name, value in current.items()
         if name not in GOVERNANCE_DISCOVERY_TAGS
     }
+    merged = {**retained, **desired}
+    if len(merged) > OCI_FREEFORM_TAG_LIMIT:
+        raise ReconcileError(
+            "AIDP governance discovery requires eight free-form tags, but the platform "
+            f"would contain {len(merged)}; OCI permits at most {OCI_FREEFORM_TAG_LIMIT}"
+        )
+    return merged
 
 
 def _update_governance_discovery_tags(
