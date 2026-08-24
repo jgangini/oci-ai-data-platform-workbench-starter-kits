@@ -4,7 +4,7 @@ Oracle AI Data Platform Workbench Starter Kits is a reusable collection of hands
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more starter kits without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current validation target: **v2.1.21**. This release standardizes the required Medallion Architecture on five reusable Object Storage buckets, adds Laboratory and Production deployment modes, publishes the `oci_medallion` Master Catalog, and keeps the AI Data Governance Gateway optional. New-Vault deployments also wait for a stable regional KMS DNS endpoint before creating the governance key.
+Current validation target: **v2.1.22**. This release standardizes the required Medallion Architecture on five reusable Object Storage buckets, adds Laboratory and Production deployment modes, publishes the `oci_medallion` Master Catalog, and keeps the AI Data Governance Gateway optional. New-Vault deployments also wait for a stable regional KMS DNS endpoint before creating the governance key.
 
 ## What the project provides
 
@@ -155,7 +155,7 @@ A separate technical JDBC API key is generated after apply, stored in OCI Vault,
 
 Use OCI Deploy Studio with an immutable validated release. Deploy Studio discovers subscribed regions and compatible AIDP, Autonomous AI Database 26ai DW, and OCI Generative AI Chat capabilities before provisioning the network, private data bucket, registration VM, Identity Domains groups and policies, AIDP workspace, compute, and permissions.
 
-For a clean `v2.1.21` validation, select **New compartment**, use the default `oracle-ai-data-platform` name or another unique name, and treat the run as an independent installation rather than an upgrade. In **Medallion Architecture**, choose **Create new bucket** or **Use existing bucket** independently for Landing, Bronze, Silver, Gold, and Artifacts. When **AI Data Governance Gateway** is selected, keep **OCI Vault mode** at **Create new Vault** for an isolated installation, or choose **Use existing Vault** and select an accessible regional `ACTIVE` `DEFAULT` Vault.
+For a clean `v2.1.22` validation, select **New compartment**, use the default `oracle-ai-data-platform` name or another unique name, and treat the run as an independent installation rather than an upgrade. In **Medallion Architecture**, choose **Create new bucket** or **Use existing bucket** independently for Landing, Bronze, Silver, Gold, and Artifacts. When **AI Data Governance Gateway** is selected, keep **OCI Vault mode** at **Create new Vault** for an isolated installation, or choose **Use existing Vault** and select an accessible regional `ACTIVE` `DEFAULT` Vault.
 
 Select the deployment mode before validation:
 
@@ -375,7 +375,7 @@ docker build -f docker/Dockerfile -t aidp-lab:test .
 
 ## OCI Deploy Studio compatibility
 
-The **v2.1.21** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery and encrypted hook-file extensions.
+The **v2.1.22** release is compatible with OCI Deploy Studio through [`terraform/deploy-studio.json`](terraform/deploy-studio.json), using manifest schema version 1 with optional regional-discovery and encrypted hook-file extensions.
 
 Deploy Studio support includes:
 
@@ -391,7 +391,7 @@ Deploy Studio support includes:
 - Post-apply reconciliation of the AIDP workspace, catalog, `aidp_cluster_shared_compute`, AI feature enablement, Identity roles, participant application, and final access artifact. The first Agent assignment reuses the shared `aidp_agent_shared_compute` runtime.
 - Structured deployment steps and outputs for the application URL, administrator URL, AIDP Workbench, bucket, workspace, compute, and identity resources.
 
-The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.21` tag rather than an untagged development commit.
+The OCI config region is only the initial choice. The selected effective region is applied consistently to AIDP, Autonomous, Generative AI, VCN, VM, and Object Storage without rewriting the original OCI config. Deploy the immutable `v2.1.22` tag rather than an untagged development commit.
 
 Deploy Studio currently applies the Resource Manager plan automatically after planning and does not expose a repository hook between those stages. For controlled deployments, review the generated plan or run `python terraform/release_gate.py --plan-json <plan.json>` in CI before starting the final apply.
 

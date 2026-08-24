@@ -1,6 +1,6 @@
 # AI Data Governance add-on
 
-> Status: `v2.1.21` validation target. The mandatory medallion bucket contract and optional governance gateway are implemented; new Vaults must expose a stable regional KMS DNS endpoint before Terraform creates the governance key. The next acceptance is one clean deployment after all local gates pass.
+> Status: `v2.1.22` validation target. The mandatory medallion bucket contract and optional governance gateway are implemented; new Vaults must expose a stable regional KMS DNS endpoint before Terraform creates the governance key. The next acceptance is one clean deployment after all local gates pass.
 
 Deploy Studio exposes an explicit **OCI Vault mode** only when this add-on is selected. **Create new Vault** is the safe default for installation isolation. **Use existing Vault** requires an explicitly selected regional Vault that preflight and Terraform both verify as `ACTIVE` and `DEFAULT`; the installer never chooses a Vault silently.
 

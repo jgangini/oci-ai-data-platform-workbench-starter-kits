@@ -8,6 +8,7 @@ variables {
   agent_model_id                      = "ocid1.generativeaimodel.oc1.us-ashburn-1.test"
   autonomous_database_admin_password  = "TestRootPassword123"
   autonomous_database_wallet_password = "TestWalletPassword123"
+  operator_username                   = "test.operator@example.test"
 }
 
 override_resource {
@@ -176,7 +177,7 @@ run "resolved_compartment_contract" {
     condition = length(oci_identity_policy.vm_bootstrap.statements) == 2 && anytrue([
       for statement in oci_identity_policy.vm_bootstrap.statements :
       strcontains(statement, "manage objects") &&
-      strcontains(statement, "target.bucket.name = 'aidp-data-test1234'") &&
+      strcontains(statement, "target.bucket.name = 'oci_landing'") &&
       strcontains(statement, "target.object.name = '.bootstrap/operator-credentials.json'")
     ])
     error_message = "The registration VM needs exact-object access to consume encrypted credentials."
