@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -267,7 +268,12 @@ def make_client(
         oci_config_file="/etc/aidp-lab/oci/config",
         objectstorage_namespace="namespace", bucket_name="aidp-data-test",
         lab_marker="lab-test", session_secret_file=str(tmp_path / "session.key"),
-        aidp_settings_file=str(tmp_path / "settings.json"), cookie_secure=False,
+        aidp_settings_file=str(tmp_path / "settings.json"),
+        application_release="v2.2.0",
+        application_commit_sha="a" * 40,
+        application_update_dir=str(tmp_path / "update"),
+        vm_update_enabled=True,
+        cookie_secure=False,
     )
     app = create_app(settings)
     identity = FakeIdentity(mode)
@@ -369,6 +375,75 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     assert response.json()["aidp_platform_id"] == "ocid1.aidataplatform.oc1..test"
     assert response.json()["deployment_mode"] == "laboratory"
     assert response.json()["operator_username"] == "joel.ganggini@oracle.com"
+
+
+def test_application_release_and_update_are_admin_only_and_idempotent(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    assert client.get("/api/admin/application").status_code == 401
+    assert client.post(
+        "/api/admin/application/update",
+        json={"operation_id": "d9282ff6-8717-4db7-9f59-241469a2c526"},
+    ).status_code == 401
+    login(client)
+
+    async def latest() -> dict[str, object]:
+        tag = "v2.3.0"
+        return {
+            "tag_name": tag,
+            "draft": False,
+            "prerelease": False,
+            "immutable": True,
+            "published_at": "2026-08-24T12:00:00Z",
+            "assets": [
+                {
+                    "name": name,
+                    "browser_download_url": (
+                        "https://github.com/jgangini/"
+                        f"oci-ai-data-platform-workbench-starter-kits/releases/download/{tag}/{name}"
+                    ),
+                    "digest": f"sha256:{character * 64}",
+                }
+                for name, character in (
+                    ("aidp-release.json", "a"),
+                    ("aidp-lab-image-amd64.tar.gz", "b"),
+                )
+            ],
+        }
+
+    client.app.state.release_manager._fetch_latest = latest
+    release = client.get("/api/admin/application")
+    assert release.status_code == 200
+    assert release.json()["current_release"] == "v2.2.0"
+    assert release.json()["latest_release"] == "v2.3.0"
+    assert release.json()["update_available"] is True
+    assert release.json()["packages"][-1]["package_id"] == "ai_data_governance_vsc_extension"
+
+    operation_id = "d9282ff6-8717-4db7-9f59-241469a2c526"
+    pending = client.post(
+        "/api/admin/application/update", json={"operation_id": operation_id}
+    )
+    assert pending.status_code == 202
+    assert pending.json()["status"] == "pending"
+    request = json.loads((tmp_path / "update/inbox/request.json").read_text(encoding="utf-8"))
+    assert request["operation_id"] == operation_id
+
+    (tmp_path / "update/status").mkdir()
+    (tmp_path / "update/status/status.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": operation_id,
+                "status": "succeeded",
+                "message": "Application updated.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    complete = client.post(
+        "/api/admin/application/update", json={"operation_id": operation_id}
+    )
+    assert complete.status_code == 200
+    assert complete.json()["status"] == "active"
 
 
 def test_registration_accepts_multiple_labs_and_activates_after_all_are_ready(tmp_path: Path) -> None:

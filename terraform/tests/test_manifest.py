@@ -197,16 +197,88 @@ def test_hook_result_matches_runner_and_manifest_contract() -> None:
     }
 
 
-def test_release_workflow_publishes_only_the_gated_v2_2_0_tag() -> None:
+def test_release_workflow_builds_frozen_amd64_assets_before_publish() -> None:
     root = Path(__file__).parents[2]
     workflow = (root / ".github" / "workflows" / "release.yml").read_text(
         encoding="utf-8"
     )
-    gate = "python terraform/release_gate.py --source-root terraform"
-    publish = 'gh release create "$GITHUB_REF_NAME"'
-    assert 'tags: ["v2.2.0"]' in workflow
-    assert 'tags: ["v*"]' not in workflow
-    assert 0 <= workflow.index(gate) < workflow.index(publish)
+    gate = 'python terraform/release_gate.py --source-root terraform --release-ref "$GITHUB_REF_NAME"'
+    build = "docker build --platform linux/amd64"
+    manifest = '(root / os.environ["RELEASE_MANIFEST_ASSET"]).write_text'
+    draft = 'gh release create "$GITHUB_REF_NAME" --draft --verify-tag'
+    upload = 'gh release upload "$GITHUB_REF_NAME"'
+    publish = 'gh release edit "$GITHUB_REF_NAME" --draft=false'
+    immutable = "- name: Verify published release is immutable"
+    platform_check = '''test "$(docker image inspect "$image_tag" --format '{{.Os}}/{{.Architecture}}')" = "linux/amd64"'''
+    assert 'tags: ["v*.*.*"]' in workflow
+    assert 'tags: ["v2.2.0"]' not in workflow
+    assert 'RELEASE_IMAGE_ASSET=aidp-lab-image-amd64.tar.gz' in workflow
+    assert 'RELEASE_MANIFEST_ASSET=aidp-release.json' in workflow
+    assert "RELEASE_REPOSITORY=https://github.com/$GITHUB_REPOSITORY" in workflow
+    assert "docker save \"$image_tag\" | gzip -n -9" in workflow
+    assert platform_check in workflow
+    assert '"schema_version": 1' in workflow
+    assert '"updater_protocol": 1' in workflow
+    assert '"release": os.environ["GITHUB_REF_NAME"]' in workflow
+    assert '"commit_sha": os.environ["RELEASE_COMMIT_SHA"]' in workflow
+    assert '"repository": os.environ["RELEASE_REPOSITORY"]' in workflow
+    assert '"image": {' in workflow
+    assert '"asset_name": os.environ["RELEASE_IMAGE_ASSET"]' in workflow
+    assert '"sha256": digest.hexdigest()' in workflow
+    assert '"platform": "linux/amd64"' in workflow
+    assert 'f\'aidp-lab:{os.environ["RELEASE_COMMIT_SHA"]}\'' in workflow
+    assert "ghcr.io" not in workflow
+    assert "docker push" not in workflow
+    assert (
+        0
+        <= workflow.index(gate)
+        < workflow.index(build)
+        < workflow.index(manifest)
+        < workflow.index(draft)
+        < workflow.index(upload)
+        < workflow.index(publish)
+        < workflow.index(immutable)
+    )
+
+
+def test_release_workflow_reruns_only_mutate_drafts() -> None:
+    root = Path(__file__).parents[2]
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "group: release-${{ github.ref }}" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert 'gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME"' in workflow
+    assert 'grep -q "HTTP 404" "$lookup_error"' in workflow
+    assert "--json isDraft,isImmutable,isPrerelease" in workflow
+    assert 'echo "mode=create"' in workflow
+    assert 'echo "mode=draft"' in workflow
+    assert 'echo "mode=immutable"' in workflow
+    assert "Existing published release is mutable; refusing to edit or republish it." in workflow
+    assert "if: steps.release.outputs.mode == 'immutable'" in workflow
+    assert "immutable release asset manifest mismatch" in workflow
+    assert workflow.count('test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET"') == 2
+    immutable_start = workflow.index("- name: Verify existing immutable release assets")
+    immutable_end = workflow.index("- uses: hashicorp/setup-terraform@v3")
+    immutable_verification = workflow[immutable_start:immutable_end]
+    assert 'gh release download "$GITHUB_REF_NAME"' in immutable_verification
+    assert "gh release edit" not in immutable_verification
+    assert "gh release upload" not in immutable_verification
+    assert workflow.count('gh release create "$GITHUB_REF_NAME"') == 1
+    assert "--draft --verify-tag" in workflow
+    assert "--clobber" in workflow
+    assert 'cmp "$RELEASE_DIST/$RELEASE_IMAGE_ASSET"' in workflow
+    assert "$'true\\tfalse\\tfalse'" in workflow
+    assert "$'false\\ttrue\\tfalse'" in workflow
+    for step in (
+        "Create or reuse draft GitHub release",
+        "Upload frozen assets to draft",
+        "Publish GitHub release",
+    ):
+        guarded_step = workflow[workflow.index(f"- name: {step}") :]
+        assert "if: steps.release.outputs.mode != 'immutable'" in guarded_step.split(
+            "run:", 1
+        )[0]
 
 
 def test_runtime_security_contracts() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,32 @@ def _artifacts_bucket_name(value: str) -> str:
     if value.strip() != "oci_artifacts":
         raise ValueError("ARTIFACTS_BUCKET_NAME must be oci_artifacts")
     return "oci_artifacts"
+
+
+_RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+_RELEASE_SHA = re.compile(r"^[0-9a-f]{40}$")
+_SOURCE_REPOSITORY = "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
+
+
+def _application_release(value: str) -> str:
+    normalized = value.strip()
+    if normalized != "development" and _RELEASE_TAG.fullmatch(normalized) is None:
+        raise ValueError("APP_RELEASE_TAG must be development or a stable semantic release tag")
+    return normalized
+
+
+def _application_commit_sha(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized != "development" and _RELEASE_SHA.fullmatch(normalized) is None:
+        raise ValueError("APP_RELEASE_SHA must be development or a full lowercase Git SHA")
+    return normalized
+
+
+def _application_repository(value: str) -> str:
+    normalized = value.strip().removesuffix(".git")
+    if normalized != _SOURCE_REPOSITORY:
+        raise ValueError("APP_REPOSITORY must be the trusted Starter Kits repository")
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +75,11 @@ class Settings:
     aidp_settings_file: str = "/var/lib/aidp-lab/settings.json"
     lab_marker: str = "aidp-lab"
     session_secret_file: str = "/var/lib/aidp-lab/session.key"
+    application_release: str = "development"
+    application_commit_sha: str = "development"
+    application_repository: str = _SOURCE_REPOSITORY
+    application_update_dir: str = "/var/lib/aidp-lab/update"
+    vm_update_enabled: bool = False
     cookie_secure: bool = True
     local_development_mode: bool = False
 
@@ -82,6 +114,20 @@ class Settings:
             aidp_settings_file=os.getenv("AIDP_SETTINGS_FILE", "/var/lib/aidp-lab/settings.json"),
             lab_marker=os.getenv("LAB_MARKER", "aidp-lab"),
             session_secret_file=os.getenv("SESSION_SECRET_FILE", "/var/lib/aidp-lab/session.key"),
+            application_release=_application_release(
+                os.getenv("APP_RELEASE_TAG", "development")
+            ),
+            application_commit_sha=_application_commit_sha(
+                os.getenv("APP_RELEASE_SHA", "development")
+            ),
+            application_repository=_application_repository(
+                os.getenv("APP_REPOSITORY", _SOURCE_REPOSITORY)
+            ),
+            application_update_dir=os.getenv(
+                "AIDP_UPDATE_DIR", "/var/lib/aidp-lab/update"
+            ),
+            vm_update_enabled=os.getenv("VM_UPDATE_ENABLED", "false").lower()
+            in {"1", "true", "yes"},
             cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
             local_development_mode=os.getenv("LOCAL_DEVELOPMENT_MODE", "false").lower() in {"1", "true", "yes"},
         )

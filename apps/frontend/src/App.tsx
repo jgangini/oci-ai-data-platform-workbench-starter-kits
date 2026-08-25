@@ -47,6 +47,8 @@ type LabUser = {
 type AssignedLab = {
   lab_id: string;
   pack_version: string;
+  bundled_version?: string | null;
+  update_available?: boolean;
   phase: string;
   workspace_path: string;
   job_name: string;
@@ -73,6 +75,9 @@ type AdminModule = {
   display_name: string;
   status: "not_installed" | "installing" | "active" | "redeploying" | "deleting" | "error" | (string & {});
   installed: boolean;
+  installed_version?: string | null;
+  bundled_version?: string | null;
+  update_available?: boolean;
   operation_id?: string | null;
   operation_type?: ModuleOperationKind | null;
   message?: string | null;
@@ -89,6 +94,35 @@ type PublicConfig = {
   labs: CatalogLab[];
 };
 type AdminSession = { username: string; operator_username: string };
+type ApplicationReleaseOperation = {
+  operation_id: string;
+  status: "queued" | "checking" | "downloading" | "building" | "validating" | "activating" | "succeeded" | "up_to_date" | "failed" | (string & {});
+  phase: RegistrationPhaseValue;
+  message: string;
+  target_release?: string;
+};
+type ApplicationReleasePackage = {
+  package_id: string;
+  display_name: string;
+  bundled_version: string;
+  kind: string;
+  scope: "participant" | "global";
+  status: string;
+};
+type AdminApplicationRelease = {
+  repository: string;
+  current_release: string;
+  current_commit_sha: string;
+  latest_release: string | null;
+  latest_published_at: string | null;
+  latest_release_url: string | null;
+  latest_release_immutable: boolean;
+  update_available: boolean;
+  updater_available: boolean;
+  update_check_error: string;
+  operation: ApplicationReleaseOperation | null;
+  packages: ApplicationReleasePackage[];
+};
 const fallbackCatalog: CatalogLab[] = [
   { lab_id: "banking", display_name: "Banking", description: "Explore customer accounts, branches and transactions through a governed medallion pipeline.", pack_version: "2.0.0", status: "available", available: true },
   { lab_id: "telecommunications", display_name: "Telecommunications", description: "Analyze subscribers, plans, network sites and usage events for service and network insights.", pack_version: "2.0.0", status: "available", available: true },
@@ -615,6 +649,9 @@ function LabManagerModal({
               {catalog.map((lab) => {
                 const installed = assigned.get(lab.lab_id);
                 const selected = selectedLabIds.includes(lab.lab_id);
+                const hasBundledUpdate = Boolean(
+                  installed && installed.pack_version !== lab.pack_version,
+                );
                 return (
                   <tr key={lab.lab_id}>
                     <td>
@@ -632,7 +669,17 @@ function LabManagerModal({
                       />
                     </td>
                     <td><strong>{lab.display_name}</strong></td>
-                    <td>{installed?.pack_version ?? lab.pack_version}</td>
+                    <td>
+                      <span className="kit-version-copy">
+                        <strong>{installed ? `Installed ${installed.pack_version}` : `Bundled ${lab.pack_version}`}</strong>
+                        {installed && <small>Bundled {lab.pack_version}</small>}
+                        {installed && (
+                          <span className={`kit-version-state ${hasBundledUpdate ? "update" : "current"}`}>
+                            {hasBundledUpdate ? "Update available" : "Current"}
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td className="lab-table-description">{labDescription(lab)}</td>
                     <td>
                       <span className={`lab-state ${installed ? "installed" : lab.available ? "unassigned" : "planned"}`}>
@@ -645,8 +692,10 @@ function LabManagerModal({
                         type="button"
                         disabled={!installed}
                         onClick={() => installed && onRedeploy(installed)}
-                        aria-label={`Redeploy ${lab.display_name} for ${user.email}`}
-                        title={installed ? "Redeploy lab" : "Assign the lab before redeploying"}
+                        aria-label={hasBundledUpdate
+                          ? `Update ${lab.display_name} from ${installed?.pack_version} to ${lab.pack_version} for ${user.email}`
+                          : `Redeploy ${lab.display_name} for ${user.email}`}
+                        title={installed ? hasBundledUpdate ? "Update starter kit" : "Redeploy starter kit" : "Assign the lab before redeploying"}
                       >
                         <RefreshIcon />
                       </button>
@@ -754,6 +803,15 @@ function GovernanceModuleModal({
           <p className="governance-module-note">
             This installation is shared by every administrator. AIDP developers can use the Agent, while only AI Data Platform administrators can modify it.
           </p>
+          <p className="governance-module-note kit-version-copy">
+            <strong>{module.installed_version ? `Installed ${module.installed_version}` : "Not installed"}</strong>
+            <small>Bundled {module.bundled_version || "unknown"}</small>
+            {module.installed && (
+              <span className={`kit-version-state ${module.update_available ? "update" : "current"}`}>
+                {module.update_available ? "Update available" : "Current"}
+              </span>
+            )}
+          </p>
           {module.status === "error" && module.message && (
             <p className="lab-manager-error" role="alert">{module.message}</p>
           )}
@@ -777,7 +835,7 @@ function GovernanceModuleModal({
                 Delete
               </button>
               <button type="button" disabled={busy || transitioning} onClick={onRedeploy}>
-                Redeploy
+                {module.update_available ? "Update" : "Redeploy"}
               </button>
             </>
           ) : (
@@ -1755,6 +1813,9 @@ function AdminUsers() {
   const labManagerUser = users.find((user) => user.id === labManagerUserId) ?? null;
   const moduleManagerUser = users.find((user) => user.id === moduleManagerUserId) ?? null;
   const governanceModule = modules.find(({ module_id }) => module_id === "ai_data_governance_vsc_extension") ?? null;
+  const pendingLabUpdate = Boolean(
+    pendingLabAction?.kind === "redeploy" && pendingLabAction.lab.update_available,
+  );
   useEffect(() => {
     if (
       !moduleManagerUserId ||
@@ -1987,7 +2048,7 @@ function AdminUsers() {
     setOperationProgress({
       status: "pending",
       phase: "cleanup",
-      message: `${action.kind === "redeploy" ? "Reinstalling" : "Removing"} the selected lab resources.`,
+      message: `${action.kind === "redeploy" ? action.lab.update_available ? "Updating" : "Reinstalling" : "Removing"} the selected lab resources.`,
     });
     try {
       const result = await requestLabAction(action, controller.signal);
@@ -2377,10 +2438,10 @@ function AdminUsers() {
       <ConfirmModal
         open={Boolean(pendingLabAction) && !operating}
         kind={pendingLabAction?.kind === "remove" ? "delete" : "reset"}
-        title={pendingLabAction?.kind === "remove" ? "Remove starter kit?" : "Redeploy starter kit?"}
-        description={`${pendingLabAction?.kind === "remove" ? "Remove" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this starter kit"} for ${pendingLabAction?.user.email ?? "this participant"}. Other starter kits and Identity access are preserved.`}
+        title={pendingLabAction?.kind === "remove" ? "Remove starter kit?" : pendingLabUpdate ? "Update starter kit?" : "Redeploy starter kit?"}
+        description={`${pendingLabAction?.kind === "remove" ? "Remove" : pendingLabUpdate ? "Update" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this starter kit"} for ${pendingLabAction?.user.email ?? "this participant"}. Other starter kits and Identity access are preserved.`}
         error={operationError}
-        confirmLabel={pendingLabAction?.kind === "remove" ? "Remove lab" : "Redeploy lab"}
+        confirmLabel={pendingLabAction?.kind === "remove" ? "Remove lab" : pendingLabUpdate ? "Update kit" : "Redeploy lab"}
         onClose={() => {
           setOperationError("");
           setPendingLabAction(null);
@@ -2554,6 +2615,138 @@ function ApplicationAccessSettings({
   );
 }
 
+const applicationUpdateStates = new Set([
+  "queued",
+  "checking",
+  "downloading",
+  "building",
+  "validating",
+  "activating",
+]);
+
+function ApplicationReleaseSettings({
+  release,
+  busy,
+  error,
+  onUpdate,
+}: {
+  release: AdminApplicationRelease | null;
+  busy: boolean;
+  error: string;
+  onUpdate: () => void;
+}) {
+  const operationRunning = Boolean(
+    release?.operation && applicationUpdateStates.has(release.operation.status),
+  );
+  const canUpdate = Boolean(
+    release?.updater_available && (release.update_available || operationRunning),
+  );
+  const statusLabel = operationRunning
+    ? "Updating"
+    : release?.operation?.status === "failed"
+      ? "Update failed"
+      : release?.update_available
+        ? "Update available"
+        : release?.latest_release
+          ? "Up to date"
+          : "Check unavailable";
+  return (
+    <section className="application-release" aria-busy={busy}>
+      <header className="application-release-heading">
+        <div>
+          <p className="eyebrow">GitHub release</p>
+          <h2>Application version</h2>
+          <p>Update the VM in place from the latest immutable release without reinstalling it.</p>
+        </div>
+        <span className={`release-state ${release?.update_available || operationRunning ? "update" : "current"}`}>
+          {statusLabel}
+        </span>
+      </header>
+      {release ? (
+        <>
+          <dl className="release-summary">
+            <div>
+              <dt>Installed release</dt>
+              <dd>{release.current_release}</dd>
+            </div>
+            <div>
+              <dt>Commit</dt>
+              <dd><code title={release.current_commit_sha}>{release.current_commit_sha.slice(0, 12)}</code></dd>
+            </div>
+            <div>
+              <dt>Latest release</dt>
+              <dd>
+                {release.latest_release_url ? (
+                  <a href={release.latest_release_url} target="_blank" rel="noopener noreferrer">
+                    {release.latest_release}
+                  </a>
+                ) : release.latest_release || "Unavailable"}
+              </dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd><a href={release.repository} target="_blank" rel="noopener noreferrer">Official repository</a></dd>
+            </div>
+          </dl>
+          {release.update_check_error && (
+            <p className="release-warning" role="status">{release.update_check_error}</p>
+          )}
+          {release.operation?.message && (
+            <p
+              className={`release-operation ${release.operation.status === "failed" ? "error" : ""}`}
+              role={release.operation.status === "failed" ? "alert" : "status"}
+              aria-live="polite"
+            >
+              {release.operation.message}
+            </p>
+          )}
+          {error && <p className="release-operation error" role="alert">{error}</p>}
+          <div className="settings-actions release-actions">
+            <button
+              type="button"
+              className="settings-save"
+              onClick={onUpdate}
+              disabled={!canUpdate || busy}
+            >
+              {operationRunning ? "Continue update" : "Update from GitHub"}
+            </button>
+          </div>
+          {!release.updater_available && (
+            <p className="settings-help">In-place updates are enabled only on the deployed application VM.</p>
+          )}
+          <div className="release-packages-wrap">
+            <table className="release-packages">
+              <thead>
+                <tr>
+                  <th scope="col">Starter kit</th>
+                  <th scope="col">Bundled version</th>
+                  <th scope="col">Scope</th>
+                </tr>
+              </thead>
+              <tbody>
+                {release.packages.map((item) => (
+                  <tr key={item.package_id}>
+                    <td><strong>{item.display_name}</strong></td>
+                    <td>{item.bundled_version}</td>
+                    <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="settings-help">
+            Updating the application changes the bundled kit versions. Existing participant installations remain unchanged until their Update or Redeploy action is used.
+          </p>
+        </>
+      ) : error ? (
+        <p className="release-operation error" role="alert">{error}</p>
+      ) : (
+        <p className="settings-help" role="status">Loading release metadata…</p>
+      )}
+    </section>
+  );
+}
+
 function AdminSettings() {
   const adminSession = useAdminSession();
   type SettingsTab = "workbench" | "application";
@@ -2564,8 +2757,13 @@ function AdminSettings() {
   const [deploymentMode, setDeploymentMode] = useState<"laboratory" | "production">("laboratory");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
+  const [applicationRelease, setApplicationRelease] = useState<AdminApplicationRelease | null>(null);
+  const [releaseBusy, setReleaseBusy] = useState(false);
+  const [releaseError, setReleaseError] = useState("");
+  const [releaseProgress, setReleaseProgress] = useState<RegistrationResponse | null>(null);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+  const releaseAbortRef = useRef<AbortController | null>(null);
   const workbenchTabRef = useRef<HTMLButtonElement>(null);
   const applicationTabRef = useRef<HTMLButtonElement>(null);
   const serviceEndpointRef = useRef<HTMLInputElement>(null);
@@ -2577,6 +2775,22 @@ function AdminSettings() {
     setAidpPlatformId(result.aidp_platform_id);
     setDeploymentMode(result.deployment_mode);
     setRegistrationCodeConfigured(result.registration_code_configured);
+  }
+  async function loadApplicationRelease() {
+    setReleaseError("");
+    try {
+      const result = await api<AdminApplicationRelease>("/api/admin/application");
+      setApplicationRelease(result);
+      return result;
+    } catch (reason) {
+      if (reason instanceof ApiRequestError && reason.status === 401)
+        window.location.assign("/admin/login");
+      else
+        setReleaseError(
+          reason instanceof Error ? reason.message : "Unable to load application release metadata",
+        );
+      return null;
+    }
   }
   useEffect(() => {
     void api<AdminSettingsResponse>("/api/admin/settings")
@@ -2591,6 +2805,8 @@ function AdminSettings() {
               : "Unable to load settings",
           );
       });
+    void loadApplicationRelease();
+    return () => releaseAbortRef.current?.abort();
   }, []);
   function handleSettingsTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -2648,12 +2864,56 @@ function AdminSettings() {
       setError(reason instanceof Error ? reason.message : "Unable to save settings");
     }
   }
+  async function updateApplication() {
+    const runningOperation = applicationRelease?.operation &&
+      applicationUpdateStates.has(applicationRelease.operation.status)
+      ? applicationRelease.operation.operation_id
+      : undefined;
+    const operationId = runningOperation || crypto.randomUUID();
+    const previousRelease = applicationRelease?.current_release;
+    const controller = new AbortController();
+    releaseAbortRef.current?.abort();
+    releaseAbortRef.current = controller;
+    setReleaseBusy(true);
+    setReleaseError("");
+    setReleaseProgress({
+      status: "pending",
+      phase: "queued",
+      message: "Waiting for the VM updater.",
+    });
+    try {
+      const result = await pollRegistration({
+        signal: controller.signal,
+        deadlineMs: 30 * 60 * 1_000,
+        request: (signal) => api<RegistrationResponse>("/api/admin/application/update", {
+          method: "POST",
+          body: JSON.stringify({ operation_id: operationId }),
+          signal,
+        }),
+        onPending: setReleaseProgress,
+      });
+      const refreshed = await loadApplicationRelease();
+      if (refreshed && previousRelease && refreshed.current_release !== previousRelease) {
+        window.location.reload();
+        return;
+      }
+      setToast(result.message || "Application release is current.");
+    } catch (reason) {
+      if (controller.signal.aborted) return;
+      await loadApplicationRelease();
+      setReleaseError(reason instanceof Error ? reason.message : "Unable to update the application");
+    } finally {
+      if (releaseAbortRef.current === controller) releaseAbortRef.current = null;
+      setReleaseProgress(null);
+      setReleaseBusy(false);
+    }
+  }
   return (
     <Shell
       onSignOut={logout}
       operatorUsername={adminSession?.operator_username || adminSession?.username}
     >
-      <section className="settings-page">
+      <section className="settings-page" aria-busy={releaseBusy} inert={releaseBusy}>
         <div className="settings-heading">
           <h1>Settings</h1>
           <p>Review the lab configuration.</p>
@@ -2804,9 +3064,15 @@ function AdminSettings() {
               </span>
               <div>
                 <strong>Application</strong>
-                <p>Manage participant access to these starter kits.</p>
+                <p>Manage the application release, starter kit versions and participant access.</p>
               </div>
             </div>
+            <ApplicationReleaseSettings
+              release={applicationRelease}
+              busy={releaseBusy}
+              error={releaseError}
+              onUpdate={() => void updateApplication()}
+            />
             <ApplicationAccessSettings
               deploymentMode={deploymentMode}
               registrationCode={registrationCode}
@@ -2823,6 +3089,14 @@ function AdminSettings() {
         </div>
       </section>
       <Toast message={toast} onDismiss={() => setToast("")} />
+      {releaseBusy && (
+        <ProvisioningOverlay
+          phase={releaseProgress?.phase}
+          message={releaseProgress?.message || "The VM is updating the application."}
+          label="Updating application"
+          indeterminate
+        />
+      )}
     </Shell>
   );
 }

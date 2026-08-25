@@ -58,12 +58,31 @@ def _plan(
     }
 
 
-def test_context_requires_current_release_source() -> None:
-    release_gate.validate_context(_context())
-    invalid = _context()
-    invalid["source"] = {**invalid["source"], "ref": "main"}  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="v2.2.0"):
-        release_gate.validate_context(invalid)
+@pytest.mark.parametrize("release_ref", ["v0.0.0", "v2.2.0", "v10.20.30"])
+def test_context_accepts_stable_semver_release_tags(release_ref: str) -> None:
+    context = _context()
+    context["source"] = {**context["source"], "ref": release_ref}  # type: ignore[arg-type]
+    release_gate.validate_context(context)
+
+
+@pytest.mark.parametrize(
+    "release_ref",
+    [
+        "",
+        "main",
+        "release/v2.2.0",
+        "2.2.0",
+        "v2.2",
+        "v02.2.0",
+        "v2.2.0-rc.1",
+        "v2.2.0+build.1",
+    ],
+)
+def test_context_rejects_branches_and_non_stable_semver_refs(release_ref: str) -> None:
+    context = _context()
+    context["source"] = {**context["source"], "ref": release_ref}  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="stable source ref"):
+        release_gate.validate_context(context)
 
 
 @pytest.mark.parametrize(
@@ -284,3 +303,16 @@ def test_cli_fails_closed_on_invalid_plan(tmp_path: Path) -> None:
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(_plan(actions=["update"])), encoding="utf-8")
     assert release_gate.main(["--source-root", str(source), "--plan-json", str(plan_path)]) == 1
+
+
+def test_cli_validates_the_release_ref(tmp_path: Path) -> None:
+    source = _source(tmp_path)
+    assert release_gate.main(
+        ["--source-root", str(source), "--release-ref", "v3.4.5"]
+    ) == 0
+    assert release_gate.main(
+        ["--source-root", str(source), "--release-ref", "v3.4.5-rc.1"]
+    ) == 1
+    assert release_gate.main(
+        ["--source-root", str(source), "--release-ref", ""]
+    ) == 1

@@ -23,6 +23,12 @@ from .aidp import (
 from .config import Settings, SettingsStore
 from .identity import IdentityClient, IdentityConflict, IdentityPending, IdentityRejected, LocalIdentityClient
 from .lab_packs import available_lab_ids, public_lab_catalog
+from .releases import (
+    ApplicationReleaseManager,
+    ReleaseUpdateConflict,
+    ReleaseUpdateUnavailable,
+    semantic_version,
+)
 from .security import (
     RateLimiter,
     issue_session,
@@ -113,6 +119,11 @@ class ModuleOperationRequest(BaseModel):
     operation_id: UUID | None = None
 
 
+class ApplicationUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_id: UUID
+
+
 class SettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     aidp_url: str | None = Field(default=None, min_length=1, max_length=2_048)
@@ -173,7 +184,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if client is not None:
                 await client.close()
 
-    app = FastAPI(title="OCI AIDP Lab", version="2.0.1", docs_url=None, redoc_url=None, lifespan=lifespan)
+    application_version = (
+        settings.application_release.removeprefix("v")
+        if semantic_version(settings.application_release)
+        else "0.0.0"
+    )
+    app = FastAPI(title="OCI AIDP Lab", version=application_version, docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.settings = settings
     app.state.settings_store = SettingsStore(settings)
     app.state.session_key = load_or_create_session_key(settings.session_secret_file)
@@ -182,6 +198,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.login_limiter = RateLimiter(5, 60)
     app.state.identity_client = None
     app.state.aidp_client = None
+    app.state.release_manager = ApplicationReleaseManager(settings)
     app.state.health_lock = asyncio.Lock()
     app.state.health_expires_at = 0.0
     app.state.health_error = False
@@ -451,9 +468,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
+    @app.get("/api/admin/application")
+    async def admin_application(_admin: str = Depends(require_admin)) -> dict[str, Any]:
+        return await app.state.release_manager.snapshot()
+
+    @app.post("/api/admin/application/update")
+    async def admin_update_application(
+        payload: ApplicationUpdateRequest,
+        _admin: str = Depends(require_admin),
+    ) -> JSONResponse:
+        try:
+            result = app.state.release_manager.request_update(str(payload.operation_id))
+        except ReleaseUpdateConflict as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        except (ReleaseUpdateUnavailable, ValueError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        return JSONResponse(
+            status_code=202 if result["status"] == "pending" else 200,
+            content=result,
+        )
+
     @app.get("/api/admin/users")
     async def admin_users(_admin: str = Depends(require_admin)) -> dict[str, list[dict]]:
         require_identity()
+        bundled_versions = {
+            lab["lab_id"]: lab["pack_version"] for lab in public_lab_catalog()
+        }
         client = app.state.identity_factory()
         users = [dict(user) for user in await client.list_lab_users()]
         platform_admin_ocids: set[str] = set()
@@ -492,6 +532,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 {
                     "lab_id": material.lab_id,
                     "pack_version": material.pack_version,
+                    "bundled_version": bundled_versions.get(material.lab_id),
+                    "update_available": bool(
+                        bundled_versions.get(material.lab_id)
+                        and bundled_versions[material.lab_id] != material.pack_version
+                    ),
                     "phase": material.phase,
                     "workspace_path": material.workspace_path,
                     "job_name": material.job_name,

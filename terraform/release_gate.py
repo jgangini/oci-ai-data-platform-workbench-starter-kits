@@ -13,9 +13,10 @@ EXPECTED_REPOSITORIES = {
     "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits",
     "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits.git",
 }
-EXPECTED_REFS = frozenset({"v2.2.0"})
-
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+_STABLE_RELEASE_REF = re.compile(
+    r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
+)
 _COMPARTMENT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _OCI_REGION = re.compile(r"^[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*$")
 _ALLOWED_IDENTITY_DOMAIN_GROUPS = frozenset({"developers", "pending"})
@@ -82,14 +83,18 @@ def compartment_target(context: dict[str, Any]) -> tuple[str, str]:
     return _compartment_name(context), _compartment_mode(context)
 
 
+def validate_release_ref(value: Any) -> None:
+    if not isinstance(value, str) or _STABLE_RELEASE_REF.fullmatch(value) is None:
+        raise ValueError("release requires a stable source ref matching vX.Y.Z")
+
+
 def validate_context(context: dict[str, Any]) -> None:
     source = context.get("source") or {}
     if context.get("project_id") != EXPECTED_PROJECT:
         raise ValueError(f"release requires project_id {EXPECTED_PROJECT}")
     if str(source.get("repository") or "").rstrip("/") not in EXPECTED_REPOSITORIES:
         raise ValueError("release requires the trusted GitHub repository")
-    if source.get("ref") not in EXPECTED_REFS:
-        raise ValueError("release requires source ref v2.2.0")
+    validate_release_ref(source.get("ref"))
     if not _SHA.fullmatch(str(source.get("commit_sha") or "")):
         raise ValueError("release requires a full lowercase 40-character source SHA")
     if _OCI_REGION.fullmatch(str(context.get("region") or "")) is None:
@@ -248,13 +253,16 @@ def validate_plan(plan: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate the immutable fresh-only v2.2.0 AIDP starter kit release contract.")
+    parser = argparse.ArgumentParser(description="Validate the immutable fresh-only AIDP starter kit release contract.")
     parser.add_argument("--source-root", type=Path, default=Path(__file__).parent)
+    parser.add_argument("--release-ref")
     parser.add_argument("--context-json", type=Path)
     parser.add_argument("--plan-json", type=Path)
     args = parser.parse_args(argv)
     try:
         validate_source(args.source_root)
+        if args.release_ref is not None:
+            validate_release_ref(args.release_ref)
         if args.context_json:
             validate_context(json.loads(args.context_json.read_text(encoding="utf-8")))
         if args.plan_json:

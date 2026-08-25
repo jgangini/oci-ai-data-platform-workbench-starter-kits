@@ -220,7 +220,11 @@ At least one starter kit must remain assigned. To remove the final starter kit, 
 The **Settings** page is divided into two sections:
 
 - **AI Data Platform Workbench** shows the service endpoint, Workbench URL, and platform OCID.
-- **Application** shows the deployment owner and, in Laboratory mode, lets an administrator replace the registration code without displaying the current secret. Production mode does not expose registration settings.
+- **Application** shows the installed application release, its exact source commit, the latest verified GitHub release, and the bundled version of every starter kit. On a deployed VM, an administrator can update the application in place without recreating the environment. In Laboratory mode this section also lets an administrator replace the registration code without displaying the current secret; Production mode does not expose registration settings.
+
+The application updater accepts only a newer stable GitHub release that is marked immutable and carries the release's prebuilt `linux/amd64` image plus its SHA-256 manifest. It validates a candidate on loopback before switching containers, preserves persistent settings and sessions, and restores the previous healthy container if activation fails. The application container never receives the Docker socket or a general-purpose host command interface.
+
+Application updates change the package versions bundled for future installs and redeploys. Existing participant kits are not changed automatically: when an installed version differs from the bundled version, the participant manager shows **Update available** and reuses that kit's idempotent Update/Redeploy action.
 
 In Production mode, selecting a user with the `AI_DATA_PLATFORM_ADMIN` assignment exposes the global **AI Data Governance for VSC Extension** control. Its installed state is shared across administrators. Install and Redeploy are idempotent; Delete requires explicit confirmation because it removes all module-owned resources and control tables.
 

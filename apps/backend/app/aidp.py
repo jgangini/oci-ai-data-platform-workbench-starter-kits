@@ -95,12 +95,22 @@ class UserMaterial:
 def _module_payload(manifest: dict[str, Any] | None = None) -> dict[str, Any]:
     state = manifest or {}
     status_value = str(state.get("status") or "not_installed")
+    installed = status_value != "not_installed"
+    bundled_version = load_lab_pack(
+        GOVERNANCE_MODULE_ID, require_available=False
+    ).pack_version
+    installed_version = str(state.get("pack_version") or "") or None
     operation = state.get("operation") if isinstance(state.get("operation"), dict) else {}
     return {
         "module_id": GOVERNANCE_MODULE_ID,
         "display_name": GOVERNANCE_DISPLAY_NAME,
         "status": status_value,
-        "installed": status_value != "not_installed",
+        "installed": installed,
+        "installed_version": installed_version if installed else None,
+        "bundled_version": bundled_version,
+        "update_available": bool(
+            installed and installed_version != bundled_version
+        ),
         "operation_id": str(operation.get("operation_id") or "") or None,
         "operation_type": str(operation.get("type") or "") or None,
         "phase": str(state.get("phase") or "not_installed"),
@@ -179,6 +189,9 @@ class LocalAidpClient:
                 self._module = {
                     "schema_version": 1,
                     "module_id": GOVERNANCE_MODULE_ID,
+                    "pack_version": load_lab_pack(
+                        GOVERNANCE_MODULE_ID, require_available=False
+                    ).pack_version,
                     "status": "active",
                     "phase": "active",
                     "enabled": True,
@@ -203,6 +216,9 @@ class LocalAidpClient:
                 status="active",
                 phase="active",
                 enabled=enabled,
+                pack_version=load_lab_pack(
+                    GOVERNANCE_MODULE_ID, require_available=False
+                ).pack_version,
                 operation={"operation_id": operation_id, "type": "redeploy", "phase": "complete"},
             )
             return _module_payload(self._module)
@@ -3504,6 +3520,9 @@ class AidpClient:
         return {
             "schema_version": 1,
             "module_id": GOVERNANCE_MODULE_ID,
+            "pack_version": load_lab_pack(
+                GOVERNANCE_MODULE_ID, require_available=False
+            ).pack_version,
             "status": status_value,
             "phase": "verify" if operation_type == "install" else ("disable" if operation_type == "delete" else "control"),
             "enabled": False,
@@ -3754,6 +3773,9 @@ class AidpClient:
                 "The governance workflow is entering steady state.", "steady"
             )
         manifest.update(status="active", phase="active")
+        manifest["pack_version"] = load_lab_pack(
+            GOVERNANCE_MODULE_ID, require_available=False
+        ).pack_version
         manifest["operation"]["phase"] = "complete"
         self._write_module_manifest(workspace_key, manifest)
 

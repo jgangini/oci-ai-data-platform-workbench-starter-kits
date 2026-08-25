@@ -180,6 +180,29 @@ test("settings keep only Workbench and application details in accessible tabs", 
   assert.doesNotMatch(styles, /\.settings-tabs \{[^}]*overflow-x: auto;/);
 });
 
+test("application settings report releases and request only the fixed VM update action", () => {
+  assert.match(source, /function ApplicationReleaseSettings/);
+  assert.match(source, /\/api\/admin\/application/);
+  assert.match(source, /\/api\/admin\/application\/update/);
+  assert.match(source, /JSON\.stringify\(\{ operation_id: operationId \}\)/);
+  assert.match(source, /Update from GitHub/);
+  assert.match(source, /Installed release/);
+  assert.match(source, /Bundled version/);
+  assert.match(source, /Existing participant installations remain unchanged/);
+  assert.match(source, /module\.installed_version/);
+  assert.match(source, /module\.bundled_version/);
+  assert.match(source, /module\.update_available \? "Update" : "Redeploy"/);
+  assert.match(source, /aria-live="polite"/);
+  assert.match(source, /deadlineMs: 30 \* 60 \* 1_000/);
+  assert.match(source, /Installed \$\{installed\.pack_version\}/);
+  assert.match(source, /Bundled \$\{lab\.pack_version\}/);
+  assert.match(source, /Update available/);
+  assert.match(source, /pendingLabUpdate \? "Update starter kit\?" : "Redeploy starter kit\?"/);
+  assert.match(styles, /\.application-release \{/);
+  assert.match(styles, /\.kit-version-state\.update \{/);
+  assert.doesNotMatch(source, /docker\.sock|docker run/);
+});
+
 test("production administrators manage one global governance module outside participant labs", () => {
   assert.match(source, /is_aidp_admin: boolean/);
   assert.match(source, /operation_type\?: ModuleOperationKind \| null/);

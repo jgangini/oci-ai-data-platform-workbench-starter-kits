@@ -9,6 +9,10 @@ SOURCE_REPO_URL="${source_repo_url}"
 SOURCE_COMMIT_SHA="${source_commit_sha}"
 SOURCE_DIR="/opt/aidp-lab/source"
 STATE_DIR="/opt/aidp-lab/state"
+UPDATE_DIR="$STATE_DIR/update"
+UPDATE_INBOX_DIR="$UPDATE_DIR/inbox"
+UPDATE_STATUS_DIR="$UPDATE_DIR/status"
+RELEASES_DIR="/opt/aidp-lab/releases"
 TLS_DIR="/opt/aidp-lab/tls"
 OCI_DIR="/opt/aidp-lab/.oci"
 AUTONOMOUS_DIR="/opt/aidp-lab/autonomous"
@@ -47,7 +51,7 @@ use_reachable_base_images() {
 dnf -y makecache
 dnf -y install dnf-plugins-core firewalld curl git openssl python3 sudo
 
-install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$OCI_DIR" "$AUTONOMOUS_DIR" "$BOOTSTRAP_DIR"
+install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$UPDATE_DIR" "$UPDATE_INBOX_DIR" "$UPDATE_STATUS_DIR" "$RELEASES_DIR" "$OCI_DIR" "$AUTONOMOUS_DIR" "$BOOTSTRAP_DIR"
 umask 077
 if [ ! -s "$BOOTSTRAP_DIR/key.pem" ]; then
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$BOOTSTRAP_DIR/key.pem"
@@ -131,6 +135,8 @@ mkdir -p "$(dirname "$SOURCE_DIR")"
 retry 5 git clone --filter=blob:none "$SOURCE_REPO_URL" "$SOURCE_DIR"
 git -C "$SOURCE_DIR" checkout --detach "$SOURCE_COMMIT_SHA"
 test "$(git -C "$SOURCE_DIR" rev-parse HEAD)" = "$SOURCE_COMMIT_SHA"
+SOURCE_RELEASE_TAG=$(git -C "$SOURCE_DIR" describe --tags --exact-match "$SOURCE_COMMIT_SHA")
+printf '%s' "$SOURCE_RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 use_reachable_base_images
 
 cat > /opt/aidp-lab/.env <<'EOF'
@@ -157,13 +163,82 @@ BUCKET_NAME=${bucket_name}
 AIDP_SETTINGS_FILE=/var/lib/aidp-lab/settings.json
 LAB_MARKER=${lab_marker}
 SESSION_SECRET_FILE=/var/lib/aidp-lab/session.key
+VM_UPDATE_ENABLED=true
+AIDP_UPDATE_DIR=/var/lib/aidp-lab/update
 COOKIE_SECURE=true
 EOF
 chmod 0600 /opt/aidp-lab/.env
 
-retry 5 docker build -f "$SOURCE_DIR/docker/Dockerfile" -t "$LOCAL_IMAGE" "$SOURCE_DIR"
+install -o root -g root -m 0755 "$SOURCE_DIR/scripts/vm_release_updater.py" /usr/local/sbin/aidp-lab-release-update
+cat >/etc/systemd/system/aidp-lab-update.service <<'EOF'
+[Unit]
+Description=Update AIDP Starter Kits from an immutable GitHub release
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=AIDP_APP_ROOT=/opt/aidp-lab
+Environment=HOME=/run/aidp-lab-update
+ExecStart=/usr/local/sbin/aidp-lab-release-update
+RuntimeDirectory=aidp-lab-update
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/aidp-lab/release.json /opt/aidp-lab/state /opt/aidp-lab/releases /run/aidp-lab-update
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
+EOF
+cat >/etc/systemd/system/aidp-lab-update.path <<'EOF'
+[Unit]
+Description=Watch for AIDP Starter Kits update requests
+
+[Path]
+PathChanged=/opt/aidp-lab/state/update/inbox/request.json
+Unit=aidp-lab-update.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+python3 - "/opt/aidp-lab/release.json" "$SOURCE_REPO_URL" "$SOURCE_RELEASE_TAG" "$SOURCE_COMMIT_SHA" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+path = Path(sys.argv[1])
+temporary = path.with_suffix(".tmp")
+temporary.write_text(json.dumps({
+    "schema_version": 1,
+    "repository": sys.argv[2].removesuffix(".git"),
+    "release": sys.argv[3],
+    "commit_sha": sys.argv[4],
+    "installed_at": datetime.now(timezone.utc).isoformat(),
+}, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+os.chmod(temporary, 0o600)
+os.replace(temporary, path)
+PY
+systemctl daemon-reload
+systemctl enable aidp-lab-update.service
+systemctl enable --now aidp-lab-update.path
+
+retry 5 docker build \
+  -f "$SOURCE_DIR/docker/Dockerfile" \
+  -t "$LOCAL_IMAGE" \
+  --build-arg "APP_RELEASE_TAG=$SOURCE_RELEASE_TAG" \
+  --build-arg "APP_RELEASE_SHA=$SOURCE_COMMIT_SHA" \
+  --build-arg "APP_REPOSITORY=$SOURCE_REPO_URL" \
+  "$SOURCE_DIR"
 retry 60 docker run --rm \
   --network host \
+  --security-opt no-new-privileges:true \
+  --cap-drop ALL \
   --entrypoint python \
   -e OCI_BOOTSTRAP_NAMESPACE=${objectstorage_namespace} \
   -e OCI_BOOTSTRAP_BUCKET=${bucket_name} \
@@ -182,6 +257,17 @@ docker rm -f "$APP_NAME" >/dev/null 2>&1 || true
 docker run -d \
   --name "$APP_NAME" \
   --restart unless-stopped \
+  --security-opt no-new-privileges:true \
+  --cap-drop ALL \
+  --cap-add CHOWN \
+  --cap-add NET_BIND_SERVICE \
+  --cap-add SETGID \
+  --cap-add SETUID \
+  --read-only \
+  --tmpfs /run:rw,noexec,nosuid,nodev,size=16m \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+  --tmpfs /var/lib/nginx:rw,noexec,nosuid,nodev,size=64m \
+  --tmpfs /var/log/nginx:rw,noexec,nosuid,nodev,size=16m \
   --env-file /opt/aidp-lab/.env \
   -p 80:80 \
   -p 443:443 \
@@ -189,6 +275,8 @@ docker run -d \
   -v "$OCI_DIR:/etc/aidp-lab/oci:ro,Z" \
   -v "$AUTONOMOUS_DIR:/etc/aidp-lab/autonomous:ro,Z" \
   -v "$STATE_DIR:/var/lib/aidp-lab:Z" \
+  -v "$UPDATE_DIR:/var/lib/aidp-lab/update:ro,Z" \
+  -v "$UPDATE_INBOX_DIR:/var/lib/aidp-lab/update/inbox:rw,Z" \
   "$LOCAL_IMAGE"
 
 for attempt in $(seq 1 120); do

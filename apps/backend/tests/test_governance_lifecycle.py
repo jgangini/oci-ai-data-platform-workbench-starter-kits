@@ -70,6 +70,22 @@ def test_module_status_reflects_externally_disabled_governance_workflow() -> Non
     assert state["enabled"] is True
 
 
+def test_module_status_compares_installed_and_bundled_versions() -> None:
+    client = module_client()
+    state = manifest("install")
+    state.update(status="active", phase="active", pack_version="2.0.0")
+    client._module_manifest = lambda _workspace: state
+    client._request = lambda *_args, **_kwargs: {
+        "continuous": {"pauseStatus": "UNPAUSED"}
+    }
+
+    module = asyncio.run(client.list_modules())[0]
+
+    assert module["installed_version"] == "2.0.0"
+    assert module["bundled_version"] == "3.0.0"
+    assert module["update_available"] is True
+
+
 def test_redeploy_preserves_externally_disabled_governance_config() -> None:
     client = module_client()
     state = manifest("install")
