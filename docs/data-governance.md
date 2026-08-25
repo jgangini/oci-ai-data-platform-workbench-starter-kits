@@ -1,77 +1,74 @@
-# AI Data Governance add-on
+# AI Data Governance for VSC Extension
 
-> Status: `v2.1.23` validation target. The mandatory medallion bucket contract and optional governance gateway are implemented; new Vaults must expose a stable regional KMS DNS endpoint before Terraform creates the governance key. The next acceptance is one clean deployment after all local gates pass.
-
-Deploy Studio exposes an explicit **OCI Vault mode** only when this add-on is selected. **Create new Vault** is the safe default for installation isolation. **Use existing Vault** requires an explicitly selected regional Vault that preflight and Terraform both verify as `ACTIVE` and `DEFAULT`; the installer never chooses a Vault silently.
+This production-only module installs one global governance Agent and the native AIDP resources that a future VS Code extension will discover. It does not deploy OKE, OCI API Gateway, Vault, KMS, an OAuth client, a JDBC identity, or a separate policy-enforcement gateway.
 
 ## Runtime boundaries
 
-| Component | Responsibility | Identity | Persistent state |
-| --- | --- | --- | --- |
-| AIDP Agent on `aidp_agent_shared_compute` | DAMA-DMBOK evidence, explanations, and registered query requests | Effective AIDP caller plus a non-logged governance session variable | AIDP `checkpointer` backed by Autonomous AI Database |
-| Governance gateway on OKE | Authorization, column policy, masking, tokenization, registered query execution, and audit | OCI Workload Identity plus the effective user's OAuth token | `data_governance_*` Delta tables in `oci_medallion.oci_artifacts` |
-| Autonomous AI Database 26ai | AI Compute Agent memory and platform AI bootstrap | AIDP/VM bootstrap identities | Agent conversation/checkpoint state |
-| VS Code extension | Catalog navigation, governed SQL/notebooks, Permissions UI, and Agent chat | OCI request signing plus user OAuth PKCE | Tokens only in VS Code SecretStorage |
+| Component | Responsibility | Persistent state |
+| --- | --- | --- |
+| Global AIDP Agent on dedicated AI Compute | DAMA-DMBOK catalog inventory and entity/column lineage | AIDP `checkpointer` backed by Autonomous AI Database |
+| Continuous AIDP workflow | Synchronize all active Master Catalog metadata every 30 seconds without overlapping runs | Four Delta control tables in `oci_medallion.oci_artifacts` |
+| Registration VM | Idempotent install, repair, pause, RBAC, and full module deletion | Protected global operation manifest outside the control tables |
+| Future VS Code extension | Discover the fixed bucket and update configuration or access mappings as an administrator | Outside this repository |
 
-Autonomous is mandatory for the deployed Agent-memory path. The governance gateway does not read or replace Agent memory. Conversely, policies are authoritative only in `oci_medallion.oci_artifacts`; Autonomous is never used as a policy fallback.
+Autonomous AI Database remains mandatory for Agent memory. Governance metadata and access mappings are separate Delta state and are never used as an Agent-memory fallback.
 
-Deploy Studio always resolves the five Medallion Architecture buckets: `oci_landing`, `oci_bronze`, `oci_silver`, `oci_gold`, and `oci_artifacts`. Each may be created or connected to an existing bucket. Governance tables are addressable as `oci_medallion.oci_artifacts.data_governance_<name>` and their Delta files live under `oci://oci_artifacts@<namespace>/oci_artifacts/<table>`. The JDBC bundle is stored at `oci_artifacts/runtime/aidp-jdbc-driver.zip`. This hierarchy keeps governance tables and runtime assets centralized while preserving one path per Delta table.
+## Fixed storage contract
+
+The artifacts bucket is always named `oci_artifacts`. Deploy Studio can create it or connect to an existing bucket, but the name is not editable. The logical schema is `oci_medallion.oci_artifacts`; every table has the physical path `oci://oci_artifacts@<namespace>/oci_artifacts/<table>`.
+
+| Table | Contract |
+| --- | --- |
+| `data_governance_config` | One module row: `module_id`, `schema_version`, `enabled` as `0` or `1`, `updated_at`, and `updated_by`. |
+| `data_governance_metadata` | Stable object identity, catalog/schema/table keys and names, column name and ordinal, data type, description, fingerprint, source version, identity status, soft-delete state, and timestamps. |
+| `data_governance_access_policy` | One logical row per group and column: `permission_id`, `object_id`, `group_ocid`, `group_name`, `has_access` as `0` or `1`, and audit fields. A missing row means no access. |
+| `data_governance_sync_state` | One row per source with snapshot version/hash, status, counters, start and last-success timestamps, and a sanitized error code. |
+
+Synchronization never changes access-policy rows. Removed columns are soft-deleted so mappings remain available until the module is deleted. An unambiguous rename keeps its `object_id`; ambiguous identity creates a new identifier so a permission cannot be inherited accidentally.
 
 ## Authorization model
 
-- `AI_DATA_PLATFORM_ADMIN` can read and update policy records.
-- `AIDP_DEVELOPER` can execute only the effective access granted by existing policies and registered queries.
-- The server enforces authorization independently of UI state. A disabled Permissions panel is convenience, not a security boundary.
-- The Agent has no direct `oci_medallion.oci_artifacts` permission and cannot submit arbitrary SQL.
-- Every request is evaluated using the end user's subject, groups, and roles. Agent or gateway service identity never upgrades the user's decision.
+- `AIDP_DEVELOPER` receives `USE` on the Agent and can invoke or test it.
+- `AI_DATA_PLATFORM_ADMIN` receives `ADMIN` on the Agent and is required to install, edit, deploy, delete, or manage permissions.
+- Participants receive no Agent `MANAGE`/`ADMIN` permission and no direct AI Compute grant unless the AIDP invocation contract later proves one is required.
+- The Agent exposes only `catalog_inventory` and `catalog_lineage`, reads all active Master Catalog catalogs, and excludes `oci_medallion.oci_artifacts` to prevent control-table self-ingestion.
+- The Agent has no gateway session token and cannot execute arbitrary SQL or update access mappings.
 
-## Query decisions
+This follows the [Oracle AIDP permissions model](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aidug/permissions-model.html): `USE` is sufficient to invoke and test, while `ADMIN` includes deletion and permission administration.
 
-1. Parse one read-only statement and resolve all table and column references.
-2. Compare the versioned catalog snapshot with policy state.
-3. Fail closed for missing, new, ambiguous, or conflicting columns.
-4. Reject explicit denied columns with `403` and the column names.
-5. Rewrite `SELECT *` to omit denied columns.
-6. Apply `NULL`, `MASK`, and `TOKENIZE` before serialization.
-7. Enforce row and response-byte limits.
-8. Record the effective principal, query, policy revision, affected columns, outcome, and request identifier without storing source secrets or unmasked values.
+## Continuous synchronization
 
-Python and Scala notebook cells receive only a governed result materialized as a DataFrame prelude. SQL cells execute at the gateway. Switching notebook language does not grant direct catalog access.
+The module creates one native continuous AIDP job with `maxConcurrentRuns=1`. Its loop:
 
-## Catalog synchronization
+1. Reads all active catalogs, schemas, tables, and columns with bounded pagination.
+2. Excludes the control schema and computes a canonical snapshot hash.
+3. Skips the MERGE when the snapshot is unchanged.
+4. Upserts metadata, preserves access mappings, and marks missing columns as deleted when the hash changes.
+5. Records a sanitized success or failure state and waits until at least 30 seconds from the cycle start.
 
-Synchronization upserts catalogs, schemas, tables, and columns by stable identifiers. Renames update metadata without replacing policy identifiers. Removed objects become tombstones; policies and audit history are retained. New columns remain blocked until an administrator classifies and reviews them. Explicit lineage rules propagate the most restrictive effective decision and record conflicts for review.
+If a cycle takes longer than 30 seconds, the next begins only after it finishes. With `enabled=0`, the workflow records `DISABLED`, pauses, and retains its resources. Reactivation requires setting `enabled=1` and resuming the workflow from the VM or future extension.
 
-## Agent contract 2.0.0
+The continuous job is intentional because normal AIDP schedules have a minimum frequency of 30 minutes. See [AIDP limits](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aidug/limits.html) and the [Create Job API](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aiwap/op-aidataplatforms-aidataplatformid-workspaces-workspacekey-jobs-post.html).
 
-- `catalog_inventory`: live participant-scoped catalog evidence.
-- `catalog_lineage`: live entity or column lineage evidence.
-- `governance_policy_explain`: explains one registered `query_id`; it never exposes control-table rows.
-- `governed_query`: executes one registered `query_id` with at most 20 named scalar parameters.
+## Lifecycle
 
-The AIDP Agent defines `governance_access_token` as required with `shouldLog: false`. VS Code sends it in A2A message metadata as `sessionvariables.governance_access_token`. Generated Agent code reads the session context at invocation time, forwards the token only in the HTTPS Authorization header, rejects redirects, caps responses, and returns sanitized failures.
+Installation is available only in production and only when the selected OCI user belongs to `AI_DATA_PLATFORM_ADMIN`. The first administrator starts the singleton operation; concurrent requests reuse the same operation and cannot create duplicates. The VM reconciles these phases:
 
-## Deployment and network gate
+1. Validate production mode, fixed storage, administrator role, and singleton state.
+2. Create the four tables with `enabled=0`.
+3. Reconcile the dedicated OCI credential, protected notebook, continuous workflow, and first snapshot.
+4. Reconcile dedicated AI Compute, the global Agent, and its deployment.
+5. Apply exact role permissions.
+6. Set `enabled=1` only after synchronization and deployment succeed.
 
-OCI API Gateway is the only public entry point. It terminates TLS, validates the OCI Identity Domains token, audience, issuer, signing key, and governance scope, then forwards requests to one fixed private OKE load-balancer address. The OKE service accepts port `8080` only from the API Gateway subnet. The container is non-root, read-only, and stripped of Linux capabilities; it validates OIDC again before executing a request.
-
-Terraform waits once for the exact DevOps pipeline policy to propagate before starting the server-side apply. The DevOps project emits a 30-day OCI service log so a failed manifest or rollout has stage-level evidence. Kubernetes uses `/healthz` for pod availability; `/readyz` remains the stricter operational check and returns `503` until the JDBC runtime, `data_governance_*` tables, and first catalog synchronization are ready. This allows the gateway to be installed before the licensed driver is uploaded without claiming data access is ready.
-
-The gateway uses OKE Workload Identity for OCI access. Deploy Studio creates a separate technical JDBC API key after Terraform apply, stores its private half only in OCI Vault, and never mounts a personal deployment key in the pod. The JDBC identity is limited to `ADMIN` on the `oci_artifacts` schema, `USE` on the shared cluster, and the documented external-table discovery permissions on `oci_artifacts`: `read buckets` and `inspect objects`. It cannot read object contents, create objects, manage objects, or delete objects directly.
-
-Licensed driver installation is an administrator-only PAR workflow. `POST /v1/admin/jdbc-driver:upload` accepts the declared `size_bytes` and SHA-256 digest and returns an opaque `upload_id`, an HTTPS `upload_url`, and an expiry. The gateway creates a ten-minute ObjectWrite PAR bound to the private bucket `oci_artifacts` and exact object `oci_artifacts/runtime/aidp-jdbc-driver.zip`; the extension uploads the ZIP directly to Object Storage rather than sending the archive through OCI API Gateway. `POST /v1/admin/jdbc-driver:complete` accepts the same size and digest plus the upload identifier. The gateway revokes the PAR before reading the fixed object, validates its size, digest, ZIP structure, and JAR content, deletes the object on failed validation, and resets runtime readiness after success. A developer receives `403` from both administrative endpoints.
-
-The gateway Workload Identity has bucket-scoped `PAR_MANAGE` only on `oci_artifacts` because OCI PAR authorization is bucket-scoped, plus `manage objects` constrained to `oci_artifacts/runtime/aidp-jdbc-driver.zip`. It cannot manage any other object in that bucket. AIDP's existing service-principal policy remains the writer for the Delta table objects governed by that AIDP instance. The pod materializes the JDBC bundle and Vault secret only on its ephemeral filesystem.
+Redeploy repairs code, workflow, Agent, compute, and permissions while preserving all table data and the previous `enabled` value. Delete first disables and pauses the workflow, then removes the deployment, Agent, dedicated AI Compute, credential, notebook, workflow, all four tables, and only their exact Object Storage prefixes. It keeps the bucket, schema, shared Spark compute, Autonomous database, and other starter kits; the global manifest is removed last.
 
 ## Acceptance gates
 
-- No `.oci`, PEM, token, wallet, secret, or Terraform state in Git, Docker build contexts, logs, VSIX packages, or OKE pod specifications.
-- One gateway, one `oci_artifacts` schema containing only `data_governance_*` control tables, and one participant Agent are reconciled without duplicates.
-- One Agent redeploy occurs only when the package, source, or tool contract changes.
-- Administrator policy operations succeed; developer operations return `403`.
-- Only administrators can reserve or complete a JDBC upload; the PAR expires after ten minutes, is bound to the fixed JDBC object, and is revoked before validation.
-- Invalid JDBC uploads are deleted, and no driver bytes traverse OCI API Gateway, Git, Terraform state, or logs.
-- SQL, Python, Scala, notebooks, and Agent tools reach the same policy decision.
-- Prompt injection cannot change identity, policy, or tool allowlists.
-- Autonomous stays deployed and the AIDP `checkpointer` path remains enabled.
-- The isolated OCI deployment is preserved after acceptance unless destruction is separately authorized.
+- The module is absent from public config, participant registration, user creation, and laboratory mode.
+- Admin APIs return `401` without a session and reject non-platform-admin targets with `403`.
+- Concurrent lifecycle calls are idempotent and interrupted phases can resume from the protected manifest.
+- `AIDP_DEVELOPER=USE` and `AI_DATA_PLATFORM_ADMIN=ADMIN`; participants cannot edit Agent source.
+- Catalog add/change/delete, safe rename, ambiguous identity, no-change snapshots, failures, slow cycles, and `enabled=0` are covered by executable checks.
+- No OKE, Vault, KMS, API Gateway, JDBC, OAuth/gateway variables, resources, outputs, packages, or release steps remain.
+- No OCI configuration, PEM, wallet, token, secret, or Terraform state enters Git or logs.

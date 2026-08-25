@@ -57,7 +57,7 @@ output "ai_data_platform_id" {
 }
 
 output "autonomous_database_id" {
-  description = "Autonomous AI Database used by participant governance agents."
+  description = "Autonomous AI Database used by the global governance Agent checkpointer."
   value       = local.autonomous_database_id
 }
 
@@ -75,93 +75,6 @@ output "autonomous_database_workload" {
 
 output "autonomous_database_compute_count" {
   value = var.autonomous_database_mode == "new" ? var.autonomous_database_compute_count : null
-}
-
-output "enable_ai_data_governance" {
-  value = var.enable_ai_data_governance
-}
-
-output "governance_gateway_cluster_id" {
-  value = try(oci_containerengine_cluster.governance[0].id, null)
-}
-
-output "governance_gateway_private_endpoint" {
-  value = try(oci_containerengine_cluster.governance[0].endpoints[0].private_endpoint, null)
-}
-
-output "governance_gateway_deploy_pipeline_id" {
-  value = try(oci_devops_deploy_pipeline.governance[0].id, null)
-}
-
-output "governance_gateway_deployment_id" {
-  value = try(oci_devops_deployment.governance[0].id, null)
-}
-
-output "governance_gateway_jdbc_user_ocid" {
-  value = try(oci_identity_user.governance_jdbc[0].id, null)
-}
-
-output "governance_gateway_oidc_authority" {
-  value = var.enable_ai_data_governance ? var.governance_gateway_oidc_authority : null
-}
-
-output "governance_gateway_oidc_client_id" {
-  value = try(oci_identity_domains_app.governance_public_client[0].name, null)
-}
-
-output "governance_gateway_oidc_issuer" {
-  value = var.enable_ai_data_governance ? var.governance_gateway_oidc_issuer : null
-}
-
-output "governance_gateway_image" {
-  description = "Canonical immutable OCI Data Governance Gateway image reference."
-  value       = var.enable_ai_data_governance ? var.governance_gateway_image : null
-}
-
-output "governance_gateway_oidc_audience" {
-  value = var.enable_ai_data_governance ? local.governance_gateway_audience : null
-}
-
-output "governance_gateway_url" {
-  description = "Public TLS API Gateway endpoint backed only by the private OKE service."
-  value       = try(oci_apigateway_deployment.governance[0].endpoint, null)
-}
-
-output "governance_gateway_oidc_scopes" {
-  value = var.enable_ai_data_governance ? "openid offline_access ${local.governance_gateway_scope}" : null
-}
-
-output "governance_gateway_jdbc_secret_ocid" {
-  value = try(oci_vault_secret.governance_jdbc[0].id, null)
-}
-
-output "governance_gateway_jdbc_driver_bucket" {
-  value = var.enable_ai_data_governance ? local.artifacts_bucket_name : null
-}
-
-output "governance_control_bucket" {
-  description = "Private oci_artifacts Object Storage bucket for the oci_artifacts Delta schema and governance runtime artifacts."
-  value       = var.enable_ai_data_governance ? local.artifacts_bucket_name : null
-}
-
-output "governance_control_delta_location" {
-  value = var.enable_ai_data_governance ? "oci://${local.artifacts_bucket_name}@${var.objectstorage_namespace}/oci_artifacts" : null
-}
-
-output "governance_gateway_jdbc_driver_object" {
-  value = var.enable_ai_data_governance ? local.governance_jdbc_object : null
-}
-
-output "governance_gateway_tokenization_key_ocid" {
-  value = try(oci_kms_key.governance[0].id, null)
-}
-
-output "governance_gateway_tokenization_crypto_endpoint" {
-  value = var.enable_ai_data_governance ? local.governance_vault_crypto_endpoint : null
-}
-
-output "governance_gateway_api_gateway_id" {
-  value = try(oci_apigateway_gateway.governance[0].id, null)
 }
 
 output "agent_model_id" {
@@ -204,7 +117,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Fresh-only v2.1.23 contract: post-apply creates no external volumes."
+  description = "Fresh-only v2.2.0 contract: post-apply creates no external volumes."
   value       = 0
 }
 

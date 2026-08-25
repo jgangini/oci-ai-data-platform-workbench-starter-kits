@@ -1,172 +1,235 @@
-"""Participant-scoped, Master Catalog backed governance Agent source."""
+"""Generated sources for the global, native AIDP governance extension."""
 
 from __future__ import annotations
 
 import json
 import re
-from urllib.parse import urlparse
+import uuid
+from typing import Any
 
+
+GOVERNANCE_MODULE_ID = "ai_data_governance_vsc_extension"
+GOVERNANCE_DISPLAY_NAME = "AI Data Governance for VSC Extension"
+GOVERNANCE_CREDENTIAL_NAME = "AidpDataGovernanceExtension"
+GOVERNANCE_AGENT_NAME = "ai_data_governance_vsc_extension"
+GOVERNANCE_AGENT_COMPUTE_NAME = "aidp_data_governance_agent_compute"
+GOVERNANCE_JOB_NAME = "wf_ai_data_governance_metadata_sync"
+GOVERNANCE_BUCKET_NAME = "oci_artifacts"
+GOVERNANCE_SCHEMA = "oci_artifacts"
+GOVERNANCE_TABLES = (
+    "data_governance_config",
+    "data_governance_metadata",
+    "data_governance_access_policy",
+    "data_governance_sync_state",
+)
 
 PARTICIPANT_KEY = re.compile(r"u[1-9][0-9]*")
-IDENTIFIER = re.compile(r"[a-z][a-z0-9_]*")
-GOVERNANCE_CREDENTIAL_NAME = "AidpGovernanceOperator"
-QUERY_ID = re.compile(r"[a-z][a-z0-9_-]{2,63}")
-
-DAMA_SYSTEM_PROMPT = """You are a senior data governance specialist grounded in DAMA-DMBOK. Use only the provided participant-scoped tools and never invent SQL, identifiers, owners, metrics, lineage, freshness, or data. Match the user's language. Call at most one tool per model turn and never emit parallel tool calls; sequential calls are allowed when one result is needed to resolve the next call.
-
-Choose evidence precisely:
-- For where to find a table or field, what information a table contains, column types, descriptions, format, lifecycle state, or catalog timestamps, call catalog_inventory. Pass search_term and include_columns=true for a focused table or field lookup. Use the smallest relevant medallion layer and use ALL only when the location is unknown or the complete live scope is required.
-- For the flow to or from a table, the workflow tasks or notebook paths involved, call catalog_lineage at ENTITY level.
-- For the origin, destination, derivation, or use of a field, call catalog_lineage at COLUMN level and pass column_name. If the table is unknown, locate it first with catalog_inventory, then call catalog_lineage on the uniquely observed table.
-- To explain the effective access decision for an approved query, call governance_policy_explain with its registered query_id.
-- To execute an approved query, call governed_query with only its registered query_id and validated scalar parameters. Never accept, reconstruct, or execute arbitrary SQL.
-
-Treat timeUpdated as the last Master Catalog metadata update, not proof that the underlying data was refreshed at that time. Treat a task display name as a workflow task; call it a notebook only when the job metadata provides notebook_path. Explain a field's likely business use only as an interpretation of observed name, type, table, and lineage unless a catalog description explicitly defines it. Use match_count and counts_by_layer exactly as returned; never recalculate or alter those counts in prose. Reconcile enumerated records with those counts, and omit a count rather than estimate it.
-
-Explain results in four concise parts: Evidence, Explanation, Governance implication, and Recommendation or limitation. Clearly distinguish observed Master Catalog metadata and lineage from DAMA-based recommendations. If evidence is unavailable, say so and identify the metadata or control needed; do not guess. Refuse arbitrary SQL, mutations, and requests for another participant's information. If a request names another participant, refuse immediately: do not call a tool, substitute the allowed participant, or disclose the allowed participant's records. When lineage is requested, present the observed source-to-target path in order, name the intervening tasks and notebook paths, and distinguish entity lineage from column lineage."""
 
 
 def database_names(participant_key: str) -> tuple[str, str]:
-    """Return legacy Autonomous names so old deployments can be cleaned safely."""
+    """Return the existing Autonomous DB schemas used by Agent checkpointers."""
     if PARTICIPANT_KEY.fullmatch(participant_key) is None or int(participant_key[1:]) < 101:
         raise ValueError("A participant key starting at u101 is required")
     stem = participant_key.upper()
     return f"{stem}_AGENT", f"{stem}_AGENT_RO"
 
 
-def external_catalog_name(participant_key: str) -> str:
-    """Return the legacy mirrored-catalog name used only during cleanup."""
-    database_names(participant_key)
-    return f"{participant_key}_agent_autonomous"
+def _identity_indexes(existing: list[dict[str, Any]]) -> tuple[dict, dict, dict]:
+    by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    by_exact: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    by_table: dict[str, list[dict[str, Any]]] = {}
+    for item in existing:
+        fingerprint = str(item.get("table_fingerprint") or "")
+        column_key = str(item.get("column_key") or "")
+        if column_key:
+            by_key.setdefault((fingerprint, column_key), []).append(item)
+        if int(item.get("is_deleted") or 0) == 0:
+            by_exact.setdefault((fingerprint, str(item.get("column_name") or "").casefold()), []).append(item)
+        by_table.setdefault(fingerprint, []).append(item)
+    return by_key, by_exact, by_table
 
 
-def agent_source(
-    *,
-    model_id: str,
-    region: str,
-    compartment_id: str,
-    platform_id: str,
-    participant_key: str,
-    catalog_name: str,
-    gateway_url: str = "",
-) -> bytes:
-    """Render a code Agent that reads live AIDP metadata with a stored OCI signer."""
-    required = (
-        model_id,
-        region,
-        compartment_id,
-        platform_id,
-        participant_key,
-        catalog_name,
+def _unique_existing_id(candidates: list[dict[str, Any]], used: set[str]) -> str | None:
+    if len(candidates) > 1:
+        raise ValueError("The control metadata contains ambiguous column identities")
+    if not candidates:
+        return None
+    object_id = str(candidates[0]["object_id"])
+    if object_id in used:
+        raise ValueError("The source snapshot contains duplicate column identities")
+    return object_id
+
+
+def _existing_column_id(column: dict[str, Any], by_key: dict, by_exact: dict, used: set[str]) -> str | None:
+    fingerprint = str(column["table_fingerprint"])
+    column_key = str(column.get("column_key") or "")
+    object_id = _unique_existing_id(
+        by_key.get((fingerprint, column_key), []) if column_key else [], used
     )
-    if not all(required):
-        raise ValueError("The Agent runtime contract is incomplete")
-    database_names(participant_key)
-    if gateway_url:
-        parsed_gateway = urlparse(gateway_url)
-        if (
-            parsed_gateway.scheme != "https"
-            or not parsed_gateway.hostname
-            or parsed_gateway.username
-            or parsed_gateway.password
-            or parsed_gateway.query
-            or parsed_gateway.fragment
-        ):
-            raise ValueError("The governance gateway URL must be a credential-free HTTPS origin")
-    encoded = json.dumps(
-        {
-            "model_id": model_id,
-            "region": region,
-            "compartment_id": compartment_id,
-            "platform_id": platform_id,
-            "catalog_name": catalog_name,
-            "credential_name": GOVERNANCE_CREDENTIAL_NAME,
-            "participant_key": participant_key,
-            "table_prefix": f"{participant_key}_",
-            "gateway_url": gateway_url.rstrip("/"),
-        },
-        sort_keys=True,
+    if object_id is not None:
+        return object_id
+    return _unique_existing_id(
+        by_exact.get((fingerprint, str(column["column_name"]).casefold()), []), used
     )
-    system_prompt = (
-        DAMA_SYSTEM_PROMPT
-        + f"\nThe only allowed participant is {participant_key}. A different participant "
-        "identifier in the request requires an immediate refusal without a tool call."
+
+
+def _has_retired_name(column: dict[str, Any], table_history: list[dict[str, Any]]) -> bool:
+    if column.get("column_key"):
+        return False
+    column_name = str(column["column_name"]).casefold()
+    return any(
+        int(item.get("is_deleted") or 0) == 1
+        and str(item.get("column_name") or "").casefold() == column_name
+        for item in table_history
     )
-    source = f'''\
-"""Read-only AIDP data-governance Agent generated for one participant.
 
-Learning map:
-1. CONFIG fixes the participant, region, platform, and private catalog boundary.
-2. The HTTP helpers sign native AIDP REST calls with a shared OCI credential.
-3. Catalog helpers discover current metadata; no table or lineage is hard-coded.
-4. The two Agent tools expose focused inventory and lineage evidence.
-5. DataGovernanceAgent connects those tools to the selected OCI Generative AI model.
 
-The file is generated during lab assignment. Editing it is useful for experiments,
-but an administrative Agent redeploy intentionally replaces local changes.
-"""
+def _rename_column_id(
+    columns: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    table_history: list[dict[str, Any]],
+) -> str | None:
+    if len(columns) != 1:
+        return None
+    if len(candidates) != 1:
+        return None
+    column, candidate = columns[0], candidates[0]
+    if int(column["column_ordinal"]) != int(candidate["column_ordinal"]):
+        return None
+    if str(column["data_type"]).casefold() != str(candidate["data_type"]).casefold():
+        return None
+    if _has_retired_name(column, table_history):
+        return None
+    return str(candidate["object_id"])
+
+
+def _new_column_id(
+    column: dict[str, Any], fingerprint: str, table_history: list[dict[str, Any]]
+) -> str:
+    stable_identity = str(column.get("column_key") or "")
+    if not stable_identity:
+        column_name = str(column["column_name"]).casefold()
+        generation = 1 + sum(
+            str(item.get("column_name") or "").casefold() == column_name
+            and int(item.get("is_deleted") or 0) == 1
+            for item in table_history
+        )
+        stable_identity = (
+            f"{column_name}:source_version={column.get('source_version') or ''}:"
+            f"fingerprint={column.get('fingerprint') or ''}:generation={generation}"
+        )
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"AIDP_MASTER_CATALOG:{fingerprint}:{stable_identity}",
+    ))
+
+
+def resolve_column_identities(
+    incoming: list[dict[str, Any]], existing: list[dict[str, Any]]
+) -> list[tuple[dict[str, Any], str, str]]:
+    """Preserve IDs only for exact identity or an unambiguous one-for-one rename."""
+    by_key, by_exact, by_table = _identity_indexes(existing)
+    resolved: list[tuple[dict[str, Any], str, str]] = []
+    unmatched: dict[str, list[dict[str, Any]]] = {}
+    used: set[str] = set()
+    for column in incoming:
+        fingerprint = str(column["table_fingerprint"])
+        object_id = _existing_column_id(column, by_key, by_exact, used)
+        if object_id is None:
+            unmatched.setdefault(fingerprint, []).append(column)
+            continue
+        resolved.append((column, object_id, "EXACT"))
+        used.add(object_id)
+    for fingerprint, columns in unmatched.items():
+        table_history = by_table.get(fingerprint, [])
+        candidates = [
+            item
+            for item in table_history
+            if str(item.get("object_id") or "") not in used and int(item.get("is_deleted") or 0) == 0
+        ]
+        object_id = _rename_column_id(columns, candidates, table_history)
+        if object_id is not None:
+            resolved.append((columns[0], object_id, "INFERRED_RENAME"))
+            used.add(object_id)
+            continue
+        for column in columns:
+            resolved.append((column, _new_column_id(column, fingerprint, table_history), "NEW"))
+    return resolved
+
+
+DAMA_SYSTEM_PROMPT = """You are a senior data governance specialist grounded in DAMA-DMBOK.
+Use only catalog_inventory and catalog_lineage. They read every ACTIVE Master Catalog catalog,
+except the oci_medallion.oci_artifacts control schema. Never invent metadata, lineage, owners,
+freshness, policies, SQL, identifiers, or access decisions. Treat timeUpdated as a catalog
+metadata timestamp, not proof of data freshness. Clearly distinguish observed evidence from a
+DAMA-based recommendation. Refuse mutations, arbitrary SQL, requests for the control schema,
+and claims that cannot be certified from the returned evidence. Match the user's language and
+answer as Evidence, Explanation, Governance implication, and Recommendation or limitation."""
+
+
+_AGENT_TEMPLATE = r'''\
+"""Read-only global AIDP Master Catalog governance Agent."""
 
 import json
 import logging
 import re
 from urllib.parse import quote
 
+import aidputils
 import oci
 import requests
-import aidputils
-from aidputils.agents.toolkit import chat_context
 from aidputils.agents.toolkit.agent_helper import init_oci_llm, pre_invoke_setup
 from aidputils.agents.toolkit.configs import OCIAIConf
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
-# Generated runtime boundary. Secrets are resolved later from Credential Store and
-# are never embedded in this file.
-CONFIG = {encoded}
+CONFIG = __CONFIG_JSON__
+SYSTEM_PROMPT = __SYSTEM_PROMPT_JSON__
 API_BASE = (
-    f"https://datalake.{{CONFIG['region']}}.oci.oraclecloud.com/20260430/"
-    f"aiDataPlatforms/{{CONFIG['platform_id']}}"
+    f"https://datalake.{CONFIG['region']}.oci.oraclecloud.com/20260430/"
+    f"aiDataPlatforms/{CONFIG['platform_id']}"
 )
-LAYERS = ("landing", "bronze", "silver", "gold")
-TABLE_NAME = re.compile(rf"^{{re.escape(CONFIG['table_prefix'])}}[a-z0-9_]+$")
-FOREIGN_TABLE = re.compile(r"\\bu[1-9][0-9]*_[a-z0-9_]+", re.IGNORECASE)
-QUERY_ID = re.compile(r"^[a-z][a-z0-9_-]{{2,63}}$")
-logger = logging.getLogger("data_governance_agent")
+IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,255}$")
+logger = logging.getLogger("ai_data_governance_vsc_extension")
 checkpointer = globals().get("checkpointer")
 
 
-# ---- Native AIDP REST helpers -------------------------------------------------
 def _request(session, signer, method, path, *, params=None, payload=None):
-    """Call one read-only AIDP endpoint and return JSON plus response headers."""
     response = session.request(
         method,
         API_BASE + path,
         auth=signer,
         params=params,
         json=payload,
-        headers={{"Accept": "application/json"}},
+        headers={"Accept": "application/json"},
         timeout=(10, 60),
     )
     response.raise_for_status()
-    return response.json() if response.content else {{}}, response.headers
+    return (response.json() if response.content else {}), response.headers
 
 
 def _items(body):
     if isinstance(body, list):
-        return [item for item in body if isinstance(item, dict)]
+        if not all(isinstance(item, dict) for item in body):
+            raise RuntimeError("AIDP returned invalid list items")
+        return body
     if isinstance(body, dict):
-        values = body.get("items") or body.get("Items") or []
-        return [item for item in values if isinstance(item, dict)]
-    return []
+        if "items" not in body and "Items" not in body:
+            raise RuntimeError("AIDP returned an invalid paginated response")
+        values = body.get("items") if "items" in body else body.get("Items")
+        if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
+            raise RuntimeError("AIDP returned invalid list items")
+        return values
+    raise RuntimeError("AIDP returned an invalid paginated response")
 
 
-def _list(session, signer, path, params):
-    """Read every page because catalog and job lists can exceed one response."""
+def _list(session, signer, path, params=None):
     result = []
     page = None
-    while True:
-        query = {{"limit": "25", **params}}
+    seen_pages = set()
+    for _ in range(1000):
+        query = {"limit": "100", **(params or {})}
         if page:
             query["page"] = page
         body, headers = _request(session, signer, "GET", path, params=query)
@@ -174,381 +237,190 @@ def _list(session, signer, path, params):
         page = headers.get("opc-next-page") or headers.get("Opc-Next-Page")
         if not page:
             return result
+        if page in seen_pages:
+            raise RuntimeError("AIDP returned a repeated pagination token")
+        seen_pages.add(page)
+    raise RuntimeError("AIDP pagination exceeded the safety limit")
 
 
-def _name(value):
-    return str(value.get("displayName") or value.get("name") or "")
+def _name(item):
+    return str(item.get("displayName") or item.get("name") or "")
 
 
-# ---- Participant catalog discovery and metadata normalization ----------------
-def _catalog_contract(session, signer):
-    """Resolve the private catalog and its four medallion schemas by live name."""
-    catalogs = [
-        item
-        for item in _list(session, signer, "/catalogs", {{}})
-        if _name(item) == CONFIG["catalog_name"]
-    ]
-    if len(catalogs) != 1 or not catalogs[0].get("key"):
-        raise RuntimeError("The participant Master Catalog was not found uniquely")
-    catalog_key = str(catalogs[0]["key"])
-    schemas = _list(session, signer, "/schemas", {{"catalogKey": catalog_key}})
-    by_layer = {{}}
-    for layer in LAYERS:
-        matches = [item for item in schemas if _name(item) == f"oci_{{layer}}"]
-        if len(matches) != 1 or not matches[0].get("key"):
-            raise RuntimeError(f"The participant {{layer}} schema was not found uniquely")
-        by_layer[layer] = matches[0]
-    return catalog_key, by_layer
-
-
-def _column_record(column):
-    """Keep only explanatory, non-sensitive column metadata returned by AIDP."""
-    return {{
-        "name": str(
-            column.get("fieldName")
-            or column.get("displayName")
-            or column.get("name")
-            or ""
-        ),
-        "type": str(
-            column.get("fieldType")
-            or column.get("dataType")
-            or column.get("type")
-            or "unknown"
-        ),
-        "precision": column.get("fieldPrecision"),
-        "scale": column.get("fieldScale"),
-        "description": (
-            column.get("fieldDescription")
-            or column.get("description")
-            or column.get("comment")
-            or ""
-        ),
-    }}
-
-
-def _table_record(item, detail, layer, schema, include_columns):
-    """Normalize list and detail responses into one beginner-friendly record."""
-    managed = detail.get("managedTableDefinition") or {{}}
-    external = detail.get("externalTableDefinition") or {{}}
-    columns = (
-        detail.get("tableFields")
-        or detail.get("columns")
-        or detail.get("columnDefinitions")
-        or []
-    )
-    return {{
-        "key": str(item.get("key") or detail.get("key") or ""),
-        "layer": layer,
-        "schema": _name(schema),
-        "table": _name(item) or _name(detail),
-        "qualified_name": (
-            f"aidp://catalogs@{{CONFIG['platform_id']}}/o/"
-            f"{{CONFIG['catalog_name']}}.{{_name(schema)}}.{{_name(item) or _name(detail)}}"
-        ),
-        "description": str(detail.get("description") or ""),
-        "table_type": str(detail.get("tableType") or item.get("tableType") or "unknown"),
-        "lifecycle_state": str(
-            detail.get("lifecycleState") or item.get("lifecycleState") or "unknown"
-        ),
-        "format": str(
-            managed.get("managedTableDataFormat")
-            or external.get("externalTableDataFormat")
-            or detail.get("dataFormat")
-            or detail.get("format")
-            or "unknown"
-        ),
-        "time_created": detail.get("timeCreated") or item.get("timeCreated"),
-        "time_updated": detail.get("timeUpdated") or item.get("timeUpdated"),
-        "created_by": detail.get("createdBy") or item.get("createdBy"),
-        "updated_by": detail.get("updatedBy") or item.get("updatedBy"),
-        "columns": [
-            _column_record(column)
-            for column in columns
-            if include_columns and isinstance(column, dict)
-        ],
-    }}
-
-
-def _catalog_tables(
-    session,
-    signer,
-    catalog_key,
-    schemas,
-    layer,
-    include_columns=False,
-    search_term="",
-):
-    """List participant tables and optionally fetch detail for focused search."""
-    tables = []
-    schema = schemas[layer]
-    for item in _list(
-        session,
-        signer,
-        "/tables",
-        {{"catalogKey": catalog_key, "schemaKey": str(schema["key"])}},
-    ):
-        table_name = _name(item)
-        if not TABLE_NAME.fullmatch(table_name):
-            continue
-        detail = item
-        table_key = str(item.get("key") or "")
-        if (include_columns or search_term) and table_key:
-            candidate, _ = _request(
-                session,
-                signer,
-                "GET",
-                f"/tables/{{quote(table_key, safe='')}}",
-            )
-            if isinstance(candidate, dict):
-                detail = candidate
-        record = _table_record(item, detail, layer, schema, include_columns)
-        if search_term:
-            needle = search_term.casefold()
-            searchable = [record["table"], record["description"]]
-            searchable.extend(
-                f"{{column['name']}} {{column['description']}}"
-                for column in record["columns"]
-            )
-            if not any(needle in value.casefold() for value in searchable):
-                continue
-            record["matched_columns"] = [
-                column["name"]
-                for column in record["columns"]
-                if needle in f"{{column['name']}} {{column['description']}}".casefold()
-            ]
-        tables.append(record)
-    return tables
-
-
-def _table_candidates(tables, table_name):
-    """Resolve a full or short table name without leaving the participant scope."""
-    value = table_name.strip().casefold().rsplit(".", 1)[-1]
-    exact = [table for table in tables if table["table"].casefold() == value]
-    if exact:
-        return exact
+def _active_catalogs(session, signer):
     return [
-        table
-        for table in tables
-        if table["table"].casefold().endswith(f"_{{value}}")
+        item for item in _list(session, signer, "/catalogs")
+        if str(item.get("lifecycleState") or item.get("state") or "").upper() == "ACTIVE"
+        and item.get("key")
     ]
 
 
-def _job_task_metadata(session, signer, task_nodes):
-    """Map observed workflow tasks to their current notebook paths and dependencies."""
-    jobs = {{}}
-    details = {{}}
-    for node in task_nodes:
-        defaults = (node.get("properties") or {{}}).get("default") or {{}}
-        workspace_key = str(defaults.get("workspaceKey") or "")
-        job_key = str(defaults.get("jobKey") or "")
-        if not workspace_key or not job_key:
+def _schemas(session, signer, catalog):
+    catalog_name = _name(catalog)
+    return [
+        schema
+        for schema in _list(session, signer, "/schemas", {"catalogKey": str(catalog["key"])})
+        if schema.get("key")
+        and not (catalog_name == "oci_medallion" and _name(schema) == "oci_artifacts")
+    ]
+
+
+def _columns(detail):
+    values = detail.get("tableFields") or detail.get("columns") or detail.get("columnDefinitions") or []
+    return [
+        {
+            "name": str(value.get("fieldName") or value.get("displayName") or value.get("name") or ""),
+            "ordinal": value.get("fieldPosition") or value.get("ordinalPosition"),
+            "data_type": str(value.get("fieldType") or value.get("dataType") or value.get("type") or "unknown"),
+            "description": str(value.get("fieldDescription") or value.get("description") or value.get("comment") or ""),
+        }
+        for value in values
+        if isinstance(value, dict)
+    ]
+
+
+def _table_records(session, signer, include_columns, search_term="", catalog_filter="", schema_filter=""):
+    records = []
+    needle = search_term.casefold()
+    for catalog in _active_catalogs(session, signer):
+        catalog_name = _name(catalog)
+        if catalog_filter and catalog_name.casefold() != catalog_filter.casefold():
             continue
-        reference = (workspace_key, job_key)
-        if reference not in jobs:
-            job, _ = _request(
-                session,
-                signer,
-                "GET",
-                f"/workspaces/{{quote(workspace_key, safe='')}}/jobs/{{quote(job_key, safe='')}}",
-            )
-            if _contains_foreign_participant(job):
-                raise RuntimeError("A lineage job crossed the participant boundary")
-            jobs[reference] = job
-        for task in jobs[reference].get("tasks") or []:
-            if not isinstance(task, dict):
+        for schema in _schemas(session, signer, catalog):
+            schema_name = _name(schema)
+            if schema_filter and schema_name.casefold() != schema_filter.casefold():
                 continue
-            task_key = str(task.get("taskKey") or "")
-            details[(job_key, task_key)] = {{
-                "notebook_path": task.get("notebookPath"),
-                "task_type": task.get("type"),
-                "depends_on": [
-                    str(dependency.get("taskKey") or "")
-                    for dependency in task.get("dependsOn") or []
-                    if isinstance(dependency, dict)
-                ],
-            }}
-    return details
+            for table in _list(session, signer, "/tables", {"catalogKey": str(catalog["key"]), "schemaKey": str(schema["key"])}):
+                table_key = str(table.get("key") or "")
+                detail = table
+                if table_key and (include_columns or needle):
+                    value, _ = _request(session, signer, "GET", f"/tables/{quote(table_key, safe='')}")
+                    if isinstance(value, dict):
+                        detail = value
+                columns = _columns(detail) if include_columns or needle else []
+                table_name = _name(table) or _name(detail)
+                record = {
+                    "catalog": catalog_name,
+                    "schema": schema_name,
+                    "table": table_name,
+                    "table_key": table_key,
+                    "description": str(detail.get("description") or ""),
+                    "table_type": str(detail.get("tableType") or table.get("tableType") or "unknown"),
+                    "lifecycle_state": str(detail.get("lifecycleState") or table.get("lifecycleState") or "unknown"),
+                    "time_created": detail.get("timeCreated") or table.get("timeCreated"),
+                    "time_updated": detail.get("timeUpdated") or table.get("timeUpdated"),
+                    "qualified_name": f"aidp://catalogs@{CONFIG['platform_id']}/o/{catalog_name}.{schema_name}.{table_name}",
+                    "columns": columns if include_columns else [],
+                }
+                searchable = [record["catalog"], record["schema"], record["table"], record["description"]]
+                searchable.extend(f"{column['name']} {column['description']}" for column in columns)
+                if not needle or any(needle in value.casefold() for value in searchable):
+                    records.append(record)
+    return records
 
 
-def _column_lineage_component(graph, table_name, column_name):
-    """Select the connected lineage component for one column from a table anchor."""
-    nodes = [node for node in graph.get("nodes") or [] if isinstance(node, dict)]
-    links = [link for link in graph.get("links") or [] if isinstance(link, dict)]
-    seeds = {{
-        str(node.get("id") or "")
-        for node in nodes
-        if str(node.get("displayName") or "").casefold() == column_name.casefold()
-        and str(
-            ((node.get("properties") or {{}}).get("default") or {{}}).get("tableName")
-            or ""
-        ).casefold() == table_name.casefold()
-    }}
-    if not seeds:
-        return {{"nodes": [], "links": []}}
-    adjacent = {{}}
-    for link in links:
-        source = str(link.get("fromNodeId") or "")
-        target = str(link.get("toNodeId") or "")
-        adjacent.setdefault(source, set()).add(target)
-        adjacent.setdefault(target, set()).add(source)
-    selected = set(seeds)
-    pending = list(seeds)
+def _is_control_qualified_name(value):
+    normalized = str(value or "").casefold().replace("/", ".")
+    token = "oci_medallion.oci_artifacts"
+    offset = normalized.find(token)
+    while offset >= 0:
+        end = offset + len(token)
+        before = normalized[offset - 1] if offset else ""
+        after = normalized[end] if end < len(normalized) else ""
+        if (not before or not (before.isalnum() or before == "_")) and (
+            not after or not (after.isalnum() or after == "_")
+        ):
+            return True
+        offset = normalized.find(token, offset + 1)
+    return False
+
+
+def _is_control_lineage_node(node):
+    if not isinstance(node, dict):
+        raise RuntimeError("AIDP returned an invalid lineage node")
+    if any(_is_control_qualified_name(node.get(name)) for name in ("qualifiedName", "id")):
+        return True
+    pending = [node]
     while pending:
-        current = pending.pop()
-        for neighbor in adjacent.get(current, set()):
-            if neighbor not in selected:
-                selected.add(neighbor)
-                pending.append(neighbor)
-    return {{
-        "nodes": [node for node in nodes if str(node.get("id") or "") in selected],
-        "links": [
-            link
-            for link in links
-            if str(link.get("fromNodeId") or "") in selected
-            and str(link.get("toNodeId") or "") in selected
-        ],
-    }}
-
-
-def _lineage_summary(session, signer, graph, process_graph=None):
-    """Turn AIDP's node/link graph into ordered evidence an Agent can explain."""
-    graph_nodes = [node for node in graph.get("nodes") or [] if isinstance(node, dict)]
-    process_nodes = [
-        node
-        for node in (process_graph or graph).get("nodes") or []
-        if isinstance(node, dict)
-    ]
-    task_nodes = [node for node in process_nodes if str(node.get("type")) == "Task"]
-    job_tasks = _job_task_metadata(session, signer, task_nodes)
-    task_by_id = {{}}
-    task_by_stage = {{}}
-    tasks = {{}}
-    for node in task_nodes:
-        name = str(node.get("displayName") or "")
-        defaults = (node.get("properties") or {{}}).get("default") or {{}}
-        run = (node.get("properties") or {{}}).get("processRun") or {{}}
-        job_key = str(defaults.get("jobKey") or "")
-        task_by_id[str(node.get("id") or "")] = name
-        if run.get("stageId"):
-            task_by_stage[str(run["stageId"])] = name
-        current = tasks.setdefault((job_key, name), {{
-            "task": name,
-            "job_name": defaults.get("jobName"),
-            "direction": node.get("direction"),
-            "depth": node.get("depth"),
-            "process_run_status": run.get("processRunStatus"),
-            "process_run_time": run.get("processRunEventTime"),
-            **job_tasks.get((job_key, name), {{}}),
-        }})
-        if run.get("processRunEventTime") and not current.get("process_run_time"):
-            current["process_run_time"] = run["processRunEventTime"]
-
-    node_by_id = {{str(node.get("id") or ""): node for node in graph_nodes}}
-    entities = {{}}
-    for node in graph_nodes:
-        if str(node.get("type")) == "Task":
+        value = pending.pop()
+        if not isinstance(value, dict):
             continue
-        defaults = (node.get("properties") or {{}}).get("default") or {{}}
-        record = {{
-            "name": str(node.get("displayName") or ""),
-            "type": str(node.get("type") or "unknown"),
-            "qualified_name": node.get("qualifiedName"),
-            "layer": defaults.get("databaseName"),
-            "table": defaults.get("tableName"),
-            "data_type": defaults.get("dataType"),
-            "direction": node.get("direction"),
-            "depth": node.get("depth"),
-        }}
-        entities[(record["qualified_name"], record["name"])] = record
+        normalized = {str(key).replace("_", "").casefold(): item for key, item in value.items()}
+        if (
+            str(normalized.get("catalogname") or normalized.get("catalog") or "").casefold()
+            == "oci_medallion"
+            and str(normalized.get("schemaname") or normalized.get("schema") or "").casefold()
+            == "oci_artifacts"
+        ):
+            return True
+        if any(
+            _is_control_qualified_name(item)
+            for key, item in normalized.items()
+            if key in {"qualifiedname", "fullyqualifiedname"}
+        ):
+            return True
+        pending.extend(item for item in value.values() if isinstance(item, dict))
+    return False
 
-    relations = []
-    seen_relations = set()
-    used_tasks = set()
-    for link in graph.get("links") or []:
-        if not isinstance(link, dict):
-            continue
-        source = node_by_id.get(str(link.get("fromNodeId") or ""), {{}})
-        target = node_by_id.get(str(link.get("toNodeId") or ""), {{}})
-        properties = link.get("properties") or {{}}
-        defaults = properties.get("default") or {{}}
-        run = properties.get("processRun") or {{}}
-        process_task = (
-            task_by_id.get(str(defaults.get("processNodeId") or ""))
-            or task_by_stage.get(str(run.get("stageId") or ""))
-        )
-        if process_task:
-            used_tasks.add(process_task)
-        record = {{
-            "from": str(source.get("displayName") or link.get("fromNodeId") or ""),
-            "from_type": str(source.get("type") or "unknown"),
-            "to": str(target.get("displayName") or link.get("toNodeId") or ""),
-            "to_type": str(target.get("type") or "unknown"),
-            "process_task": process_task,
-            "transformation": defaults.get("transformation"),
-        }}
-        identity = tuple(record.values())
-        if identity not in seen_relations:
-            seen_relations.add(identity)
-            relations.append(record)
 
-    task_records = list(tasks.values())
-    if process_graph is not None:
-        task_records = [task for task in task_records if task["task"] in used_tasks]
-    timestamps = [
-        task["process_run_time"] for task in task_records if task.get("process_run_time")
+def _filter_control_lineage(graph):
+    if (
+        not isinstance(graph, dict)
+        or not isinstance(graph.get("nodes"), list)
+        or not isinstance(graph.get("links"), list)
+        or not all(isinstance(node, dict) for node in graph["nodes"])
+        or not all(isinstance(link, dict) for link in graph["links"])
+    ):
+        raise RuntimeError("AIDP returned an invalid lineage response")
+    excluded = {
+        str(node["id"])
+        for node in graph["nodes"]
+        if _is_control_lineage_node(node) and node.get("id")
+    }
+    while True:
+        descendants = {
+            str(node["id"])
+            for node in graph["nodes"]
+            if node.get("id") and str(node.get("parentId") or "") in excluded
+        }
+        expanded = excluded | descendants
+        if expanded == excluded:
+            break
+        excluded = expanded
+    filtered = dict(graph)
+    filtered["nodes"] = [
+        node for node in graph["nodes"]
+        if not _is_control_lineage_node(node)
+        and str(node.get("id") or "") not in excluded
     ]
-    return {{
-        "node_count": len(graph_nodes),
-        "relation_count": len(relations),
-        "entities": sorted(
-            entities.values(),
-            key=lambda item: (str(item["depth"]), item["type"], item["name"]),
-        ),
-        "tasks": sorted(task_records, key=lambda item: (str(item["depth"]), item["task"])),
-        "relations": relations,
-        "latest_observed_process_time": max(timestamps) if timestamps else None,
-    }}
+    filtered["links"] = [
+        link for link in graph["links"]
+        if str(link.get("fromNodeId") or "") not in excluded
+        and str(link.get("toNodeId") or "") not in excluded
+    ]
+    return filtered
 
 
 def _safe_error(stage, exc):
     response = getattr(exc, "response", None)
-    status = getattr(exc, "status", None) or getattr(response, "status_code", None)
-    code = getattr(exc, "code", None)
-    if response is not None and not code:
-        try:
-            body = response.json()
-            code = body.get("code") if isinstance(body, dict) else None
-        except Exception:
-            code = None
-    return {{"stage": stage, "type": type(exc).__name__, "status": status, "code": code}}
-
-
-def _contains_foreign_participant(value):
-    if isinstance(value, str):
-        matches = FOREIGN_TABLE.findall(value)
-        return any(
-            not match.casefold().startswith(CONFIG["table_prefix"].casefold())
-            for match in matches
-        )
-    if isinstance(value, dict):
-        return any(_contains_foreign_participant(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_contains_foreign_participant(item) for item in value)
-    return False
+    return {
+        "stage": stage,
+        "type": type(exc).__name__,
+        "status": getattr(exc, "status", None) or getattr(response, "status_code", None),
+        "code": getattr(exc, "code", None),
+    }
 
 
 def _credential_signer():
-    """Build an OCI request signer from the deployment-owned shared credential."""
     try:
-        values = {{
+        values = {
             key: aidputils.secrets.get(name=CONFIG["credential_name"], key=key)
             for key in ("tenancy", "user", "fingerprint", "region", "private_key")
-        }}
+        }
         if any(not isinstance(value, str) or not value for value in values.values()):
-            raise ValueError("The shared OCI credential is incomplete")
+            raise ValueError("incomplete credential")
         if values["region"] != CONFIG["region"]:
-            raise ValueError("The shared OCI credential region does not match this deployment")
+            raise ValueError("credential region mismatch")
         return oci.signer.Signer(
             tenancy=values["tenancy"],
             user=values["user"],
@@ -557,297 +429,80 @@ def _credential_signer():
             private_key_content=values["private_key"],
         )
     except Exception as exc:
-        raise RuntimeError("The shared OCI credential is unavailable or invalid") from exc
-
-
-def _session_variable(name):
-    """Read one non-logged AIDP session variable without persisting it."""
-    context = chat_context.session_context_var.get() or {{}}
-    if not isinstance(context, dict):
-        raise RuntimeError("The AIDP session context is unavailable")
-    value = context.get(name) or context.get(f"sessionvariables.{{name}}")
-    if isinstance(value, dict):
-        value = value.get("value")
-    if not isinstance(value, str) or not value or len(value) > 16384 or "\\r" in value or "\\n" in value:
-        raise RuntimeError("The governance session credential is unavailable")
-    return value
-
-
-def _gateway_request(method, path, payload=None):
-    """Call the private governance gateway with the effective user's token."""
-    if not CONFIG["gateway_url"]:
-        raise RuntimeError("The governance gateway endpoint is not configured")
-    response = requests.request(
-        method,
-        CONFIG["gateway_url"] + path,
-        headers={{
-            "Accept": "application/json",
-            "Authorization": f"Bearer {{_session_variable('governance_access_token')}}",
-        }},
-        json=payload,
-        timeout=(10, 60),
-        allow_redirects=False,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError(f"The governance gateway rejected the request (HTTP {{response.status_code}})")
-    if len(response.content) > 2_000_000:
-        raise RuntimeError("The governance gateway response exceeded the Agent limit")
-    body = response.json() if response.content else {{}}
-    if not isinstance(body, dict):
-        raise RuntimeError("The governance gateway returned an invalid response")
-    return body
-
-
-def _registered_query_id(value):
-    query_id = value.strip().lower()
-    if QUERY_ID.fullmatch(query_id) is None:
-        raise ValueError("query_id must identify a registered governance query")
-    return query_id
-
-
-def _query_parameters(parameters_json):
-    if len(parameters_json) > 8192:
-        raise ValueError("parameters_json is too large")
-    value = json.loads(parameters_json)
-    if not isinstance(value, dict) or len(value) > 20:
-        raise ValueError("parameters_json must be an object with at most 20 values")
-    if any(
-        not isinstance(key, str)
-        or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) is None
-        or not isinstance(item, (str, int, float, bool, type(None)))
-        for key, item in value.items()
-    ):
-        raise ValueError("parameters_json accepts only named scalar values")
-    return value
+        raise RuntimeError("The governance OCI credential is unavailable or invalid") from exc
 
 
 def _tools():
-    """Create read-only tools bound to the participant catalog in CONFIG."""
     signer = _credential_signer()
     session = requests.Session()
 
     @tool
-    def catalog_inventory(
-        layer: str = "ALL",
-        include_columns: bool = False,
-        search_term: str = "",
-    ) -> str:
-        """Find or describe this participant's current Master Catalog tables and fields.
-
-        Use search_term for a table or column name. Set include_columns=true for
-        field names, types, precision, scale, and descriptions. Records also show
-        format, lifecycle state, and catalog creation/update timestamps.
-        """
-        selected = layer.strip().lower()
-        if selected != "all" and selected not in LAYERS:
-            return json.dumps({{"error": "layer must be ALL, LANDING, BRONZE, SILVER, or GOLD"}})
-        query = search_term.strip()
-        if len(query) > 100:
-            return json.dumps({{"error": "search_term must contain at most 100 characters"}})
-        if _contains_foreign_participant(query):
-            return json.dumps({{"error": "search is outside this participant catalog"}})
+    def catalog_inventory(search_term: str = "", include_columns: bool = True, catalog_name: str = "", schema_name: str = "") -> str:
+        """Search tables and columns across every ACTIVE Master Catalog catalog."""
+        values = (search_term.strip(), catalog_name.strip(), schema_name.strip())
+        if any(len(value) > 256 for value in values):
+            return json.dumps({"error": "catalog search inputs must contain at most 256 characters"})
+        if catalog_name == "oci_medallion" and schema_name == "oci_artifacts":
+            return json.dumps({"error": "the governance control schema is excluded"})
         try:
-            catalog_key, schemas = _catalog_contract(session, signer)
-            layers = LAYERS if selected == "all" else (selected,)
-            with_columns = include_columns or bool(query)
-            tables = [
-                table
-                for item in layers
-                for table in _catalog_tables(
-                    session,
-                    signer,
-                    catalog_key,
-                    schemas,
-                    item,
-                    with_columns,
-                    query,
-                )
-            ]
-            return json.dumps({{
-                "participant_key": CONFIG["participant_key"],
-                "catalog": CONFIG["catalog_name"],
+            records = _table_records(session, signer, include_columns, search_term, catalog_name, schema_name)
+            return json.dumps({
                 "evidence_type": "observed_master_catalog",
-                "search_term": query or None,
-                "match_count": len(tables),
-                "counts_by_layer": {{
-                    item: sum(table["layer"] == item for table in tables)
-                    for item in layers
-                }},
-                "tables": sorted(tables, key=lambda item: (item["layer"], item["table"])),
-            }}, sort_keys=True)
+                "match_count": len(records),
+                "tables": sorted(records, key=lambda item: (item["catalog"], item["schema"], item["table"])),
+            }, sort_keys=True)
         except Exception as exc:
-            return json.dumps({{"error": _safe_error("catalog_inventory", exc)}}, sort_keys=True)
+            return json.dumps({"error": _safe_error("catalog_inventory", exc)}, sort_keys=True)
 
     @tool
-    def catalog_lineage(
-        table_name: str,
-        lineage_level: str = "ENTITY",
-        column_name: str = "",
-    ) -> str:
-        """Trace one participant table or field through observed AIDP lineage.
-
-        ENTITY returns tables, workflow tasks, notebook paths, dependencies, and
-        runs. COLUMN plus column_name returns field derivations and the exact
-        processing tasks/notebooks recorded for those relations.
-        """
-        normalized_name = table_name.strip().lower()
-        level = lineage_level.strip().upper()
-        requested_column = column_name.strip()
-        if (
-            not normalized_name
-            or re.fullmatch(r"[a-z][a-z0-9_.]*", normalized_name) is None
-            or _contains_foreign_participant(normalized_name)
-        ):
-            return json.dumps({{"error": "table is outside this participant catalog"}})
-        if level not in {{"ENTITY", "COLUMN"}}:
-            return json.dumps({{"error": "lineage_level must be ENTITY or COLUMN"}})
-        if requested_column:
-            if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", requested_column) is None:
-                return json.dumps({{"error": "column_name is invalid"}})
-            level = "COLUMN"
+    def catalog_lineage(table_name: str, catalog_name: str = "", schema_name: str = "", lineage_level: str = "ENTITY", column_name: str = "") -> str:
+        """Trace entity or column lineage for one uniquely resolved Master Catalog table."""
+        requested = table_name.strip()
+        level = "COLUMN" if column_name.strip() else lineage_level.strip().upper()
+        if not requested or not IDENTIFIER.fullmatch(requested) or level not in {"ENTITY", "COLUMN"}:
+            return json.dumps({"error": "table_name or lineage_level is invalid"})
+        if catalog_name == "oci_medallion" and schema_name == "oci_artifacts":
+            return json.dumps({"error": "the governance control schema is excluded"})
         try:
-            catalog_key, schemas = _catalog_contract(session, signer)
-            tables = [
-                table
-                for layer in LAYERS
-                for table in _catalog_tables(
-                    session,
-                    signer,
-                    catalog_key,
-                    schemas,
-                    layer,
-                )
-            ]
-            matches = _table_candidates(tables, normalized_name)
+            records = _table_records(session, signer, True, requested, catalog_name, schema_name)
+            matches = [item for item in records if requested.casefold() in {
+                item["table"].casefold(),
+                f"{item['schema']}.{item['table']}".casefold(),
+                f"{item['catalog']}.{item['schema']}.{item['table']}".casefold(),
+            }]
             if len(matches) != 1:
-                return json.dumps({{
-                    "error": "table was not found uniquely in this participant catalog",
-                    "candidates": sorted(table["table"] for table in matches),
-                }})
+                return json.dumps({
+                    "error": "table was not found uniquely",
+                    "candidates": sorted(f"{item['catalog']}.{item['schema']}.{item['table']}" for item in matches),
+                })
             table = matches[0]
-            anchor = table["qualified_name"]
-            resolved_column = None
-            if requested_column:
-                detail, _ = _request(
-                    session,
-                    signer,
-                    "GET",
-                    f"/tables/{{quote(table['key'], safe='')}}",
-                )
-                columns = [
-                    _column_record(column)
-                    for column in (
-                        detail.get("tableFields")
-                        or detail.get("columns")
-                        or detail.get("columnDefinitions")
-                        or []
-                    )
-                    if isinstance(column, dict)
-                ]
-                column_matches = [
-                    column
-                    for column in columns
-                    if column["name"].casefold() == requested_column.casefold()
-                ]
-                if len(column_matches) != 1:
-                    return json.dumps({{
-                        "error": "column was not found uniquely in the selected table",
-                        "available_columns": sorted(column["name"] for column in columns),
-                    }})
-                resolved_column = column_matches[0]
+            if column_name and sum(column["name"].casefold() == column_name.casefold() for column in table["columns"]) != 1:
+                return json.dumps({"error": "column was not found uniquely in the selected table"})
             graph, _ = _request(
                 session,
                 signer,
                 "POST",
                 "/actions/fetchLineage",
-                params={{"limit": "400" if level == "COLUMN" else "100"}},
-                payload={{
-                    "anchorNode": anchor,
-                    "direction": "BOTH",
-                    "maxDepth": 8,
-                    "level": level,
-                    "shouldIncludeEdges": True,
-                }},
+                params={"limit": "400" if level == "COLUMN" else "100"},
+                payload={"anchorNode": table["qualified_name"], "direction": "BOTH", "maxDepth": 8, "level": level, "shouldIncludeEdges": True},
             )
-            if _contains_foreign_participant(graph):
-                return json.dumps({{"error": "lineage response crossed the participant boundary"}})
-            if resolved_column:
-                graph = _column_lineage_component(
-                    graph,
-                    table["table"],
-                    resolved_column["name"],
-                )
-                if not graph["nodes"]:
-                    return json.dumps({{
-                        "error": "column exists but no observed column lineage was found"
-                    }})
-            process_graph = None
-            if level == "COLUMN":
-                process_graph, _ = _request(
-                    session,
-                    signer,
-                    "POST",
-                    "/actions/fetchLineage",
-                    params={{"limit": "100"}},
-                    payload={{
-                        "anchorNode": table["qualified_name"],
-                        "direction": "BOTH",
-                        "maxDepth": 8,
-                        "level": "ENTITY",
-                        "shouldIncludeEdges": True,
-                    }},
-                )
-                if _contains_foreign_participant(process_graph):
-                    return json.dumps({{"error": "lineage response crossed the participant boundary"}})
-            return json.dumps({{
-                "participant_key": CONFIG["participant_key"],
-                "catalog": CONFIG["catalog_name"],
-                "anchor": anchor,
-                "table": table["table"],
-                "column": resolved_column,
-                "level": level,
-                "direction": "BOTH",
-                "max_depth": 8,
+            return json.dumps({
                 "evidence_type": "observed_master_catalog_lineage",
-                "lineage": _lineage_summary(session, signer, graph, process_graph),
-            }}, sort_keys=True)
+                "catalog": table["catalog"],
+                "schema": table["schema"],
+                "table": table["table"],
+                "column": column_name or None,
+                "level": level,
+                "lineage": _filter_control_lineage(graph),
+            }, sort_keys=True)
         except Exception as exc:
-            return json.dumps({{"error": _safe_error("catalog_lineage", exc)}}, sort_keys=True)
+            return json.dumps({"error": _safe_error("catalog_lineage", exc)}, sort_keys=True)
 
-    @tool
-    def governance_policy_explain(query_id: str) -> str:
-        """Explain the effective policy for one registered governance query."""
-        try:
-            registered = _registered_query_id(query_id)
-            return json.dumps(
-                _gateway_request("GET", f"/v1/queries/{{quote(registered, safe='')}}:explain"),
-                sort_keys=True,
-            )
-        except Exception as exc:
-            return json.dumps({{"error": _safe_error("governance_policy_explain", exc)}}, sort_keys=True)
-
-    @tool
-    def governed_query(query_id: str, parameters_json: str = "{{}}") -> str:
-        """Execute one registered governance query with validated scalar parameters."""
-        try:
-            registered = _registered_query_id(query_id)
-            parameters = _query_parameters(parameters_json)
-            return json.dumps(
-                _gateway_request(
-                    "POST",
-                    f"/v1/queries/{{quote(registered, safe='')}}:execute",
-                    {{"parameters": parameters}},
-                ),
-                sort_keys=True,
-            )
-        except Exception as exc:
-            return json.dumps({{"error": _safe_error("governed_query", exc)}}, sort_keys=True)
-
-    return [catalog_inventory, catalog_lineage, governance_policy_explain, governed_query]
+    return [catalog_inventory, catalog_lineage]
 
 
 def _error_response(error):
-    return {{"messages": [{{"role": "ai", "content": json.dumps({{"agent_error": error}})}}]}}
+    return {"messages": [{"role": "ai", "content": json.dumps({"agent_error": error})}]}
 
 
 class DataGovernanceAgent:
@@ -860,10 +515,10 @@ class DataGovernanceAgent:
             self.llm = init_oci_llm(OCIAIConf(
                 model_provider="generic",
                 compartment_id=CONFIG["compartment_id"],
-                endpoint=f"https://inference.generativeai.{{CONFIG['region']}}.oci.oraclecloud.com",
+                endpoint=f"https://inference.generativeai.{CONFIG['region']}.oci.oraclecloud.com",
                 model_id=CONFIG["model_id"],
-                model_args={{}},
-                guardrails_config={{"name": "Data governance", "description": "Participant isolation", "policies": []}},
+                model_args={},
+                guardrails_config={"name": "Data governance", "description": "Read-only Master Catalog", "policies": []},
             ))
         except Exception as exc:
             self.setup_error = _safe_error("setup", exc)
@@ -874,27 +529,536 @@ class DataGovernanceAgent:
         if self.setup_error:
             return _error_response(self.setup_error)
         try:
-            agent_args = {{
-                "model": self.llm,
-                "tools": _tools(),
-                "prompt": {system_prompt!r},
-                "debug": False,
-            }}
+            args = {"model": self.llm, "tools": _tools(), "prompt": SYSTEM_PROMPT, "debug": False}
             if checkpointer:
                 try:
-                    agent = create_react_agent(checkpointer=checkpointer, **agent_args)
+                    agent = create_react_agent(checkpointer=checkpointer, **args)
                 except Exception:
                     logger.warning("Checkpointer initialization failed; using a stateless graph", exc_info=True)
-                    agent = create_react_agent(**agent_args)
+                    agent = create_react_agent(**args)
             else:
-                agent = create_react_agent(**agent_args)
-            message = {{"messages": [dict(HumanMessage(content=user_query))]}}
-            return await agent.ainvoke(
-                input=message,
-                config=config,
-            )
+                agent = create_react_agent(**args)
+            return await agent.ainvoke(input={"messages": [dict(HumanMessage(content=user_query))]}, config=config)
         except Exception as exc:
             logger.exception("Governance Agent invocation failed")
             return _error_response(_safe_error("invoke", exc))
 '''
-    return source.encode("utf-8")
+
+
+def agent_source(*, model_id: str, region: str, compartment_id: str, platform_id: str) -> bytes:
+    """Render the global two-tool Agent without user tokens or gateway dependencies."""
+    if not all((model_id, region, compartment_id, platform_id)):
+        raise ValueError("The Agent runtime contract is incomplete")
+    config = json.dumps(
+        {
+            "model_id": model_id,
+            "region": region,
+            "compartment_id": compartment_id,
+            "platform_id": platform_id,
+            "credential_name": GOVERNANCE_CREDENTIAL_NAME,
+        },
+        sort_keys=True,
+    )
+    return (
+        _AGENT_TEMPLATE.replace("__CONFIG_JSON__", config)
+        .replace("__SYSTEM_PROMPT_JSON__", json.dumps(DAMA_SYSTEM_PROMPT))
+        .encode("utf-8")
+    )
+
+
+_SYNC_TEMPLATE = r'''\
+import hashlib
+import json
+import time
+import uuid
+from datetime import datetime, timezone
+from urllib.parse import quote
+
+import aidputils
+import oci
+import requests
+from delta.tables import DeltaTable
+from pyspark.sql import Row
+from pyspark.sql.functions import col, current_timestamp, lit
+
+CONFIG = __SYNC_CONFIG_JSON__
+MODULE_ID = CONFIG["module_id"]
+CONTROL_SCHEMA = "oci_medallion.oci_artifacts"
+API_BASE = (
+    f"https://datalake.{CONFIG['region']}.oci.oraclecloud.com/20260430/"
+    f"aiDataPlatforms/{CONFIG['platform_id']}"
+)
+
+
+def _location(table):
+    return f"oci://oci_artifacts@{CONFIG['namespace']}/oci_artifacts/{table}"
+
+
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CONTROL_SCHEMA}")
+spark.sql(f"""CREATE TABLE IF NOT EXISTS {CONTROL_SCHEMA}.data_governance_config (
+ module_id STRING, schema_version INT, enabled INT, updated_at TIMESTAMP, updated_by STRING
+) USING DELTA LOCATION '{_location("data_governance_config")}'""")
+spark.sql(f"""CREATE TABLE IF NOT EXISTS {CONTROL_SCHEMA}.data_governance_metadata (
+ object_id STRING, catalog_key STRING, catalog_guid STRING, catalog_name STRING, schema_key STRING, schema_name STRING,
+ table_key STRING, table_fingerprint STRING, table_name STRING, table_created_at STRING,
+ table_created_by STRING, entity_type STRING, column_key STRING, column_name STRING, column_ordinal INT,
+ data_type STRING, description STRING, fingerprint STRING, source_version STRING,
+ identity_status STRING, is_deleted INT, created_at TIMESTAMP, updated_at TIMESTAMP, deleted_at TIMESTAMP
+) USING DELTA LOCATION '{_location("data_governance_metadata")}'""")
+spark.sql(f"""CREATE TABLE IF NOT EXISTS {CONTROL_SCHEMA}.data_governance_access_policy (
+ permission_id STRING, object_id STRING, group_ocid STRING, group_name STRING, has_access INT,
+ updated_at TIMESTAMP, updated_by STRING
+) USING DELTA LOCATION '{_location("data_governance_access_policy")}'""")
+spark.sql(f"""CREATE TABLE IF NOT EXISTS {CONTROL_SCHEMA}.data_governance_sync_state (
+ source STRING, snapshot_version STRING, snapshot_hash STRING, status STRING, observed_count BIGINT,
+ inserted_count BIGINT, updated_count BIGINT, deleted_count BIGINT, started_at TIMESTAMP,
+ last_success_at TIMESTAMP, error_code STRING
+) USING DELTA LOCATION '{_location("data_governance_sync_state")}'""")
+spark.sql(f"""MERGE INTO {CONTROL_SCHEMA}.data_governance_config t
+USING (SELECT '{MODULE_ID}' module_id, 1 schema_version, 0 enabled,
+current_timestamp() updated_at, 'installer' updated_by) s ON t.module_id=s.module_id
+WHEN NOT MATCHED THEN INSERT *""")
+
+def _validated_enabled(rows):
+    if len(rows) != 1 or rows[0]["enabled"] not in (0, 1):
+        raise ValueError("The governance config singleton is invalid")
+    return int(rows[0]["enabled"])
+
+
+def _sync_state_frame(**values):
+    return spark.createDataFrame([Row(**values)], schema="""
+        source STRING, snapshot_version STRING, snapshot_hash STRING, status STRING,
+        observed_count BIGINT, inserted_count BIGINT, updated_count BIGINT, deleted_count BIGINT,
+        started_at TIMESTAMP, last_success_at TIMESTAMP, error_code STRING
+    """)
+
+
+started = datetime.now(timezone.utc)
+config_rows = spark.table(f"{CONTROL_SCHEMA}.data_governance_config").where(
+    f"module_id='{MODULE_ID}'"
+).limit(2).collect()
+try:
+    config_enabled = _validated_enabled(config_rows)
+except Exception as exc:
+    error_code = hashlib.sha256(type(exc).__name__.encode()).hexdigest()[:16]
+    failed = _sync_state_frame(
+        source="master_catalog", snapshot_version="", snapshot_hash="", status="ERROR",
+        observed_count=0, inserted_count=0, updated_count=0, deleted_count=0,
+        started_at=started, last_success_at=None, error_code=error_code,
+    )
+    DeltaTable.forName(spark, f"{CONTROL_SCHEMA}.data_governance_sync_state").alias("t").merge(
+        failed.alias("s"), "t.source=s.source"
+    ).whenMatchedUpdate(set={"status": "s.status", "started_at": "s.started_at", "error_code": "s.error_code"}).whenNotMatchedInsertAll().execute()
+    raise
+SHOULD_DISABLE = CONFIG["desired_enabled"] is False or (
+    config_enabled == 0
+    and CONFIG["desired_enabled"] is None
+    and not CONFIG["bootstrap_snapshot"]
+)
+
+
+def _credential_signer():
+    values = {
+        key: aidputils.secrets.get(name=CONFIG["credential_name"], key=key)
+        for key in ("tenancy", "user", "fingerprint", "region", "private_key")
+    }
+    if any(not value for value in values.values()) or values["region"] != CONFIG["region"]:
+        raise RuntimeError("The governance OCI credential is invalid")
+    return oci.signer.Signer(
+        tenancy=values["tenancy"], user=values["user"], fingerprint=values["fingerprint"],
+        private_key_file_location=None, private_key_content=values["private_key"],
+    )
+
+
+def _request(session, signer, method, path, *, params=None, payload=None):
+    response = session.request(
+        method, API_BASE + path, auth=signer, params=params,
+        json=payload,
+        headers={"Accept": "application/json"}, timeout=(10, 60),
+    )
+    response.raise_for_status()
+    return (response.json() if response.content else {}), response.headers
+
+
+def _list(session, signer, path, params=None):
+    result, page = [], None
+    seen_pages = set()
+    for _ in range(1000):
+        query = {"limit": "100", **(params or {})}
+        if page:
+            query["page"] = page
+        body, headers = _request(session, signer, "GET", path, params=query)
+        if isinstance(body, list):
+            values = body
+        elif isinstance(body, dict) and ("items" in body or "Items" in body):
+            values = body.get("items") if "items" in body else body.get("Items")
+        else:
+            raise RuntimeError("AIDP returned an invalid paginated response")
+        if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
+            raise RuntimeError("AIDP returned invalid list items")
+        result.extend(values)
+        page = headers.get("opc-next-page") or headers.get("Opc-Next-Page")
+        if not page:
+            return result
+        if page in seen_pages:
+            raise RuntimeError("AIDP returned a repeated pagination token")
+        seen_pages.add(page)
+    raise RuntimeError("AIDP pagination exceeded the safety limit")
+
+
+def _name(item):
+    return str(item.get("displayName") or item.get("name") or "")
+
+
+def _pause_workflow():
+    if not CONFIG["workspace_key"] or not CONFIG["job_key"]:
+        raise RuntimeError("The disabled governance workflow cannot resolve its own job")
+    session, signer = requests.Session(), _credential_signer()
+    path = f"/workspaces/{quote(CONFIG['workspace_key'], safe='')}/jobs/{quote(CONFIG['job_key'], safe='')}"
+    details, _ = _request(session, signer, "GET", path)
+    payload = {
+        name: details[name]
+        for name in ("name", "path", "description", "maxConcurrentRuns", "jobClusters", "tasks")
+        if name in details
+    }
+    payload["continuous"] = {"pauseStatus": "PAUSED"}
+    _request(session, signer, "PUT", path, payload=payload)
+
+
+def _identity_indexes(existing):
+    by_key, by_exact, by_table = {}, {}, {}
+    for item in existing:
+        fingerprint = str(item.get("table_fingerprint") or "")
+        column_key = str(item.get("column_key") or "")
+        if column_key:
+            by_key.setdefault((fingerprint, column_key), []).append(item)
+        if int(item.get("is_deleted") or 0) == 0:
+            by_exact.setdefault((fingerprint, str(item.get("column_name") or "").casefold()), []).append(item)
+        by_table.setdefault(fingerprint, []).append(item)
+    return by_key, by_exact, by_table
+
+
+def _unique_existing_id(candidates, used):
+    if len(candidates) > 1:
+        raise RuntimeError("The control metadata contains ambiguous column identities")
+    if not candidates:
+        return None
+    object_id = candidates[0]["object_id"]
+    if object_id in used:
+        raise RuntimeError("The source snapshot contains duplicate column identities")
+    return object_id
+
+
+def _existing_column_id(column, by_key, by_exact, used):
+    fingerprint = column["table_fingerprint"]
+    column_key = str(column.get("column_key") or "")
+    object_id = _unique_existing_id(
+        by_key.get((fingerprint, column_key), []) if column_key else [], used
+    )
+    if object_id is not None:
+        return object_id
+    return _unique_existing_id(
+        by_exact.get((fingerprint, column["column_name"].casefold()), []), used
+    )
+
+
+def _has_retired_name(column, table_history):
+    if column.get("column_key"):
+        return False
+    column_name = str(column["column_name"]).casefold()
+    return any(
+        int(item.get("is_deleted") or 0) == 1
+        and str(item.get("column_name") or "").casefold() == column_name
+        for item in table_history
+    )
+
+
+def _rename_column_id(columns, candidates, table_history):
+    if len(columns) != 1:
+        return None
+    if len(candidates) != 1:
+        return None
+    column, candidate = columns[0], candidates[0]
+    if int(column["column_ordinal"]) != int(candidate["column_ordinal"]):
+        return None
+    if column["data_type"].casefold() != candidate["data_type"].casefold():
+        return None
+    if _has_retired_name(column, table_history):
+        return None
+    return candidate["object_id"]
+
+
+def _new_column_id(column, fingerprint, table_history):
+    stable_identity = str(column.get("column_key") or "")
+    if not stable_identity:
+        column_name = str(column["column_name"]).casefold()
+        generation = 1 + sum(
+            str(item.get("column_name") or "").casefold() == column_name
+            and int(item.get("is_deleted") or 0) == 1
+            for item in table_history
+        )
+        stable_identity = (
+            f"{column_name}:source_version={column.get('source_version') or ''}:"
+            f"fingerprint={column.get('fingerprint') or ''}:generation={generation}"
+        )
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"AIDP_MASTER_CATALOG:{fingerprint}:{stable_identity}",
+    ))
+
+
+def _resolve_identities(incoming, existing):
+    by_key, by_exact, by_table = _identity_indexes(existing)
+    resolved, unmatched, used = [], {}, set()
+    for column in incoming:
+        fingerprint = column["table_fingerprint"]
+        object_id = _existing_column_id(column, by_key, by_exact, used)
+        if object_id is None:
+            unmatched.setdefault(fingerprint, []).append(column)
+            continue
+        resolved.append((column, object_id, "EXACT"))
+        used.add(object_id)
+    for fingerprint, columns in unmatched.items():
+        table_history = by_table.get(fingerprint, [])
+        candidates = [
+            item for item in table_history
+            if item["object_id"] not in used and int(item["is_deleted"] or 0) == 0
+        ]
+        object_id = _rename_column_id(columns, candidates, table_history)
+        if object_id is not None:
+            resolved.append((columns[0], object_id, "INFERRED_RENAME"))
+            used.add(object_id)
+            continue
+        for column in columns:
+            resolved.append((column, _new_column_id(column, fingerprint, table_history), "NEW"))
+    return resolved
+
+
+def _metadata_fingerprint(*values):
+    return hashlib.sha256(json.dumps(values, separators=(",", ":")).encode()).hexdigest()
+
+
+def _change_counts(incoming, existing, unchanged=False):
+    def value(item, name, default=None):
+        return item.get(name, default) if isinstance(item, dict) else getattr(item, name, default)
+
+    existing_by_id = {str(value(row, "object_id", "")): row for row in existing}
+    incoming_by_id = {str(value(row, "object_id", "")): row for row in incoming}
+    if unchanged:
+        return 0, 0, 0
+    inserted = sum(object_id not in existing_by_id for object_id in incoming_by_id)
+    updated = sum(
+        object_id in existing_by_id
+        and (
+            str(value(existing_by_id[object_id], "fingerprint", "") or "")
+            != str(value(row, "fingerprint", "") or "")
+            or int(value(existing_by_id[object_id], "is_deleted", 0) or 0) != 0
+        )
+        for object_id, row in incoming_by_id.items()
+    )
+    deleted = sum(
+        int(value(row, "is_deleted", 0) or 0) == 0 and object_id not in incoming_by_id
+        for object_id, row in existing_by_id.items()
+    )
+    return inserted, updated, deleted
+
+
+def _snapshot():
+    session, signer = requests.Session(), _credential_signer()
+    existing = [row.asDict(recursive=True) for row in spark.table(f"{CONTROL_SCHEMA}.data_governance_metadata").collect()]
+    incoming = []
+    seen_table_fingerprints = {}
+    for catalog in _list(session, signer, "/catalogs"):
+        state = str(catalog.get("lifecycleState") or catalog.get("state") or "").upper()
+        if state != "ACTIVE" or not catalog.get("key"):
+            continue
+        catalog_guid = str(catalog.get("catalogGuid") or catalog["key"])
+        for schema in _list(session, signer, "/schemas", {"catalogKey": str(catalog["key"])}):
+            if not schema.get("key") or (_name(catalog) == "oci_medallion" and _name(schema) == "oci_artifacts"):
+                continue
+            for table in _list(session, signer, "/tables", {"catalogKey": str(catalog["key"]), "schemaKey": str(schema["key"])}):
+                table_key = str(table.get("key") or "")
+                if not table_key:
+                    continue
+                detail, _ = _request(session, signer, "GET", f"/tables/{quote(table_key, safe='')}")
+                created_at = str(detail.get("timeCreated") or "")
+                created_by = str(detail.get("createdBy") or "")
+                entity_type = str(detail.get("entityType") or "")
+                if not entity_type:
+                    raise RuntimeError("AIDP returned a table without entityType")
+                identity = "\0".join((catalog_guid, created_at, created_by, entity_type))
+                if not created_at or not created_by:
+                    identity = "\0".join((catalog_guid, table_key))
+                table_fingerprint = hashlib.sha256(identity.encode()).hexdigest()
+                prior_table = seen_table_fingerprints.setdefault(table_fingerprint, table_key)
+                if prior_table != table_key:
+                    raise RuntimeError("AIDP returned ambiguous table creation identities")
+                columns = detail.get("tableFields") or detail.get("columns") or detail.get("columnDefinitions")
+                if not isinstance(columns, list) or not all(isinstance(column, dict) for column in columns):
+                    raise RuntimeError("AIDP returned invalid table columns")
+                for fallback_ordinal, column in enumerate(columns, start=1):
+                    name = str(column.get("fieldName") or column.get("displayName") or column.get("name") or "")
+                    data_type = str(column.get("fieldType") or column.get("dataType") or column.get("type") or "")
+                    if not name or not data_type:
+                        raise RuntimeError("AIDP returned an incomplete column")
+                    source_ordinal = column.get("fieldPosition")
+                    if source_ordinal is None:
+                        source_ordinal = column.get("ordinalPosition")
+                    try:
+                        ordinal = fallback_ordinal if source_ordinal is None else int(source_ordinal)
+                    except (TypeError, ValueError) as exc:
+                        raise RuntimeError("AIDP returned an invalid column ordinal") from exc
+                    description = str(column.get("fieldDescription") or column.get("description") or column.get("comment") or "")
+                    catalog_name = _name(catalog)
+                    schema_name = _name(schema)
+                    table_name = _name(detail) or _name(table)
+                    catalog_key = str(catalog["key"])
+                    schema_key = str(schema["key"])
+                    column_key = str(column.get("key") or column.get("id") or "")
+                    source_version = str(detail.get("timeUpdated") or table.get("timeUpdated") or "")
+                    fingerprint = _metadata_fingerprint(
+                        catalog_key, catalog_guid, catalog_name, schema_key, schema_name,
+                        table_key, table_fingerprint, table_name, created_at, created_by,
+                        entity_type, column_key, name, ordinal, data_type, description,
+                        source_version,
+                    )
+                    if not source_version:
+                        source_version = fingerprint
+                    incoming.append({
+                        "catalog_key": catalog_key, "catalog_guid": catalog_guid,
+                        "catalog_name": catalog_name, "schema_key": schema_key,
+                        "schema_name": schema_name, "table_key": table_key,
+                        "table_fingerprint": table_fingerprint, "table_name": table_name,
+                        "table_created_at": created_at, "table_created_by": created_by, "entity_type": entity_type,
+                        "column_key": column_key,
+                        "column_name": name, "column_ordinal": ordinal, "data_type": data_type,
+                        "description": description, "fingerprint": fingerprint,
+                        "source_version": source_version,
+                    })
+    return [
+        Row(**column, object_id=object_id, identity_status=status, is_deleted=0)
+        for column, object_id, status in _resolve_identities(incoming, existing)
+    ], existing
+
+
+if SHOULD_DISABLE:
+    if CONFIG["desired_enabled"] is False:
+        spark.sql(f"UPDATE {CONTROL_SCHEMA}.data_governance_config SET enabled=0, updated_at=current_timestamp(), updated_by='installer' WHERE module_id='{MODULE_ID}'")
+    spark.sql(f"""MERGE INTO {CONTROL_SCHEMA}.data_governance_sync_state t
+    USING (SELECT 'master_catalog' source, 'DISABLED' status, current_timestamp() started_at) s
+    ON t.source=s.source
+    WHEN MATCHED THEN UPDATE SET t.status=s.status, t.started_at=s.started_at, t.error_code=NULL
+    WHEN NOT MATCHED THEN INSERT (source, snapshot_version, snapshot_hash, status, observed_count,
+      inserted_count, updated_count, deleted_count, started_at, last_success_at, error_code)
+      VALUES (s.source, '', '', s.status, 0, 0, 0, 0, s.started_at, NULL, NULL)""")
+    if CONFIG["desired_enabled"] is None:
+        _pause_workflow()
+    dbutils.notebook.exit("DISABLED")
+
+try:
+    records, existing_metadata = _snapshot()
+    snapshot_hash = hashlib.sha256("".join(sorted(row.fingerprint for row in records)).encode()).hexdigest()
+    previous = spark.table(f"{CONTROL_SCHEMA}.data_governance_sync_state").where("source='master_catalog'").limit(1).collect()
+    unchanged = bool(previous and previous[0]["snapshot_hash"] == snapshot_hash and previous[0]["status"] == "SUCCESS")
+    inserted_count, updated_count, deleted_count = _change_counts(
+        records, existing_metadata, unchanged
+    )
+    if not unchanged:
+        target = DeltaTable.forName(spark, f"{CONTROL_SCHEMA}.data_governance_metadata")
+        if records:
+            incoming = (
+                spark.createDataFrame(records)
+                .withColumn("created_at", current_timestamp())
+                .withColumn("updated_at", current_timestamp())
+                .withColumn("deleted_at", lit(None).cast("timestamp"))
+            )
+            target.alias("t").merge(incoming.alias("s"), "t.object_id=s.object_id").whenMatchedUpdate(set={
+                "catalog_key": "s.catalog_key", "catalog_guid": "s.catalog_guid", "catalog_name": "s.catalog_name", "schema_key": "s.schema_key",
+                "schema_name": "s.schema_name", "table_key": "s.table_key", "table_name": "s.table_name",
+                "table_fingerprint": "s.table_fingerprint", "table_created_at": "s.table_created_at",
+                "table_created_by": "s.table_created_by", "entity_type": "s.entity_type",
+                "column_key": "s.column_key", "column_name": "s.column_name", "column_ordinal": "s.column_ordinal",
+                "data_type": "s.data_type", "description": "s.description", "fingerprint": "s.fingerprint",
+                "source_version": "s.source_version", "identity_status": "s.identity_status", "is_deleted": "0",
+                "updated_at": "current_timestamp()", "deleted_at": "NULL",
+            }).whenNotMatchedInsertAll().execute()
+        observed = [row.object_id for row in records]
+        deletion_condition = col("is_deleted") == 0
+        if observed:
+            deletion_condition = deletion_condition & (~col("object_id").isin(observed))
+        target.update(
+            condition=deletion_condition,
+            set={"is_deleted": lit(1), "deleted_at": current_timestamp(), "updated_at": current_timestamp()},
+        )
+    now = datetime.now(timezone.utc)
+    state = _sync_state_frame(
+        source="master_catalog", snapshot_version=now.isoformat(), snapshot_hash=snapshot_hash,
+        status="SUCCESS", observed_count=len(records), inserted_count=inserted_count,
+        updated_count=updated_count, deleted_count=deleted_count,
+        started_at=started, last_success_at=now, error_code=None,
+    )
+    DeltaTable.forName(spark, f"{CONTROL_SCHEMA}.data_governance_sync_state").alias("t").merge(
+        state.alias("s"), "t.source=s.source"
+    ).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
+    if CONFIG["desired_enabled"] is not None:
+        enabled = 1 if CONFIG["desired_enabled"] else 0
+        spark.sql(f"UPDATE {CONTROL_SCHEMA}.data_governance_config SET enabled={enabled}, updated_at=current_timestamp(), updated_by='installer' WHERE module_id='{MODULE_ID}'")
+except Exception as exc:
+    error_code = hashlib.sha256(type(exc).__name__.encode()).hexdigest()[:16]
+    failed = _sync_state_frame(
+        source="master_catalog", snapshot_version="", snapshot_hash="", status="ERROR",
+        observed_count=0, inserted_count=0, updated_count=0, deleted_count=0,
+        started_at=started, last_success_at=None, error_code=error_code,
+    )
+    DeltaTable.forName(spark, f"{CONTROL_SCHEMA}.data_governance_sync_state").alias("t").merge(
+        failed.alias("s"), "t.source=s.source"
+    ).whenMatchedUpdate(set={"status": "s.status", "started_at": "s.started_at", "error_code": "s.error_code"}).whenNotMatchedInsertAll().execute()
+    raise
+finally:
+    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+    time.sleep(max(0, 30 - elapsed))
+'''
+
+
+def governance_sync_notebook(
+    *,
+    namespace: str,
+    platform_id: str,
+    region: str,
+    desired_enabled: bool | None,
+    bootstrap_snapshot: bool = False,
+    workspace_key: str = "",
+    job_key: str = "",
+) -> dict[str, Any]:
+    """Return the protected Spark notebook used by the single continuous workflow."""
+    if not all((namespace, platform_id, region)):
+        raise ValueError("The governance synchronization runtime contract is incomplete")
+    config = json.dumps(
+        {
+            "module_id": GOVERNANCE_MODULE_ID,
+            "credential_name": GOVERNANCE_CREDENTIAL_NAME,
+            "namespace": namespace,
+            "platform_id": platform_id,
+            "region": region,
+            "desired_enabled": desired_enabled,
+            "bootstrap_snapshot": bootstrap_snapshot,
+            "workspace_key": workspace_key,
+            "job_key": job_key,
+        },
+        sort_keys=True,
+    )
+    source = _SYNC_TEMPLATE.replace("__SYNC_CONFIG_JSON__", config)
+    return {
+        "cells": [
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": source.splitlines(keepends=True),
+            }
+        ],
+        "metadata": {"language_info": {"name": "python"}},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }

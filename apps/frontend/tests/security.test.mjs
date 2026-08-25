@@ -10,9 +10,10 @@ const styles = await readFile(new URL("../src/styles.css", import.meta.url), "ut
 const viteConfig = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
 const labCatalog = JSON.parse(await readFile(new URL("../../backend/app/labs/catalog.json", import.meta.url), "utf8"));
 
-test("browser storage is limited to the non-secret lab operation", () => {
+test("browser storage is limited to non-secret idempotency keys", () => {
   assert.doesNotMatch(source, /localStorage\.setItem|sessionStorage/);
   assert.match(pollingSource, /aidp-lab\.operation\.\$\{kind\}\.\$\{userId\}\.\$\{labId\}/);
+  assert.match(pollingSource, /aidp-module\.operation\.\$\{kind\}\.\$\{moduleId\}/);
   assert.match(pollingSource, /JSON\.stringify\(operation\)/);
   assert.doesNotMatch(pollingSource, /password|registrationCode|email/i);
 });
@@ -148,26 +149,22 @@ test("settings can rotate the registration code without exposing or persisting i
   assert.doesNotMatch(source, /(?:localStorage|sessionStorage).*registrationCode/);
 });
 
-test("settings separate Workbench, application and governance details into accessible tabs", () => {
+test("settings keep only Workbench and application details in accessible tabs", () => {
   assert.match(source, /className="settings-tabs" role="tablist"/);
   assert.match(source, /role="tab"[\s\S]*aria-controls="settings-panel-workbench"/);
   assert.match(source, /role="tab"[\s\S]*aria-controls="settings-panel-application"/);
-  assert.match(source, /role="tab"[\s\S]*aria-controls="settings-panel-governance"/);
   assert.match(source, /role="tabpanel"[\s\S]*aria-labelledby="settings-tab-workbench"/);
   assert.match(source, /role="tabpanel"[\s\S]*aria-labelledby="settings-tab-application"/);
-  assert.match(source, /role="tabpanel"[\s\S]*aria-labelledby="settings-tab-governance"/);
   assert.match(source, /ArrowLeft[\s\S]*ArrowRight[\s\S]*Home[\s\S]*End/);
-  assert.match(source, /\["workbench", "application", "governance"\]/);
+  assert.match(source, /\["workbench", "application"\]/);
 
   const workbenchPanel = source.indexOf('id="settings-panel-workbench"');
   const applicationPanel = source.indexOf('id="settings-panel-application"');
-  const governancePanel = source.indexOf('id="settings-panel-governance"');
-  const panelsEnd = source.indexOf("{error && (", governancePanel);
-  assert.ok(workbenchPanel > 0 && applicationPanel > workbenchPanel && governancePanel > applicationPanel && panelsEnd > governancePanel);
+  const panelsEnd = source.indexOf("{error && (", applicationPanel);
+  assert.ok(workbenchPanel > 0 && applicationPanel > workbenchPanel && panelsEnd > applicationPanel);
 
   const workbenchSource = source.slice(workbenchPanel, applicationPanel);
-  const applicationSource = source.slice(applicationPanel, governancePanel);
-  const governanceSource = source.slice(governancePanel, panelsEnd);
+  const applicationSource = source.slice(applicationPanel, panelsEnd);
   const serviceEndpoint = workbenchSource.indexOf("AI Data Platform Workbench Service Endpoint");
   const workbenchUrl = workbenchSource.indexOf("AI Data Platform Workbench URL");
   const workbenchOcid = workbenchSource.indexOf("AI Data Platform Workbench OCID");
@@ -175,24 +172,55 @@ test("settings separate Workbench, application and governance details into acces
   assert.doesNotMatch(workbenchSource, /Shared compute/);
   assert.match(applicationSource, /<ApplicationAccessSettings/);
   assert.match(source, /function ApplicationAccessSettings[\s\S]*<SettingsRegistrationCodeField/);
-  assert.doesNotMatch(applicationSource, /AIDP JDBC driver/);
   assert.match(source, /function ApplicationAccessSettings[\s\S]*>\s*Save Settings\s*</);
-  assert.match(governanceSource, /Governance artifact bucket/);
-  assert.match(governanceSource, /Governance Delta schema/);
-  assert.match(governanceSource, /AIDP JDBC driver/);
-  assert.match(governanceSource, /Install JDBC Driver/);
-  assert.match(source, /const governanceGatewayInstalled = jdbcDriverAvailable && Boolean\(governanceGatewayUrl\)/);
-  assert.match(governanceSource, /governanceGatewayInstalled \? \(/);
-  assert.match(governanceSource, /jdbcDriverAvailable \? \(/);
-  assert.match(governanceSource, /Deployment pending/);
-  assert.match(governanceSource, /connect-compute\.html#GUID-B7F594C8-724D-4733-B80D-7A4C9A0CB0A2/);
-  assert.match(governanceSource, /jdbcDriverDownloadImage/);
-  assert.match(source, /title="Install JDBC driver\?"/);
-  assert.match(source, /label="Installing JDBC driver"/);
+  assert.doesNotMatch(source, /AI Data Governance Gateway|governance_gateway|JDBC|\bOKE\b/);
   assert.match(styles, /\.settings-tab\[aria-selected="true"\]/);
   assert.match(styles, /\.settings-panel\[hidden\] \{ display: none; \}/);
   assert.match(styles, /\.settings-tabs \{[^}]*flex-wrap: wrap;[^}]*overflow: visible;/);
   assert.doesNotMatch(styles, /\.settings-tabs \{[^}]*overflow-x: auto;/);
+});
+
+test("production administrators manage one global governance module outside participant labs", () => {
+  assert.match(source, /is_aidp_admin: boolean/);
+  assert.match(source, /operation_type\?: ModuleOperationKind \| null/);
+  assert.match(source, /\/api\/admin\/modules/);
+  assert.match(source, /production && user\.is_aidp_admin && governanceModule/);
+  assert.match(source, /function GovernanceModuleModal/);
+  assert.match(source, /Global production module/);
+  assert.match(source, /type="checkbox"[\s\S]*checked=\{module\.installed \|\| selected\}/);
+  assert.match(source, /AI Data Governance for VSC Extension|module\.display_name/);
+  assert.match(source, /\/modules\/\$\{encodeURIComponent\(governanceModule\.module_id\)\}/);
+  assert.match(source, /kind === "redeploy" \? `\$\{moduleBase\}\/redeploy` : moduleBase/);
+  assert.match(source, /method: "DELETE"/);
+  assert.match(source, /getOrCreateModuleOperation/);
+  assert.match(source, /governanceModule\.operation_id/);
+  assert.match(source, /moduleOperationKind\(module\.status, module\.operation_type\)/);
+  assert.match(source, /moduleOperationsRef\.current\.set/);
+  assert.match(source, /Resume \{recoverableKind === "install" \? "installation"/);
+  assert.match(source, /const refreshed = \(await loadModules\(\)\)/);
+  assert.match(source, /window\.setTimeout\(refresh, 2_000\)/);
+  assert.match(source, /\["installing", "redeploying", "deleting"\]/);
+  assert.match(source, /Redeploy/);
+  assert.match(source, /Delete global governance module\?/);
+  assert.match(source, /four Delta tables and only their prefixes in oci_artifacts/);
+  assert.doesNotMatch(source, /lab_id: "agent"/);
+  assert.match(source, /function participantLabCatalog/);
+  assert.match(source, /\["agent", "ai_data_governance_vsc_extension"\]\.includes\(lab_id\)/);
+  assert.ok(!labCatalog.labs.includes("agent"));
+});
+
+test("unmanaged AIDP administrators retain module access without participant controls", () => {
+  assert.match(source, /user\.managed === false \? \(/);
+  assert.match(source, /<strong>AIDP administrator<\/strong>/);
+  assert.match(source, /<small>Platform administration only<\/small>/);
+  assert.match(source, /production && user\.is_aidp_admin && governanceModule/);
+  assert.match(source, /user\.managed !== false && \([\s\S]*Manage starter kits for/);
+});
+
+test("dialogs make the application shell and footer inert", () => {
+  assert.match(source, /const appRoot = document\.getElementById\("root"\)/);
+  assert.match(source, /if \(appRoot\) appRoot\.inert = true/);
+  assert.match(source, /if \(appRoot\) appRoot\.inert = previousInert \?\? false/);
 });
 
 test("administrator mutates one participant laboratory at a time", () => {
@@ -204,7 +232,7 @@ test("administrator mutates one participant laboratory at a time", () => {
   assert.match(source, /operation_id: operation\.operationId/);
   assert.match(source, /Other starter kits and Identity access are preserved/);
   assert.match(source, /open=\{Boolean\(pendingLabAction\) && !operating\}/);
-  assert.match(source, /aria-busy=\{operating \|\| creating\} inert=\{operating \|\| creating\}/);
+  assert.match(source, /aria-busy=\{operating \|\| creating \|\| moduleOperating\} inert=\{operating \|\| creating \|\| moduleOperating\}/);
   assert.match(source, /operationAbortRef\.current\?\.abort\(\)/);
   assert.match(source, /A participant must keep at least one starter kit/);
   assert.match(source, /disabled=\{!hasChanges \|\| !selectedLabIds\.length\}/);
@@ -233,8 +261,7 @@ test("laboratory manager derives only the requested assignment changes", () => {
   assert.match(source, /Confirm changes/);
   assert.match(source, /lab-assignment-check/);
   assert.match(source, /Redeploy \$\{lab\.display_name\} for \$\{user\.email\}/);
-  assert.match(source, /pendingLabAction\.lab\.lab_id === "agent"/);
-  assert.match(source, /replaces the participant's Agent customizations/);
+  assert.doesNotMatch(source, /pendingLabAction\.lab\.lab_id === "agent"/);
   assert.match(source, /labPhaseLabel\(installed\.phase\)/);
   assert.match(source, /lab\.available \? "Pending" : "Planned"/);
   assert.match(styles, /\.lab-manager-modal \{[^}]*1120px/);

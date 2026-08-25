@@ -30,6 +30,10 @@ locals {
     for layer, config in local.medallion_bucket_configuration : layer => config
     if config.mode == "existing"
   }
+  selected_medallion_bucket_names = [
+    for config in values(local.medallion_bucket_configuration) :
+    lower(config.mode == "new" ? config.new_name : config.existing_name)
+  ]
 }
 
 resource "terraform_data" "validate_medallion_buckets" {
@@ -38,11 +42,18 @@ resource "terraform_data" "validate_medallion_buckets" {
       condition = alltrue([
         for config in values(local.medallion_bucket_configuration) :
         can(regex("^[A-Za-z0-9._-]{1,128}$", config.mode == "new" ? config.new_name : config.existing_name))
-        ]) && can(regex(
-        "^[A-Za-z0-9._-]{1,128}$",
-        var.artifacts_bucket_mode == "new" ? trimspace(var.artifacts_new_bucket_name) : trimspace(var.artifacts_existing_bucket_name)
-      ))
+      ])
       error_message = "Each selected medallion bucket name must contain 1-128 letters, numbers, dots, underscores, or hyphens."
+    }
+
+    precondition {
+      condition     = length(distinct(local.selected_medallion_bucket_names)) == length(local.selected_medallion_bucket_names)
+      error_message = "Landing, bronze, silver, and gold must use four unique Object Storage bucket names."
+    }
+
+    precondition {
+      condition     = !contains(local.selected_medallion_bucket_names, "oci_artifacts")
+      error_message = "The fixed oci_artifacts bucket is reserved for governance artifacts."
     }
   }
 }
@@ -138,7 +149,7 @@ resource "oci_objectstorage_bucket" "artifacts" {
   count          = var.artifacts_bucket_mode == "new" ? 1 : 0
   compartment_id = local.target_compartment
   namespace      = var.objectstorage_namespace
-  name           = trimspace(var.artifacts_new_bucket_name)
+  name           = "oci_artifacts"
   access_type    = "NoPublicAccess"
   storage_tier   = "Standard"
   versioning     = "Disabled"
@@ -155,7 +166,7 @@ resource "oci_objectstorage_bucket" "artifacts" {
 data "oci_objectstorage_bucket" "artifacts" {
   count     = var.artifacts_bucket_mode == "existing" ? 1 : 0
   namespace = var.objectstorage_namespace
-  name      = trimspace(var.artifacts_existing_bucket_name)
+  name      = "oci_artifacts"
 }
 
 # ponytail: prefixes stay virtual until AIDP's first write; add markers only when OCI exposes write readiness.

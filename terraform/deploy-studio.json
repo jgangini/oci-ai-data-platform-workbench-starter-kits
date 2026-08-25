@@ -15,8 +15,8 @@
   },
   "presentation": {
     "title": "Oracle AI Data Platform Workbench Starter Kits",
-    "summary": "Deploys reusable Oracle AI Data Platform Workbench starter kits with governed medallion data layers, Autonomous AI Database agent memory, and an optional AI Data Governance Gateway on private OKE.",
-    "tags": ["VM", "VCN", "OKE", "AI Data Platform Workbench", "Data Governance", "Object Storage", "IAM"],
+    "summary": "Deploys reusable Oracle AI Data Platform Workbench starter kits with governed medallion data layers, Autonomous AI Database agent memory, and native OCI governance extension support.",
+    "tags": ["VM", "VCN", "AI Data Platform Workbench", "Data Governance", "Object Storage", "IAM"],
     "image": "/assets/oci-aidp-cloud-migration-lab.png",
     "image_alt": "Oracle AI Data Platform Workbench Starter Kits architecture",
     "href": "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
@@ -285,54 +285,6 @@
           {"value": "new", "label": "Create new bucket"},
           {"value": "existing", "label": "Use existing bucket"}
         ]
-      },
-      {
-        "name": "artifacts_new_bucket_name",
-        "label": "Artifacts bucket name",
-        "type": "text",
-        "required": true,
-        "default": "oci_artifacts",
-        "group": "medallion",
-        "visible_when": {"field": "artifacts_bucket_mode", "equals": "new"}
-      },
-      {
-        "name": "artifacts_existing_bucket_name",
-        "label": "Existing artifacts bucket",
-        "type": "select",
-        "required": true,
-        "options_source": "oci_active_buckets",
-        "group": "medallion",
-        "visible_when": {"field": "artifacts_bucket_mode", "equals": "existing"}
-      },
-      {
-        "name": "enable_ai_data_governance",
-        "label": "AI Data Governance Gateway",
-        "type": "boolean",
-        "required": false,
-        "default": false,
-        "group": "optional_addons"
-      },
-      {
-        "name": "governance_vault_mode",
-        "label": "OCI Vault mode",
-        "type": "select",
-        "required": true,
-        "default": "new",
-        "group": "optional_addons",
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "options": [
-          {"value": "new", "label": "Create new Vault"},
-          {"value": "existing", "label": "Use existing Vault"}
-        ]
-      },
-      {
-        "name": "existing_governance_vault_ocid",
-        "label": "Existing OCI Vault",
-        "type": "select",
-        "required": true,
-        "options_source": "oci_active_vaults",
-        "group": "optional_addons",
-        "visible_when": {"field": "governance_vault_mode", "equals": "existing"}
       }
     ],
     "email_access_fields": ["deployment_mode", "admin_username", "admin_password", "registration_code"]
@@ -356,27 +308,6 @@
     "autonomous_database_version",
     "autonomous_database_workload",
     "autonomous_database_compute_count",
-    "enable_ai_data_governance",
-    "governance_gateway_cluster_id",
-    "governance_gateway_private_endpoint",
-    "governance_gateway_deploy_pipeline_id",
-    "governance_gateway_deployment_id",
-    "governance_gateway_jdbc_user_ocid",
-    "governance_gateway_oidc_authority",
-    "governance_gateway_oidc_client_id",
-    "governance_gateway_oidc_issuer",
-    "governance_gateway_oidc_audience",
-    "governance_gateway_oidc_scopes",
-    "governance_gateway_url",
-    "governance_gateway_image",
-    "governance_gateway_jdbc_secret_ocid",
-    "governance_gateway_jdbc_driver_bucket",
-    "governance_gateway_jdbc_driver_object",
-    "governance_control_bucket",
-    "governance_control_delta_location",
-    "governance_gateway_tokenization_key_ocid",
-    "governance_gateway_tokenization_crypto_endpoint",
-    "governance_gateway_api_gateway_id",
     "agent_model_id",
     "default_workspace_name",
     "developer_group_ocid",
@@ -399,7 +330,7 @@
     "timeout_seconds": 300,
     "requires_oci_credentials": true,
     "secret_inputs": ["autonomous_database_admin_password", "autonomous_database_wallet_password"],
-    "output_inputs": ["home_region", "operator_user_ocid", "operator_username", "preferred_vm_shape", "availability_domain_index", "governance_gateway_image", "governance_gateway_oidc_authority", "governance_gateway_oidc_issuer", "governance_gateway_oidc_static_jwks_json"],
+    "output_inputs": ["home_region", "operator_user_ocid", "operator_username", "preferred_vm_shape", "availability_domain_index"],
     "runtime_fields": [
       {
         "name": "home_region",
@@ -445,42 +376,6 @@
         "required": true,
         "min_length": 1,
         "max_length": 2
-      },
-      {
-        "name": "governance_gateway_image",
-        "label": "Resolved governance image",
-        "type": "text",
-        "required": false,
-        "pattern": "^[a-z0-9./_-]+(?:\\.[a-z0-9.-]+)?/[a-z0-9./_-]+@sha256:[0-9a-f]{64}$",
-        "min_length": 80,
-        "max_length": 512
-      },
-      {
-        "name": "governance_gateway_oidc_authority",
-        "label": "Resolved OCI Identity Domain",
-        "type": "text",
-        "required": false,
-        "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~/-]+)?$",
-        "min_length": 12,
-        "max_length": 512
-      },
-      {
-        "name": "governance_gateway_oidc_issuer",
-        "label": "Resolved OCI token issuer",
-        "type": "text",
-        "required": false,
-        "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~/-]*)?$",
-        "min_length": 12,
-        "max_length": 512
-      },
-      {
-        "name": "governance_gateway_oidc_static_jwks_json",
-        "label": "Resolved OCI signing keys",
-        "type": "text",
-        "required": false,
-        "pattern": "^\\[\\{.*\\}\\]$",
-        "min_length": 64,
-        "max_length": 4096
       }
     ]
   },

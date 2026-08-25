@@ -1,21 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
 import logging
-import os
 import re
-import tempfile
 import time
-import zipfile
 from contextlib import asynccontextmanager
-from pathlib import Path, PurePosixPath
 from typing import Any, AsyncIterator, Callable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .aidp import (
@@ -44,106 +38,6 @@ LOCAL_COOKIE_NAME = "aidp_lab_admin"
 CODE_PATTERN = re.compile(r"^[A-Z]{4}-[0-9]{4}$")
 EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$")
 logger = logging.getLogger(__name__)
-MAX_JDBC_DRIVER_BYTES = 128 * 1024 * 1024
-MAX_JDBC_DRIVER_EXPANDED_BYTES = 512 * 1024 * 1024
-
-
-def _jdbc_object_storage(settings: Settings) -> Any:
-    import oci
-
-    signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-    return oci.object_storage.ObjectStorageClient(
-        {},
-        signer=signer,
-        service_endpoint=f"https://objectstorage.{settings.aidp_region}.oraclecloud.com",
-        retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY,
-    )
-
-
-def _validate_jdbc_driver_archive(path: Path) -> None:
-    if not path.stat().st_size or not zipfile.is_zipfile(path):
-        raise ValueError("Select the ZIP downloaded from AIDP Workbench")
-    with zipfile.ZipFile(path) as archive:
-        members = [item for item in archive.infolist() if not item.is_dir()]
-        if (
-            not members
-            or sum(item.file_size for item in members) > MAX_JDBC_DRIVER_EXPANDED_BYTES
-            or any(
-                PurePosixPath(item.filename.replace("\\", "/")).is_absolute()
-                or ".." in PurePosixPath(item.filename.replace("\\", "/")).parts
-                for item in members
-            )
-            or not any(item.filename.casefold().endswith((".jar", ".zip")) for item in members)
-        ):
-            raise ValueError("The AIDP JDBC driver archive is not valid")
-
-
-def _sync_jdbc_driver_object(settings: Settings, source: Path) -> None:
-    if settings.local_development_mode or not settings.enforce_governed_data_access:
-        return
-    if not all((settings.aidp_region, settings.objectstorage_namespace, settings.governance_control_bucket)):
-        raise RuntimeError("Object Storage is not configured for the governance gateway")
-    client = _jdbc_object_storage(settings)
-    digest = hashlib.md5(usedforsecurity=False)
-    with source.open("rb") as content:
-        for chunk in iter(lambda: content.read(1024 * 1024), b""):
-            digest.update(chunk)
-    with source.open("rb") as body:
-        client.put_object(
-            settings.objectstorage_namespace,
-            settings.governance_control_bucket,
-            settings.governance_jdbc_driver_object,
-            body,
-            content_length=source.stat().st_size,
-            content_md5=base64.b64encode(digest.digest()).decode("ascii"),
-            content_type="application/zip",
-        )
-
-
-def _restore_jdbc_driver_object(settings: Settings, destination: Path) -> bool:
-    if destination.is_file():
-        return True
-    if settings.local_development_mode or not settings.enforce_governed_data_access:
-        return False
-    if not all((settings.aidp_region, settings.objectstorage_namespace, settings.governance_control_bucket)):
-        return False
-    import oci
-
-    try:
-        response = _jdbc_object_storage(settings).get_object(
-            settings.objectstorage_namespace,
-            settings.governance_control_bucket,
-            settings.governance_jdbc_driver_object,
-        )
-    except oci.exceptions.ServiceError as exc:
-        if exc.status == 404:
-            return False
-        raise
-    declared = int(response.headers.get("content-length", 0))
-    if not 1 <= declared <= MAX_JDBC_DRIVER_BYTES:
-        raise ValueError("The stored AIDP JDBC driver size is invalid")
-    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=destination.parent, suffix=".zip", delete=False) as handle:
-            temporary = Path(handle.name)
-            remaining = MAX_JDBC_DRIVER_BYTES + 1
-            while remaining:
-                chunk = response.data.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    break
-                handle.write(chunk)
-                remaining -= len(chunk)
-        if temporary.stat().st_size != declared:
-            raise ValueError("The stored AIDP JDBC driver is incomplete")
-        _validate_jdbc_driver_archive(temporary)
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, destination)
-        temporary = None
-        return True
-    finally:
-        if temporary:
-            temporary.unlink(missing_ok=True)
 HEALTH_SUCCESS_TTL_SECONDS = 30
 HEALTH_FAILURE_TTL_SECONDS = 5
 
@@ -212,6 +106,11 @@ class AdminLabRequest(BaseModel):
 class LabOperationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation_id: UUID
+
+
+class ModuleOperationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_id: UUID | None = None
 
 
 class SettingsRequest(BaseModel):
@@ -538,83 +437,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"username": username, "operator_username": settings.operator_username}
 
     async def admin_settings_payload() -> dict[str, str | bool]:
-        driver = Path(settings.jdbc_driver_file)
-        if not driver.is_file():
-            try:
-                await asyncio.to_thread(_restore_jdbc_driver_object, settings, driver)
-            except Exception:
-                logger.exception("Failed to restore the JDBC driver from private Object Storage")
-        result = app.state.settings_store.get_admin_settings()
-        try:
-            result.update(await app.state.aidp_factory().connection_access())
-        except (AidpProvisionPending, AidpProvisionError):
-            result.update(compute_name="", jdbc_url="")
-        return result
+        return app.state.settings_store.get_admin_settings()
 
     @app.get("/api/admin/settings")
     async def admin_settings(_admin: str = Depends(require_admin)) -> dict[str, str | bool]:
         return await admin_settings_payload()
-
-    @app.get("/api/admin/aidp/jdbc-driver", response_class=FileResponse)
-    async def download_jdbc_driver(_admin: str = Depends(require_admin)) -> FileResponse:
-        driver = Path(settings.jdbc_driver_file)
-        if not driver.is_file():
-            try:
-                await asyncio.to_thread(_restore_jdbc_driver_object, settings, driver)
-            except Exception:
-                logger.exception("Failed to restore the JDBC driver for an administrator download")
-        if not driver.is_file() or driver.suffix.casefold() != ".zip":
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND,
-                "The AIDP JDBC driver has not been synchronized to this lab VM yet",
-            )
-        return FileResponse(
-            driver,
-            media_type="application/zip",
-            filename="aidp-jdbc-driver.zip",
-        )
-
-    @app.put("/api/admin/aidp/jdbc-driver")
-    async def upload_jdbc_driver(
-        request: Request,
-        _admin: str = Depends(require_admin),
-    ) -> dict[str, bool]:
-        content_length = request.headers.get("content-length")
-        if content_length and (not content_length.isdigit() or int(content_length) > MAX_JDBC_DRIVER_BYTES):
-            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "The JDBC driver exceeds 128 MiB")
-        driver = Path(settings.jdbc_driver_file)
-        driver.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        temporary: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=driver.parent, suffix=".zip", delete=False) as handle:
-                temporary = Path(handle.name)
-                size = 0
-                async for chunk in request.stream():
-                    size += len(chunk)
-                    if size > MAX_JDBC_DRIVER_BYTES:
-                        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "The JDBC driver exceeds 128 MiB")
-                    handle.write(chunk)
-            if not temporary:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Select the ZIP downloaded from AIDP Workbench")
-            try:
-                _validate_jdbc_driver_archive(temporary)
-            except ValueError as exc:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-            try:
-                _sync_jdbc_driver_object(settings, temporary)
-            except Exception:
-                logger.exception("Failed to synchronize the validated JDBC driver to private Object Storage")
-                raise HTTPException(
-                    status.HTTP_502_BAD_GATEWAY,
-                    "The JDBC driver could not be synchronized to the governance gateway",
-                ) from None
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, driver)
-            temporary = None
-            return {"jdbc_driver_available": True}
-        finally:
-            if temporary:
-                temporary.unlink(missing_ok=True)
 
     @app.put("/api/admin/settings")
     async def update_admin_settings(payload: SettingsRequest, _admin: str = Depends(require_admin)) -> dict[str, str | bool]:
@@ -629,6 +456,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_identity()
         client = app.state.identity_factory()
         users = [dict(user) for user in await client.list_lab_users()]
+        platform_admin_ocids: set[str] = set()
+        if settings.aidp_ready():
+            try:
+                admin_user_ocids, admin_group_ocids = (
+                    await app.state.aidp_factory().platform_admin_principals()
+                )
+                by_id = {str(user.get("id") or ""): user for user in users}
+                for user in await client.list_users_by_principals(
+                    admin_user_ocids, admin_group_ocids
+                ):
+                    by_id.setdefault(str(user.get("id") or ""), dict(user))
+                    user_ocid = str(user.get("ocid") or "")
+                    if user_ocid.startswith("ocid1.user."):
+                        platform_admin_ocids.add(user_ocid)
+                users = list(by_id.values())
+            except (AidpProvisionPending, AidpProvisionError, IdentityPending) as exc:
+                logger.warning("AIDP platform administrator inventory is unavailable (%s)", type(exc).__name__)
         user_ocids = [
             str(user["ocid"])
             for user in users
@@ -641,6 +485,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except (AidpProvisionPending, AidpProvisionError) as exc:
                 logger.warning("AIDP participant lab inventory is unavailable (%s)", type(exc).__name__)
         for user in users:
+            user["is_aidp_admin"] = str(user.get("ocid") or "") in platform_admin_ocids
             materials = assigned_labs.get(str(user.get("ocid") or ""), [])
             user["participant_code"] = materials[0].participant_code if materials else None
             user["labs"] = [
@@ -654,7 +499,139 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 for material in materials
             ]
             user.pop("ocid", None)
-        return {"users": users}
+        return {"users": sorted(users, key=lambda item: (not item["is_aidp_admin"], str(item.get("email") or "").casefold()))}
+
+    async def selected_platform_admin(user_id: str) -> dict[str, Any]:
+        require_identity()
+        if settings.deployment_mode != "production":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Governance modules are not available in laboratory mode")
+        if not settings.aidp_ready():
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
+        aidp = app.state.aidp_factory()
+        try:
+            admin_user_ocids, admin_group_ocids = await aidp.platform_admin_principals()
+            users = await app.state.identity_factory().list_users_by_principals(
+                admin_user_ocids, admin_group_ocids
+            )
+        except IdentityPending as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        except (AidpProvisionPending, AidpProvisionError) as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        matches = [user for user in users if str(user.get("id") or "") == user_id]
+        if not matches:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "The selected user is not an AI_DATA_PLATFORM_ADMIN")
+        return dict(matches[0])
+
+    async def module_pending_response(
+        operation_id: str, operation_type: str, exc: AidpProvisionPending
+    ) -> JSONResponse:
+        try:
+            modules = await app.state.aidp_factory().list_modules()
+        except (AidpProvisionPending, AidpProvisionError):
+            modules = []
+        candidate = modules[0] if modules else {}
+        pending_status = {
+            "install": "installing",
+            "redeploy": "redeploying",
+            "delete": "deleting",
+        }[operation_type]
+        reuses_global_install = bool(
+            operation_type == "install"
+            and candidate.get("operation_id")
+            and candidate.get("operation_type") == "install"
+            and candidate.get("status") == pending_status
+        )
+        module = (
+            candidate
+            if candidate.get("operation_id") == operation_id or reuses_global_install
+            else {}
+        )
+        return JSONResponse(status_code=202, content={
+            "module_id": module.get("module_id") or "ai_data_governance_vsc_extension",
+            "display_name": module.get("display_name") or "AI Data Governance for VSC Extension",
+            "status": str(module.get("status") or pending_status),
+            "installed": bool(module.get("installed", True)),
+            "phase": exc.phase,
+            "operation_id": module.get("operation_id") or operation_id,
+            "operation_type": module.get("operation_type") or operation_type,
+            "enabled": bool(module.get("enabled", candidate.get("enabled", False))),
+            "message": str(exc),
+        })
+
+    @app.get("/api/admin/modules")
+    async def admin_modules(_admin: str = Depends(require_admin)) -> dict[str, list[dict[str, Any]]]:
+        if settings.deployment_mode != "production":
+            return {"modules": []}
+        if not settings.aidp_ready():
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
+        try:
+            return {"modules": await app.state.aidp_factory().list_modules()}
+        except AidpProvisionPending as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        except AidpProvisionError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+
+    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension")
+    async def admin_install_governance_module(
+        user_id: str,
+        payload: ModuleOperationRequest | None = None,
+        _admin: str = Depends(require_admin),
+    ) -> JSONResponse:
+        user = await selected_platform_admin(user_id)
+        operation_id = str(payload.operation_id if payload and payload.operation_id else uuid4())
+        try:
+            result = await app.state.aidp_factory().install_governance_module(
+                str(user["ocid"]), operation_id, role_membership_verified=True
+            )
+        except AidpProvisionPending as exc:
+            return await module_pending_response(operation_id, "install", exc)
+        except AidpProvisionConflict as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        except AidpProvisionError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        result["message"] = "AI Data Governance for VSC Extension is active."
+        return JSONResponse(content=result)
+
+    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension/redeploy")
+    async def admin_redeploy_governance_module(
+        user_id: str,
+        payload: ModuleOperationRequest | None = None,
+        _admin: str = Depends(require_admin),
+    ) -> JSONResponse:
+        user = await selected_platform_admin(user_id)
+        operation_id = str(payload.operation_id if payload and payload.operation_id else uuid4())
+        try:
+            result = await app.state.aidp_factory().redeploy_governance_module(
+                str(user["ocid"]), operation_id, role_membership_verified=True
+            )
+        except AidpProvisionPending as exc:
+            return await module_pending_response(operation_id, "redeploy", exc)
+        except AidpProvisionConflict as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        except AidpProvisionError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        result["message"] = "AI Data Governance for VSC Extension was redeployed."
+        return JSONResponse(content=result)
+
+    @app.delete("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension")
+    async def admin_delete_governance_module(
+        user_id: str,
+        operation_id: UUID,
+        _admin: str = Depends(require_admin),
+    ) -> JSONResponse:
+        user = await selected_platform_admin(user_id)
+        try:
+            result = await app.state.aidp_factory().delete_governance_module(
+                str(user["ocid"]), str(operation_id), role_membership_verified=True
+            )
+        except AidpProvisionPending as exc:
+            return await module_pending_response(str(operation_id), "delete", exc)
+        except AidpProvisionConflict as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        except AidpProvisionError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        result["message"] = "AI Data Governance for VSC Extension was deleted completely."
+        return JSONResponse(content=result)
 
     @app.post("/api/admin/users")
     async def admin_create_user(payload: AdminUserRequest, _admin: str = Depends(require_admin)) -> JSONResponse:

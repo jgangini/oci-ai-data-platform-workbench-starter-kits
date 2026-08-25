@@ -4,6 +4,7 @@ import threading
 import time
 
 import httpx
+import pytest
 
 from app.config import Settings
 from app.identity import IdentityClient, IdentityConflict, IdentityPending, IdentityRejected, LocalIdentityClient
@@ -124,6 +125,84 @@ def test_group_user_listing_paginates() -> None:
 
     asyncio.run(run())
     assert starts == [1, 101]
+
+
+def test_platform_role_principals_resolve_group_members_and_deduplicate_users() -> None:
+    direct_ocid = "ocid1.user.oc1..ada"
+    group_ocid = "ocid1.group.oc1..platform-admins"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        filter_expression = request.url.params["filter"]
+        if request.url.path.endswith("/Groups"):
+            assert filter_expression == f"ocid eq {json.dumps(group_ocid)}"
+            assert request.url.params["count"] == "2"
+            return httpx.Response(200, json={
+                "Resources": [{"id": "group-id", "ocid": group_ocid}],
+                "totalResults": 1,
+            })
+        if filter_expression == f"ocid eq {json.dumps(direct_ocid)}":
+            resources = [{
+                "id": "ada-id", "ocid": direct_ocid, "userName": "ada@example.com",
+                "displayName": "Ada", "active": True, "externalId": "lab",
+            }]
+        elif filter_expression == f"groups.value eq {json.dumps('group-id')}":
+            resources = [
+                {
+                    "id": "ada-id", "ocid": direct_ocid, "userName": "ada@example.com",
+                    "displayName": "Ada", "active": True, "externalId": "lab",
+                },
+                {
+                    "id": "grace-id", "ocid": "ocid1.user.oc1..grace",
+                    "userName": "grace@example.com", "displayName": "Grace",
+                    "active": True,
+                },
+            ]
+        else:
+            raise AssertionError(f"unexpected filter: {filter_expression}")
+        return httpx.Response(200, json={"Resources": resources, "totalResults": len(resources)})
+
+    async def run() -> None:
+        client = IdentityClient(
+            Settings(identity_domain_url="https://identity.example.test", lab_marker="lab"),
+            client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        users = await client.list_users_by_principals({direct_ocid}, {group_ocid})
+        assert [(user["email"], user["managed"]) for user in users] == [
+            ("ada@example.com", True),
+            ("grace@example.com", False),
+        ]
+        await client.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "groups",
+    [
+        [],
+        [
+            {"id": "first", "ocid": "ocid1.group.oc1..platform-admins"},
+            {"id": "second", "ocid": "ocid1.group.oc1..platform-admins"},
+        ],
+    ],
+)
+def test_platform_role_group_resolution_fails_closed(groups: list[dict]) -> None:
+    group_ocid = "ocid1.group.oc1..platform-admins"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/Groups")
+        return httpx.Response(200, json={"Resources": groups, "totalResults": len(groups)})
+
+    async def run() -> None:
+        client = IdentityClient(
+            Settings(identity_domain_url="https://identity.example.test"),
+            client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        with pytest.raises(IdentityPending):
+            await client.list_users_by_principals(set(), {group_ocid})
+        await client.close()
+
+    asyncio.run(run())
 
 
 def test_identity_domain_rejection_is_safe() -> None:
@@ -529,6 +608,11 @@ def test_local_identity_demotes_existing_active_user_during_preparation() -> Non
 
         await client.activate_registration(reconciled.user_id)
         assert (await client.list_lab_users())[0]["status"] == "active"
+
+        group_ocid = "ocid1.group.oc1..platform-admins"
+        client.group_members[group_ocid] = {created.user_ocid}
+        inherited = await client.list_users_by_principals(set(), {group_ocid})
+        assert [user["id"] for user in inherited] == [created.user_id]
 
     asyncio.run(run())
 

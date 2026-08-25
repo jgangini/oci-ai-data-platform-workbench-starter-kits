@@ -330,6 +330,68 @@ class IdentityClient:
             )
         return sorted(users, key=lambda item: (item["status"], item["email"].lower()))
 
+    async def list_users_by_ocids(self, user_ocids: set[str]) -> list[dict[str, Any]]:
+        """Resolve platform-role members even when the starter kit did not create them."""
+        return await self.list_users_by_principals(user_ocids, set())
+
+    async def list_users_by_principals(
+        self,
+        user_ocids: set[str],
+        group_ocids: set[str],
+    ) -> list[dict[str, Any]]:
+        """Resolve direct users and every user inherited through an OCI group role assignee."""
+        users_by_id: dict[str, dict[str, Any]] = {}
+        for user_ocid in sorted(user_ocids):
+            if not user_ocid.startswith("ocid1.user."):
+                continue
+            matches = await self._users_matching(f"ocid eq {_scim_literal(user_ocid)}")
+            if len(matches) > 1:
+                raise IdentityPending("Identity Domains returned duplicate users for one OCI identifier")
+            if not matches:
+                continue
+            user = matches[0]
+            users_by_id[str(user["id"])] = _platform_role_user(
+                user, user_ocid, self.settings.lab_marker
+            )
+        for group_ocid in sorted(group_ocids):
+            response = await self._request(
+                "GET",
+                "/admin/v1/Groups",
+                params={
+                    "filter": f"ocid eq {_scim_literal(group_ocid)}",
+                    "count": 2,
+                    "attributes": "id,ocid",
+                },
+            )
+            response.raise_for_status()
+            body = response.json()
+            matches = body.get("Resources", []) if isinstance(body, dict) else []
+            resource_count = len(matches) if isinstance(matches, list) else -1
+            try:
+                total_results = int(body.get("totalResults", resource_count))
+            except (TypeError, ValueError):
+                total_results = -1
+            if not isinstance(matches, list) or total_results != 1 or resource_count != 1:
+                raise IdentityPending(
+                    "Identity Domains has not published exactly one administrator group yet"
+                )
+            group = matches[0]
+            if (
+                not isinstance(group, dict)
+                or str(group.get("ocid") or "") != group_ocid
+                or not group.get("id")
+            ):
+                raise IdentityPending(
+                    "Identity Domains has not published exactly one administrator group yet"
+                )
+            for user in await self._users_in_group(str(group["id"])):
+                user_id, user_ocid = _user_coordinates(user)
+                users_by_id.setdefault(
+                    user_id,
+                    _platform_role_user(user, user_ocid, self.settings.lab_marker),
+                )
+        return list(users_by_id.values())
+
 
 class LocalIdentityClient:
     """In-memory Identity Domains substitute for the local Docker profile only."""
@@ -337,6 +399,7 @@ class LocalIdentityClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.users: dict[str, dict[str, Any]] = {}
+        self.group_members: dict[str, set[str]] = {}
 
     async def close(self) -> None:
         return None
@@ -379,6 +442,27 @@ class LocalIdentityClient:
     async def list_lab_users(self) -> list[dict[str, Any]]:
         return sorted(self.users.values(), key=lambda item: item["email"].casefold())
 
+    async def list_users_by_ocids(self, user_ocids: set[str]) -> list[dict[str, Any]]:
+        return [
+            user
+            for user in self.users.values()
+            if str(user.get("ocid") or "") in user_ocids
+        ]
+
+    async def list_users_by_principals(
+        self,
+        user_ocids: set[str],
+        group_ocids: set[str],
+    ) -> list[dict[str, Any]]:
+        resolved_ocids = set(user_ocids)
+        for group_ocid in group_ocids:
+            if group_ocid not in self.group_members:
+                raise IdentityPending(
+                    "Local Identity Domains has not published the administrator group yet"
+                )
+            resolved_ocids.update(self.group_members[group_ocid])
+        return await self.list_users_by_ocids(resolved_ocids)
+
     async def delete_lab_user(self, user_id: str) -> bool:
         return self.users.pop(user_id, None) is not None
 
@@ -413,6 +497,20 @@ def _user_coordinates(user: dict[str, Any]) -> tuple[str, str]:
     if not user_ocid.startswith("ocid1.user."):
         raise IdentityPending("Identity Domains has not published the OCI user OCID yet")
     return user_id, user_ocid
+
+
+def _platform_role_user(
+    user: dict[str, Any], user_ocid: str, lab_marker: str
+) -> dict[str, Any]:
+    return {
+        "id": str(user["id"]),
+        "ocid": user_ocid,
+        "name": user.get("displayName") or user.get("name", {}).get("formatted") or "",
+        "email": user.get("userName", ""),
+        "status": "active",
+        "active": bool(user.get("active", False)),
+        "managed": user.get("externalId") == lab_marker,
+    }
 
 
 def _safe_error(response: Any) -> str:

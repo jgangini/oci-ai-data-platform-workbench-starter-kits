@@ -37,13 +37,10 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: apps/backend/requirements-dev.txt
-      - run: pip install -r apps/backend/requirements-dev.txt -r apps/governance_gateway/requirements.txt
+      - run: pip install -r apps/backend/requirements-dev.txt
       - run: python -m pytest apps/backend/tests terraform/tests
         env:
           SESSION_SECRET_FILE: ${{ runner.temp }}/aidp-lab/session.key
-      - run: python -m pytest apps/governance_gateway/tests
-        env:
-          PYTHONPATH: apps
 
   frontend:
     runs-on: ubuntu-latest
@@ -66,4 +63,3 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -f docker/Dockerfile -t aidp-lab:test .
-      - run: docker build -f apps/governance_gateway/Dockerfile -t aidp-governance-gateway:test .

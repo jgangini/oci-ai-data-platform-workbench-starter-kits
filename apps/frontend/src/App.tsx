@@ -14,21 +14,22 @@ import { labAssignmentChanges } from "./labAssignments";
 
 import {
   ApiRequestError,
+  getOrCreateModuleOperation,
   getOrCreateLabOperation,
+  loadModuleOperation,
   loadLabOperation,
+  moduleOperationKind,
   parseRetryAfter,
+  persistModuleOperation,
   persistLabOperation,
   pollRegistration,
   registrationProgress,
   type RegistrationPhase,
   type RegistrationPhaseValue,
   type RegistrationResponse,
+  type ModuleOperation,
+  type ModuleOperationKind,
 } from "./registrationPoll";
-
-const jdbcDriverDownloadImage = new URL(
-  "./assets/aidp-jdbc-driver-download.png",
-  import.meta.url,
-).href;
 
 type ApiError = { detail?: string };
 type LabUser = {
@@ -39,6 +40,7 @@ type LabUser = {
   labs: AssignedLab[];
   active: boolean;
   managed?: boolean;
+  is_aidp_admin: boolean;
   participant_code?: number | null;
 };
 
@@ -62,15 +64,25 @@ type AdminSettingsResponse = {
   aidp_service_endpoint: string;
   aidp_url: string;
   aidp_platform_id: string;
-  compute_name: string;
-  jdbc_url: string;
-  jdbc_authentication: string;
-  jdbc_driver_available: boolean;
-  governance_gateway_url: string;
-  governance_control_bucket: string;
   deployment_mode: "laboratory" | "production";
   operator_username: string;
   registration_code_configured: boolean;
+};
+type AdminModule = {
+  module_id: "ai_data_governance_vsc_extension" | (string & {});
+  display_name: string;
+  status: "not_installed" | "installing" | "active" | "redeploying" | "deleting" | "error" | (string & {});
+  installed: boolean;
+  operation_id?: string | null;
+  operation_type?: ModuleOperationKind | null;
+  message?: string | null;
+  enabled: boolean;
+};
+type AdminModuleOperationResponse = {
+  status: AdminModule["status"];
+  phase?: RegistrationPhaseValue;
+  operation_id: string;
+  message?: string;
 };
 type PublicConfig = {
   deployment_mode: "laboratory" | "production";
@@ -83,8 +95,35 @@ const fallbackCatalog: CatalogLab[] = [
   { lab_id: "telco_lineage", display_name: "Telco Customer 360 Lineage", description: "Test end-to-end data lineage for prepaid, postpaid and home services, from Landing through Gold with entity and column relationships.", pack_version: "2.0.0", status: "available", available: true },
   { lab_id: "retail", display_name: "Retail", description: "Transform customers, products, orders and order items into sales and customer analytics.", pack_version: "2.0.0", status: "available", available: true },
   { lab_id: "healthcare", display_name: "Healthcare", description: "Prepare patients, providers, appointments and encounters for operational healthcare analysis.", pack_version: "2.0.0", status: "available", available: true },
-  { lab_id: "agent", display_name: "Data Governance Agent", description: "Use an editable participant-scoped agent for catalog inventory, lineage and governed metrics.", pack_version: "1.0.0", status: "available", available: true },
 ];
+
+function participantLabCatalog(catalog: CatalogLab[]) {
+  return catalog.filter(({ lab_id }) => !["agent", "ai_data_governance_vsc_extension"].includes(lab_id));
+}
+
+function moduleOperationKey(moduleId: string, kind: ModuleOperationKind) {
+  return `${moduleId}:${kind}`;
+}
+
+function readStoredModuleOperation(moduleId: string, kind: ModuleOperationKind) {
+  try {
+    return loadModuleOperation(window.localStorage, moduleId, kind);
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStoredModuleOperation(
+  moduleId: string,
+  kind: ModuleOperationKind,
+  operation?: ModuleOperation,
+) {
+  try {
+    persistModuleOperation(window.localStorage, moduleId, kind, operation);
+  } catch {
+    // The server manifest and the in-memory copy remain authoritative.
+  }
+}
 
 function labLabel(catalog: CatalogLab[], labId: string) {
   return catalog.find(({ lab_id }) => lab_id === labId)?.display_name ?? labId;
@@ -163,11 +202,15 @@ function useDialogFocus<Panel extends HTMLElement, Initial extends HTMLElement>(
       }
     };
     const previousOverflow = document.body.style.overflow;
+    const appRoot = document.getElementById("root");
+    const previousInert = appRoot?.inert;
+    if (appRoot) appRoot.inert = true;
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
+      if (appRoot) appRoot.inert = previousInert ?? false;
       previousFocusRef.current?.focus();
     };
   }, [initialFocusRef, open, panelRef]);
@@ -634,6 +677,121 @@ function LabManagerModal({
   );
 }
 
+function GovernanceModuleModal({
+  open,
+  user,
+  module,
+  selected,
+  busy,
+  error,
+  onSelectedChange,
+  onInstall,
+  onResume,
+  onRedeploy,
+  onDelete,
+  onClose,
+}: {
+  open: boolean;
+  user: LabUser | null;
+  module: AdminModule | null;
+  selected: boolean;
+  busy: boolean;
+  error: string;
+  onSelectedChange: (selected: boolean) => void;
+  onInstall: () => void;
+  onResume: (kind: ModuleOperationKind) => void;
+  onRedeploy: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus(open, busy ? () => undefined : onClose, panelRef, closeRef);
+
+  if (!open || !user || !module) return null;
+  const transitioning = ["installing", "redeploying", "deleting"].includes(module.status);
+  const recoverableKind = moduleOperationKind(module.status, module.operation_type);
+  const resumable = Boolean(recoverableKind && module.operation_id);
+  const state = module.status.replaceAll("_", " ");
+  return createPortal(
+    <div className="lab-manager-overlay">
+      <section
+        className="lab-manager-modal governance-module-modal"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        aria-busy={busy || transitioning}
+        tabIndex={-1}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">Global production module</p>
+            <h2 id={titleId}>{module.display_name}</h2>
+            <p id={descriptionId}>Manage the singleton through administrator {user.email}.</p>
+          </div>
+          <span className={`lab-state ${module.enabled ? "installed" : module.installed ? "planned" : "unassigned"}`}>
+            {state}
+          </span>
+        </header>
+        <div className="governance-module-body">
+          <label className="governance-module-option">
+            <input
+              className="lab-assignment-check"
+              type="checkbox"
+              checked={module.installed || selected}
+              disabled={module.installed || busy || transitioning}
+              onChange={(event) => onSelectedChange(event.target.checked)}
+            />
+            <span>
+              <strong>{module.display_name}</strong>
+              <small>Creates the global Agent, dedicated AI Compute and governance control tables in the fixed oci_artifacts bucket.</small>
+            </span>
+          </label>
+          <p className="governance-module-note">
+            This installation is shared by every administrator. AIDP developers can use the Agent, while only AI Data Platform administrators can modify it.
+          </p>
+          {module.status === "error" && module.message && (
+            <p className="lab-manager-error" role="alert">{module.message}</p>
+          )}
+          {error && <p className="lab-manager-error" role="alert">{error}</p>}
+        </div>
+        <footer>
+          <button ref={closeRef} className="secondary" type="button" disabled={busy} onClick={onClose}>
+            Close
+          </button>
+          {resumable ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => recoverableKind && onResume(recoverableKind)}
+            >
+              Resume {recoverableKind === "install" ? "installation" : recoverableKind === "redeploy" ? "redeployment" : "deletion"}
+            </button>
+          ) : module.installed ? (
+            <>
+              <button className="secondary destructive" type="button" disabled={busy || transitioning} onClick={onDelete}>
+                Delete
+              </button>
+              <button type="button" disabled={busy || transitioning} onClick={onRedeploy}>
+                Redeploy
+              </button>
+            </>
+          ) : (
+            <button type="button" disabled={!selected || busy || transitioning} onClick={onInstall}>
+              Install
+            </button>
+          )}
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 function usePublicConfig() {
   const [config, setConfig] = useState<PublicConfig | null>(null);
   useEffect(() => {
@@ -642,10 +800,6 @@ function usePublicConfig() {
       .catch(() => undefined);
   }, []);
   return config;
-}
-
-function useLabCatalog() {
-  return usePublicConfig()?.labs ?? fallbackCatalog;
 }
 
 function useAdminSession() {
@@ -991,7 +1145,7 @@ function RegisterPage({
   initialAdminLogin?: boolean;
 }) {
   const publicConfig = usePublicConfig();
-  const catalog = publicConfig?.labs ?? fallbackCatalog;
+  const catalog = participantLabCatalog(publicConfig?.labs ?? fallbackCatalog);
   const production = publicConfig?.deployment_mode === "production";
   const configLoaded = publicConfig !== null;
   const [adminLoginVisible, setAdminLoginVisible] = useState(initialAdminLogin);
@@ -1495,8 +1649,11 @@ function AdminLoginCard() {
 
 function AdminUsers() {
   const adminSession = useAdminSession();
-  const catalog = useLabCatalog();
+  const publicConfig = usePublicConfig();
+  const catalog = participantLabCatalog(publicConfig?.labs ?? fallbackCatalog);
+  const production = publicConfig?.deployment_mode === "production";
   const [users, setUsers] = useState<LabUser[]>([]);
+  const [modules, setModules] = useState<AdminModule[]>([]);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -1508,6 +1665,8 @@ function AdminUsers() {
   const [draft, setDraft] = useState({ name: "", email: "", lab_ids: ["banking"] as string[] });
   const createAbortRef = useRef<AbortController | null>(null);
   const operationAbortRef = useRef<AbortController | null>(null);
+  const moduleAbortRef = useRef<AbortController | null>(null);
+  const moduleOperationsRef = useRef(new Map<string, ModuleOperation>());
   const [labManagerUserId, setLabManagerUserId] = useState<string | null>(null);
   const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
   const [confirmingLabRemoval, setConfirmingLabRemoval] = useState(false);
@@ -1520,6 +1679,13 @@ function AdminUsers() {
   const [operating, setOperating] = useState(false);
   const [operationProgress, setOperationProgress] = useState<RegistrationResponse | null>(null);
   const [operationError, setOperationError] = useState("");
+  const [moduleManagerUserId, setModuleManagerUserId] = useState<string | null>(null);
+  const [moduleSelected, setModuleSelected] = useState(false);
+  const [moduleLoadError, setModuleLoadError] = useState("");
+  const [moduleOperationError, setModuleOperationError] = useState("");
+  const [moduleOperating, setModuleOperating] = useState(false);
+  const [moduleProgress, setModuleProgress] = useState<RegistrationResponse | null>(null);
+  const [pendingModuleAction, setPendingModuleAction] = useState<ModuleOperationKind | null>(null);
   const [pendingDelete, setPendingDelete] = useState<LabUser | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
@@ -1538,17 +1704,77 @@ function AdminUsers() {
         );
     }
   }
+  async function loadModules() {
+    if (!production) {
+      setModules([]);
+      setModuleLoadError("");
+      return [];
+    }
+    setModuleLoadError("");
+    try {
+      const loaded = (await api<{ modules: AdminModule[] }>("/api/admin/modules")).modules;
+      setModules(loaded);
+      for (const module of loaded) {
+        const recoverableKind = moduleOperationKind(module.status, module.operation_type);
+        for (const kind of ["install", "redeploy", "delete"] as const) {
+          const key = moduleOperationKey(module.module_id, kind);
+          if (recoverableKind === kind) {
+            if (module.operation_id) {
+              const operation = { moduleId: module.module_id, kind, operationId: module.operation_id };
+              moduleOperationsRef.current.set(key, operation);
+              writeStoredModuleOperation(module.module_id, kind, operation);
+            }
+            continue;
+          }
+          moduleOperationsRef.current.delete(key);
+          writeStoredModuleOperation(module.module_id, kind);
+        }
+      }
+      return loaded;
+    } catch (reason) {
+      if (reason instanceof ApiRequestError && reason.status === 401)
+        window.location.assign("/admin/login");
+      else
+        setModuleLoadError(reason instanceof Error ? reason.message : "Unable to load global modules");
+    }
+  }
   useEffect(() => {
     void loadUsers();
     return () => {
       createAbortRef.current?.abort();
       operationAbortRef.current?.abort();
+      moduleAbortRef.current?.abort();
     };
   }, []);
+  useEffect(() => {
+    if (production) void loadModules();
+  }, [production]);
   const visible = users.filter((user) =>
     `${user.name} ${user.email}`.toLowerCase().includes(query.toLowerCase()),
   );
   const labManagerUser = users.find((user) => user.id === labManagerUserId) ?? null;
+  const moduleManagerUser = users.find((user) => user.id === moduleManagerUserId) ?? null;
+  const governanceModule = modules.find(({ module_id }) => module_id === "ai_data_governance_vsc_extension") ?? null;
+  useEffect(() => {
+    if (
+      !moduleManagerUserId ||
+      !governanceModule ||
+      !["installing", "redeploying", "deleting"].includes(governanceModule.status)
+    )
+      return undefined;
+    let cancelled = false;
+    let timeout = 0;
+    const refresh = async () => {
+      await loadModules();
+      if (!cancelled) timeout = window.setTimeout(refresh, 2_000);
+    };
+    timeout = window.setTimeout(refresh, 2_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+    // An error is terminal until an administrator explicitly resumes its manifest operation.
+  }, [moduleManagerUserId, governanceModule?.module_id, governanceModule?.operation_id, governanceModule?.status]);
   async function logout() {
     await api("/api/admin/logout", { method: "POST" });
     window.location.assign("/");
@@ -1777,13 +2003,110 @@ function AdminUsers() {
       setOperating(false);
     }
   }
+
+  async function openModuleManager(user: LabUser) {
+    if (!production || !user.is_aidp_admin || !governanceModule) return;
+    const refreshed = (await loadModules())?.find(
+      ({ module_id }) => module_id === governanceModule.module_id,
+    ) ?? governanceModule;
+    setModuleManagerUserId(user.id);
+    setModuleSelected(refreshed.installed);
+    setModuleOperationError("");
+  }
+
+  async function runModuleAction(kind: ModuleOperationKind) {
+    if (!moduleManagerUser || !moduleManagerUser.is_aidp_admin || !governanceModule) return;
+    const recoverableKind = moduleOperationKind(governanceModule.status, governanceModule.operation_type);
+    const operationKey = moduleOperationKey(governanceModule.module_id, kind);
+    let operation;
+    try {
+      operation = getOrCreateModuleOperation(
+        moduleOperationsRef.current.get(operationKey) ??
+          readStoredModuleOperation(governanceModule.module_id, kind),
+        governanceModule.module_id,
+        kind,
+        () => crypto.randomUUID(),
+        recoverableKind === kind ? governanceModule.operation_id || undefined : undefined,
+      );
+      moduleOperationsRef.current.set(operationKey, operation);
+      writeStoredModuleOperation(governanceModule.module_id, kind, operation);
+    } catch (reason) {
+      setModuleOperationError(reason instanceof Error ? reason.message : "Unable to prepare the module operation.");
+      return;
+    }
+
+    const controller = new AbortController();
+    moduleAbortRef.current?.abort();
+    moduleAbortRef.current = controller;
+    setModuleOperating(true);
+    setModuleOperationError("");
+    setMessage("");
+    setModuleProgress({
+      status: "pending",
+      phase: kind === "delete" ? "cleanup" : "content",
+      message: `${kind === "install" ? "Installing" : kind === "redeploy" ? "Redeploying" : "Deleting"} ${governanceModule.display_name}.`,
+    });
+    let operationId = operation.operationId;
+    const moduleBase = `/api/admin/users/${encodeURIComponent(moduleManagerUser.id)}/modules/${encodeURIComponent(governanceModule.module_id)}`;
+    try {
+      const result = await pollRegistration({
+        signal: controller.signal,
+        request: async (signal) => {
+          const response = await (kind === "delete"
+            ? api<AdminModuleOperationResponse>(`${moduleBase}?operation_id=${encodeURIComponent(operationId)}`, {
+                method: "DELETE",
+                signal,
+              })
+            : api<AdminModuleOperationResponse>(kind === "redeploy" ? `${moduleBase}/redeploy` : moduleBase, {
+                method: "POST",
+                body: JSON.stringify({ operation_id: operationId }),
+                signal,
+              }));
+          if (response.operation_id && response.operation_id !== operationId) {
+            operationId = response.operation_id;
+            const serverOperation = {
+              moduleId: governanceModule.module_id,
+              kind,
+              operationId,
+            };
+            moduleOperationsRef.current.set(operationKey, serverOperation);
+            writeStoredModuleOperation(governanceModule.module_id, kind, serverOperation);
+          }
+          const complete = kind === "delete"
+            ? response.status === "not_installed"
+            : response.status === "active";
+          const pending = ["installing", "redeploying", "deleting"].includes(response.status);
+          return {
+            status: complete ? "active" : pending ? "pending" : response.status,
+            phase: response.phase,
+            message: response.message,
+          };
+        },
+        onPending: setModuleProgress,
+      });
+      moduleOperationsRef.current.delete(operationKey);
+      writeStoredModuleOperation(governanceModule.module_id, kind);
+      setPendingModuleAction(null);
+      setModuleSelected(false);
+      setMessage(result.message || `${governanceModule.display_name} ${kind === "delete" ? "deleted" : "ready"}.`);
+      await loadModules();
+    } catch (reason) {
+      if (controller.signal.aborted) return;
+      await loadModules();
+      setModuleOperationError(reason instanceof Error ? reason.message : "Unable to update the governance module.");
+    } finally {
+      if (moduleAbortRef.current === controller) moduleAbortRef.current = null;
+      setModuleProgress(null);
+      setModuleOperating(false);
+    }
+  }
   return (
     <>
       <Shell
         onSignOut={() => setLogoutOpen(true)}
         operatorUsername={adminSession?.operator_username || adminSession?.username}
       >
-        <section className="admin" aria-busy={operating || creating} inert={operating || creating}>
+        <section className="admin" aria-busy={operating || creating || moduleOperating} inert={operating || creating || moduleOperating}>
           <div className="admin-panel">
             <div className="admin-panel-heading">
               <h1>Users</h1>
@@ -1831,7 +2154,10 @@ function AdminUsers() {
                 <button
                   className="toolbar-icon"
                   type="button"
-                  onClick={() => void loadUsers()}
+                  onClick={() => {
+                    void loadUsers();
+                    if (production) void loadModules();
+                  }}
                   aria-label="Refresh users"
                   title="Refresh users"
                 >
@@ -1839,6 +2165,11 @@ function AdminUsers() {
                 </button>
               </div>
             </div>
+            {moduleLoadError && (
+              <p className="notice error admin-module-error" role="alert">
+                {moduleLoadError}
+              </p>
+            )}
             <div className="table-wrap">
               <table>
                 <thead>
@@ -1875,14 +2206,21 @@ function AdminUsers() {
                       </td>
                       <td>
                         <div className="lab-summary">
-                          <span>
-                            <strong>{user.labs.length} {user.labs.length === 1 ? "starter kit" : "starter kits"}</strong>
-                            <small>
-                              {user.labs.every((lab) => lab.phase === "active")
-                                ? "All active"
-                                : `${user.labs.filter((lab) => lab.phase === "active").length} active`}
-                            </small>
-                          </span>
+                          {user.managed === false ? (
+                            <span>
+                              <strong>AIDP administrator</strong>
+                              <small>Platform administration only</small>
+                            </span>
+                          ) : (
+                            <span>
+                              <strong>{user.labs.length} {user.labs.length === 1 ? "starter kit" : "starter kits"}</strong>
+                              <small>
+                                {user.labs.every((lab) => lab.phase === "active")
+                                  ? "All active"
+                                  : `${user.labs.filter((lab) => lab.phase === "active").length} active`}
+                              </small>
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td>
@@ -1894,29 +2232,46 @@ function AdminUsers() {
                       </td>
                       <td className="row-actions">
                         <span className="row-action-group">
-                          <button
-                            className="table-action table-edit"
-                            type="button"
-                            aria-haspopup="dialog"
-                            aria-expanded={labManagerUserId === user.id}
-                            onClick={() => openLabManager(user)}
-                            aria-label={`Manage starter kits for ${user.email}`}
-                            title="Manage starter kits"
-                          >
-                            <EditIcon />
-                          </button>
-                          <button
-                            className="table-action table-delete"
-                            type="button"
-                            onClick={() => {
-                              setDeleteError("");
-                              setPendingDelete(user);
-                            }}
-                            aria-label={`Delete ${user.email}`}
-                            title="Delete"
-                          >
-                            <TrashIcon />
-                          </button>
+                          {production && user.is_aidp_admin && governanceModule && (
+                            <button
+                              className="table-action table-module"
+                              type="button"
+                              aria-haspopup="dialog"
+                              aria-expanded={moduleManagerUserId === user.id}
+                              onClick={() => void openModuleManager(user)}
+                              aria-label={`Manage ${governanceModule.display_name} as ${user.email}`}
+                              title={`Manage ${governanceModule.display_name}`}
+                            >
+                              <AdminLoginIcon />
+                            </button>
+                          )}
+                          {user.managed !== false && (
+                            <>
+                              <button
+                                className="table-action table-edit"
+                                type="button"
+                                aria-haspopup="dialog"
+                                aria-expanded={labManagerUserId === user.id}
+                                onClick={() => openLabManager(user)}
+                                aria-label={`Manage starter kits for ${user.email}`}
+                                title="Manage starter kits"
+                              >
+                                <EditIcon />
+                              </button>
+                              <button
+                                className="table-action table-delete"
+                                type="button"
+                                onClick={() => {
+                                  setDeleteError("");
+                                  setPendingDelete(user);
+                                }}
+                                aria-label={`Delete ${user.email}`}
+                                title="Delete"
+                              >
+                                <TrashIcon />
+                              </button>
+                            </>
+                          )}
                         </span>
                       </td>
                     </tr>
@@ -1982,13 +2337,48 @@ function AdminUsers() {
         }}
         onSave={() => void saveLabAssignments()}
       />
+      <GovernanceModuleModal
+        open={Boolean(moduleManagerUser) && !moduleOperating && !pendingModuleAction}
+        user={moduleManagerUser}
+        module={governanceModule}
+        selected={moduleSelected}
+        busy={moduleOperating}
+        error={moduleOperationError}
+        onSelectedChange={(selected) => {
+          setModuleSelected(selected);
+          setModuleOperationError("");
+        }}
+        onInstall={() => void runModuleAction("install")}
+        onResume={(kind) => void runModuleAction(kind)}
+        onRedeploy={() => void runModuleAction("redeploy")}
+        onDelete={() => {
+          setModuleOperationError("");
+          setPendingModuleAction("delete");
+        }}
+        onClose={() => {
+          setModuleManagerUserId(null);
+          setModuleSelected(false);
+          setModuleOperationError("");
+        }}
+      />
+      <ConfirmModal
+        open={pendingModuleAction === "delete" && !moduleOperating}
+        kind="delete"
+        title="Delete global governance module?"
+        description={`This permanently deletes ${governanceModule?.display_name ?? "the module"}, its Agent deployment, dedicated AI Compute, credential, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema and shared Spark compute are retained.`}
+        error={moduleOperationError}
+        confirmLabel="Delete module"
+        onClose={() => {
+          setPendingModuleAction(null);
+          setModuleOperationError("");
+        }}
+        onConfirm={() => void runModuleAction("delete")}
+      />
       <ConfirmModal
         open={Boolean(pendingLabAction) && !operating}
         kind={pendingLabAction?.kind === "remove" ? "delete" : "reset"}
         title={pendingLabAction?.kind === "remove" ? "Remove starter kit?" : "Redeploy starter kit?"}
-        description={pendingLabAction?.kind === "redeploy" && pendingLabAction.lab.lab_id === "agent"
-          ? `Reinstall ${labLabel(catalog, "agent")} for ${pendingLabAction.user.email}. This replaces the participant's Agent customizations. Data starter kits and Identity access are preserved.`
-          : `${pendingLabAction?.kind === "remove" ? "Remove" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this starter kit"} for ${pendingLabAction?.user.email ?? "this participant"}. Other starter kits and Identity access are preserved.`}
+        description={`${pendingLabAction?.kind === "remove" ? "Remove" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this starter kit"} for ${pendingLabAction?.user.email ?? "this participant"}. Other starter kits and Identity access are preserved.`}
         error={operationError}
         confirmLabel={pendingLabAction?.kind === "remove" ? "Remove lab" : "Redeploy lab"}
         onClose={() => {
@@ -2025,6 +2415,14 @@ function AdminUsers() {
           message={
             operationProgress?.message || "Updating the participant's starter kit."
           }
+        />
+      )}
+      {moduleOperating && (
+        <ProvisioningOverlay
+          phase={moduleProgress?.phase}
+          label={pendingModuleAction === "delete" ? "Deleting governance module" : "Reconciling governance module"}
+          indeterminate
+          message={moduleProgress?.message || "Reconciling the global production module."}
         />
       )}
     </>
@@ -2156,52 +2554,27 @@ function ApplicationAccessSettings({
   );
 }
 
-function GatewayInstallationStatus({ installed }: { installed: boolean }) {
-  return (
-    <span className={`settings-status ${installed ? "available" : "unavailable"}`}>
-      {installed ? "Installed" : "Not installed"}
-    </span>
-  );
-}
-
 function AdminSettings() {
   const adminSession = useAdminSession();
-  type SettingsTab = "workbench" | "application" | "governance";
+  type SettingsTab = "workbench" | "application";
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("workbench");
   const [aidpServiceEndpoint, setAidpServiceEndpoint] = useState("");
   const [aidpUrl, setAidpUrl] = useState("");
   const [aidpPlatformId, setAidpPlatformId] = useState("");
-  const [jdbcUrl, setJdbcUrl] = useState("");
-  const [jdbcAuthentication, setJdbcAuthentication] = useState("");
-  const [jdbcDriverAvailable, setJdbcDriverAvailable] = useState(false);
-  const [governanceGatewayUrl, setGovernanceGatewayUrl] = useState("");
-  const [governanceControlBucket, setGovernanceControlBucket] = useState("");
   const [deploymentMode, setDeploymentMode] = useState<"laboratory" | "production">("laboratory");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
-  const [pendingDriverFile, setPendingDriverFile] = useState<File | null>(null);
-  const [uploadingDriver, setUploadingDriver] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const workbenchTabRef = useRef<HTMLButtonElement>(null);
   const applicationTabRef = useRef<HTMLButtonElement>(null);
-  const governanceTabRef = useRef<HTMLButtonElement>(null);
   const serviceEndpointRef = useRef<HTMLInputElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const platformIdRef = useRef<HTMLInputElement>(null);
-  const jdbcUrlRef = useRef<HTMLInputElement>(null);
-  const gatewayUrlRef = useRef<HTMLInputElement>(null);
-  const driverInputRef = useRef<HTMLInputElement>(null);
-  const governanceGatewayInstalled = jdbcDriverAvailable && Boolean(governanceGatewayUrl);
   function applyAdminSettings(result: AdminSettingsResponse) {
     setAidpServiceEndpoint(result.aidp_service_endpoint);
     setAidpUrl(result.aidp_url);
     setAidpPlatformId(result.aidp_platform_id);
-    setJdbcUrl(result.jdbc_url);
-    setJdbcAuthentication(result.jdbc_authentication);
-    setJdbcDriverAvailable(result.jdbc_driver_available);
-    setGovernanceGatewayUrl(result.governance_gateway_url);
-    setGovernanceControlBucket(result.governance_control_bucket);
     setDeploymentMode(result.deployment_mode);
     setRegistrationCodeConfigured(result.registration_code_configured);
   }
@@ -2222,7 +2595,7 @@ function AdminSettings() {
   function handleSettingsTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    const tabs: SettingsTab[] = ["workbench", "application", "governance"];
+    const tabs: SettingsTab[] = ["workbench", "application"];
     const currentIndex = tabs.indexOf(activeSettingsTab);
     const nextTab = event.key === "Home"
       ? tabs[0]
@@ -2230,11 +2603,7 @@ function AdminSettings() {
         ? tabs[tabs.length - 1]
         : tabs[(currentIndex + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
     setActiveSettingsTab(nextTab);
-    (nextTab === "workbench"
-      ? workbenchTabRef
-      : nextTab === "application"
-        ? applicationTabRef
-        : governanceTabRef).current?.focus();
+    (nextTab === "workbench" ? workbenchTabRef : applicationTabRef).current?.focus();
   }
   async function logout() {
     await api("/api/admin/logout", { method: "POST" });
@@ -2279,47 +2648,6 @@ function AdminSettings() {
       setError(reason instanceof Error ? reason.message : "Unable to save settings");
     }
   }
-  async function uploadJdbcDriver(file?: File) {
-    if (!file) return;
-    setError("");
-    if (!file.name.toLowerCase().endsWith(".zip")) {
-      setError("Select the ZIP downloaded from AIDP Workbench.");
-      return;
-    }
-    setPendingDriverFile(null);
-    setUploadingDriver(true);
-    try {
-      const result = await api<{ jdbc_driver_available: boolean }>(
-        "/api/admin/aidp/jdbc-driver",
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/zip" },
-          body: file,
-        },
-      );
-      setJdbcDriverAvailable(result.jdbc_driver_available);
-      setToast("AIDP JDBC driver synchronized to oci_artifacts and the lab VM.");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to store the JDBC driver");
-    } finally {
-      setUploadingDriver(false);
-      if (driverInputRef.current) driverInputRef.current.value = "";
-    }
-  }
-  function selectJdbcDriver(file?: File) {
-    if (!file) return;
-    setError("");
-    if (!file.name.toLowerCase().endsWith(".zip")) {
-      setError("Select the ZIP downloaded from AI Data Platform Workbench.");
-      if (driverInputRef.current) driverInputRef.current.value = "";
-      return;
-    }
-    setPendingDriverFile(file);
-  }
-  function cancelJdbcDriverInstall() {
-    setPendingDriverFile(null);
-    if (driverInputRef.current) driverInputRef.current.value = "";
-  }
   return (
     <Shell
       onSignOut={logout}
@@ -2359,20 +2687,6 @@ function AdminSettings() {
               onKeyDown={handleSettingsTabKeyDown}
             >
               Application
-            </button>
-            <button
-              ref={governanceTabRef}
-              id="settings-tab-governance"
-              type="button"
-              className="settings-tab"
-              role="tab"
-              aria-selected={activeSettingsTab === "governance"}
-              aria-controls="settings-panel-governance"
-              tabIndex={activeSettingsTab === "governance" ? 0 : -1}
-              onClick={() => setActiveSettingsTab("governance")}
-              onKeyDown={handleSettingsTabKeyDown}
-            >
-              AI Data Governance Gateway
             </button>
           </div>
           <section
@@ -2501,127 +2815,6 @@ function AdminSettings() {
               onSave={() => void saveSettings("application")}
             />
           </section>
-          <section
-            id="settings-panel-governance"
-            className="settings-panel"
-            role="tabpanel"
-            aria-labelledby="settings-tab-governance"
-            hidden={activeSettingsTab !== "governance"}
-          >
-            <div className="settings-intro">
-              <span className="settings-icon">
-                <AdminLoginIcon />
-              </span>
-              <div>
-                <div className="settings-title-row">
-                  <strong>AI Data Governance Gateway</strong>
-                  <GatewayInstallationStatus installed={governanceGatewayInstalled} />
-                </div>
-                <p>Review governed data access, runtime artifacts and JDBC connectivity.</p>
-              </div>
-              {!jdbcDriverAvailable && (
-                <button type="button" className="settings-intro-action" onClick={() => driverInputRef.current?.click()}>
-                  Install JDBC Driver
-                </button>
-              )}
-            </div>
-            {governanceGatewayInstalled ? (
-              <>
-                <label className="settings-field">
-                  AI Data Governance Gateway URL
-                  <span className="settings-url-control">
-                    <input ref={gatewayUrlRef} value={governanceGatewayUrl} readOnly spellCheck={false} aria-label="AI Data Governance Gateway URL" placeholder="Not installed" />
-                    <button type="button" className="copy-url" onClick={() => void copyAidpValue(governanceGatewayUrl, gatewayUrlRef, "AI Data Governance Gateway URL")} disabled={!governanceGatewayUrl} aria-label="Copy AI Data Governance Gateway URL" title="Copy AI Data Governance Gateway URL">
-                      <CopyIcon />
-                    </button>
-                  </span>
-                </label>
-                <label className="settings-field">
-                  Governance artifact bucket
-                  <input value={governanceControlBucket} readOnly spellCheck={false} aria-label="Governance artifact bucket" placeholder="Not installed" />
-                  <span className="settings-help">Private Object Storage bucket for governance tables and runtime artifacts.</span>
-                </label>
-                <label className="settings-field">
-                  Governance Delta schema
-                  <input value="oci_artifacts" readOnly spellCheck={false} aria-label="Governance Delta schema" />
-                </label>
-                <div className="settings-intro settings-connection-intro">
-                  <div>
-                    <strong>Gateway connection</strong>
-                    <p>Share these non-secret connection details only with authorized lab users.</p>
-                  </div>
-                </div>
-                <label className="settings-field">
-                  JDBC URL
-                  <span className="settings-url-control">
-                    <input ref={jdbcUrlRef} value={jdbcUrl} readOnly spellCheck={false} aria-label="JDBC URL" placeholder="Not available" />
-                    <button type="button" className="copy-url" onClick={() => void copyAidpValue(jdbcUrl, jdbcUrlRef, "JDBC URL")} disabled={!jdbcUrl} aria-label="Copy JDBC URL" title="Copy JDBC URL">
-                      <CopyIcon />
-                    </button>
-                  </span>
-                </label>
-                <label className="settings-field">
-                  Authentication
-                  <input value={jdbcAuthentication} readOnly spellCheck={false} aria-label="JDBC authentication" placeholder="Not available" />
-                </label>
-                <div className="settings-field">
-                  <span className="settings-field-label">AIDP JDBC driver</span>
-                  <div className="settings-driver-card">
-                    <div>
-                      <strong>Available</strong>
-                      <p>The driver is synchronized to oci_artifacts and the lab VM.</p>
-                    </div>
-                    <div className="settings-driver-actions">
-                      <a className="settings-link" href="/api/admin/aidp/jdbc-driver" download>
-                        Download driver
-                      </a>
-                      <button type="button" className="secondary" onClick={() => driverInputRef.current?.click()}>
-                        Replace driver
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </>
-            ) : jdbcDriverAvailable ? (
-              <section className="jdbc-install-guide" aria-labelledby="gateway-deployment-title">
-                <div>
-                  <p className="eyebrow">Deployment pending</p>
-                  <h2 id="gateway-deployment-title">Deploy AI Data Governance Gateway in OKE</h2>
-                  <p>The JDBC driver is ready. Enable <strong>AI Data Governance Gateway</strong> under Components in Deploy Studio to create the OKE runtime and publish its connection details.</p>
-                </div>
-              </section>
-            ) : (
-              <section className="jdbc-install-guide" aria-labelledby="jdbc-install-title">
-                <div>
-                  <p className="eyebrow">Required setup</p>
-                  <h2 id="jdbc-install-title">Download the JDBC driver from Workbench</h2>
-                  <p>The gateway installs the official ZIP produced by your AI Data Platform Workbench cluster.</p>
-                  <ol>
-                    <li>Open AI Data Platform Workbench and select the workspace for these starter kits.</li>
-                    <li>Open <strong>Compute</strong> and select the cluster that the gateway will use.</li>
-                    <li>Open <strong>Connections</strong> or <strong>Connection details</strong>.</li>
-                    <li>Select <strong>Download JDBC Driver</strong> and keep the downloaded ZIP unchanged.</li>
-                    <li>Return here and select <strong>Install JDBC Driver</strong>.</li>
-                  </ol>
-                  <a className="settings-link jdbc-docs-link" href="https://docs.oracle.com/en/cloud/paas/ai-data-platform/aidug/connect-compute.html#GUID-B7F594C8-724D-4733-B80D-7A4C9A0CB0A2" target="_blank" rel="noopener noreferrer">
-                    View Oracle JDBC instructions <OpenExternalIcon />
-                  </a>
-                </div>
-                <figure>
-                  <img src={jdbcDriverDownloadImage} alt="AI Data Platform Workbench Connection details page with Download JDBC Driver highlighted" />
-                  <figcaption>Connection details → Download JDBC Driver</figcaption>
-                </figure>
-              </section>
-            )}
-            <input
-              ref={driverInputRef}
-              className="sr-only"
-              type="file"
-              accept=".zip,application/zip"
-              aria-label="Select AI Data Platform Workbench JDBC driver ZIP"
-              onChange={(event) => selectJdbcDriver(event.target.files?.[0])}
-            />
-          </section>
           {error && (
             <p className="notice error" role="alert">
               {error}
@@ -2629,23 +2822,6 @@ function AdminSettings() {
           )}
         </div>
       </section>
-      <ConfirmModal
-        open={Boolean(pendingDriverFile)}
-        kind="question"
-        title="Install JDBC driver?"
-        description={`Install ${pendingDriverFile?.name || "the selected ZIP"} for the AI Data Governance Gateway?`}
-        confirmLabel="Install JDBC Driver"
-        onClose={cancelJdbcDriverInstall}
-        onConfirm={() => void uploadJdbcDriver(pendingDriverFile || undefined)}
-      />
-      {uploadingDriver && (
-        <ProvisioningOverlay
-          phase="content"
-          label="Installing JDBC driver"
-          indeterminate
-          message="Validating the ZIP and synchronizing the driver to oci_artifacts and the lab VM."
-        />
-      )}
       <Toast message={toast} onDismiss={() => setToast("")} />
     </Shell>
   );

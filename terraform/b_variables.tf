@@ -98,7 +98,7 @@ variable "registration_code_hash" {
 }
 
 variable "agent_model_id" {
-  description = "ACTIVE on-demand OCI Generative AI CHAT model selected in Deploy Studio for participant governance agents."
+  description = "ACTIVE on-demand OCI Generative AI CHAT model for the production-only global governance Agent."
   type        = string
   validation {
     condition     = length(trimspace(var.agent_model_id)) > 0
@@ -176,12 +176,6 @@ variable "autonomous_database_wallet_password" {
     )
     error_message = "autonomous_database_wallet_password must be 12-30 characters with uppercase, lowercase and a number, without quotes or the word admin."
   }
-}
-
-variable "enable_ai_data_governance" {
-  description = "Install the optional AI Data Governance Gateway in a private OKE cluster."
-  type        = bool
-  default     = false
 }
 
 variable "landing_bucket_mode" {
@@ -269,63 +263,6 @@ variable "artifacts_bucket_mode" {
   }
 }
 
-variable "artifacts_new_bucket_name" {
-  type    = string
-  default = "oci_artifacts"
-}
-
-variable "artifacts_existing_bucket_name" {
-  type    = string
-  default = ""
-}
-
-variable "governance_vault_mode" {
-  description = "Whether the governance gateway creates a DEFAULT OCI Vault or reuses one selected explicitly."
-  type        = string
-  default     = "new"
-  validation {
-    condition     = contains(["new", "existing"], var.governance_vault_mode)
-    error_message = "governance_vault_mode must be new or existing."
-  }
-}
-
-variable "existing_governance_vault_ocid" {
-  description = "Explicit OCID of an existing regional ACTIVE DEFAULT Vault when governance_vault_mode is existing."
-  type        = string
-  default     = ""
-  validation {
-    condition = (
-      trimspace(var.existing_governance_vault_ocid) == "" ||
-      can(regex("^ocid1\\.vault\\.oc[1-9][0-9]*\\.[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*\\..+$", trimspace(var.existing_governance_vault_ocid)))
-    )
-    error_message = "existing_governance_vault_ocid must be empty or a regional OCI Vault OCID."
-  }
-}
-
-variable "governance_gateway_image" {
-  description = "Immutable gateway image resolved by the authenticated deployment preflight."
-  type        = string
-  default     = ""
-}
-
-variable "governance_gateway_oidc_issuer" {
-  description = "HTTPS issuer discovered from the active default OCI Identity Domain."
-  type        = string
-  default     = ""
-}
-
-variable "governance_gateway_oidc_authority" {
-  description = "Active default OCI Identity Domain URL discovered by the deployment preflight."
-  type        = string
-  default     = ""
-}
-
-variable "governance_gateway_oidc_static_jwks_json" {
-  description = "Current public RSA signing keys retrieved through authenticated Identity Domains preflight."
-  type        = string
-  default     = ""
-}
-
 variable "preferred_vm_shape" {
   description = "Server-selected E5/E4/E3 Flex shape from the trusted capacity preflight."
   type        = string
@@ -360,23 +297,6 @@ variable "_oci_vcn" {
   default = {
     cidr_block        = "10.10.0.0/24"
     ingress_tcp_ports = [80, 443]
-  }
-}
-
-variable "_oci_governance" {
-  description = "Private OKE network and worker defaults for the optional governance gateway."
-
-  default = {
-    vcn_cidr             = "10.11.0.0/16"
-    endpoint_subnet_cidr = "10.11.0.0/28"
-    worker_subnet_cidr   = "10.11.1.0/24"
-    service_subnet_cidr  = "10.11.2.0/24"
-    gateway_subnet_cidr  = "10.11.3.0/28"
-    gateway_backend_ip   = "10.11.2.10"
-    node_shape           = "VM.Standard.E4.Flex"
-    node_ocpus           = 2
-    node_memory_in_gbs   = 16
-    node_count           = 2
   }
 }
 

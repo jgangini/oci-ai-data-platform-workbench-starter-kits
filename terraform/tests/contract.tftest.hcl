@@ -83,6 +83,11 @@ run "resolved_compartment_contract" {
   }
 
   assert {
+    condition     = oci_objectstorage_bucket.artifacts[0].name == "oci_artifacts"
+    error_message = "The artifacts bucket name is fixed for extension discovery."
+  }
+
+  assert {
     condition     = oci_ai_data_platform_ai_data_platform.lab.default_workspace_name == "aidp-lab-workspace-test1234"
     error_message = "The AIDP default workspace must be deterministic."
   }
@@ -230,6 +235,63 @@ run "explicit_e4_retry_contract" {
     condition     = oci_core_instance.lab.shape == "VM.Standard.E4.Flex"
     error_message = "A retry can switch to E4 using only a non-secret Terraform variable."
   }
+}
+
+run "rejects_duplicate_new_and_existing_medallion_bucket_names" {
+  command = plan
+
+  override_data {
+    target = data.oci_objectstorage_bucket.medallion["bronze"]
+    values = {
+      name           = "shared-medallion"
+      compartment_id = "ocid1.compartment.oc1..test"
+    }
+  }
+
+  variables {
+    tenancy_ocid                = "ocid1.tenancy.oc1..test"
+    home_region                 = "us-ashburn-1"
+    operator_user_ocid          = "ocid1.user.oc1..operator"
+    compartment_ocid            = "ocid1.compartment.oc1..test"
+    objectstorage_namespace     = "testnamespace"
+    deployment_suffix           = "test1234"
+    admin_password_hash         = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash      = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha           = "0123456789abcdef0123456789abcdef01234567"
+    landing_new_bucket_name     = "shared-medallion"
+    bronze_bucket_mode          = "existing"
+    bronze_existing_bucket_name = "shared-medallion"
+  }
+
+  expect_failures = [terraform_data.validate_medallion_buckets]
+}
+
+run "rejects_reserved_artifacts_name_for_existing_medallion_bucket" {
+  command = plan
+
+  override_data {
+    target = data.oci_objectstorage_bucket.medallion["gold"]
+    values = {
+      name           = "oci_artifacts"
+      compartment_id = "ocid1.compartment.oc1..test"
+    }
+  }
+
+  variables {
+    tenancy_ocid              = "ocid1.tenancy.oc1..test"
+    home_region               = "us-ashburn-1"
+    operator_user_ocid        = "ocid1.user.oc1..operator"
+    compartment_ocid          = "ocid1.compartment.oc1..test"
+    objectstorage_namespace   = "testnamespace"
+    deployment_suffix         = "test1234"
+    admin_password_hash       = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash    = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha         = "0123456789abcdef0123456789abcdef01234567"
+    gold_bucket_mode          = "existing"
+    gold_existing_bucket_name = "oci_artifacts"
+  }
+
+  expect_failures = [terraform_data.validate_medallion_buckets]
 }
 
 run "authorized_e3_fallback_contract" {

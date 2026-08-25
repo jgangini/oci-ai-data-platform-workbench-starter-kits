@@ -31,8 +31,12 @@ await promisify(execFile)(
 const require = createRequire(import.meta.url);
 const {
   ApiRequestError,
+  getOrCreateModuleOperation,
   getOrCreateLabOperation,
+  loadModuleOperation,
   loadLabOperation,
+  moduleOperationKind,
+  persistModuleOperation,
   persistLabOperation,
   RegistrationPollingTimeout,
   parseRetryAfter,
@@ -224,4 +228,66 @@ test("lab operations survive a page reload until completion", () => {
     JSON.stringify({ labId: "unknown", kind: "redeploy", operationId: operation.operationId }),
   );
   assert.equal(loadLabOperation(storage, "user-1", "healthcare", "redeploy"), undefined);
+});
+
+test("global module operations reuse the server UUID and survive reloads", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  const moduleId = "ai_data_governance_vsc_extension";
+  const serverOperationId = "b0dc0b1d-351b-4416-acff-cbeb9e2d82c9";
+  const operation = getOrCreateModuleOperation(
+    undefined,
+    moduleId,
+    "install",
+    () => "eea2956a-fdff-454b-9e33-76d72af966b4",
+    serverOperationId,
+  );
+
+  assert.equal(operation.operationId, serverOperationId);
+  persistModuleOperation(storage, moduleId, "install", operation);
+  assert.deepEqual(loadModuleOperation(storage, moduleId, "install"), operation);
+  assert.equal(
+    getOrCreateModuleOperation(operation, moduleId, "install", () => crypto.randomUUID()),
+    operation,
+  );
+  assert.equal(loadModuleOperation(storage, moduleId, "redeploy"), undefined);
+  persistModuleOperation(storage, moduleId, "install");
+  assert.equal(loadModuleOperation(storage, moduleId, "install"), undefined);
+});
+
+test("global module error states retain the exact recoverable operation kind", () => {
+  assert.equal(moduleOperationKind("installing"), "install");
+  assert.equal(moduleOperationKind("redeploying"), "redeploy");
+  assert.equal(moduleOperationKind("deleting"), "delete");
+  assert.equal(moduleOperationKind("error", "install"), "install");
+  assert.equal(moduleOperationKind("error", "redeploy"), "redeploy");
+  assert.equal(moduleOperationKind("error", "delete"), "delete");
+  assert.equal(moduleOperationKind("error", "unknown"), undefined);
+  assert.equal(moduleOperationKind("active", "redeploy"), undefined);
+});
+
+test("blocked browser storage never prevents an in-memory module operation", () => {
+  const blockedStorage = {
+    getItem: () => { throw new Error("blocked"); },
+    setItem: () => { throw new Error("blocked"); },
+    removeItem: () => { throw new Error("blocked"); },
+  };
+  const moduleId = "ai_data_governance_vsc_extension";
+  const operationId = "d3f4d6bc-1e10-4bce-a982-26dd90ad8d80";
+
+  assert.equal(loadModuleOperation(blockedStorage, moduleId, "delete"), undefined);
+  const operation = getOrCreateModuleOperation(
+    undefined,
+    moduleId,
+    "delete",
+    () => operationId,
+  );
+  assert.doesNotThrow(() =>
+    persistModuleOperation(blockedStorage, moduleId, "delete", operation),
+  );
+  assert.equal(operation.operationId, operationId);
 });

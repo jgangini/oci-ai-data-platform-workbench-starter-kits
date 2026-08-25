@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.lab_packs import lab_catalog, load_lab_pack, public_lab_catalog
+from app.lab_packs import lab_catalog, load_lab_pack, module_catalog, public_lab_catalog
 from scripts.generate_telco_lineage_lab import _source_data, _validate_source_contract
 
 
@@ -14,10 +14,11 @@ LEGACY_LABS = ("banking", "telecommunications", "retail", "healthcare")
 ACTIVE_LABS = ("banking", "telecommunications", "telco_lineage", "retail", "healthcare")
 
 
-def test_catalog_has_five_lineage_labs_and_available_governance_agent() -> None:
+def test_catalog_separates_five_participant_labs_from_global_governance_module() -> None:
     packs = lab_catalog()
     public = public_lab_catalog()
-    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "agent")
+    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "ai_data_governance_vsc_extension")
+    assert tuple(item["lab_id"] for item in public) == ACTIVE_LABS
     assert all(pack.available for pack in packs[:5])
     assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == dict.fromkeys(
         ACTIVE_LABS, "2.0.0"
@@ -25,11 +26,15 @@ def test_catalog_has_five_lineage_labs_and_available_governance_agent() -> None:
     assert all(item["description"].strip() for item in public)
     assert "transactions" in public[0]["description"]
     assert packs[-1].status == "available"
-    assert packs[-1].pack_version == "2.0.0"
-    assert packs[-1].kind == "governance_agent"
+    assert packs[-1].pack_version == "3.0.0"
+    assert packs[-1].kind == "governance_extension"
+    assert packs[-1].scope == "global"
+    assert packs[-1].installation_modes == ("production",)
     assert not packs[-1].datasets and not packs[-1].notebooks
-    assert load_lab_pack("agent").agent["editable"] is True
-    assert load_lab_pack("agent").agent["expertise"] == "DAMA-DMBOK"
+    assert module_catalog() == (packs[-1],)
+    module = load_lab_pack("ai_data_governance_vsc_extension")
+    assert module.agent["editable_by"] == "AI_DATA_PLATFORM_ADMIN"
+    assert module.agent["tools"] == ["catalog_inventory", "catalog_lineage"]
 
 
 @pytest.mark.parametrize("lab_id", LEGACY_LABS)

@@ -17,6 +17,12 @@ def _deployment_mode(value: str) -> str:
     return normalized
 
 
+def _artifacts_bucket_name(value: str) -> str:
+    if value.strip() != "oci_artifacts":
+        raise ValueError("ARTIFACTS_BUCKET_NAME must be oci_artifacts")
+    return "oci_artifacts"
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     admin_username: str = "admin"
@@ -35,14 +41,10 @@ class Settings:
     autonomous_database_id: str = ""
     autonomous_runtime_file: str = "/etc/aidp-lab/autonomous/runtime.json"
     agent_model_id: str = ""
-    governance_gateway_url: str = ""
-    governance_control_bucket: str = ""
-    jdbc_driver_file: str = "/var/lib/aidp-lab/drivers/aidp-jdbc-driver.zip"
-    governance_jdbc_driver_object: str = "oci_artifacts/runtime/aidp-jdbc-driver.zip"
-    enforce_governed_data_access: bool = False
     oci_config_file: str = "/etc/aidp-lab/oci/config"
     objectstorage_namespace: str = ""
     bucket_name: str = ""
+    artifacts_bucket_name: str = "oci_artifacts"
     aidp_settings_file: str = "/var/lib/aidp-lab/settings.json"
     lab_marker: str = "aidp-lab"
     session_secret_file: str = "/var/lib/aidp-lab/session.key"
@@ -71,21 +73,12 @@ class Settings:
                 "/etc/aidp-lab/autonomous/runtime.json",
             ),
             agent_model_id=os.getenv("AGENT_MODEL_ID", ""),
-            governance_gateway_url=os.getenv("GOVERNANCE_GATEWAY_URL", "").rstrip("/"),
-            governance_control_bucket=os.getenv("GOVERNANCE_CONTROL_BUCKET", ""),
-            jdbc_driver_file=os.getenv(
-                "AIDP_JDBC_DRIVER_FILE",
-                "/var/lib/aidp-lab/drivers/aidp-jdbc-driver.zip",
-            ),
-            governance_jdbc_driver_object=os.getenv(
-                "GOVERNANCE_JDBC_DRIVER_OBJECT",
-                "oci_artifacts/runtime/aidp-jdbc-driver.zip",
-            ),
-            enforce_governed_data_access=os.getenv("ENFORCE_GOVERNED_DATA_ACCESS", "false").lower()
-            in {"1", "true", "yes"},
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
             objectstorage_namespace=os.getenv("OBJECTSTORAGE_NAMESPACE", ""),
             bucket_name=os.getenv("BUCKET_NAME", ""),
+            artifacts_bucket_name=_artifacts_bucket_name(
+                os.getenv("ARTIFACTS_BUCKET_NAME", "oci_artifacts")
+            ),
             aidp_settings_file=os.getenv("AIDP_SETTINGS_FILE", "/var/lib/aidp-lab/settings.json"),
             lab_marker=os.getenv("LAB_MARKER", "aidp-lab"),
             session_secret_file=os.getenv("SESSION_SECRET_FILE", "/var/lib/aidp-lab/session.key"),
@@ -135,10 +128,6 @@ class SettingsStore:
             ),
             "aidp_url": values["aidp_workbench_url"],
             "aidp_platform_id": self._settings.aidp_platform_id,
-            "governance_gateway_url": self._settings.governance_gateway_url,
-            "governance_control_bucket": self._settings.governance_control_bucket,
-            "jdbc_driver_available": Path(self._settings.jdbc_driver_file).is_file(),
-            "jdbc_authentication": "OCI API key or browser authorization token",
             "deployment_mode": self._settings.deployment_mode,
             "operator_username": self._settings.operator_username,
             "registration_code_configured": bool(values["registration_code_hash"]),

@@ -1,8 +1,7 @@
-import io
-import zipfile
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.aidp import AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, UserMaterial
@@ -41,11 +40,33 @@ class FakeIdentity:
         self.activated.append(user_id)
 
     async def list_lab_users(self) -> list[dict]:
+        if self.mode == "unmanaged-admin":
+            return []
         return [{
             "id": "user-id", "ocid": "ocid1.user.oc1..ada", "name": "Ada",
             "email": "ada@example.com", "status": "active", "active": True,
             "managed": True,
         }]
+
+    async def list_users_by_ocids(self, user_ocids: set[str]) -> list[dict]:
+        return await self.list_users_by_principals(user_ocids, set())
+
+    async def list_users_by_principals(
+        self, user_ocids: set[str], group_ocids: set[str]
+    ) -> list[dict]:
+        if self.mode == "group-admin":
+            if "ocid1.group.oc1..platform-admins" not in group_ocids:
+                return []
+            return await self.list_lab_users()
+        if "ocid1.user.oc1..ada" not in user_ocids:
+            return []
+        if self.mode == "unmanaged-admin":
+            return [{
+                "id": "user-id", "ocid": "ocid1.user.oc1..ada", "name": "Ada",
+                "email": "ada@example.com", "status": "active", "active": True,
+                "managed": False,
+            }]
+        return await self.list_lab_users()
 
     async def get_lab_user(self, user_id: str) -> dict | None:
         if self.mode == "foreign-delete":
@@ -75,6 +96,12 @@ class FakeAidp:
             "ocid1.user.oc1..ada": ["banking"]
         }
         self.cleaned: list[str] = []
+        self.admin_ocids = set() if mode == "not-admin" else {"ocid1.user.oc1..ada"}
+        self.admin_groups = {"ocid1.group.oc1..platform-admins"} if mode == "group-admin" else set()
+        if mode == "group-admin":
+            self.admin_ocids.clear()
+        self.module: dict | None = None
+        self.verified_governance_operations: list[str] = []
 
     @staticmethod
     def material(email: str, lab_id: str) -> UserMaterial:
@@ -137,13 +164,87 @@ class FakeAidp:
     async def close(self) -> None:
         return None
 
-    async def connection_access(self) -> dict[str, str]:
+    async def platform_admin_user_ocids(self) -> set[str]:
+        return set(self.admin_ocids)
+
+    async def platform_admin_principals(self) -> tuple[set[str], set[str]]:
+        return set(self.admin_ocids), set(self.admin_groups)
+
+    async def list_modules(self) -> list[dict]:
+        if self.mode == "module-status-pending":
+            raise AidpProvisionPending("workspace is not visible yet", "workspace")
+        return [self.module or {
+            "module_id": "ai_data_governance_vsc_extension",
+            "display_name": "AI Data Governance for VSC Extension",
+            "status": "not_installed",
+            "installed": False,
+            "operation_id": None,
+            "operation_type": None,
+            "phase": "not_installed",
+            "enabled": False,
+        }]
+
+    async def install_governance_module(
+        self,
+        user_ocid: str,
+        operation_id: str,
+        *,
+        role_membership_verified: bool = False,
+    ) -> dict:
+        if role_membership_verified:
+            self.verified_governance_operations.append("install")
+        if self.mode in {"module-pre-manifest-pending", "module-status-pending"}:
+            raise AidpProvisionPending("workspace is not visible yet", "workspace")
+        if self.mode == "module-concurrent-pending":
+            self.module = {
+                "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance for VSC Extension",
+                "status": "installing", "installed": True,
+                "operation_id": "a635d4ba-6d8c-48df-9340-4c0c1266ca66",
+                "operation_type": "install", "phase": "control", "enabled": False,
+            }
+            raise AidpProvisionPending("the singleton install is already running", "control")
+        if self.mode == "module-pending":
+            self.module = {
+                "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance for VSC Extension",
+                "status": "installing", "installed": True, "operation_id": operation_id,
+                "operation_type": "install", "phase": "sync", "enabled": False,
+            }
+            raise AidpProvisionPending("first snapshot running", "sync")
+        self.module = {
+            "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance for VSC Extension",
+            "status": "active", "installed": True, "operation_id": operation_id,
+            "operation_type": "install", "phase": "active", "enabled": True,
+        }
+        return dict(self.module)
+
+    async def redeploy_governance_module(
+        self,
+        user_ocid: str,
+        operation_id: str,
+        *,
+        role_membership_verified: bool = False,
+    ) -> dict:
+        if role_membership_verified:
+            self.verified_governance_operations.append("redeploy")
+        if self.module is None:
+            raise AidpProvisionConflict("not installed")
+        self.module.update(operation_id=operation_id, operation_type="redeploy", status="active", phase="active")
+        return dict(self.module)
+
+    async def delete_governance_module(
+        self,
+        user_ocid: str,
+        operation_id: str,
+        *,
+        role_membership_verified: bool = False,
+    ) -> dict:
+        if role_membership_verified:
+            self.verified_governance_operations.append("delete")
+        self.module = None
         return {
-            "compute_name": "aidp_cluster_shared_compute",
-            "jdbc_url": (
-                "jdbc:spark://gateway.aidp.us-chicago-1.oci.oraclecloud.com/default;"
-                "SparkServerType=AIDP;httpPath=cliservice/test-cluster"
-            ),
+            "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance for VSC Extension",
+            "status": "not_installed", "installed": False, "operation_id": operation_id,
+            "operation_type": "delete", "phase": "complete", "enabled": False,
         }
 
 
@@ -163,9 +264,6 @@ def make_client(
         aidp_workbench_url="https://example.datalake.oci.oraclecloud.com#?tenant=test&domain=Default",
         aidp_platform_id="ocid1.aidataplatform.oc1..test",
         aidp_workspace_name="aidp-lab-workspace-test", aidp_region="us-chicago-1",
-        governance_gateway_url="https://governance.example.test",
-        governance_control_bucket="oci_artifacts",
-        jdbc_driver_file=str(tmp_path / "aidp-jdbc-driver.zip"),
         oci_config_file="/etc/aidp-lab/oci/config",
         objectstorage_namespace="namespace", bucket_name="aidp-data-test",
         lab_marker="lab-test", session_secret_file=str(tmp_path / "session.key"),
@@ -199,6 +297,12 @@ def test_participant_codes_start_at_101_and_are_stable_by_email(tmp_path: Path) 
     assert reloaded.participant_code("third@example.com") == 103
 
 
+def test_artifacts_bucket_name_is_fixed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ARTIFACTS_BUCKET_NAME", "renamed-artifacts")
+    with pytest.raises(ValueError, match="must be oci_artifacts"):
+        Settings.from_env()
+
+
 def login(client: TestClient) -> None:
     response = client.post(
         "/api/admin/login",
@@ -208,10 +312,10 @@ def login(client: TestClient) -> None:
     assert LOCAL_COOKIE_NAME in response.cookies
 
 
-def test_public_catalog_exposes_five_lineage_labs_and_available_agent(tmp_path: Path) -> None:
+def test_public_catalog_exposes_only_five_participant_labs(tmp_path: Path) -> None:
     payload = make_client(tmp_path).get("/api/config").json()
     assert [lab["lab_id"] for lab in payload["labs"]] == [
-        "banking", "telecommunications", "telco_lineage", "retail", "healthcare", "agent"
+        "banking", "telecommunications", "telco_lineage", "retail", "healthcare"
     ]
     assert all(lab["available"] for lab in payload["labs"])
     assert all(lab["description"].strip() for lab in payload["labs"])
@@ -263,36 +367,8 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json()["aidp_service_endpoint"] == "https://aidp.us-chicago-1.oci.oraclecloud.com"
     assert response.json()["aidp_platform_id"] == "ocid1.aidataplatform.oc1..test"
-    assert response.json()["compute_name"] == "aidp_cluster_shared_compute"
-    assert response.json()["jdbc_url"].startswith("jdbc:spark://")
-    assert response.json()["governance_gateway_url"] == "https://governance.example.test"
-    assert response.json()["governance_control_bucket"] == "oci_artifacts"
-    assert response.json()["jdbc_driver_available"] is False
     assert response.json()["deployment_mode"] == "laboratory"
     assert response.json()["operator_username"] == "joel.ganggini@oracle.com"
-
-
-def test_admin_jdbc_driver_download_requires_session_and_existing_vm_file(tmp_path: Path) -> None:
-    client = make_client(tmp_path)
-    assert client.get("/api/admin/aidp/jdbc-driver").status_code == 401
-    assert client.put("/api/admin/aidp/jdbc-driver", content=b"not-a-zip").status_code == 401
-    login(client)
-    assert client.get("/api/admin/aidp/jdbc-driver").status_code == 404
-    assert client.put("/api/admin/aidp/jdbc-driver", content=b"not-a-zip").status_code == 422
-    bundle = io.BytesIO()
-    with zipfile.ZipFile(bundle, "w") as archive:
-        archive.writestr("simbaSpark/SparkJDBC42.jar", b"driver")
-    uploaded = client.put(
-        "/api/admin/aidp/jdbc-driver",
-        content=bundle.getvalue(),
-        headers={"content-type": "application/zip"},
-    )
-    assert uploaded.status_code == 200
-    assert uploaded.json() == {"jdbc_driver_available": True}
-    response = client.get("/api/admin/aidp/jdbc-driver")
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "application/zip"
-    assert "aidp-jdbc-driver.zip" in response.headers["content-disposition"]
 
 
 def test_registration_accepts_multiple_labs_and_activates_after_all_are_ready(tmp_path: Path) -> None:
@@ -368,6 +444,7 @@ def test_admin_lists_labs_and_can_add_redeploy_and_remove_one(tmp_path: Path) ->
     assert users.status_code == 200
     assert [lab["lab_id"] for lab in users.json()["users"][0]["labs"]] == ["banking"]
     assert "industry" not in users.json()["users"][0]
+    assert users.json()["users"][0]["is_aidp_admin"] is True
 
     added = client.post(
         "/api/admin/users/user-id/labs", json={"lab_id": "retail"}
@@ -387,6 +464,125 @@ def test_admin_lists_labs_and_can_add_redeploy_and_remove_one(tmp_path: Path) ->
         f"/api/admin/users/user-id/labs/banking?operation_id={operation_id}"
     )
     assert protected.status_code == 409
+
+
+def test_governance_module_api_is_production_only_and_requires_admin_session(tmp_path: Path) -> None:
+    path = "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension"
+    laboratory = make_client(tmp_path)
+    assert laboratory.get("/api/admin/modules").status_code == 401
+    assert laboratory.post(path).status_code == 401
+    login(laboratory)
+    assert laboratory.get("/api/admin/modules").json() == {"modules": []}
+    assert laboratory.post(path).status_code == 404
+
+
+def test_governance_module_lifecycle_uses_global_operation_contract(tmp_path: Path) -> None:
+    client = make_client(tmp_path, deployment_mode="production")
+    login(client)
+    modules = client.get("/api/admin/modules")
+    assert modules.status_code == 200
+    assert modules.json()["modules"][0] == {
+        "module_id": "ai_data_governance_vsc_extension",
+        "display_name": "AI Data Governance for VSC Extension",
+        "status": "not_installed",
+        "installed": False,
+        "operation_id": None,
+        "operation_type": None,
+        "phase": "not_installed",
+        "enabled": False,
+    }
+    operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
+    path = "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension"
+    installed = client.post(path, json={"operation_id": operation_id})
+    assert installed.status_code == 200
+    assert installed.json()["operation_type"] == "install"
+    assert installed.json()["operation_id"] == operation_id
+    assert installed.json()["enabled"] is True
+    redeployed = client.post(f"{path}/redeploy", json={"operation_id": operation_id})
+    assert redeployed.status_code == 200
+    assert redeployed.json()["operation_type"] == "redeploy"
+    deleted = client.delete(f"{path}?operation_id={operation_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "not_installed"
+
+
+def test_governance_module_rejects_non_platform_admin_and_lists_unmanaged_admin(tmp_path: Path) -> None:
+    path = "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension"
+    denied = make_client(tmp_path / "denied", mode="not-admin", deployment_mode="production")
+    login(denied)
+    users = denied.get("/api/admin/users").json()["users"]
+    assert users[0]["is_aidp_admin"] is False
+    assert denied.post(path).status_code == 403
+
+    unmanaged = make_client(tmp_path / "unmanaged", mode="unmanaged-admin", deployment_mode="production")
+    login(unmanaged)
+    users = unmanaged.get("/api/admin/users").json()["users"]
+    assert users == [{
+        "id": "user-id", "name": "Ada", "email": "ada@example.com", "status": "active",
+        "active": True, "managed": False, "is_aidp_admin": True,
+        "participant_code": None, "labs": [],
+    }]
+    assert unmanaged.post(path).status_code == 200
+
+
+def test_governance_module_accepts_admin_inherited_from_group(tmp_path: Path) -> None:
+    client = make_client(tmp_path, mode="group-admin", deployment_mode="production")
+    login(client)
+    users = client.get("/api/admin/users").json()["users"]
+    assert users[0]["is_aidp_admin"] is True
+
+    response = client.post(
+        "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension",
+        json={"operation_id": "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"},
+    )
+
+    assert response.status_code == 200
+    assert client.app.state.test_aidp.verified_governance_operations == ["install"]
+
+
+def test_governance_module_pending_response_resumes_manifest_operation(tmp_path: Path) -> None:
+    client = make_client(tmp_path, mode="module-pending", deployment_mode="production")
+    login(client)
+    operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
+    response = client.post(
+        "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension",
+        json={"operation_id": operation_id},
+    )
+    assert response.status_code == 202
+    assert response.json()["operation_id"] == operation_id
+    assert response.json()["operation_type"] == "install"
+    assert response.json()["phase"] == "sync"
+
+
+@pytest.mark.parametrize("mode", ["module-pre-manifest-pending", "module-status-pending"])
+def test_governance_module_pending_before_manifest_is_retryable(tmp_path: Path, mode: str) -> None:
+    client = make_client(tmp_path / mode, mode=mode, deployment_mode="production")
+    login(client)
+    operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
+    response = client.post(
+        "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension",
+        json={"operation_id": operation_id},
+    )
+    assert response.status_code == 202
+    assert response.json()["status"] == "installing"
+    assert response.json()["installed"] is True
+    assert response.json()["operation_id"] == operation_id
+    assert response.json()["operation_type"] == "install"
+    assert response.json()["phase"] == "workspace"
+
+
+def test_concurrent_governance_install_reuses_the_global_operation_id(tmp_path: Path) -> None:
+    client = make_client(tmp_path, mode="module-concurrent-pending", deployment_mode="production")
+    login(client)
+    response = client.post(
+        "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension",
+        json={"operation_id": "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"},
+    )
+    assert response.status_code == 202
+    assert response.json()["status"] == "installing"
+    assert response.json()["operation_id"] == "a635d4ba-6d8c-48df-9340-4c0c1266ca66"
+    assert response.json()["operation_type"] == "install"
+    assert response.json()["phase"] == "control"
 
 
 def test_admin_lab_mutation_reports_retryable_pending(tmp_path: Path) -> None:

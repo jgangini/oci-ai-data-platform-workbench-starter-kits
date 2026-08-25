@@ -42,6 +42,8 @@ class LabPack:
     pack_version: str
     status: str
     kind: str
+    scope: str
+    installation_modes: tuple[str, ...]
     pack_sha256: str
     datasets: tuple[LabAsset, ...]
     notebooks: tuple[LabAsset, ...]
@@ -151,7 +153,7 @@ def _pack_contract(
     if require_available and status != "available":
         raise LabPackError(f"Lab {lab_id} is not available yet")
     kind = str(metadata.get("kind") or "data_pipeline")
-    if kind not in {"data_pipeline", "governance_agent"}:
+    if kind not in {"data_pipeline", "governance_extension"}:
         raise LabPackError(f"Invalid lab kind: {lab_id}")
     pack_version = str(metadata.get("pack_version") or "")
     if PACK_VERSION_PATTERN.fullmatch(pack_version) is None:
@@ -175,8 +177,8 @@ def _pack_assets(
     )
     if status == "available" and kind == "data_pipeline" and (not datasets or not notebooks):
         raise LabPackError(f"Available lab has no assets: {lab_id}")
-    if kind == "governance_agent" and (datasets or notebooks):
-        raise LabPackError(f"Governance agent must not declare data assets: {lab_id}")
+    if kind == "governance_extension" and (datasets or notebooks):
+        raise LabPackError(f"Governance extension must not declare data assets: {lab_id}")
     if len({item.name for item in datasets}) != len(datasets):
         raise LabPackError(f"Duplicate dataset file: {lab_id}")
     if len({item.name for item in notebooks}) != len(notebooks):
@@ -253,8 +255,6 @@ def _agent_evaluation_case_valid(case: Any) -> bool:
         not in {
             "catalog_inventory",
             "catalog_lineage",
-            "governance_policy_explain",
-            "governed_query",
         }
         for tool in expected_tools
     ):
@@ -263,18 +263,20 @@ def _agent_evaluation_case_valid(case: Any) -> bool:
     return isinstance(required_concepts, list) and bool(required_concepts)
 
 
-def _governance_agent_contract_valid(agent: Any) -> bool:
+def _governance_extension_contract_valid(agent: Any) -> bool:
     if not isinstance(agent, dict):
         return False
-    if agent.get("name_template") != "{participant_key}_agent_data_governance":
+    if agent.get("name") != "ai_data_governance_vsc_extension":
         return False
-    if agent.get("editable") is not True or agent.get("expertise") != "DAMA-DMBOK":
+    if (
+        agent.get("editable") is not True
+        or agent.get("editable_by") != "AI_DATA_PLATFORM_ADMIN"
+        or agent.get("expertise") != "DAMA-DMBOK"
+    ):
         return False
     if set(agent.get("tools") or []) != {
         "catalog_inventory",
         "catalog_lineage",
-        "governance_policy_explain",
-        "governed_query",
     }:
         return False
     cases = agent.get("evaluation_cases")
@@ -295,15 +297,27 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
         metadata, lab_id, require_available
     )
     datasets, notebooks = _pack_assets(root, metadata, status, kind, lab_id)
+    scope = str(metadata.get("scope") or "participant")
+    installation_modes = tuple(map(str, metadata.get("installation_modes") or ["laboratory", "production"]))
+    if scope not in {"participant", "global"} or any(
+        mode not in {"laboratory", "production"} for mode in installation_modes
+    ):
+        raise LabPackError(f"Invalid lab scope: {lab_id}")
+    if kind == "governance_extension" and (
+        scope != "global" or installation_modes != ("production",)
+    ):
+        raise LabPackError(f"Invalid governance extension scope: {lab_id}")
     agent = metadata.get("agent", {})
-    if kind == "governance_agent" and not _governance_agent_contract_valid(agent):
-        raise LabPackError(f"Invalid governance Agent contract: {lab_id}")
+    if kind == "governance_extension" and not _governance_extension_contract_valid(agent):
+        raise LabPackError(f"Invalid governance extension contract: {lab_id}")
     return LabPack(
         lab_id=lab_id,
         display_name=str(metadata.get("display_name") or lab_id.title()),
         pack_version=pack_version,
         status=status,
         kind=kind,
+        scope=scope,
+        installation_modes=installation_modes,
         pack_sha256=digest,
         datasets=datasets,
         notebooks=notebooks,
@@ -342,7 +356,15 @@ def lab_catalog() -> tuple[LabPack, ...]:
 
 
 def available_lab_ids() -> tuple[str, ...]:
-    return tuple(pack.lab_id for pack in lab_catalog() if pack.available)
+    return tuple(
+        pack.lab_id
+        for pack in lab_catalog()
+        if pack.available and pack.scope == "participant"
+    )
+
+
+def module_catalog() -> tuple[LabPack, ...]:
+    return tuple(pack for pack in lab_catalog() if pack.scope == "global")
 
 
 def public_lab_catalog() -> list[dict[str, Any]]:
@@ -357,4 +379,5 @@ def public_lab_catalog() -> list[dict[str, Any]]:
             "available": pack.available,
         }
         for pack in lab_catalog()
+        if pack.scope == "participant"
     ]

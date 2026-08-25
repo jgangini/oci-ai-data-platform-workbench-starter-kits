@@ -13,22 +13,18 @@ EXPECTED_REPOSITORIES = {
     "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits",
     "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits.git",
 }
-EXPECTED_REFS = frozenset({"v2.1.23"})
+EXPECTED_REFS = frozenset({"v2.2.0"})
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _COMPARTMENT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _OCI_REGION = re.compile(r"^[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*$")
 _ALLOWED_IDENTITY_DOMAIN_GROUPS = frozenset({"developers", "pending"})
-_ALLOWED_GOVERNANCE_RESOURCES = frozenset(
-    {
-        ("oci_identity_domains_app", "governance_public_client"),
-        ("oci_kms_vault", "governance"),
-        ("oci_kms_key", "governance"),
-        ("oci_vault_secret", "governance_jdbc"),
-    }
+_RESOURCE_DECLARATION = re.compile(
+    r'resource\s+"([^"]+)"\s+"([^"]+)"',
+    re.IGNORECASE,
 )
-_CONTROL_RESOURCE = re.compile(
-    r'resource\s+"(oci_identity_domains_app|oci_kms_[^"]+|oci_vault_[^"]+)"\s+"([^"]+)"',
+_INPUT_OUTPUT_DECLARATION = re.compile(
+    r'(?:variable|output)\s+"([^"]+)"',
     re.IGNORECASE,
 )
 _IDENTITY_DOMAIN_RESOURCE = re.compile(
@@ -93,7 +89,7 @@ def validate_context(context: dict[str, Any]) -> None:
     if str(source.get("repository") or "").rstrip("/") not in EXPECTED_REPOSITORIES:
         raise ValueError("release requires the trusted GitHub repository")
     if source.get("ref") not in EXPECTED_REFS:
-        raise ValueError("release requires source ref v2.1.23")
+        raise ValueError("release requires source ref v2.2.0")
     if not _SHA.fullmatch(str(source.get("commit_sha") or "")):
         raise ValueError("release requires a full lowercase 40-character source SHA")
     if _OCI_REGION.fullmatch(str(context.get("region") or "")) is None:
@@ -126,16 +122,53 @@ def _forbidden_finding(text: str) -> str | None:
     return None
 
 
+def _control_name_finding(value: str) -> str | None:
+    normalized = re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")
+    tokens = set(normalized.split("_"))
+    if "oke" in tokens or "kubernetes" in tokens or "containerengine" in normalized or "container_engine" in normalized:
+        return "OCI Kubernetes Engine control"
+    if "vault" in tokens:
+        return "OCI Vault control"
+    if "kms" in tokens:
+        return "OCI KMS control"
+    if "apigateway" in normalized or "api_gateway" in normalized:
+        return "OCI API Gateway control"
+    if "jdbc" in tokens:
+        return "JDBC control"
+    if "governance" in tokens or "governed_data_access" in normalized:
+        return "governance gateway/control declaration"
+    return None
+
+
 def _forbidden_control_resource(text: str) -> str | None:
-    for resource_type, name in _CONTROL_RESOURCE.findall(text):
-        normalized = (resource_type.lower(), name.lower())
-        if normalized in _ALLOWED_GOVERNANCE_RESOURCES:
-            continue
-        return (
-            "Identity Domains OAuth client"
-            if resource_type.lower() == "oci_identity_domains_app"
-            else "OCI Vault or customer-managed KMS resource"
-        )
+    for resource_type, name in _RESOURCE_DECLARATION.findall(text):
+        if resource_type.casefold() == "oci_identity_domains_app":
+            return "Identity Domains OAuth client"
+        finding = _control_name_finding(resource_type) or _control_name_finding(name)
+        if finding:
+            return finding
+    for name in _INPUT_OUTPUT_DECLARATION.findall(text):
+        finding = _control_name_finding(name)
+        if finding:
+            return finding
+    return None
+
+
+def _manifest_control_finding(path: Path) -> str | None:
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    form = manifest.get("form") if isinstance(manifest, dict) else None
+    fields = form.get("fields") if isinstance(form, dict) else []
+    outputs = manifest.get("outputs") if isinstance(manifest, dict) else []
+    names = [
+        field.get("name")
+        for field in fields
+        if isinstance(field, dict) and isinstance(field.get("name"), str)
+    ]
+    names.extend(output for output in outputs if isinstance(output, str))
+    for name in names:
+        finding = _control_name_finding(name)
+        if finding:
+            return f"{finding} named {name}"
     return None
 
 
@@ -151,6 +184,11 @@ def validate_source(terraform_root: Path) -> None:
             raise ValueError(f"release source contains {finding} in {path.relative_to(terraform_root)}")
         if 'resource "oci_objectstorage_bucket"' in text and re.search(r"\bkms_key_id\s*=", text):
             raise ValueError("the lab bucket must use its Oracle-managed encryption key")
+    manifest_path = terraform_root / "deploy-studio.json"
+    if manifest_path.is_file():
+        finding = _manifest_control_finding(manifest_path)
+        if finding:
+            raise ValueError(f"release manifest contains {finding}")
 
 
 def _has_nonempty_key(value: Any, key: str) -> bool:
@@ -174,12 +212,11 @@ def _planned_values(resource: dict[str, Any]) -> dict[str, Any]:
 
 def _forbidden_plan_type(resource_type: str, address: str) -> str | None:
     resource_name = address.rsplit(".", 1)[-1].split("[", 1)[0].lower()
-    if (resource_type, resource_name) in _ALLOWED_GOVERNANCE_RESOURCES:
-        return None
-    if resource_type.startswith(("oci_kms_", "oci_vault_")):
-        return "OCI Vault or customer-managed KMS resource"
     if resource_type == "oci_identity_domains_app":
         return "Identity Domains OAuth client"
+    finding = _control_name_finding(resource_type) or _control_name_finding(resource_name)
+    if finding:
+        return finding
     if "ai_data_platform" in resource_type and "volume" in resource_type:
         return "external AIDP volume"
     identity_prefix = "oci_identity_domains_"
@@ -211,7 +248,7 @@ def validate_plan(plan: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate the immutable fresh-only v2.1.23 AIDP starter kit release contract.")
+    parser = argparse.ArgumentParser(description="Validate the immutable fresh-only v2.2.0 AIDP starter kit release contract.")
     parser.add_argument("--source-root", type=Path, default=Path(__file__).parent)
     parser.add_argument("--context-json", type=Path)
     parser.add_argument("--plan-json", type=Path)

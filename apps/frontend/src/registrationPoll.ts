@@ -43,8 +43,84 @@ export type LabOperation = {
   operationId: string;
 };
 
+export type ModuleOperationKind = "install" | "redeploy" | "delete";
+export type ModuleOperation = {
+  moduleId: string;
+  kind: ModuleOperationKind;
+  operationId: string;
+};
+
+export function moduleOperationKind(
+  status: string,
+  operationType?: string | null,
+): ModuleOperationKind | undefined {
+  if (status === "installing") return "install";
+  if (status === "redeploying") return "redeploy";
+  if (status === "deleting") return "delete";
+  if (
+    status === "error" &&
+    operationType &&
+    ["install", "redeploy", "delete"].includes(operationType)
+  )
+    return operationType as ModuleOperationKind;
+  return undefined;
+}
+
 type LabOperationStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 const labOperationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function moduleOperationStorageKey(moduleId: string, kind: ModuleOperationKind) {
+  return `aidp-module.operation.${kind}.${moduleId}`;
+}
+
+export function loadModuleOperation(
+  storage: LabOperationStorage,
+  moduleId: string,
+  kind: ModuleOperationKind,
+): ModuleOperation | undefined {
+  try {
+    const value = JSON.parse(storage.getItem(moduleOperationStorageKey(moduleId, kind)) || "null");
+    return value &&
+      value.moduleId === moduleId && value.kind === kind &&
+      typeof value.operationId === "string" &&
+      labOperationId.test(value.operationId)
+      ? value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function persistModuleOperation(
+  storage: LabOperationStorage,
+  moduleId: string,
+  kind: ModuleOperationKind,
+  operation?: ModuleOperation,
+) {
+  try {
+    if (operation)
+      storage.setItem(moduleOperationStorageKey(moduleId, kind), JSON.stringify(operation));
+    else
+      storage.removeItem(moduleOperationStorageKey(moduleId, kind));
+  } catch {
+    // ponytail: in-memory/server UUIDs keep idempotency when browser storage is blocked.
+  }
+}
+
+export function getOrCreateModuleOperation(
+  current: ModuleOperation | undefined,
+  moduleId: string,
+  kind: ModuleOperationKind,
+  createId: () => string,
+  activeOperationId?: string,
+): ModuleOperation {
+  if (activeOperationId && labOperationId.test(activeOperationId))
+    return { moduleId, kind, operationId: activeOperationId };
+  if (!current) return { moduleId, kind, operationId: createId() };
+  if (current.moduleId !== moduleId || current.kind !== kind)
+    throw new Error("Finish the pending governance module operation first.");
+  return current;
+}
 
 function labOperationStorageKey(userId: string, labId: string, kind: LabOperation["kind"]) {
   return `aidp-lab.operation.${kind}.${userId}.${labId}`;

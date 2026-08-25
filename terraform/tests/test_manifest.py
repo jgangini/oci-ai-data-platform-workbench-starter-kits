@@ -10,6 +10,7 @@ def test_deploy_studio_manifest_contract() -> None:
     root = Path(__file__).parents[2]
     manifest = json.loads((root / "terraform" / "deploy-studio.json").read_text(encoding="utf-8"))
     variables = (root / "terraform" / "b_variables.tf").read_text(encoding="utf-8")
+    storage = (root / "terraform" / "f_oci_objectstorage_bucket.tf").read_text(encoding="utf-8")
     assert manifest["schema_version"] == 1
     assert manifest["project_id"] == "oci-aidp-cloud-migration-lab"
     assert manifest["terraform"] == {"path": "terraform", "package_oci_credentials": False}
@@ -55,29 +56,19 @@ def test_deploy_studio_manifest_contract() -> None:
         "field": "autonomous_database_mode",
         "equals": "existing",
     }
-    assert fields["enable_ai_data_governance"]["group"] == "optional_addons"
-    assert fields["governance_vault_mode"] == {
-        "name": "governance_vault_mode",
-        "label": "OCI Vault mode",
-        "type": "select",
-        "required": True,
-        "default": "new",
-        "group": "optional_addons",
-        "visible_when": {"field": "enable_ai_data_governance", "equals": "true"},
-        "options": [
-            {"value": "new", "label": "Create new Vault"},
-            {"value": "existing", "label": "Use existing Vault"},
-        ],
-    }
-    assert fields["existing_governance_vault_ocid"]["options_source"] == "oci_active_vaults"
-    assert fields["existing_governance_vault_ocid"]["visible_when"] == {
-        "field": "governance_vault_mode",
-        "equals": "existing",
-    }
-    for layer in ("landing", "bronze", "silver", "gold", "artifacts"):
+    for layer in ("landing", "bronze", "silver", "gold"):
         assert fields[f"{layer}_bucket_mode"]["group"] == "medallion"
         assert fields[f"{layer}_new_bucket_name"]["default"] == f"oci_{layer}"
         assert fields[f"{layer}_existing_bucket_name"]["options_source"] == "oci_active_buckets"
+    assert fields["artifacts_bucket_mode"]["group"] == "medallion"
+    assert "artifacts_new_bucket_name" not in fields
+    assert "artifacts_existing_bucket_name" not in fields
+    assert storage.count('name           = "oci_artifacts"') == 1
+    assert storage.count('name      = "oci_artifacts"') == 1
+    assert 'variable "artifacts_new_bucket_name"' not in variables
+    assert 'variable "artifacts_existing_bucket_name"' not in variables
+    assert "enable_ai_data_governance" not in fields
+    assert "optional_addons" not in {field["group"] for field in fields.values()}
     assert "enable_medallion_architecture" not in fields
     assert not any(name.startswith("governance_gateway_") for name in fields)
     assert fields["admin_username"]["group"] == "application_vm"
@@ -102,7 +93,7 @@ def test_deploy_studio_manifest_contract() -> None:
     assert manifest["presentation"]["title"] == "Oracle AI Data Platform Workbench Starter Kits"
     assert manifest["presentation"]["summary"].startswith("Deploys reusable Oracle AI Data Platform Workbench starter kits")
     assert manifest["presentation"]["href"] == "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
-    assert manifest["presentation"]["tags"] == ["VM", "VCN", "OKE", "AI Data Platform Workbench", "Data Governance", "Object Storage", "IAM"]
+    assert manifest["presentation"]["tags"] == ["VM", "VCN", "AI Data Platform Workbench", "Data Governance", "Object Storage", "IAM"]
     assert manifest["presentation"]["image"] == "/assets/oci-aidp-cloud-migration-lab.png"
     assert [step["key"] for step in manifest["run_steps"]] == [
         "queue",
@@ -129,10 +120,6 @@ def test_deploy_studio_manifest_contract() -> None:
         "operator_username",
         "preferred_vm_shape",
         "availability_domain_index",
-        "governance_gateway_image",
-        "governance_gateway_oidc_authority",
-        "governance_gateway_oidc_issuer",
-        "governance_gateway_oidc_static_jwks_json",
     ]
     assert manifest["preflight"]["output_inputs"] == [
         "home_region",
@@ -140,10 +127,6 @@ def test_deploy_studio_manifest_contract() -> None:
         "operator_username",
         "preferred_vm_shape",
         "availability_domain_index",
-        "governance_gateway_image",
-        "governance_gateway_oidc_authority",
-        "governance_gateway_oidc_issuer",
-        "governance_gateway_oidc_static_jwks_json",
     ]
     runtime_fields = {
         field["name"]: field for field in manifest["preflight"]["runtime_fields"]
@@ -151,10 +134,6 @@ def test_deploy_studio_manifest_contract() -> None:
     assert re.fullmatch(
         runtime_fields["operator_user_ocid"]["pattern"],
         "ocid1.user.oc1..operator",
-    )
-    assert re.fullmatch(
-        runtime_fields["governance_gateway_oidc_issuer"]["pattern"],
-        "https://identity.oraclecloud.com/",
     )
     assert (root / manifest["preflight"]["entrypoint"]).is_file()
     assert "aidp_workbench_url" in manifest["outputs"]
@@ -171,23 +150,6 @@ def test_deploy_studio_manifest_contract() -> None:
         "autonomous_database_version",
         "autonomous_database_workload",
         "autonomous_database_compute_count",
-        "enable_ai_data_governance",
-        "governance_gateway_cluster_id",
-        "governance_gateway_private_endpoint",
-        "governance_gateway_deploy_pipeline_id",
-        "governance_gateway_deployment_id",
-        "governance_gateway_jdbc_user_ocid",
-        "governance_gateway_url",
-        "governance_gateway_oidc_scopes",
-        "governance_gateway_image",
-        "governance_gateway_jdbc_secret_ocid",
-        "governance_gateway_jdbc_driver_bucket",
-        "governance_gateway_jdbc_driver_object",
-        "governance_control_bucket",
-        "governance_control_delta_location",
-        "governance_gateway_tokenization_key_ocid",
-        "governance_gateway_tokenization_crypto_endpoint",
-        "governance_gateway_api_gateway_id",
         "agent_model_id",
     }.issubset(manifest["outputs"])
     assert "aidp_console_url" not in manifest["outputs"]
@@ -235,13 +197,24 @@ def test_hook_result_matches_runner_and_manifest_contract() -> None:
     }
 
 
+def test_release_workflow_publishes_only_the_gated_v2_2_0_tag() -> None:
+    root = Path(__file__).parents[2]
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    gate = "python terraform/release_gate.py --source-root terraform"
+    publish = 'gh release create "$GITHUB_REF_NAME"'
+    assert 'tags: ["v2.2.0"]' in workflow
+    assert 'tags: ["v*"]' not in workflow
+    assert 0 <= workflow.index(gate) < workflow.index(publish)
+
+
 def test_runtime_security_contracts() -> None:
     root = Path(__file__).parents[2]
     attributes = (root / ".gitattributes").read_text(encoding="utf-8")
     nginx = (root / "docker/nginx.conf").read_text(encoding="utf-8")
     local_nginx = (root / "docker/nginx.oci-local.conf").read_text(encoding="utf-8")
     backend_requirements = (root / "apps/backend/requirements.txt").read_text(encoding="utf-8")
-    gateway_requirements = (root / "apps/governance_gateway/requirements.txt").read_text(encoding="utf-8")
     entrypoint = (root / "docker/entrypoint.sh").read_text(encoding="utf-8")
     cloud_init = (root / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")
     variables = (root / "terraform/b_variables.tf").read_text(encoding="utf-8")
@@ -253,16 +226,14 @@ def test_runtime_security_contracts() -> None:
     backend_main = (root / "apps/backend/app/main.py").read_text(encoding="utf-8")
     assert "$proxy_add_x_forwarded_for" not in nginx
     assert "*.sh text eol=lf" in attributes
-    assert nginx.count("X-Forwarded-For $remote_addr") == 2
+    assert nginx.count("X-Forwarded-For $remote_addr") == 1
     for proxy in (nginx, local_nginx):
-        assert "location = /api/admin/aidp/jdbc-driver {" in proxy
-        assert "client_max_body_size 128m;" in proxy
+        assert "/api/admin/aidp/jdbc-driver" not in proxy
         assert "client_max_body_size 1m;" in proxy
         assert "proxy_read_timeout 300s;" in proxy
         assert "proxy_send_timeout 300s;" in proxy
-    for requirements in (backend_requirements, gateway_requirements):
-        assert "fastapi==0.141.1" in requirements
-        assert "starlette==0.49.1" in requirements
+    assert "fastapi==0.141.1" in backend_requirements
+    assert "starlette==0.49.1" in backend_requirements
     assert "limit_req" not in nginx
     assert "opaque_rate_limit_key" in backend_main
     assert 'headers={"Retry-After": str(' in backend_main
@@ -368,7 +339,7 @@ def test_terraform_files_follow_select_ai_order() -> None:
         "j_outputs.tf",
     }
     assert expected.issubset({path.name for path in root.glob("*.tf")})
-    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefghiiiiij")
+    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefghiij")
     assert not {"main.tf", "network.tf", "compute.tf", "storage.tf", "identity.tf", "aidp.tf", "outputs.tf", "providers.tf"} & {
         path.name for path in root.glob("*.tf")
     }

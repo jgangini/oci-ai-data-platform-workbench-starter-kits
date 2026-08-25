@@ -24,7 +24,7 @@ def _context() -> dict[str, object]:
         "compartment_mode": "new",
         "source": {
             "repository": "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits.git",
-            "ref": "v2.1.23",
+            "ref": "v2.2.0",
             "commit_sha": "0123456789abcdef0123456789abcdef01234567",
         },
     }
@@ -62,7 +62,7 @@ def test_context_requires_current_release_source() -> None:
     release_gate.validate_context(_context())
     invalid = _context()
     invalid["source"] = {**invalid["source"], "ref": "main"}  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="v2.1.23"):
+    with pytest.raises(ValueError, match="v2.2.0"):
         release_gate.validate_context(invalid)
 
 
@@ -118,6 +118,15 @@ def test_context_rejects_untrusted_repository_and_short_sha() -> None:
         ('resource "oci_opensearch_opensearch_cluster" "bad" {}', "OSCS/OpenSearch"),
         ('payload = { volumeType = "EXTERNAL" }', "external AIDP volume"),
         ('resource "oci_kms_vault" "bad" {}', "OCI Vault"),
+        ('resource "oci_kms_key" "bad" {}', "OCI KMS"),
+        ('resource "oci_containerengine_cluster" "bad" {}', "Kubernetes Engine"),
+        ('resource "oci_apigateway_gateway" "bad" {}', "API Gateway"),
+        ('resource "oci_core_subnet" "governance" {}', "governance gateway/control"),
+        ('variable "oke_cluster_id" {}', "Kubernetes Engine"),
+        ('variable "existing_governance_vault_ocid" {}', "OCI Vault"),
+        ('output "api_gateway_url" { value = "" }', "API Gateway"),
+        ('output "jdbc_url" { value = "" }', "JDBC"),
+        ('variable "enable_ai_data_governance" {}', "governance gateway/control"),
         ('resource "oci_identity_domains_app" "bad" {}', "OAuth client"),
         ('resource "oci_identity_domains_user" "operator_copy" {}', "technical Identity Domains user"),
         ('resource "oci_identity_domains_group" "provisioner" {}', "technical Identity Domains group"),
@@ -148,20 +157,48 @@ def test_source_requires_oracle_managed_bucket_key(tmp_path: Path) -> None:
         release_gate.validate_source(root)
 
 
-def test_source_accepts_minimal_safe_deployment(tmp_path: Path) -> None:
-    release_gate.validate_source(_source(tmp_path))
-
-
-def test_source_accepts_only_named_governance_resources_and_public_client(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "section,name,message",
+    [
+        ("field", "oke_cluster_id", "Kubernetes Engine"),
+        ("field", "governance_vault_mode", "OCI Vault"),
+        ("field", "jdbc_driver_file", "JDBC"),
+        ("output", "governance_gateway_url", "governance gateway/control"),
+        ("output", "api_gateway_id", "API Gateway"),
+    ],
+)
+def test_manifest_rejects_forbidden_controls(
+    tmp_path: Path, section: str, name: str, message: str
+) -> None:
     root = _source(tmp_path)
-    (root / "i_oci_data_governance_edge.tf").write_text(
-        '\n'.join(
-            (
-                'resource "oci_identity_domains_app" "governance_public_client" {}',
-                'resource "oci_kms_vault" "governance" {}',
-                'resource "oci_kms_key" "governance" {}',
-                'resource "oci_vault_secret" "governance_jdbc" {}',
-            )
+    manifest = {
+        "form": {"fields": [{"name": name}] if section == "field" else []},
+        "outputs": [name] if section == "output" else [],
+    }
+    (root / "deploy-studio.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        release_gate.validate_source(root)
+
+
+def test_source_accepts_minimal_safe_deployment(tmp_path: Path) -> None:
+    root = _source(tmp_path)
+    (root / "release_gate.py").write_text(
+        "# negative guards for OKE, Vault, KMS, API Gateway, JDBC and governance_gateway\n",
+        encoding="utf-8",
+    )
+    tests = root / "tests"
+    tests.mkdir()
+    (tests / "test_negative_guards.py").write_text(
+        "FORBIDDEN = ('oci_containerengine_', 'oci_vault_', 'jdbc')\n",
+        encoding="utf-8",
+    )
+    (root / "deploy-studio.json").write_text(
+        json.dumps(
+            {
+                "presentation": {"summary": "Does not deploy OKE, Vault, JDBC, or a governance gateway."},
+                "form": {"fields": [{"name": "agent_model_id"}]},
+                "outputs": ["agent_model_id"],
+            }
         ),
         encoding="utf-8",
     )
@@ -195,26 +232,22 @@ def test_plan_rejects_forbidden_resource_and_customer_managed_bucket_key() -> No
         release_gate.validate_plan(_plan(resource_type="oci_opensearch_opensearch_cluster"))
     for resource_type, message in (
         ("oci_kms_vault", "OCI Vault"),
-        ("oci_kms_key", "OCI Vault"),
+        ("oci_kms_key", "OCI KMS"),
         ("oci_vault_secret", "OCI Vault"),
+        ("oci_containerengine_cluster", "Kubernetes Engine"),
+        ("oci_apigateway_gateway", "API Gateway"),
         ("oci_identity_domains_app", "OAuth client"),
     ):
         with pytest.raises(ValueError, match=message):
             release_gate.validate_plan(_plan(resource_type=resource_type))
+    with pytest.raises(ValueError, match="governance gateway/control"):
+        release_gate.validate_plan(
+            _plan(resource_type="oci_core_subnet", address="oci_core_subnet.governance")
+        )
     bucket_plan = _plan(resource_type="oci_objectstorage_bucket")
     bucket_plan["resource_changes"][0]["change"]["after"]["kms_key_id"] = "ocid1.key.oc1..test"  # type: ignore[index]
     with pytest.raises(ValueError, match="customer-managed"):
         release_gate.validate_plan(bucket_plan)
-
-
-def test_plan_accepts_only_named_governance_resources_and_public_client() -> None:
-    for resource_type, address in (
-        ("oci_kms_vault", "oci_kms_vault.governance[0]"),
-        ("oci_kms_key", "oci_kms_key.governance[0]"),
-        ("oci_vault_secret", "oci_vault_secret.governance_jdbc[0]"),
-        ("oci_identity_domains_app", "oci_identity_domains_app.governance_public_client[0]"),
-    ):
-        release_gate.validate_plan(_plan(resource_type=resource_type, address=address))
 
 
 def test_plan_rejects_technical_identity_resources_but_allows_lab_groups() -> None:

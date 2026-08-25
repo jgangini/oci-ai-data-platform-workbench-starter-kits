@@ -9,16 +9,25 @@ import re
 import threading
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from oci._vendor import requests
 
-from .autonomous import AutonomousGovernanceClient, AutonomousProvisionError
 from .config import Settings
 from .governance import (
+    GOVERNANCE_AGENT_COMPUTE_NAME,
+    GOVERNANCE_AGENT_NAME,
+    GOVERNANCE_BUCKET_NAME,
+    GOVERNANCE_CREDENTIAL_NAME,
+    GOVERNANCE_DISPLAY_NAME,
+    GOVERNANCE_JOB_NAME,
+    GOVERNANCE_MODULE_ID,
+    GOVERNANCE_TABLES,
     agent_source,
-    external_catalog_name,
+    governance_sync_notebook,
 )
 from .lab_packs import LabAsset, LabPack, available_lab_ids, load_lab_pack
 from .notebooks import (
@@ -34,11 +43,14 @@ from .notebooks import (
 
 API_VERSION = "20260430"
 SHARED_COMPUTE_NAME = "aidp_cluster_shared_compute"
-AGENT_COMPUTE_NAME = "aidp_agent_shared_compute"
+AGENT_COMPUTE_NAME = GOVERNANCE_AGENT_COMPUTE_NAME
 CATALOG_NAME = "oci_medallion"
 LEGACY_CATALOG_NAME = "aidp_lab"
 LAYOUT_VERSION = 5
 CONTROL_ROOT = f"{WORKSPACE_ROOT}/.control"
+MODULE_CONTROL_ROOT = f"{CONTROL_ROOT}/modules"
+MODULE_ROOT = f"{MODULE_CONTROL_ROOT}/{GOVERNANCE_MODULE_ID}"
+MODULE_MANIFEST_PATH = f"{MODULE_ROOT}/manifest.json"
 LEGACY_MEDALLION_ROOT = "/Workspace/medallon"
 LEGACY_WORKSPACE_ROOT = "/Workspace/lab-users"
 LEGACY_LAB_IDS = frozenset({"banking", "telecommunications", "retail", "healthcare"})
@@ -80,6 +92,22 @@ class UserMaterial:
     participant_code: int | None = None
 
 
+def _module_payload(manifest: dict[str, Any] | None = None) -> dict[str, Any]:
+    state = manifest or {}
+    status_value = str(state.get("status") or "not_installed")
+    operation = state.get("operation") if isinstance(state.get("operation"), dict) else {}
+    return {
+        "module_id": GOVERNANCE_MODULE_ID,
+        "display_name": GOVERNANCE_DISPLAY_NAME,
+        "status": status_value,
+        "installed": status_value != "not_installed",
+        "operation_id": str(operation.get("operation_id") or "") or None,
+        "operation_type": str(operation.get("type") or "") or None,
+        "phase": str(state.get("phase") or "not_installed"),
+        "enabled": bool(state.get("enabled", False)),
+    }
+
+
 def _validated_lab_ids(lab_ids: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
     values = (lab_ids,) if isinstance(lab_ids, str) else tuple(lab_ids)
     if not values or len(values) != len(set(values)):
@@ -100,11 +128,15 @@ def participant_owner_key(user_ocid: str) -> str:
 class LocalAidpClient:
     """In-memory AIDP adapter for the Docker development and test profile."""
 
-    def __init__(self, _: Settings) -> None:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
         self.users: dict[str, dict[str, UserMaterial]] = {}
         self._operations: dict[tuple[str, str], tuple[str, UserMaterial]] = {}
         # ponytail: process-local locks are sufficient for the single-process development adapter.
         self._locks: dict[str, asyncio.Lock] = {}
+        self._module_lock = asyncio.Lock()
+        self._module: dict[str, Any] | None = None
+        self._platform_admin_ocids: set[str] = set()
 
     async def close(self) -> None:
         return None
@@ -112,30 +144,94 @@ class LocalAidpClient:
     async def healthcheck(self) -> None:
         return None
 
-    async def connection_access(self) -> dict[str, str]:
-        return {
-            "compute_name": SHARED_COMPUTE_NAME,
-            "jdbc_url": (
-                "jdbc:spark://gateway.aidp.us-chicago-1.oci.oraclecloud.com/default;"
-                "SparkServerType=AIDP;httpPath=cliservice/local-cluster"
-            ),
-        }
+    async def is_platform_admin(self, user_ocid: str) -> bool:
+        return user_ocid in self._platform_admin_ocids
+
+    async def platform_admin_user_ocids(self) -> set[str]:
+        return set(self._platform_admin_ocids)
+
+    async def platform_admin_principals(self) -> tuple[set[str], set[str]]:
+        return set(self._platform_admin_ocids), set()
+
+    def grant_platform_admin(self, user_ocid: str) -> None:
+        if not user_ocid.startswith("ocid1.user."):
+            raise ValueError("A valid OCI user OCID is required")
+        self._platform_admin_ocids.add(user_ocid)
+
+    async def list_modules(self) -> list[dict[str, Any]]:
+        if self.settings.deployment_mode != "production":
+            return []
+        return [_module_payload(self._module)]
+
+    async def install_governance_module(
+        self,
+        user_ocid: str,
+        operation_id: str,
+        *,
+        role_membership_verified: bool = False,
+    ) -> dict[str, Any]:
+        if self.settings.deployment_mode != "production":
+            raise AidpProvisionConflict("Governance modules are available only in production mode")
+        if not role_membership_verified and not await self.is_platform_admin(user_ocid):
+            raise AidpProvisionConflict("The selected user is not an AI_DATA_PLATFORM_ADMIN")
+        async with self._module_lock:
+            if self._module is None:
+                self._module = {
+                    "schema_version": 1,
+                    "module_id": GOVERNANCE_MODULE_ID,
+                    "status": "active",
+                    "phase": "active",
+                    "enabled": True,
+                    "operation": {"operation_id": operation_id, "type": "install", "phase": "complete"},
+                }
+            return _module_payload(self._module)
+
+    async def redeploy_governance_module(
+        self,
+        user_ocid: str,
+        operation_id: str,
+        *,
+        role_membership_verified: bool = False,
+    ) -> dict[str, Any]:
+        if not role_membership_verified and not await self.is_platform_admin(user_ocid):
+            raise AidpProvisionConflict("The selected user is not an AI_DATA_PLATFORM_ADMIN")
+        async with self._module_lock:
+            if self._module is None:
+                raise AidpProvisionConflict("The governance module is not installed")
+            enabled = bool(self._module.get("enabled"))
+            self._module.update(
+                status="active",
+                phase="active",
+                enabled=enabled,
+                operation={"operation_id": operation_id, "type": "redeploy", "phase": "complete"},
+            )
+            return _module_payload(self._module)
+
+    async def delete_governance_module(
+        self,
+        user_ocid: str,
+        operation_id: str,
+        *,
+        role_membership_verified: bool = False,
+    ) -> dict[str, Any]:
+        if not role_membership_verified and not await self.is_platform_admin(user_ocid):
+            raise AidpProvisionConflict("The selected user is not an AI_DATA_PLATFORM_ADMIN")
+        async with self._module_lock:
+            self._module = None
+            result = _module_payload()
+            result.update(operation_id=operation_id, operation_type="delete", phase="complete")
+            return result
 
     @staticmethod
     def _material(user_ocid: str, email: str, lab_id: str, participant_code: int) -> UserMaterial:
         pack = load_lab_pack(lab_id)
         key = participant_key(participant_code)
-        resource_name = (
-            str(pack.agent["name_template"]).format(participant_key=key)
-            if pack.kind == "governance_agent"
-            else f"wf_{key}_{lab_id}"
-        )
         return UserMaterial(
             email,
             lab_id,
             key,
             workspace_root(key, lab_id, email),
-            resource_name,
+            f"wf_{key}_{lab_id}",
             pack.pack_version,
             participant_code=participant_code,
         )
@@ -218,6 +314,7 @@ class AidpClient:
 
         self._oci = oci
         config = oci.config.from_file(settings.oci_config_file, "DEFAULT")
+        self._oci_config = config
         self.signer = oci.signer.Signer(
             tenancy=config["tenancy"],
             user=config["user"],
@@ -226,9 +323,6 @@ class AidpClient:
             pass_phrase=config.get("pass_phrase"),
         )
         self.object_storage = oci.object_storage.ObjectStorageClient(config)
-        self.governance_database = AutonomousGovernanceClient(
-            settings.autonomous_runtime_file
-        )
         self.session = requests.Session()
         self._session_lock = threading.Lock()
         # ponytail: process-local locks serialize one participant; use a distributed lock if the API is replicated.
@@ -236,30 +330,6 @@ class AidpClient:
 
     async def close(self) -> None:
         self.session.close()
-
-    async def connection_access(self) -> dict[str, str]:
-        workspace = self._workspace()
-        workspace_key = str(workspace["key"])
-        cluster = self._shared_compute(workspace_key)
-        cluster_key = str(cluster["key"])
-        details = self._request(
-            "GET",
-            f"/workspaces/{workspace_key}/clusters/{cluster_key}",
-            phase="workspace",
-        )
-        jdbc_url = str(
-            (details.get("jdbcEndpointUrl") if isinstance(details, dict) else "")
-            or cluster.get("jdbcEndpointUrl")
-            or ""
-        ).strip()
-        if not jdbc_url.startswith("jdbc:spark://") or ";SparkServerType=AIDP" not in jdbc_url:
-            raise AidpProvisionPending(
-                "AIDP has not published the JDBC connection details yet.", "workspace"
-            )
-        return {
-            "compute_name": str(cluster.get("displayName") or SHARED_COMPUTE_NAME),
-            "jdbc_url": jdbc_url,
-        }
 
     @staticmethod
     def _request_headers(
@@ -408,11 +478,14 @@ class AidpClient:
     @staticmethod
     def _page_items(body: Any) -> list[dict[str, Any]]:
         if isinstance(body, list):
-            return [item for item in body if isinstance(item, dict)]
-        if isinstance(body, dict):
-            values = body.get("items") or body.get("Items") or []
-            return [item for item in values if isinstance(item, dict)]
-        return []
+            values = body
+        elif isinstance(body, dict) and ("items" in body or "Items" in body):
+            values = body.get("items") if "items" in body else body.get("Items")
+        else:
+            raise AidpProvisionError("AIDP returned an invalid paginated response.")
+        if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
+            raise AidpProvisionError("AIDP returned invalid list items.")
+        return values
 
     def _list(
         self,
@@ -423,7 +496,8 @@ class AidpClient:
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         page: str | None = None
-        while True:
+        seen_pages: set[str] = set()
+        for _ in range(1000):
             query = {"limit": "100", **(params or {})}
             if page:
                 query["page"] = page
@@ -434,6 +508,10 @@ class AidpClient:
             page = response_headers.get("opc-next-page") or response_headers.get("Opc-Next-Page")
             if not page:
                 return items
+            if page in seen_pages:
+                raise AidpProvisionError("AIDP returned a repeated pagination token.")
+            seen_pages.add(page)
+        raise AidpProvisionError("AIDP pagination exceeded the safety limit.")
 
     def _workspace(self) -> dict[str, Any]:
         workspaces = [
@@ -488,31 +566,6 @@ class AidpClient:
             raise AidpProvisionPending(f"AIDP has not published catalog {name} yet.", "schemas")
         return published, True
 
-    def _cleanup_external_catalog(self, participant_key: str, state: dict[str, Any]) -> None:
-        name = str(state.get("external_catalog_name") or external_catalog_name(participant_key))
-        catalog = self._catalog(name, allow_missing=True, allow_deleting=True)
-        if catalog is None:
-            return
-        if str(catalog.get("lifecycleState") or catalog.get("state") or "").upper() == "DELETING":
-            raise AidpProvisionPending(
-                "Participant external catalog deletion is still in progress.", "cleanup"
-            )
-        catalog_key = str(catalog.get("key") or "")
-        if not catalog_key:
-            raise AidpProvisionPending(
-                "The participant external catalog identifier is not ready.", "cleanup"
-            )
-        self._request(
-            "DELETE",
-            f"/catalogs/{catalog_key}",
-            allow_not_found=True,
-            phase="cleanup",
-        )
-        if self._catalog(name, allow_missing=True, allow_deleting=True) is not None:
-            raise AidpProvisionPending(
-                "Participant external catalog deletion is still in progress.", "cleanup"
-            )
-
     def _shared_compute(self, workspace_key: str) -> dict[str, Any]:
         clusters = [
             item
@@ -526,48 +579,111 @@ class AidpClient:
             clusters[0], {"ACTIVE", "STOPPED"}, "compute", "workspace"
         )
 
+    def _agent_compute_async_operations(
+        self, workspace_key: str
+    ) -> list[tuple[dict[str, Any], str]]:
+        operations: list[tuple[dict[str, Any], str]] = []
+        workspace_prefix = f"{workspace_key}."
+        for item in self._list(
+            "/asyncOperations",
+            params={"resourceType": "AI_COMPUTE"},
+            phase="workspace",
+        ):
+            action = str(item.get("actionType") or "").upper()
+            resource_name = str(item.get("resourceName") or "")
+            if (
+                item.get("resourceDisplayName") != AGENT_COMPUTE_NAME
+                or action not in {"CREATE_CLUSTER", "DELETE_CLUSTER"}
+                or not resource_name.startswith(workspace_prefix)
+                or not resource_name.removeprefix(workspace_prefix)
+            ):
+                continue
+            operations.append((item, resource_name.removeprefix(workspace_prefix)))
+        operations.sort(
+            key=lambda entry: str(entry[0].get("timeStarted") or ""), reverse=True
+        )
+        return operations
+
+    @staticmethod
+    def _async_operation_status(operation: dict[str, Any]) -> str:
+        return str(
+            operation.get("status")
+            or operation.get("lifecycleState")
+            or operation.get("state")
+            or ""
+        ).upper()
+
+    @staticmethod
+    def _operation_retry_scope(operation: dict[str, Any], message: str) -> str:
+        retry_scope = str(operation.get("key") or "")
+        if not retry_scope:
+            raise AidpProvisionError(message)
+        return retry_scope
+
+    def _deleted_agent_compute_retry_scope(
+        self, operation: dict[str, Any], operation_status: str
+    ) -> str:
+        if operation_status in {"SUCCESS", "SUCCEEDED"}:
+            return self._operation_retry_scope(
+                operation,
+                "The completed governance AI compute deletion has no operation identifier.",
+            )
+        if operation_status in {"FAILED", "ERROR", "CANCELED", "CANCELLED"}:
+            raise AidpProvisionError(
+                "The dedicated governance AI compute deletion failed closed."
+            )
+        raise AidpProvisionPending(
+            "AIDP is still deleting the dedicated governance AI compute.",
+            "workspace",
+        )
+
+    def _hidden_agent_compute(
+        self, workspace_key: str, resource_key: str
+    ) -> dict[str, Any] | None:
+        candidate = self._request(
+            "GET",
+            f"/workspaces/{workspace_key}/clusters/{resource_key}",
+            allow_not_found=True,
+            phase="workspace",
+        )
+        if not isinstance(candidate, dict):
+            return None
+        if self._resource_name(candidate) != AGENT_COMPUTE_NAME:
+            return None
+        resource_type = str(
+            candidate.get("type") or candidate.get("sourceApi") or ""
+        ).upper()
+        return candidate if resource_type == "AI_COMPUTE" else None
+
     def _recover_hidden_agent_compute(
         self, workspace_key: str
     ) -> tuple[dict[str, Any] | None, str]:
-        operations = sorted(
-            [
-                item
-                for item in self._list(
-                    "/asyncOperations",
-                    params={"resourceType": "AI_COMPUTE"},
-                    phase="workspace",
-                )
-                if item.get("resourceDisplayName") == AGENT_COMPUTE_NAME
-            ],
-            key=lambda item: str(item.get("timeStarted") or ""),
-            reverse=True,
-        )
-        retry_scope = str(operations[0].get("key") or "") if operations else ""
-        for operation in operations:
-            resource = str(operation.get("resourceName") or "").split(".")
-            if len(resource) != 2 or resource[0] != workspace_key:
-                continue
-            candidate = self._request(
-                "GET",
-                f"/workspaces/{workspace_key}/clusters/{resource[1]}",
-                allow_not_found=True,
-                phase="workspace",
+        operations = self._agent_compute_async_operations(workspace_key)
+        if not operations:
+            return None, ""
+        operation, resource_key = operations[0]
+        operation_status = self._async_operation_status(operation)
+        if str(operation.get("actionType") or "").upper() == "DELETE_CLUSTER":
+            return None, self._deleted_agent_compute_retry_scope(
+                operation, operation_status
             )
-            if (
-                isinstance(candidate, dict)
-                and self._resource_name(candidate) == AGENT_COMPUTE_NAME
-                and str(candidate.get("type") or candidate.get("sourceApi") or "").upper()
-                == "AI_COMPUTE"
-            ):
-                return (
-                    {
-                        **candidate,
-                        "_async_operation_action": operation.get("actionType"),
-                        "_async_operation_status": operation.get("status"),
-                    },
-                    retry_scope,
-                )
-        return None, retry_scope
+        retry_scope = str(operation.get("key") or "")
+        candidate = self._hidden_agent_compute(workspace_key, resource_key)
+        if candidate is not None:
+            return {
+                **candidate,
+                "_async_operation_action": operation.get("actionType"),
+                "_async_operation_status": operation_status,
+            }, retry_scope
+        if operation_status in {"FAILED", "ERROR", "CANCELED", "CANCELLED"}:
+            return None, self._operation_retry_scope(
+                operation,
+                "The failed governance AI compute creation has no operation identifier.",
+            )
+        raise AidpProvisionPending(
+            "AIDP is still creating the dedicated governance AI compute.",
+            "workspace",
+        )
 
     def _remove_failed_agent_compute(
         self, workspace_key: str, compute: dict[str, Any] | None
@@ -579,7 +695,8 @@ class AidpClient:
         ).upper()
         failed_create = (
             str(compute.get("_async_operation_action") or "").upper() == "CREATE_CLUSTER"
-            and str(compute.get("_async_operation_status") or "").upper() == "FAILED"
+            and str(compute.get("_async_operation_status") or "").upper()
+            in {"FAILED", "ERROR", "CANCELED", "CANCELLED"}
         )
         failed_resource = resource_state == "FAILED" or resource_state.endswith(
             "_FAILED"
@@ -634,7 +751,7 @@ class AidpClient:
                 payload={
                     "type": "AI_COMPUTE",
                     "displayName": AGENT_COMPUTE_NAME,
-                    "description": "Shared least-privilege compute for participant governance agents",
+                    "description": "Dedicated AI compute for the global data governance Agent",
                     "driverConfig": {"driverShapeConfig": {"ocpus": 1, "memoryInGBs": 16}},
                     "replicaConfig": {"minReplica": 1, "maxReplica": 1},
                 },
@@ -644,7 +761,7 @@ class AidpClient:
             current = matches()
             if len(current) != 1:
                 raise AidpProvisionPending(
-                    "AIDP has not published the shared AI compute yet.", "workspace"
+                    "AIDP has not published the dedicated governance AI compute yet.", "workspace"
                 )
             created = True
         else:
@@ -676,20 +793,7 @@ class AidpClient:
         *,
         repair_drift: bool,
     ) -> tuple[str, bool]:
-        session_config = {
-            "variables": {
-                "governance_access_token": {
-                    "name": "governance_access_token",
-                    "description": (
-                        "Short-lived effective-user OAuth token for the private "
-                        "governance gateway"
-                    ),
-                    "isRequired": True,
-                    "shouldLog": False,
-                    "isSystem": False,
-                }
-            }
-        }
+        session_config = {"variables": {}}
         entry_path = f"{root}/governance_agent.py"
         dependencies_path = f"{root}/requirements.txt"
         descriptor_path = f"{root}/agent-manifest.json"
@@ -718,7 +822,7 @@ class AidpClient:
                 f"/workspaces/{workspace_key}/agents",
                 payload={
                     "displayName": name,
-                    "description": "Participant-editable data governance agent with predefined governance tools",
+                    "description": "Global read-only Master Catalog governance Agent",
                     "pathInfo": root,
                     "type": "CODE",
                     "entryFilePath": entry_path,
@@ -731,14 +835,14 @@ class AidpClient:
             agents = self._agents(workspace_key, name)
             if len(agents) != 1:
                 raise AidpProvisionPending(
-                    "AIDP has not published the participant Agent yet.", "content"
+                    "AIDP has not published the global governance Agent yet.", "content"
                 )
             created = True
             changed = True
         agent_key = str(agents[0].get("key") or agents[0].get("id") or "")
         if not agent_key:
             raise AidpProvisionPending(
-                "AIDP has not published the participant Agent identifier yet.", "content"
+                "AIDP has not published the global governance Agent identifier yet.", "content"
             )
         if changed and not created:
             self._request(
@@ -746,10 +850,7 @@ class AidpClient:
                 f"/workspaces/{workspace_key}/agents/{agent_key}",
                 payload={
                     "displayName": name,
-                    "description": (
-                        "Participant-editable data governance agent with predefined "
-                        "governance tools"
-                    ),
+                    "description": "Global read-only Master Catalog governance Agent",
                     "entryFilePath": entry_path,
                     "dependenciesFilePath": dependencies_path,
                     "computeKey": compute_key,
@@ -771,6 +872,8 @@ class AidpClient:
     ) -> tuple[dict[str, Any], bool]:
         path = f"/workspaces/{workspace_key}/agents/{agent_key}/deployments"
         deployments = self._list(path, phase="deployment")
+        if len(deployments) > 1:
+            raise AidpProvisionError("AIDP has duplicate global governance Agent deployments.")
         for deployment in deployments:
             state = str(
                 deployment.get("lifecycleState") or deployment.get("state") or ""
@@ -786,8 +889,7 @@ class AidpClient:
                                 or f"{agent_name}_deployment"
                             ),
                             "description": (
-                                "Production deployment for the participant "
-                                "governance Agent"
+                                "Production deployment for the global governance Agent"
                             ),
                             "agentComputeKey": compute_key,
                             "agentKey": agent_key,
@@ -801,7 +903,7 @@ class AidpClient:
                 return deployment, False
             if state in {"CREATING", "DEPLOYING", "UPDATING"}:
                 raise AidpProvisionPending(
-                    "The participant Agent deployment is still starting.", "deployment"
+                    "The global governance Agent deployment is still starting.", "deployment"
                 )
         if any(
             str(item.get("lifecycleState") or item.get("state") or "").upper()
@@ -809,20 +911,19 @@ class AidpClient:
             for item in deployments
         ):
             raise AidpProvisionError(
-                "The participant Agent deployment failed; redeploy the Agent laboratory."
+                "The global governance Agent deployment failed; retry the module redeploy."
             )
         deployment = self._request(
             "POST",
             f"{path}/actions/deploy",
             payload={
-                "displayName": (
-                    f"{agent_name}_{agent_key[:8]}_{uuid.uuid4().hex[:8]}_deployment"
-                ),
-                "description": "Production deployment for the participant governance Agent",
+                "displayName": f"{agent_name}_deployment",
+                "description": "Production deployment for the global governance Agent",
                 "agentComputeKey": compute_key,
                 "agentKey": agent_key,
             },
             phase="deployment",
+            retry_scope=f"agent-deploy:{agent_key}",
         )
         return deployment if isinstance(deployment, dict) else {}, True
 
@@ -1286,8 +1387,6 @@ class AidpClient:
             "region": self.settings.aidp_region,
             "model_id": self.settings.agent_model_id,
             "catalog": {"name": catalog_name_for(participant), "key": ""},
-            "agent": None,
-            "external_catalog": None,
             "sync_state": {},
             "labs": labs,
         }
@@ -1321,8 +1420,6 @@ class AidpClient:
                     "name": participant_catalog_name(participant_key(participant_code)),
                     "key": "",
                 },
-                "agent": None,
-                "external_catalog": None,
                 "sync_state": {},
                 "labs": {},
             }
@@ -1335,17 +1432,12 @@ class AidpClient:
             if lab_id in labs:
                 continue
             pack = load_lab_pack(lab_id)
-            resource_name = (
-                str(pack.agent["name_template"]).format(participant_key=key)
-                if pack.kind == "governance_agent"
-                else f"wf_{key}_{lab_id}"
-            )
             labs[lab_id] = {
                 "pack_version": pack.pack_version,
                 "pack_hash": pack.pack_sha256,
                 "workspace_path": workspace_root(key, lab_id, normalized_email if existing.get("owner_key") else None),
-                "job_name": resource_name,
-                "catalog_name": participant_catalog_name(key) if pack.kind == "data_pipeline" else "",
+                "job_name": f"wf_{key}_{lab_id}",
+                "catalog_name": participant_catalog_name(key),
                 "catalog_key": "",
                 "phase": "workspace",
                 "operation": None,
@@ -1519,8 +1611,13 @@ class AidpClient:
         return bool(
             self._resource_name(details) == payload["name"]
             and details.get("path") == payload["path"]
+            and details.get("maxConcurrentRuns") == payload["maxConcurrentRuns"]
             and self._job_tasks_match(details.get("tasks"), payload["tasks"], compute_key)
             and self._job_compute_matches(details.get("jobClusters"), compute_key)
+            and (
+                "continuous" not in payload
+                or details.get("continuous") == payload["continuous"]
+            )
         )
 
     def _job_key(self, workspace_key: str, job_name: str) -> str:
@@ -1541,7 +1638,8 @@ class AidpClient:
             f"/workspaces/{workspace_key}/jobs",
             payload={
                 name: payload[name]
-                for name in ("name", "path", "description", "maxConcurrentRuns")
+                for name in ("name", "path", "description", "maxConcurrentRuns", "continuous")
+                if name in payload
             },
             phase="content",
         )
@@ -1897,258 +1995,6 @@ class AidpClient:
         )
         return job_name, job_key, content_changed or job_changed
 
-    def _active_agent_material(
-        self,
-        user_ocid: str,
-        email: str,
-        manifest: dict[str, Any],
-        state: dict[str, Any],
-        pack: LabPack,
-    ) -> UserMaterial:
-        owner_key = participant_owner_key(user_ocid)
-        key = self._manifest_participant_key(manifest, owner_key)
-        participant_code = manifest.get("participant_code")
-        workspace_key = str(self._workspace()["key"])
-        root = str(state["workspace_path"])
-        agent_name = str(pack.agent["name_template"]).format(participant_key=key)
-        agent = manifest.get("agent") if isinstance(manifest.get("agent"), dict) else {}
-        agent_key = str(state.get("agent_key") or agent.get("key") or "")
-        compute_key = str(state.get("compute_key") or agent.get("compute_key") or "")
-        if not agent_key or not compute_key:
-            raise AidpProvisionError(
-                "The active Agent manifest is incomplete; redeploy the Agent laboratory."
-            )
-        deployment, deployment_changed = self._ensure_agent_deployment(
-            workspace_key, agent_key, compute_key, agent_name
-        )
-        deployment_key = str(deployment.get("key") or deployment.get("id") or "")
-        if deployment_changed:
-            raise AidpProvisionPending(
-                "The participant Agent deployment is starting; final verification is next.",
-                "deployment",
-            )
-        if deployment_key and state.get("deployment_key") != deployment_key:
-            state["deployment_key"] = deployment_key
-            agent["deployment_key"] = deployment_key
-            manifest["agent"] = agent
-            self._write_manifest(workspace_key, owner_key, manifest)
-        return UserMaterial(
-            email,
-            pack.lab_id,
-            key,
-            root,
-            agent_name,
-            str(state.get("pack_version") or pack.pack_version),
-            participant_code=participant_code if isinstance(participant_code, int) else None,
-        )
-
-    def _provision_agent(
-        self,
-        user_ocid: str,
-        email: str,
-        manifest: dict[str, Any],
-        state: dict[str, Any],
-        pack: LabPack,
-    ) -> UserMaterial:
-        if state.get("phase") == "active":
-            return self._active_agent_material(user_ocid, email, manifest, state, pack)
-        owner_key = participant_owner_key(user_ocid)
-        key = self._manifest_participant_key(manifest, owner_key)
-        participant_code = manifest.get("participant_code")
-        workspace_key = str(self._workspace()["key"])
-        root = str(state["workspace_path"])
-        lab_root = root.rsplit("/", 1)[0]
-        participant_root = root
-        agent_name = str(pack.agent["name_template"]).format(participant_key=key)
-        was_active = False
-        if not all(
-            (
-                self.settings.agent_model_id,
-                self.settings.aidp_region,
-                self.settings.compartment_id,
-                self.settings.aidp_platform_id,
-            )
-        ):
-            raise AidpProvisionError("The selected Agent model and regional runtime are incomplete.")
-
-        layout_changed = self._ensure_workspace_layout(
-            workspace_key, (WORKSPACE_ROOT, CONTROL_ROOT, lab_root, participant_root)
-        )
-        catalog_name, catalog_key, schema_keys, catalog_changed = (
-            self._agent_catalog_contract(key)
-        )
-        compute, compute_changed = self._ensure_agent_compute(workspace_key)
-        self._pending_after_change(
-            any((layout_changed, catalog_changed, compute_changed)),
-            was_active,
-            workspace_key,
-            manifest,
-            pack.lab_id,
-            "content",
-            "The Agent workspace and shared AI compute are ready; content is next.",
-        )
-        source = agent_source(
-            model_id=self.settings.agent_model_id,
-            region=self.settings.aidp_region,
-            compartment_id=self.settings.compartment_id,
-            platform_id=self.settings.aidp_platform_id,
-            participant_key=key,
-            catalog_name=catalog_name,
-            gateway_url=self.settings.governance_gateway_url,
-        )
-        descriptor = json.dumps(
-            {
-                "schema_version": 2,
-                "lab_id": pack.lab_id,
-                "pack_version": pack.pack_version,
-                "pack_hash": pack.pack_sha256,
-                "participant_key": key,
-                "catalog_name": catalog_name,
-                "entry_file": "governance_agent.py",
-                "entry_sha256": hashlib.sha256(source).hexdigest(),
-                "tool_contract_version": "2.0.0",
-                "tools": [
-                    "catalog_inventory",
-                    "catalog_lineage",
-                    "governance_policy_explain",
-                    "governed_query",
-                ],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        source_hash = hashlib.sha256(source).hexdigest()
-        agent_key, content_changed = self._ensure_agent(
-            workspace_key,
-            str(compute["key"]),
-            agent_name,
-            root,
-            source,
-            descriptor,
-            repair_drift=True,
-        )
-        state.update(
-            agent_key=agent_key,
-            compute_key=str(compute["key"]),
-            job_name=agent_name,
-            catalog_key=catalog_key,
-            catalog_name=catalog_name,
-            source_hash=source_hash,
-        )
-        self._pending_after_change(
-            content_changed,
-            was_active,
-            workspace_key,
-            manifest,
-            pack.lab_id,
-            "permissions",
-            "The participant Agent is ready; permissions are next.",
-        )
-        if self._ensure_agent_permissions(
-            workspace_key,
-            str(compute["key"]),
-            catalog_key,
-            agent_key,
-            user_ocid,
-        ):
-            raise AidpProvisionPending(
-                "The participant Agent permissions were applied; final verification is next.",
-                "permissions",
-            )
-        deployment, deployment_changed = self._ensure_agent_deployment(
-            workspace_key,
-            agent_key,
-            str(compute["key"]),
-            agent_name,
-            redeploy_revision=(
-                source_hash
-                if state.get("deployment_source_hash") != source_hash
-                else ""
-            ),
-        )
-        deployment_key = str(deployment.get("key") or deployment.get("id") or "")
-        if deployment_key:
-            state["deployment_key"] = deployment_key
-        if deployment_changed:
-            state["deployment_source_hash"] = source_hash
-        self._pending_after_change(
-            deployment_changed,
-            was_active,
-            workspace_key,
-            manifest,
-            pack.lab_id,
-            "deployment",
-            "The participant Agent deployment is starting; final verification is next.",
-        )
-        state["deployment_source_hash"] = source_hash
-        self._advance_lab_manifest(workspace_key, manifest, pack.lab_id, "active")
-        manifest["agent"] = {
-            "key": agent_key,
-            "name": agent_name,
-            "compute_key": str(compute["key"]),
-            "deployment_key": deployment_key,
-            "model_id": self.settings.agent_model_id,
-            "catalog_key": catalog_key,
-            "catalog_name": catalog_name,
-        }
-        self._write_manifest(workspace_key, owner_key, manifest)
-        return UserMaterial(
-            email,
-            pack.lab_id,
-            key,
-            root,
-            agent_name,
-            pack.pack_version,
-            participant_code=participant_code if isinstance(participant_code, int) else None,
-        )
-
-    def _agent_catalog_contract(
-        self, key: str
-    ) -> tuple[str, str, dict[str, str], bool]:
-        catalog_name = participant_catalog_name(key)
-        catalog, catalog_changed = self._ensure_catalog(catalog_name)
-        catalog_key = str(catalog.get("key") or "")
-        if not catalog_key:
-            raise AidpProvisionPending(
-                "The participant Master Catalog identifier is not published yet.", "schemas"
-            )
-        schemas, schemas_changed = self._ensure_catalog_contract(catalog_key, catalog_name)
-        schema_keys = {
-            layer: str(schema.get("key") or "")
-            for layer, schema in schemas.items()
-        }
-        if any(not schema_key for schema_key in schema_keys.values()):
-            raise AidpProvisionPending(
-                "The participant medallion schemas are not published yet.", "schemas"
-            )
-        return catalog_name, catalog_key, schema_keys, catalog_changed or schemas_changed
-
-    def _ensure_agent_permissions(
-        self,
-        workspace_key: str,
-        agent_compute_key: str,
-        catalog_key: str,
-        agent_key: str,
-        user_ocid: str,
-    ) -> bool:
-        changed = False
-        for path, action, permission in (
-            (
-                f"/workspaces/{workspace_key}/clusters/{agent_compute_key}",
-                "assignClusterPermissionDetails",
-                "USE",
-            ),
-            (
-                f"/workspaces/{workspace_key}/agents/{agent_key}",
-                "assignAgentPermissionDetails",
-                "MANAGE",
-            ),
-        ):
-            changed = self._ensure_permission(path, action, user_ocid, permission) or changed
-        catalog_path = f"/catalogs/{catalog_key}"
-        self._assert_permission_absent(catalog_path, user_ocid, "SELECT")
-        return changed
-
     def _active_lab_material(
         self,
         user_ocid: str,
@@ -2198,8 +2044,6 @@ class AidpClient:
             (WORKSPACE_ROOT, CONTROL_ROOT),
         )
         state = self._manifest_labs(manifest, owner_key)[lab_id]
-        if pack.kind == "governance_agent":
-            return self._provision_agent(user_ocid, email, manifest, state, pack)
         active_material = self._active_lab_material(
             user_ocid, email, lab_id, key, state, participant_code
         )
@@ -2396,21 +2240,14 @@ class AidpClient:
                 workspace_key, key, lab_id, state, preserve_workspace=True
             )
             pack = load_lab_pack(lab_id)
-            if pack.kind == "governance_agent":
-                self._forget_agent_resources(manifest)
-            resource_name = (
-                str(pack.agent["name_template"]).format(participant_key=key)
-                if pack.kind == "governance_agent"
-                else f"wf_{key}_{lab_id}"
-            )
             state.update(
                 pack_version=pack.pack_version,
                 pack_hash=pack.pack_sha256,
                 workspace_path=workspace_root(
                     key, lab_id, str(manifest.get("participant_email") or "") or None
                 ),
-                job_name=resource_name,
-                catalog_name=(participant_catalog_name(key) if pack.kind == "data_pipeline" else ""),
+                job_name=f"wf_{key}_{lab_id}",
+                catalog_name=participant_catalog_name(key),
                 catalog_key="",
                 phase="workspace",
             )
@@ -2454,8 +2291,6 @@ class AidpClient:
         state["operation"] = {"operation_id": operation_id, "type": "delete", "phase": "cleanup"}
         self._write_manifest(workspace_key, owner_key, manifest)
         self._cleanup_lab(workspace_key, key, lab_id, state)
-        if load_lab_pack(lab_id).kind == "governance_agent":
-            self._forget_agent_resources(manifest)
         labs.pop(lab_id)
         self._write_manifest(workspace_key, owner_key, manifest)
 
@@ -2741,27 +2576,6 @@ class AidpClient:
             "labs": {lab_id: state},
         }
         self._manifest_labs(validated, key)
-        pack = load_lab_pack(lab_id)
-        if pack.kind == "governance_agent":
-            self._cleanup_agent(
-                workspace_key,
-                str(state.get("job_name") or f"{key}_agent_data_governance"),
-            )
-            # Legacy v4 Agents used an Autonomous mirror. New Agents are backed by
-            # Master Catalog, but an old mirror must still be removed during upgrade.
-            if state.get("external_catalog_key") or state.get("external_catalog_name"):
-                self._cleanup_external_catalog(key, state)
-                try:
-                    self.governance_database.drop_participant(key)
-                except AutonomousProvisionError as exc:
-                    raise AidpProvisionError(str(exc)) from exc
-            if not preserve_workspace:
-                self._delete_workspace_path(
-                    workspace_key,
-                    workspace_path,
-                    "Agent workspace deletion is still in progress.",
-                )
-            return
         self._cleanup_lab_job(workspace_key, str(state.get("job_name") or f"wf_{key}_{lab_id}"))
         catalog_name = str(state.get("catalog_name") or catalog_name_for(key))
         catalog = self._catalog(catalog_name, allow_missing=True)
@@ -2774,11 +2588,6 @@ class AidpClient:
                 workspace_path,
                 "Lab workspace deletion is still in progress.",
             )
-
-    @staticmethod
-    def _forget_agent_resources(manifest: dict[str, Any]) -> None:
-        manifest["agent"] = None
-        manifest["external_catalog"] = None
 
     def _cleanup_user(self, owner_key: str, preserve_manifest: bool = False) -> None:
         workspace_key = str(self._workspace()["key"])
@@ -2827,6 +2636,1467 @@ class AidpClient:
         owner_key = participant_owner_key(user_ocid)
         async with self._locks.setdefault(owner_key, asyncio.Lock()):
             await asyncio.to_thread(self._cleanup_user, owner_key)
+
+    def _role(self, name: str) -> dict[str, Any]:
+        matches = [item for item in self._list("/roles", params={"displayName": name}, phase="permissions") if self._resource_name(item) == name]
+        if len(matches) != 1 or not matches[0].get("key"):
+            raise AidpProvisionPending(f"The AIDP role {name} is not ready yet.", "permissions")
+        return matches[0]
+
+    def _role_principal_ocids(self, name: str) -> tuple[set[str], set[str]]:
+        role = self._role(name)
+        pending = [str(role["key"])]
+        visited: set[str] = set()
+        users: set[str] = set()
+        groups: set[str] = set()
+        while pending:
+            role_key = pending.pop()
+            if role_key in visited:
+                continue
+            if len(visited) >= 100:
+                raise AidpProvisionError("The AIDP administrator role hierarchy is too deep.")
+            visited.add(role_key)
+            details = self._request(
+                "GET",
+                f"/roles/{quote(role_key, safe='')}",
+                phase="permissions",
+            )
+            assignees = details.get("assignees") if isinstance(details, dict) else None
+            if not isinstance(assignees, list):
+                raise AidpProvisionError("AIDP returned invalid administrator role assignees.")
+            for item in assignees:
+                if not isinstance(item, dict):
+                    raise AidpProvisionError("AIDP returned an invalid administrator role assignee.")
+                principal_type = str(item.get("type") or "").upper()
+                target = str(item.get("target") or "")
+                if principal_type == "USER" and target.startswith("ocid1.user."):
+                    users.add(target)
+                elif principal_type == "GROUP" and target.startswith("ocid1.group."):
+                    groups.add(target)
+                elif principal_type == "ROLE" and target:
+                    pending.append(target)
+                else:
+                    raise AidpProvisionError("AIDP returned an unsupported administrator role assignee.")
+        return users, groups
+
+    def _role_user_ocids(self, name: str) -> set[str]:
+        return self._role_principal_ocids(name)[0]
+
+    async def platform_admin_user_ocids(self) -> set[str]:
+        return await asyncio.to_thread(self._role_user_ocids, "AI_DATA_PLATFORM_ADMIN")
+
+    async def platform_admin_principals(self) -> tuple[set[str], set[str]]:
+        return await asyncio.to_thread(
+            self._role_principal_ocids, "AI_DATA_PLATFORM_ADMIN"
+        )
+
+    async def is_platform_admin(self, user_ocid: str) -> bool:
+        return user_ocid in await self.platform_admin_user_ocids()
+
+    @staticmethod
+    def _module_manifest_valid(manifest: Any) -> bool:
+        if not isinstance(manifest, dict):
+            return False
+        operation = manifest.get("operation")
+        operation_id = operation.get("operation_id") if isinstance(operation, dict) else None
+        try:
+            canonical_operation_id = str(uuid.UUID(operation_id))
+        except (AttributeError, TypeError, ValueError):
+            return False
+        return bool(
+            manifest.get("schema_version") == 1
+            and manifest.get("module_id") == GOVERNANCE_MODULE_ID
+            and manifest.get("status") in {"installing", "active", "redeploying", "deleting", "error"}
+            and isinstance(operation, dict)
+            and operation_id == canonical_operation_id
+            and operation.get("type") in {"install", "redeploy", "delete"}
+        )
+
+    def _module_manifest(self, workspace_key: str) -> dict[str, Any] | None:
+        manifest = self._workspace_json(
+            workspace_key,
+            MODULE_MANIFEST_PATH,
+            "The global governance module manifest is invalid; reconcile it before retrying.",
+        )
+        if manifest is not None and not self._module_manifest_valid(manifest):
+            raise AidpProvisionError("The global governance module manifest is invalid; cleanup stopped.")
+        return manifest
+
+    def _write_module_manifest(self, workspace_key: str, manifest: dict[str, Any]) -> None:
+        manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._upload_file(
+            workspace_key,
+            MODULE_MANIFEST_PATH,
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+            repair_drift=True,
+        )
+
+    def _module_status(self) -> dict[str, Any]:
+        if self.settings.deployment_mode != "production":
+            return _module_payload()
+        workspace_key = str(self._workspace()["key"])
+        manifest = self._module_manifest(workspace_key)
+        if manifest is None:
+            return _module_payload()
+        effective = dict(manifest)
+        effective["enabled"] = self._governance_enabled(workspace_key, manifest)
+        return _module_payload(effective)
+
+    def _governance_enabled(self, workspace_key: str, manifest: dict[str, Any]) -> bool:
+        workflow_key = str((manifest.get("resources") or {}).get("workflow_key") or "")
+        if not workflow_key:
+            return False
+        try:
+            details = self._request(
+                "GET",
+                f"/workspaces/{workspace_key}/jobs/{quote(workflow_key, safe='')}",
+                allow_not_found=True,
+                phase="sync",
+            )
+        except (AidpProvisionError, AidpProvisionPending):
+            return False
+        continuous = details.get("continuous") if isinstance(details, dict) else None
+        return bool(
+            isinstance(continuous, dict)
+            and str(continuous.get("pauseStatus") or "").upper() == "UNPAUSED"
+        )
+
+    async def list_modules(self) -> list[dict[str, Any]]:
+        if self.settings.deployment_mode != "production":
+            return []
+        return [await asyncio.to_thread(self._module_status)]
+
+    def _ensure_governance_bucket(self) -> bool:
+        if self.settings.artifacts_bucket_name != GOVERNANCE_BUCKET_NAME:
+            raise AidpProvisionError("The governance artifacts bucket must be named oci_artifacts.")
+        try:
+            self.object_storage.head_bucket(
+                self.settings.objectstorage_namespace, self.settings.artifacts_bucket_name
+            )
+            return False
+        except self._oci.exceptions.ServiceError as exc:
+            if exc.status != 404:
+                raise AidpProvisionError("The fixed governance artifacts bucket is unavailable.") from exc
+        self.object_storage.create_bucket(
+            self.settings.objectstorage_namespace,
+            {"name": self.settings.artifacts_bucket_name, "compartment_id": self.settings.compartment_id},
+        )
+        raise AidpProvisionPending("The fixed oci_artifacts bucket is being created.", "control")
+
+    def _credential_payload(self) -> dict[str, Any]:
+        key_path = Path(str(self._oci_config.get("key_file") or ""))
+        if not key_path.is_absolute():
+            key_path = Path(self.settings.oci_config_file).parent / key_path
+        try:
+            private_key = key_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise AidpProvisionError("The dedicated governance OCI credential cannot be loaded.") from exc
+        required = {name: str(self._oci_config.get(name) or "") for name in ("tenancy", "user", "fingerprint")}
+        if any(not value for value in required.values()) or not private_key.strip():
+            raise AidpProvisionError("The dedicated governance OCI credential is incomplete.")
+        return {
+            "displayName": GOVERNANCE_CREDENTIAL_NAME,
+            "credentialDescription": "Dedicated OCI credential for the global governance extension",
+            "type": "SECRET_TOKEN",
+            "credentialDetails": {
+                "credentialType": "SECRET_TOKEN",
+                "secretTokenPair": [
+                    {"secretKey": name, "secretValue": value}
+                    for name, value in (
+                        ("tenancy", required["tenancy"]),
+                        ("user", required["user"]),
+                        ("fingerprint", required["fingerprint"]),
+                        ("region", self.settings.aidp_region),
+                        ("private_key", private_key),
+                    )
+                ],
+            },
+        }
+
+    def _ensure_governance_credential(self) -> tuple[str, bool]:
+        matches = [item for item in self._list("/credentials", params={"displayName": GOVERNANCE_CREDENTIAL_NAME}, phase="control") if self._resource_name(item) == GOVERNANCE_CREDENTIAL_NAME]
+        if len(matches) > 1:
+            raise AidpProvisionError(f"AIDP has duplicate credentials named {GOVERNANCE_CREDENTIAL_NAME}.")
+        payload = self._credential_payload()
+        if not matches:
+            self._request("POST", "/credentials", payload=payload, phase="control")
+            matches = [item for item in self._list("/credentials", params={"displayName": GOVERNANCE_CREDENTIAL_NAME}, phase="control") if self._resource_name(item) == GOVERNANCE_CREDENTIAL_NAME]
+            if len(matches) != 1:
+                raise AidpProvisionPending("AIDP has not published the governance credential yet.", "control")
+            return str(matches[0].get("key") or matches[0].get("id") or ""), True
+        credential = matches[0]
+        if str(credential.get("type") or credential.get("credentialType") or "") != "SECRET_TOKEN":
+            raise AidpProvisionError("The existing governance credential has an incompatible type.")
+        key = str(credential.get("key") or credential.get("id") or "")
+        if not key:
+            raise AidpProvisionPending("The governance credential identifier is not ready.", "control")
+        self._request("PUT", f"/credentials/{quote(key, safe='')}", payload=payload, phase="control", retry_scope=f"credential:{hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()}")
+        return key, False
+
+    def _governance_job_payload(
+        self,
+        workspace_key: str,
+        compute_key: str,
+        *,
+        job_key: str = "",
+        desired_enabled: bool | None,
+        paused: bool,
+        bootstrap_snapshot: bool = False,
+    ) -> tuple[dict[str, Any], bool]:
+        notebook_path = f"{MODULE_ROOT}/data_governance_sync.ipynb"
+        notebook = governance_sync_notebook(
+            namespace=self.settings.objectstorage_namespace,
+            platform_id=self.settings.aidp_platform_id,
+            region=self.settings.aidp_region,
+            desired_enabled=desired_enabled,
+            bootstrap_snapshot=bootstrap_snapshot,
+            workspace_key=workspace_key,
+            job_key=job_key,
+        )
+        changed = self._upload_notebook(workspace_key, notebook_path, notebook, repair_drift=True)
+        return {
+            "name": GOVERNANCE_JOB_NAME,
+            "path": MODULE_ROOT,
+            "description": "Continuous 30-second Master Catalog metadata reconciliation",
+            "maxConcurrentRuns": 1,
+            "continuous": {"pauseStatus": "PAUSED" if paused else "UNPAUSED"},
+            "jobClusters": [{"clusterKey": compute_key}],
+            "tasks": [{
+                "type": "NOTEBOOK_TASK",
+                "taskKey": "sync_master_catalog",
+                "dependsOn": [],
+                "runIf": "ALL_SUCCESS",
+                "maxRetries": 0,
+                "isRetryOnTimeout": False,
+                "notebookPath": notebook_path,
+                "cluster": {"clusterKey": compute_key},
+                "parameters": [],
+            }],
+        }, changed
+
+    def _ensure_governance_job(
+        self,
+        workspace_key: str,
+        compute_key: str,
+        *,
+        desired_enabled: bool | None,
+        paused: bool,
+        bootstrap_snapshot: bool = False,
+    ) -> tuple[str, bool]:
+        job_key = self._job_key(workspace_key, GOVERNANCE_JOB_NAME)
+        payload, changed = self._governance_job_payload(
+            workspace_key,
+            compute_key,
+            job_key=job_key,
+            desired_enabled=desired_enabled,
+            paused=paused,
+            bootstrap_snapshot=bootstrap_snapshot,
+        )
+        if job_key:
+            details = self._request("GET", f"/workspaces/{workspace_key}/jobs/{job_key}", allow_not_found=True, phase="sync")
+            if self._job_contract_is_visible(details, payload, compute_key) and not changed:
+                return job_key, False
+        if not job_key:
+            job_key = self._create_job(workspace_key, payload)
+            changed = True
+            payload, notebook_changed = self._governance_job_payload(
+                workspace_key,
+                compute_key,
+                job_key=job_key,
+                desired_enabled=desired_enabled,
+                paused=paused,
+                bootstrap_snapshot=bootstrap_snapshot,
+            )
+            changed = changed or notebook_changed
+        self._publish_job(workspace_key, job_key, payload, compute_key)
+        return job_key, True
+
+    @staticmethod
+    def _timestamp(value: Any) -> float | None:
+        if isinstance(value, (int, float)):
+            return float(value) / (1000 if value > 10_000_000_000 else 1)
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+
+    def _governance_sync_marker(
+        self, workspace_key: str, job_key: str, requested_at: str
+    ) -> tuple[str, float | None]:
+        details = self._request(
+            "GET",
+            f"/workspaces/{workspace_key}/jobs/{job_key}",
+            allow_not_found=True,
+            phase="sync",
+        )
+        details = details if isinstance(details, dict) else {}
+        revision = str(
+            details.get("version")
+            or details.get("revision")
+            or details.get("jobVersion")
+            or ""
+        )
+        threshold = self._timestamp(requested_at) or self._timestamp(
+            details.get("timeUpdated")
+            or details.get("timePublished")
+            or details.get("timeCreated")
+        )
+        return revision, threshold
+
+    def _governance_run_matches(
+        self, run: dict[str, Any], revision: str, threshold: float | None
+    ) -> bool:
+        run_revision = str(run.get("jobVersion") or run.get("revision") or "")
+        if revision and run_revision:
+            return run_revision == revision
+        run_time = self._timestamp(
+            run.get("timeStarted") or run.get("startTime") or run.get("timeCreated")
+        )
+        return bool(
+            threshold is not None and run_time is not None and run_time >= threshold
+        )
+
+    def _governance_run_order(self, run: dict[str, Any]) -> tuple[float, str]:
+        return (
+            self._timestamp(
+                run.get("timeStarted") or run.get("startTime") or run.get("timeCreated")
+            )
+            or 0,
+            str(run.get("key") or run.get("id") or ""),
+        )
+
+    @staticmethod
+    def _governance_run_state(run: dict[str, Any]) -> str:
+        return str(
+            run.get("runState")
+            or run.get("lifecycleState")
+            or run.get("state")
+            or ""
+        ).upper()
+
+    def _successful_governance_sync(
+        self, workspace_key: str, job_key: str, *, requested_at: str = ""
+    ) -> bool:
+        runs = self._list(f"/workspaces/{workspace_key}/jobs/{job_key}/runs", phase="sync")
+        revision, threshold = self._governance_sync_marker(
+            workspace_key, job_key, requested_at
+        )
+        current_runs = [
+            run
+            for run in runs
+            if self._governance_run_matches(run, revision, threshold)
+        ]
+        if not current_runs:
+            return False
+        state = self._governance_run_state(
+            max(current_runs, key=self._governance_run_order)
+        )
+        if state in {"FAILED", "ERROR", "CANCELED", "CANCELLED"}:
+            raise AidpProvisionError("The governance metadata synchronization failed closed.")
+        return state in {"SUCCESS", "SUCCEEDED"}
+
+    @classmethod
+    def _role_permission_matches(
+        cls,
+        item: dict[str, Any],
+        role_name: str,
+        permission: str,
+        inheritable: bool | None = None,
+        *,
+        include_columns: bool = False,
+    ) -> bool:
+        grantee, grantee_type = cls._permission_grantee(item)
+        values = cls._permission_values(item)
+        return bool(
+            grantee == role_name
+            and grantee_type == "ROLE"
+            and values == {permission}
+            and item.get("isInherited") is not True
+            and (inheritable is None or item.get("isPermissionsInheritable") is inheritable)
+            and (
+                not include_columns
+                or not (item.get("columns") or item.get("includeColumns"))
+                and not item.get("excludeColumns")
+            )
+        )
+
+    @classmethod
+    def _permission_signature(
+        cls,
+        item: dict[str, Any],
+        *,
+        include_columns: bool,
+        inheritable: bool,
+    ) -> tuple[Any, ...]:
+        grantee, grantee_type = cls._permission_grantee(item)
+        return (
+            grantee,
+            grantee_type,
+            frozenset(cls._permission_values(item)),
+            item.get("isPermissionsInheritable") if inheritable else None,
+            frozenset(item.get("columns") or item.get("includeColumns") or [])
+            if include_columns
+            else frozenset(),
+            frozenset(item.get("excludeColumns") or [])
+            if include_columns
+            else frozenset(),
+        )
+
+    def _revoke_direct_permission(
+        self,
+        resource_path: str,
+        revoke_key: str,
+        item: dict[str, Any],
+        *,
+        include_columns: bool,
+        inheritable: bool,
+    ) -> None:
+        grantee, grantee_type = self._permission_grantee(item)
+        permissions = sorted(self._permission_values(item))
+        if grantee_type not in {"USER", "ROLE", "GROUP"} or not grantee or not permissions:
+            raise AidpProvisionError("AIDP returned an invalid direct governance permission.")
+        details: dict[str, Any] = {
+            "assignees": {"type": grantee_type, "targets": [grantee]},
+            "permissions": permissions,
+        }
+        if include_columns:
+            details.update(
+                includeColumns=sorted(
+                    item.get("columns") or item.get("includeColumns") or []
+                ),
+                excludeColumns=sorted(item.get("excludeColumns") or []),
+            )
+        if inheritable:
+            details["isPermissionsInheritable"] = (
+                item.get("isPermissionsInheritable") is not False
+            )
+        self._request(
+            "POST",
+            f"{resource_path}/actions/managePermission",
+            payload={revoke_key: details},
+            phase="permissions",
+        )
+
+    def _assert_no_forbidden_direct_permissions(
+        self,
+        resource_path: str,
+        forbidden: set[str],
+        *,
+        allowed_grantees: set[tuple[str, str]],
+        inheritable_only: bool = False,
+    ) -> None:
+        if any(
+            item.get("isInherited") is not True
+            and (
+                not inheritable_only
+                or item.get("isPermissionsInheritable") is not False
+            )
+            and self._permission_grantee(item) not in allowed_grantees
+            and self._permission_values(item).intersection(forbidden)
+            for item in self._list(f"{resource_path}/permissions", phase="permissions")
+        ):
+            raise AidpProvisionError(
+                "A shared workspace ancestor grants governance edit access outside "
+                "AI_DATA_PLATFORM_ADMIN; remove that grant before retrying."
+            )
+
+    @classmethod
+    def _assert_no_inherited_governance_editor(
+        cls,
+        permissions: list[dict[str, Any]],
+        allowed_grantees: set[tuple[str, str]] | None = None,
+    ) -> None:
+        allowed = allowed_grantees or {("AI_DATA_PLATFORM_ADMIN", "ROLE")}
+        for item in permissions:
+            if (
+                item.get("isInherited") is True
+                and cls._permission_grantee(item) not in allowed
+                and cls._permission_values(item).intersection({"MANAGE", "ADMIN"})
+            ):
+                raise AidpProvisionError(
+                    "A non-administrator inherits governance edit access from a parent resource."
+                )
+
+    def _reconcile_role_permissions_exact(
+        self,
+        resource_path: str,
+        assignment_key: str,
+        revoke_key: str,
+        expected: tuple[tuple[str, str, bool | None], ...],
+        *,
+        include_columns: bool = False,
+        inheritable: bool = False,
+        reject_inherited_editors: bool = False,
+        allowed_inherited_editors: set[tuple[str, str]] | None = None,
+    ) -> bool:
+        permissions_path = f"{resource_path}/permissions"
+        current = self._list(permissions_path, phase="permissions")
+        if reject_inherited_editors:
+            self._assert_no_inherited_governance_editor(
+                current, allowed_inherited_editors
+            )
+        direct = [item for item in current if item.get("isInherited") is not True]
+        expected_signatures = {
+            (
+                role_name,
+                "ROLE",
+                frozenset({permission}),
+                expected_inheritable if inheritable else None,
+                frozenset(),
+                frozenset(),
+            )
+            for role_name, permission, expected_inheritable in expected
+        }
+        signatures = {
+            self._permission_signature(
+                item,
+                include_columns=include_columns,
+                inheritable=inheritable,
+            )
+            for item in direct
+        }
+        if len(direct) == len(expected_signatures) and signatures == expected_signatures:
+            return False
+        for item in direct:
+            self._revoke_direct_permission(
+                resource_path,
+                revoke_key,
+                item,
+                include_columns=include_columns,
+                inheritable=inheritable,
+            )
+        remaining = [
+            item
+            for item in self._list(permissions_path, phase="permissions")
+            if item.get("isInherited") is not True
+        ]
+        if remaining:
+            raise AidpProvisionPending(
+                "AIDP is still revoking divergent governance permissions.",
+                "permissions",
+            )
+        for role_name, permission, expected_inheritable in expected:
+            self._ensure_role_permission(
+                resource_path,
+                assignment_key,
+                role_name,
+                permission,
+                inheritable=expected_inheritable,
+                include_columns=include_columns,
+            )
+        return True
+
+    def _ensure_role_permission(
+        self,
+        resource_path: str,
+        assignment_key: str,
+        role_name: str,
+        permission: str,
+        *,
+        inheritable: bool | None = None,
+        include_columns: bool = False,
+    ) -> bool:
+        path = f"{resource_path}/permissions"
+        current = self._list(path, phase="permissions")
+        matches = [
+            item
+            for item in current
+            if item.get("isInherited") is not True
+            and self._permission_grantee(item) == (role_name, "ROLE")
+        ]
+        if any(
+            not self._role_permission_matches(
+                item,
+                role_name,
+                permission,
+                inheritable,
+                include_columns=include_columns,
+            )
+            for item in matches
+        ) or len(matches) > 1:
+            raise AidpProvisionError(f"Role {role_name} has a conflicting direct governance permission.")
+        if any(
+            self._role_permission_matches(
+                item,
+                role_name,
+                permission,
+                inheritable,
+                include_columns=include_columns,
+            )
+            for item in matches
+        ):
+            return False
+        assignment: dict[str, Any] = {
+            "assignees": {"type": "ROLE", "targets": [role_name]},
+            "permissions": [permission],
+        }
+        if inheritable is not None:
+            assignment["isPermissionsInheritable"] = inheritable
+        if include_columns:
+            assignment.update(includeColumns=[], excludeColumns=[])
+        self._request(
+            "POST",
+            f"{resource_path}/actions/managePermission",
+            payload={assignment_key: assignment},
+            phase="permissions",
+        )
+        current = self._list(path, phase="permissions")
+        if not any(
+            self._role_permission_matches(
+                item,
+                role_name,
+                permission,
+                inheritable,
+                include_columns=include_columns,
+            )
+            for item in current
+        ):
+            raise AidpProvisionPending("AIDP has not applied the governance permission yet.", "permissions")
+        return True
+
+    def _governance_agent_artifacts(self) -> tuple[bytes, bytes, str]:
+        if not all((self.settings.agent_model_id, self.settings.aidp_region, self.settings.compartment_id, self.settings.aidp_platform_id)):
+            raise AidpProvisionError("The selected Agent model and regional runtime are incomplete.")
+        source = agent_source(
+            model_id=self.settings.agent_model_id,
+            region=self.settings.aidp_region,
+            compartment_id=self.settings.compartment_id,
+            platform_id=self.settings.aidp_platform_id,
+        )
+        source_hash = hashlib.sha256(source).hexdigest()
+        descriptor = json.dumps({
+            "schema_version": 1,
+            "module_id": GOVERNANCE_MODULE_ID,
+            "entry_file": "governance_agent.py",
+            "entry_sha256": source_hash,
+            "tools": ["catalog_inventory", "catalog_lineage"],
+        }, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return source, descriptor, source_hash
+
+    @staticmethod
+    def _deployment_marker(item: dict[str, Any]) -> str:
+        return json.dumps(
+            [
+                item.get("version") or item.get("revision") or item.get("deploymentVersion"),
+                item.get("timeUpdated") or item.get("updatedAt"),
+                item.get("etag"),
+            ],
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _governance_redeploy_revision(
+        manifest: dict[str, Any], source_hash: str
+    ) -> str:
+        if manifest.get("status") != "redeploying":
+            return ""
+        operation = manifest.get("operation") or {}
+        return f"{operation.get('operation_id')}:{source_hash}"
+
+    @staticmethod
+    def _governance_redeploy_trigger(
+        resources: dict[str, Any], redeploy_revision: str
+    ) -> str:
+        requested = str(resources.get("deployment_redeploy_requested") or "")
+        completed = str(resources.get("deployment_revision") or "")
+        if redeploy_revision and completed != redeploy_revision and requested != redeploy_revision:
+            return redeploy_revision
+        return ""
+
+    def _record_governance_redeploy(
+        self,
+        resources: dict[str, Any],
+        redeploy_revision: str,
+        trigger_revision: str,
+        visible_deployments: list[dict[str, Any]],
+        deployment: dict[str, Any],
+    ) -> None:
+        if trigger_revision:
+            baseline = (
+                self._deployment_marker(visible_deployments[0])
+                if visible_deployments
+                else ""
+            )
+            resources.update(
+                deployment_redeploy_requested=trigger_revision,
+                deployment_redeploy_baseline=baseline,
+            )
+            return
+        completed_revision = str(resources.get("deployment_revision") or "")
+        if not redeploy_revision or completed_revision == redeploy_revision:
+            return
+        current_marker = self._deployment_marker(deployment)
+        baseline = str(resources.get("deployment_redeploy_baseline") or "")
+        if not baseline or current_marker == baseline:
+            raise AidpProvisionPending(
+                "The global governance Agent redeploy revision is not visible yet.",
+                "agent",
+            )
+        resources["deployment_revision"] = redeploy_revision
+        resources.pop("deployment_redeploy_requested", None)
+        resources.pop("deployment_redeploy_baseline", None)
+
+    def _ensure_global_agent_deployment(
+        self,
+        workspace_key: str,
+        compute_key: str,
+        agent_key: str,
+        manifest: dict[str, Any],
+        source_hash: str,
+    ) -> tuple[dict[str, Any], bool]:
+        resources = manifest.setdefault("resources", {})
+        redeploy_revision = self._governance_redeploy_revision(manifest, source_hash)
+        deployment_path = f"/workspaces/{workspace_key}/agents/{agent_key}/deployments"
+        visible_deployments = self._list(deployment_path, phase="deployment")
+        if len(visible_deployments) > 1:
+            raise AidpProvisionError("AIDP has duplicate global governance Agent deployments.")
+        trigger_revision = self._governance_redeploy_trigger(
+            resources, redeploy_revision
+        )
+        deployment, changed = self._ensure_agent_deployment(
+            workspace_key,
+            agent_key,
+            compute_key,
+            GOVERNANCE_AGENT_NAME,
+            redeploy_revision=trigger_revision,
+        )
+        self._record_governance_redeploy(
+            resources,
+            redeploy_revision,
+            trigger_revision,
+            visible_deployments,
+            deployment,
+        )
+        return deployment, changed
+
+    def _ensure_global_agent(self, workspace_key: str, manifest: dict[str, Any]) -> bool:
+        source, descriptor, source_hash = self._governance_agent_artifacts()
+        compute, compute_changed = self._ensure_agent_compute(workspace_key)
+        agent_key, agent_changed = self._ensure_agent(
+            workspace_key,
+            str(compute["key"]),
+            GOVERNANCE_AGENT_NAME,
+            f"{MODULE_ROOT}/agent",
+            source,
+            descriptor,
+            repair_drift=True,
+        )
+        resources = manifest.setdefault("resources", {})
+        deployment, deployment_changed = self._ensure_global_agent_deployment(
+            workspace_key,
+            str(compute["key"]),
+            agent_key,
+            manifest,
+            source_hash,
+        )
+        resources.update({
+            "agent_key": agent_key,
+            "agent_compute_key": str(compute["key"]),
+            "deployment_key": str(deployment.get("key") or deployment.get("id") or ""),
+            "agent_source_hash": source_hash,
+        })
+        return any((compute_changed, agent_changed, deployment_changed))
+
+    def _ensure_global_agent_permissions(self, workspace_key: str, manifest: dict[str, Any]) -> bool:
+        resources = manifest.get("resources") or {}
+        agent_key = str(resources.get("agent_key") or "")
+        compute_key = str(resources.get("agent_compute_key") or "")
+        if not agent_key or not compute_key:
+            raise AidpProvisionError("The governance Agent manifest is incomplete.")
+        self._role("AIDP_DEVELOPER")
+        admin_users, admin_groups = self._role_principal_ocids(
+            "AI_DATA_PLATFORM_ADMIN"
+        )
+        admin_grantees = {
+            ("AI_DATA_PLATFORM_ADMIN", "ROLE"),
+            *((user_ocid, "USER") for user_ocid in admin_users),
+            *((group_ocid, "GROUP") for group_ocid in admin_groups),
+        }
+        workspace_path = f"/workspaces/{workspace_key}"
+        self._assert_no_forbidden_direct_permissions(
+            workspace_path,
+            {"ADMINISTRATOR"},
+            allowed_grantees=admin_grantees,
+        )
+        workspace_root_key = self._workspace_object_key(workspace_key, WORKSPACE_ROOT)
+        workspace_root_path = (
+            f"/workspaces/{workspace_key}/objects/{quote(workspace_root_key, safe='')}"
+        )
+        self._assert_no_forbidden_direct_permissions(
+            workspace_root_path,
+            {"READ", "USE", "MANAGE", "ADMIN"},
+            allowed_grantees=admin_grantees,
+            inheritable_only=True,
+        )
+        changed = False
+        for path, expected in (
+            (CONTROL_ROOT, (("AI_DATA_PLATFORM_ADMIN", "ADMIN", True),)),
+            (MODULE_CONTROL_ROOT, ()),
+        ):
+            object_key = self._workspace_object_key(workspace_key, path)
+            changed = self._reconcile_role_permissions_exact(
+                f"/workspaces/{workspace_key}/objects/{quote(object_key, safe='')}",
+                "assignWorkspaceObjectPermissionDetails",
+                "revokeWorkspaceObjectPermissionDetails",
+                expected,
+                inheritable=True,
+                reject_inherited_editors=True,
+                allowed_inherited_editors=admin_grantees,
+            ) or changed
+        agent_path = f"/workspaces/{workspace_key}/agents/{agent_key}"
+        changed = self._reconcile_role_permissions_exact(
+            agent_path,
+            "assignAgentPermissionDetails",
+            "revokeAgentPermissionDetails",
+            (
+                ("AIDP_DEVELOPER", "USE", None),
+                ("AI_DATA_PLATFORM_ADMIN", "ADMIN", None),
+            ),
+            include_columns=True,
+            reject_inherited_editors=True,
+            allowed_inherited_editors=admin_grantees,
+        ) or changed
+        compute_path = f"/workspaces/{workspace_key}/clusters/{compute_key}"
+        changed = self._reconcile_role_permissions_exact(
+            compute_path,
+            "assignClusterPermissionDetails",
+            "revokeClusterPermissionDetails",
+            (),
+        ) or changed
+        module_object_key = self._workspace_object_key(workspace_key, MODULE_ROOT)
+        module_path = f"/workspaces/{workspace_key}/objects/{quote(module_object_key, safe='')}"
+        changed = self._reconcile_role_permissions_exact(
+            module_path,
+            "assignWorkspaceObjectPermissionDetails",
+            "revokeWorkspaceObjectPermissionDetails",
+            (("AI_DATA_PLATFORM_ADMIN", "ADMIN", True),),
+            inheritable=True,
+            reject_inherited_editors=True,
+            allowed_inherited_editors=admin_grantees,
+        ) or changed
+        for path, is_folder in (
+            (MODULE_MANIFEST_PATH, False),
+            (f"{MODULE_ROOT}/agent", True),
+            (f"{MODULE_ROOT}/agent/governance_agent.py", False),
+            (f"{MODULE_ROOT}/agent/requirements.txt", False),
+            (f"{MODULE_ROOT}/agent/agent-manifest.json", False),
+            (f"{MODULE_ROOT}/data_governance_sync.ipynb", False),
+        ):
+            object_key = self._workspace_object_key(workspace_key, path)
+            changed = self._reconcile_role_permissions_exact(
+                f"/workspaces/{workspace_key}/objects/{quote(object_key, safe='')}",
+                "assignWorkspaceObjectPermissionDetails",
+                "revokeWorkspaceObjectPermissionDetails",
+                (),
+                inheritable=is_folder,
+                reject_inherited_editors=True,
+                allowed_inherited_editors=admin_grantees,
+            ) or changed
+        return changed
+
+    def _new_module_manifest(self, operation_id: str, operation_type: str) -> dict[str, Any]:
+        status_value = "installing" if operation_type == "install" else f"{operation_type}ing"
+        if operation_type == "delete":
+            status_value = "deleting"
+        return {
+            "schema_version": 1,
+            "module_id": GOVERNANCE_MODULE_ID,
+            "status": status_value,
+            "phase": "verify" if operation_type == "install" else ("disable" if operation_type == "delete" else "control"),
+            "enabled": False,
+            "operation": {"operation_id": operation_id, "type": operation_type, "phase": "started"},
+            "resources": {},
+        }
+
+    def _governance_workspace(self) -> str:
+        if self.settings.deployment_mode != "production":
+            raise AidpProvisionConflict("Governance modules are available only in production mode")
+        return str(self._workspace()["key"])
+
+    def _start_governance_install(
+        self, workspace_key: str, operation_id: str, operation_type: str
+    ) -> dict[str, Any]:
+        if operation_type != "install":
+            raise AidpProvisionConflict("The governance module is not installed")
+        self._ensure_workspace_layout(
+            workspace_key,
+            (
+                WORKSPACE_ROOT,
+                CONTROL_ROOT,
+                MODULE_CONTROL_ROOT,
+                MODULE_ROOT,
+                f"{MODULE_ROOT}/agent",
+            ),
+        )
+        manifest = self._new_module_manifest(operation_id, operation_type)
+        self._write_module_manifest(workspace_key, manifest)
+        return manifest
+
+    def _resume_governance_operation(
+        self,
+        workspace_key: str,
+        manifest: dict[str, Any],
+        operation_id: str,
+        operation_type: str,
+    ) -> None:
+        if manifest["status"] != "error":
+            return
+        current = manifest["operation"]
+        if current.get("operation_id") != operation_id or current.get("type") != operation_type:
+            raise AidpProvisionConflict(
+                "The failed governance operation must resume with its original operation_id"
+            )
+        manifest["status"] = "installing" if operation_type == "install" else "redeploying"
+        current["phase"] = "resumed"
+        manifest.pop("error_code", None)
+        self._write_module_manifest(workspace_key, manifest)
+
+    @staticmethod
+    def _governance_operation_complete(
+        manifest: dict[str, Any], operation_id: str, operation_type: str
+    ) -> bool:
+        if operation_type == "install" and manifest["status"] == "active":
+            return True
+        current = manifest["operation"]
+        return bool(
+            manifest["status"] == "active"
+            and current.get("operation_id") == operation_id
+            and current.get("type") == operation_type
+            and current.get("phase") == "complete"
+        )
+
+    @staticmethod
+    def _assert_governance_operation_available(
+        manifest: dict[str, Any], operation_id: str, operation_type: str
+    ) -> None:
+        if manifest["status"] in {"active", "error"}:
+            return
+        current = manifest["operation"]
+        if current.get("type") == "install" and operation_type == "install":
+            if current.get("operation_id") != operation_id:
+                raise AidpProvisionPending(
+                    "The existing global governance installation is still in progress.",
+                    str(manifest.get("phase") or "control"),
+                )
+            return
+        if current.get("operation_id") != operation_id or current.get("type") != operation_type:
+            raise AidpProvisionConflict(
+                "Another global governance module operation is already in progress"
+            )
+
+    def _begin_governance_repair(
+        self,
+        workspace_key: str,
+        manifest: dict[str, Any],
+        operation_id: str,
+        operation_type: str,
+    ) -> dict[str, Any]:
+        previous_enabled = self._governance_enabled(workspace_key, manifest)
+        resources = dict(manifest.get("resources") or {})
+        replacement = self._new_module_manifest(operation_id, operation_type)
+        replacement.update(
+            enabled=previous_enabled,
+            previous_enabled=previous_enabled,
+            resources=resources,
+        )
+        self._write_module_manifest(workspace_key, replacement)
+        return replacement
+
+    def _prepare_governance_reconciliation(
+        self, workspace_key: str, operation_id: str, operation_type: str
+    ) -> tuple[dict[str, Any], bool]:
+        manifest = self._module_manifest(workspace_key)
+        if manifest is None:
+            return self._start_governance_install(
+                workspace_key, operation_id, operation_type
+            ), False
+        self._resume_governance_operation(
+            workspace_key, manifest, operation_id, operation_type
+        )
+        if self._governance_operation_complete(manifest, operation_id, operation_type):
+            return manifest, True
+        self._assert_governance_operation_available(
+            manifest, operation_id, operation_type
+        )
+        if manifest["status"] in {"active", "error"} and operation_type in {"redeploy", "delete"}:
+            manifest = self._begin_governance_repair(
+                workspace_key, manifest, operation_id, operation_type
+            )
+        return manifest, False
+
+    def _reconcile_governance_verify(
+        self, workspace_key: str, manifest: dict[str, Any], _operation_type: str
+    ) -> None:
+        self._ensure_governance_bucket()
+        manifest["phase"] = "control"
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _reconcile_governance_control(
+        self, workspace_key: str, manifest: dict[str, Any], operation_type: str
+    ) -> None:
+        self._ensure_governance_bucket()
+        credential_key, _ = self._ensure_governance_credential()
+        shared_compute = self._shared_compute(workspace_key)
+        previous_enabled = bool(manifest.get("previous_enabled"))
+        sync_requested_at = datetime.now(timezone.utc).isoformat()
+        job_key, changed = self._ensure_governance_job(
+            workspace_key,
+            str(shared_compute["key"]),
+            desired_enabled=None,
+            paused=(operation_type == "redeploy" and not previous_enabled),
+            bootstrap_snapshot=(operation_type == "install" or previous_enabled),
+        )
+        resources = manifest["resources"]
+        resources.update(credential_key=credential_key, workflow_key=job_key)
+        if changed:
+            resources["sync_requested_at"] = sync_requested_at
+        manifest["phase"] = (
+            "agent"
+            if operation_type == "redeploy" and not previous_enabled
+            else "sync"
+        )
+        self._write_module_manifest(workspace_key, manifest)
+        if changed:
+            raise AidpProvisionPending(
+                "The governance tables and first metadata snapshot are starting.",
+                "sync",
+            )
+
+    def _reconcile_governance_sync(
+        self, workspace_key: str, manifest: dict[str, Any], _operation_type: str
+    ) -> None:
+        resources = manifest["resources"]
+        job_key = str(resources.get("workflow_key") or "")
+        if not job_key or not self._successful_governance_sync(
+            workspace_key,
+            job_key,
+            requested_at=str(resources.get("sync_requested_at") or ""),
+        ):
+            raise AidpProvisionPending(
+                "The first governance metadata snapshot is still running.", "sync"
+            )
+        manifest["phase"] = "agent"
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _reconcile_governance_agent(
+        self, workspace_key: str, manifest: dict[str, Any], _operation_type: str
+    ) -> None:
+        if self._ensure_global_agent(workspace_key, manifest):
+            self._write_module_manifest(workspace_key, manifest)
+            raise AidpProvisionPending(
+                "The global governance Agent deployment is starting.", "agent"
+            )
+        manifest["phase"] = "permissions"
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _reconcile_governance_permissions(
+        self, workspace_key: str, manifest: dict[str, Any], _operation_type: str
+    ) -> None:
+        if self._ensure_global_agent_permissions(workspace_key, manifest):
+            raise AidpProvisionPending(
+                "The exact governance Agent role permissions are being applied.",
+                "permissions",
+            )
+        manifest["phase"] = "activation"
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _reconcile_governance_activation(
+        self, workspace_key: str, manifest: dict[str, Any], operation_type: str
+    ) -> None:
+        desired = (
+            True
+            if operation_type == "install"
+            else bool(manifest.get("previous_enabled", manifest.get("enabled")))
+        )
+        shared_compute = self._shared_compute(workspace_key)
+        sync_requested_at = datetime.now(timezone.utc).isoformat()
+        job_key, changed = self._ensure_governance_job(
+            workspace_key,
+            str(shared_compute["key"]),
+            desired_enabled=desired,
+            paused=not desired,
+        )
+        resources = manifest["resources"]
+        resources["workflow_key"] = job_key
+        if changed:
+            resources["sync_requested_at"] = sync_requested_at
+            self._write_module_manifest(workspace_key, manifest)
+            raise AidpProvisionPending(
+                "The governance activation cycle is starting.", "activation"
+            )
+        if desired and not self._successful_governance_sync(
+            workspace_key,
+            job_key,
+            requested_at=str(resources.get("sync_requested_at") or ""),
+        ):
+            raise AidpProvisionPending(
+                "The governance activation cycle is still running.", "activation"
+            )
+        manifest.update(phase="steady", enabled=desired)
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _reconcile_governance_steady(
+        self, workspace_key: str, manifest: dict[str, Any], _operation_type: str
+    ) -> None:
+        shared_compute = self._shared_compute(workspace_key)
+        _, changed = self._ensure_governance_job(
+            workspace_key,
+            str(shared_compute["key"]),
+            desired_enabled=None,
+            paused=not bool(manifest.get("enabled")),
+        )
+        if changed:
+            self._write_module_manifest(workspace_key, manifest)
+            raise AidpProvisionPending(
+                "The governance workflow is entering steady state.", "steady"
+            )
+        manifest.update(status="active", phase="active")
+        manifest["operation"]["phase"] = "complete"
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _reconcile_governance_module(
+        self, user_ocid: str, operation_id: str, operation_type: str
+    ) -> dict[str, Any]:
+        workspace_key = self._governance_workspace()
+        manifest, complete = self._prepare_governance_reconciliation(
+            workspace_key, operation_id, operation_type
+        )
+        if complete:
+            return _module_payload(manifest)
+        handlers = {
+            "verify": self._reconcile_governance_verify,
+            "control": self._reconcile_governance_control,
+            "sync": self._reconcile_governance_sync,
+            "agent": self._reconcile_governance_agent,
+            "permissions": self._reconcile_governance_permissions,
+            "activation": self._reconcile_governance_activation,
+            "steady": self._reconcile_governance_steady,
+        }
+        while handler := handlers.get(str(manifest["phase"])):
+            handler(workspace_key, manifest, operation_type)
+        return _module_payload(manifest)
+
+    async def install_governance_module(
+        self,
+        user_ocid: str,
+        operation_id: str,
+        *,
+        role_membership_verified: bool = False,
+    ) -> dict[str, Any]:
+        if not role_membership_verified and not await self.is_platform_admin(user_ocid):
+            raise AidpProvisionConflict("The selected user is not an AI_DATA_PLATFORM_ADMIN")
+        async with self._locks.setdefault(GOVERNANCE_MODULE_ID, asyncio.Lock()):
+            return await self._run_module_operation(
+                self._reconcile_governance_module, user_ocid, operation_id, "install"
+            )
+
+    async def redeploy_governance_module(
+        self,
+        user_ocid: str,
+        operation_id: str,
+        *,
+        role_membership_verified: bool = False,
+    ) -> dict[str, Any]:
+        if not role_membership_verified and not await self.is_platform_admin(user_ocid):
+            raise AidpProvisionConflict("The selected user is not an AI_DATA_PLATFORM_ADMIN")
+        async with self._locks.setdefault(GOVERNANCE_MODULE_ID, asyncio.Lock()):
+            return await self._run_module_operation(
+                self._reconcile_governance_module, user_ocid, operation_id, "redeploy"
+            )
+
+    def _record_module_error(self, operation_id: str, operation_type: str, error: BaseException) -> None:
+        workspace_key = str(self._workspace()["key"])
+        manifest = self._module_manifest(workspace_key)
+        if manifest is None:
+            return
+        operation = manifest.get("operation") or {}
+        if operation.get("type") != operation_type:
+            return
+        if operation.get("operation_id") != operation_id:
+            return
+        manifest["status"] = "error"
+        manifest["error_code"] = hashlib.sha256(
+            f"{operation_type}:{manifest.get('phase')}:{type(error).__name__}".encode("utf-8")
+        ).hexdigest()[:16]
+        operation["phase"] = "error"
+        self._write_module_manifest(workspace_key, manifest)
+
+    async def _run_module_operation(
+        self, operation: Any, user_ocid: str, operation_id: str, operation_type: str
+    ) -> dict[str, Any]:
+        try:
+            return await asyncio.to_thread(operation, user_ocid, operation_id, operation_type)
+        except (AidpProvisionPending, AidpProvisionConflict):
+            raise
+        except AidpProvisionError as exc:
+            try:
+                await asyncio.to_thread(self._record_module_error, operation_id, operation_type, exc)
+            except AidpProvisionPending:
+                pass
+            raise
+        except Exception as exc:
+            try:
+                await asyncio.to_thread(self._record_module_error, operation_id, operation_type, exc)
+            except (AidpProvisionPending, AidpProvisionError):
+                pass
+            raise AidpProvisionError("The governance module operation failed closed; retry the same operation_id.") from None
+
+    def _delete_governance_deployments(self, workspace_key: str, agent_key: str) -> None:
+        path = f"/workspaces/{workspace_key}/agents/{agent_key}/deployments"
+        for deployment in self._list(path, phase="cleanup"):
+            key = str(deployment.get("key") or deployment.get("id") or "")
+            if key:
+                self._request("DELETE", f"{path}/{quote(key, safe='')}", allow_not_found=True, phase="cleanup")
+        if self._list(path, phase="cleanup"):
+            raise AidpProvisionPending("The governance Agent deployment deletion is still in progress.", "cleanup")
+
+    def _delete_governance_compute(self, workspace_key: str) -> None:
+        matches = [item for item in self._list(f"/workspaces/{workspace_key}/clusters", phase="cleanup") if self._resource_name(item) == GOVERNANCE_AGENT_COMPUTE_NAME]
+        if len(matches) > 1:
+            raise AidpProvisionError("AIDP has duplicate dedicated governance AI compute resources.")
+        if matches:
+            key = str(matches[0].get("key") or matches[0].get("id") or "")
+            if key:
+                self._request("DELETE", f"/workspaces/{workspace_key}/clusters/{quote(key, safe='')}", allow_not_found=True, phase="cleanup")
+            raise AidpProvisionPending("The dedicated governance AI compute deletion is still in progress.", "cleanup")
+
+    def _delete_governance_credential(self) -> None:
+        matches = [item for item in self._list("/credentials", params={"displayName": GOVERNANCE_CREDENTIAL_NAME}, phase="cleanup") if self._resource_name(item) == GOVERNANCE_CREDENTIAL_NAME]
+        if len(matches) > 1:
+            raise AidpProvisionError("AIDP has duplicate governance credentials.")
+        if matches:
+            key = str(matches[0].get("key") or matches[0].get("id") or "")
+            if key:
+                self._request("DELETE", f"/credentials/{quote(key, safe='')}", allow_not_found=True, phase="cleanup")
+            raise AidpProvisionPending("The governance credential deletion is still in progress.", "cleanup")
+
+    def _delete_governance_tables(self) -> None:
+        catalog = self._catalog(CATALOG_NAME, allow_missing=True)
+        if catalog is None:
+            return
+        schemas = [item for item in self._list("/schemas", params={"catalogKey": str(catalog["key"])}, phase="cleanup") if self._resource_name(item) == "oci_artifacts"]
+        if len(schemas) > 1:
+            raise AidpProvisionError("AIDP has duplicate governance control schemas.")
+        if schemas:
+            schema_key = str(schemas[0].get("key") or "")
+            tables = [item for item in self._schema_tables(str(catalog["key"]), schema_key) if self._resource_name(item) in GOVERNANCE_TABLES]
+            for table in tables:
+                key = str(table.get("key") or "")
+                if key:
+                    self._request("DELETE", f"/tables/{quote(key, safe='')}", allow_not_found=True, phase="cleanup")
+            if tables:
+                raise AidpProvisionPending("The governance Delta table deletion is still in progress.", "cleanup")
+
+    def _delete_governance_prefixes(self) -> None:
+        for table in GOVERNANCE_TABLES:
+            prefix = f"oci_artifacts/{table}/"
+            start: str | None = None
+            while True:
+                response = self.object_storage.list_objects(
+                    self.settings.objectstorage_namespace, self.settings.artifacts_bucket_name, prefix=prefix, start=start
+                )
+                for item in response.data.objects:
+                    self.object_storage.delete_object(self.settings.objectstorage_namespace, self.settings.artifacts_bucket_name, item.name)
+                start = response.data.next_start_with
+                if not start:
+                    break
+            response = self.object_storage.list_objects(
+                self.settings.objectstorage_namespace, self.settings.artifacts_bucket_name, prefix=prefix, start=None
+            )
+            if response.data.objects:
+                raise AidpProvisionPending("Governance Object Storage cleanup is still in progress.", "cleanup")
+
+    @staticmethod
+    def _completed_governance_deletion(operation_id: str) -> dict[str, Any]:
+        result = _module_payload()
+        result.update(
+            operation_id=operation_id,
+            operation_type="delete",
+            phase="complete",
+        )
+        return result
+
+    def _resume_governance_deletion(
+        self, workspace_key: str, manifest: dict[str, Any], operation_id: str
+    ) -> None:
+        if manifest["status"] != "error":
+            return
+        current = manifest["operation"]
+        if current.get("type") == "delete":
+            if current.get("operation_id") != operation_id:
+                raise AidpProvisionConflict(
+                    "The failed governance deletion must resume with its original operation_id"
+                )
+            manifest["status"] = "deleting"
+            current["phase"] = "resumed"
+            manifest.pop("error_code", None)
+            self._write_module_manifest(workspace_key, manifest)
+            return
+        if current.get("type") not in {"install", "redeploy"}:
+            raise AidpProvisionConflict(
+                "The failed governance operation cannot be replaced by deletion"
+            )
+        resources = manifest.get("resources") or {}
+        manifest.update(
+            status="deleting",
+            phase="disable" if resources.get("workflow_key") else "resources",
+        )
+        manifest["operation"] = {
+            "operation_id": operation_id,
+            "type": "delete",
+            "phase": "started",
+        }
+        manifest.pop("error_code", None)
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _prepare_governance_deletion(
+        self, workspace_key: str, manifest: dict[str, Any], operation_id: str
+    ) -> None:
+        self._resume_governance_deletion(workspace_key, manifest, operation_id)
+        current = manifest["operation"]
+        if manifest["status"] != "deleting":
+            if manifest["status"] != "active":
+                raise AidpProvisionConflict(
+                    "Another global governance module operation is already in progress"
+                )
+            manifest.update(status="deleting", phase="disable")
+            manifest["operation"] = {
+                "operation_id": operation_id,
+                "type": "delete",
+                "phase": "started",
+            }
+            self._write_module_manifest(workspace_key, manifest)
+            return
+        if current.get("operation_id") != operation_id:
+            raise AidpProvisionConflict(
+                "Another global governance module operation is already in progress"
+            )
+
+    def _delete_governance_disable_phase(
+        self, workspace_key: str, manifest: dict[str, Any]
+    ) -> None:
+        resources = manifest.setdefault("resources", {})
+        if not resources.get("disable_requested_at"):
+            shared_compute = self._shared_compute(workspace_key)
+            disable_requested_at = datetime.now(timezone.utc).isoformat()
+            job_key, _ = self._ensure_governance_job(
+                workspace_key,
+                str(shared_compute["key"]),
+                desired_enabled=False,
+                paused=False,
+            )
+            resources.update(
+                workflow_key=job_key,
+                disable_requested_at=disable_requested_at,
+            )
+            self._write_module_manifest(workspace_key, manifest)
+            raise AidpProvisionPending(
+                "The governance workflow is disabling before deletion.", "disable"
+            )
+        job_key = str(resources.get("workflow_key") or "")
+        if not job_key or not self._successful_governance_sync(
+            workspace_key,
+            job_key,
+            requested_at=str(resources.get("disable_requested_at") or ""),
+        ):
+            raise AidpProvisionPending(
+                "The governance workflow is disabling before deletion.", "disable"
+            )
+        manifest.update(enabled=False, phase="pause")
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _delete_governance_pause_phase(
+        self, workspace_key: str, manifest: dict[str, Any]
+    ) -> None:
+        shared_compute = self._shared_compute(workspace_key)
+        _, changed = self._ensure_governance_job(
+            workspace_key,
+            str(shared_compute["key"]),
+            desired_enabled=False,
+            paused=True,
+        )
+        if changed:
+            self._write_module_manifest(workspace_key, manifest)
+            raise AidpProvisionPending(
+                "The disabled governance workflow is being paused.", "pause"
+            )
+        manifest["phase"] = "resources"
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _delete_governance_resources_phase(
+        self, workspace_key: str, manifest: dict[str, Any]
+    ) -> None:
+        resources = manifest.get("resources") or {}
+        agent_key = str(resources.get("agent_key") or "")
+        if agent_key:
+            self._delete_governance_deployments(workspace_key, agent_key)
+        self._cleanup_agent(workspace_key, GOVERNANCE_AGENT_NAME)
+        self._delete_governance_compute(workspace_key)
+        self._cleanup_lab_job(workspace_key, GOVERNANCE_JOB_NAME)
+        self._delete_governance_credential()
+        for path in (
+            f"{MODULE_ROOT}/agent/governance_agent.py",
+            f"{MODULE_ROOT}/agent/requirements.txt",
+            f"{MODULE_ROOT}/agent/agent-manifest.json",
+            f"{MODULE_ROOT}/data_governance_sync.ipynb",
+        ):
+            self._delete_workspace_path(
+                workspace_key,
+                path,
+                "The protected governance source deletion is still in progress.",
+            )
+        manifest["phase"] = "tables"
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _delete_governance_tables_phase(
+        self, workspace_key: str, manifest: dict[str, Any]
+    ) -> None:
+        self._delete_governance_tables()
+        self._delete_governance_prefixes()
+        manifest["phase"] = "manifest"
+        self._write_module_manifest(workspace_key, manifest)
+
+    def _delete_governance_module(
+        self, user_ocid: str, operation_id: str, operation_type: str = "delete"
+    ) -> dict[str, Any]:
+        if operation_type != "delete":
+            raise ValueError("Invalid governance module operation")
+        workspace_key = self._governance_workspace()
+        manifest = self._module_manifest(workspace_key)
+        if manifest is None:
+            return self._completed_governance_deletion(operation_id)
+        self._prepare_governance_deletion(workspace_key, manifest, operation_id)
+        handlers = {
+            "disable": self._delete_governance_disable_phase,
+            "pause": self._delete_governance_pause_phase,
+            "resources": self._delete_governance_resources_phase,
+            "tables": self._delete_governance_tables_phase,
+        }
+        while handler := handlers.get(str(manifest["phase"])):
+            handler(workspace_key, manifest)
+        self._delete_workspace_path(
+            workspace_key,
+            MODULE_ROOT,
+            "The governance module manifest and workspace deletion is still in progress.",
+        )
+        return self._completed_governance_deletion(operation_id)
+
+    async def delete_governance_module(
+        self,
+        user_ocid: str,
+        operation_id: str,
+        *,
+        role_membership_verified: bool = False,
+    ) -> dict[str, Any]:
+        if not role_membership_verified and not await self.is_platform_admin(user_ocid):
+            raise AidpProvisionConflict("The selected user is not an AI_DATA_PLATFORM_ADMIN")
+        async with self._locks.setdefault(GOVERNANCE_MODULE_ID, asyncio.Lock()):
+            return await self._run_module_operation(
+                self._delete_governance_module, user_ocid, operation_id, "delete"
+            )
 
     def _healthcheck(self) -> None:
         workspace = self._workspace()

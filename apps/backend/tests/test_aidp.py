@@ -52,7 +52,7 @@ class FakeResponse:
 
 def bare_client() -> AidpClient:
     client = object.__new__(AidpClient)
-    client.base = "https://aidp.example.invalid/20240831/dataLakes/platform"
+    client.base = "https://aidp.example.invalid/20260430/aiDataPlatforms/platform"
     client.signer = object()
     client._session_lock = threading.Lock()
     client._locks = {}
@@ -207,6 +207,13 @@ def test_list_follows_opc_next_page_and_preserves_filters() -> None:
     }
 
 
+def test_list_fails_closed_on_repeated_page_token() -> None:
+    client = bare_client()
+    client._request = lambda *_args, **_kwargs: ({"items": []}, {"opc-next-page": "same"})
+    with pytest.raises(AidpProvisionError, match="repeated pagination token"):
+        client._list("/catalogs")
+
+
 def test_agent_compute_recovers_resource_hidden_behind_async_operation() -> None:
     client = bare_client()
     workspace_key = "workspace"
@@ -220,6 +227,7 @@ def test_agent_compute_recovers_resource_hidden_behind_async_operation() -> None
         assert params == {"resourceType": "AI_COMPUTE"}
         return [
             {
+                "actionType": "CREATE_CLUSTER",
                 "resourceDisplayName": AGENT_COMPUTE_NAME,
                 "resourceName": f"{workspace_key}.{hidden_key}",
                 "timeStarted": "2026-08-16T17:08:22Z",
@@ -324,7 +332,10 @@ def test_agent_compute_removes_failed_restart_before_retry() -> None:
     ]
 
 
-def test_agent_compute_rotates_retry_token_after_terminal_attempt() -> None:
+@pytest.mark.parametrize("operation_status", ["FAILED", "CANCELED"])
+def test_agent_compute_rotates_retry_token_after_terminal_attempt(
+    operation_status: str,
+) -> None:
     client = bare_client()
     workspace_key = "workspace"
     failed_key = "failed-ai-compute"
@@ -341,7 +352,7 @@ def test_agent_compute_rotates_retry_token_after_terminal_attempt() -> None:
                 "actionType": "CREATE_CLUSTER",
                 "resourceDisplayName": AGENT_COMPUTE_NAME,
                 "resourceName": f"{workspace_key}.{failed_key}",
-                "status": "FAILED",
+                "status": operation_status,
                 "timeStarted": "2026-08-16T17:25:22Z",
             }
         ]
@@ -360,6 +371,103 @@ def test_agent_compute_rotates_retry_token_after_terminal_attempt() -> None:
     assert post_kwargs["retry_scope"] == "agent-compute:failed-operation"
     assert "gpus" not in post_kwargs["payload"]["driverConfig"]["driverShapeConfig"]
     assert post_kwargs["payload"]["replicaConfig"] == {"minReplica": 1, "maxReplica": 1}
+
+
+@pytest.mark.parametrize("operation_status", ["ACCEPTED", "RUNNING", "SUCCESS", "SUCCEEDED"])
+def test_agent_compute_waits_for_a_hidden_create_without_posting_again(
+    operation_status: str,
+) -> None:
+    client = bare_client()
+    workspace_key = "workspace"
+    hidden_key = "pending-ai-compute"
+    calls: list[tuple[str, str]] = []
+
+    def list_items(path: str, *, params=None, **_kwargs):
+        if path.endswith("/clusters"):
+            return []
+        assert path == "/asyncOperations"
+        assert params == {"resourceType": "AI_COMPUTE"}
+        return [
+            {
+                "key": "accepted-operation",
+                "actionType": "CREATE_CLUSTER",
+                "resourceDisplayName": AGENT_COMPUTE_NAME,
+                "resourceName": f"{workspace_key}.{hidden_key}",
+                "status": operation_status,
+                "timeStarted": "2026-08-16T17:25:22Z",
+            }
+        ]
+
+    def request(method: str, path: str, **_kwargs):
+        calls.append((method, path))
+        return None
+
+    client._list = list_items
+    client._request = request
+
+    with pytest.raises(AidpProvisionPending, match="still creating"):
+        client._ensure_agent_compute(workspace_key)
+
+    assert calls == [("GET", f"/workspaces/{workspace_key}/clusters/{hidden_key}")]
+
+
+def test_agent_compute_recreates_only_after_a_successful_matching_delete() -> None:
+    client = bare_client()
+    workspace_key = "workspace"
+    post_kwargs: dict[str, object] = {}
+
+    def list_items(path: str, *, params=None, **_kwargs):
+        if path.endswith("/clusters"):
+            return []
+        assert path == "/asyncOperations"
+        assert params == {"resourceType": "AI_COMPUTE"}
+        return [
+            {
+                "key": "wrong-name-operation",
+                "actionType": "CREATE_CLUSTER",
+                "resourceDisplayName": "other-compute",
+                "resourceName": f"{workspace_key}.other",
+                "status": "RUNNING",
+                "timeStarted": "2026-08-16T17:30:00Z",
+            },
+            {
+                "key": "wrong-workspace-operation",
+                "actionType": "CREATE_CLUSTER",
+                "resourceDisplayName": AGENT_COMPUTE_NAME,
+                "resourceName": "other-workspace.other",
+                "status": "RUNNING",
+                "timeStarted": "2026-08-16T17:29:00Z",
+            },
+            {
+                "key": "delete-operation",
+                "actionType": "DELETE_CLUSTER",
+                "resourceDisplayName": AGENT_COMPUTE_NAME,
+                "resourceName": f"{workspace_key}.deleted-ai-compute",
+                "status": "SUCCEEDED",
+                "timeStarted": "2026-08-16T17:28:00Z",
+            },
+            {
+                "key": "old-create-operation",
+                "actionType": "CREATE_CLUSTER",
+                "resourceDisplayName": AGENT_COMPUTE_NAME,
+                "resourceName": f"{workspace_key}.deleted-ai-compute",
+                "status": "SUCCEEDED",
+                "timeStarted": "2026-08-16T17:27:00Z",
+            },
+        ]
+
+    def request(method: str, _path: str, **kwargs):
+        if method == "POST":
+            post_kwargs.update(kwargs)
+        return None
+
+    client._list = list_items
+    client._request = request
+
+    with pytest.raises(AidpProvisionPending, match="has not published"):
+        client._ensure_agent_compute(workspace_key)
+
+    assert post_kwargs["retry_scope"] == "agent-compute:delete-operation"
 
 
 def test_job_contract_is_derived_from_pack_and_accepts_a_sixth_notebook() -> None:
@@ -506,8 +614,6 @@ def test_local_multi_lab_lifecycle_is_idempotent_and_protects_last_lab() -> None
         await client.delete_lab(USER_OCID, "healthcare", operation_id)
         with pytest.raises(AidpProvisionConflict, match="last lab"):
             await client.delete_lab(USER_OCID, "banking", operation_id)
-        agent = await client.add_lab(USER_OCID, EMAIL, "agent")
-        assert agent.job_name == "u101_agent_data_governance"
         await client.cleanup_user(USER_OCID)
         assert client.users == {}
 

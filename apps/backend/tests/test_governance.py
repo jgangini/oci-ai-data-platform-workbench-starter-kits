@@ -1,616 +1,384 @@
-from __future__ import annotations
-
 import ast
+import hashlib
 import json
-import re
-import threading
-from types import SimpleNamespace
+import uuid
 
 import pytest
 
-from app.aidp import API_VERSION, AidpClient, AidpProvisionPending, participant_owner_key
 from app.governance import (
-    DAMA_SYSTEM_PROMPT,
+    GOVERNANCE_TABLES,
     agent_source,
-    database_names,
-    external_catalog_name,
+    governance_sync_notebook,
+    resolve_column_identities,
 )
-from app.lab_packs import load_lab_pack
 
 
-USER_OCID = "ocid1.user.oc1..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-EMAIL = "ada@example.com"
-
-
-def bare_client() -> AidpClient:
-    client = object.__new__(AidpClient)
-    client.base = f"https://aidp.example.invalid/{API_VERSION}/aiDataPlatforms/platform"
-    client.signer = object()
-    client._session_lock = threading.Lock()
-    client._locks = {}
-    client.settings = SimpleNamespace(
-        bucket_name="bucket",
-        objectstorage_namespace="namespace",
-        aidp_region="us-chicago-1",
-        agent_model_id="ocid1.generativeaimodel.oc1.us-chicago-1.example",
-        governance_gateway_url="https://governance.example.invalid",
-        aidp_platform_id="ocid1.aidataplatform.oc1.us-chicago-1.example",
-        compartment_id="ocid1.compartment.oc1..example",
-        autonomous_database_id="ocid1.autonomousdatabase.oc1.us-chicago-1.example",
-    )
-    client.governance_database = SimpleNamespace(ready=lambda: False)
-    return client
-
-
-def rendered_agent_source() -> str:
+def rendered_agent() -> str:
     return agent_source(
-        model_id="ocid1.generativeaimodel.oc1.us-chicago-1.chat",
+        model_id="ocid1.generativeaimodel.oc1.us-chicago-1.example",
         region="us-chicago-1",
-        compartment_id="ocid1.compartment.oc1..participant",
-        platform_id="ocid1.aidataplatform.oc1.us-chicago-1.participant",
-        participant_key="u101",
-        catalog_name="u101_aidp",
+        compartment_id="ocid1.compartment.oc1..example",
+        platform_id="ocid1.aidataplatform.oc1..example",
     ).decode("utf-8")
 
 
-def rendered_agent_function(name: str):
-    module = ast.parse(rendered_agent_source())
-    function = next(
-        node
-        for node in module.body
-        if isinstance(node, ast.FunctionDef) and node.name == name
+def rendered_sync(*, desired_enabled=None, bootstrap_snapshot=False) -> str:
+    notebook = governance_sync_notebook(
+        namespace="namespace",
+        platform_id="ocid1.aidataplatform.oc1..example",
+        region="us-chicago-1",
+        desired_enabled=desired_enabled,
+        bootstrap_snapshot=bootstrap_snapshot,
+        workspace_key="workspace-key",
+        job_key="job-key",
     )
-    namespace: dict[str, object] = {}
-    exec(compile(ast.Module(body=[function], type_ignores=[]), "governance_agent.py", "exec"), namespace)
+    return "".join(notebook["cells"][0]["source"])
+
+
+def _function(source: str, name: str, namespace: dict) -> object:
+    tree = ast.parse(source)
+    node = next(item for item in tree.body if isinstance(item, ast.FunctionDef) and item.name == name)
+    exec(compile(ast.Module(body=[node], type_ignores=[]), "generated.py", "exec"), namespace)
     return namespace[name]
 
 
-@pytest.mark.parametrize(
-    ("participant_key", "expected"),
-    [
-        ("u101", ("U101_AGENT", "U101_AGENT_RO")),
-        ("u999", ("U999_AGENT", "U999_AGENT_RO")),
-        ("u1000", ("U1000_AGENT", "U1000_AGENT_RO")),
-    ],
-)
-def test_database_names_are_participant_scoped(
-    participant_key: str, expected: tuple[str, str]
-) -> None:
-    assert database_names(participant_key) == expected
-    assert external_catalog_name(participant_key).startswith(participant_key)
+def _generated_identity_resolver(source: str) -> object:
+    namespace = {"uuid": uuid}
+    for name in (
+        "_identity_indexes",
+        "_unique_existing_id",
+        "_existing_column_id",
+        "_has_retired_name",
+        "_rename_column_id",
+        "_new_column_id",
+        "_resolve_identities",
+    ):
+        _function(source, name, namespace)
+    return namespace["_resolve_identities"]
 
 
-@pytest.mark.parametrize("participant_key", ["u100", "u_101", "u101x", "U101", "u1;drop user admin"])
-def test_database_names_reject_non_participant_identifiers(participant_key: str) -> None:
-    with pytest.raises(ValueError, match="starting at u101"):
-        database_names(participant_key)
-
-
-def test_agent_source_reads_live_master_catalog_without_sql_connections() -> None:
-    source = rendered_agent_source()
-
-    assert "AIDPToolConf" not in source and "SQLTool" not in source
-    assert re.search(
-        r"\b(?:INSERT|UPDATE|DELETE|MERGE|DROP|ALTER)\s+(?:INTO|TABLE|FROM)\b",
-        source,
-        re.IGNORECASE,
-    ) is None
-    assert "u102" not in source.casefold()
-    assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
-    assert "Call at most one tool per model turn" in source
-    assert "def catalog_inventory(" in source
-    assert "def governance_policy_explain(" in source
-    assert "def governed_query(" in source
-    assert "chat_context.session_context_var.get()" in source
-    assert '"shouldLog"' not in source
-    assert "search_term: str = \"\"" in source
-    assert '"time_updated"' in source
-    assert '"counts_by_layer"' in source
-    assert 'column.get("fieldType")' in source
-    assert '"observed_master_catalog"' in source
-    assert "fetchLineage" in source
-    assert "def _lineage_summary(" in source
-    assert "def _column_lineage_component(" in source
-    assert '"process_task"' in source
-    assert '"notebook_path"' in source
-    assert '/jobs/{quote(job_key, safe=\'\')}' in source
-    assert 'defaults.get("processNodeId")' in source
-    assert 'run.get("processRunEventTime")' in source
-    assert 'anchor = f"{anchor}/' not in source
-    assert '"limit": "25"' in source
-    assert 'detail.get("tableFields")' in source
-    assert 'managed.get("managedTableDataFormat")' in source
-    assert 'f"aidp://catalogs@{CONFIG[\'platform_id\']}/o/"' in source
-    assert "get_resource_principals_signer" not in source
-    assert "get_resource_principal_delegation_token_signer" not in source
-    assert 'aidputils.secrets.get(name=CONFIG["credential_name"], key=key)' in source
-    assert "private_key_content=values[\"private_key\"]" in source
-    assert "The shared OCI credential is unavailable or invalid" in source
-    assert "TABLE_NAME.fullmatch" in source
-    assert "_contains_foreign_participant" in source
-    assert "def _catalog_contract(" in source
-    assert 'if _name(item) == CONFIG["catalog_name"]' in source
-    assert 'if _name(item) == f"oci_{layer}"' in source
-    assert "Checkpointer initialization failed; using a stateless graph" in source
-    assert '"stage": stage' in source
-    assert 'getattr(response, "status_code", None)' in source
-    assert 'return _error_response(self.setup_error)' in source
-    assert "input=message" in source
-    assert "Learning map:" in source
-    assert "no table or lineage is hard-coded" in source
-    encoded_config = source.split("CONFIG = ", 1)[1].splitlines()[0]
-    config = json.loads(encoded_config)
-    assert config["catalog_name"] == "u101_aidp"
-    assert config["credential_name"] == "AidpGovernanceOperator"
-    assert config["participant_key"] == "u101"
-    assert config["table_prefix"] == "u101_"
-    assert config["platform_id"].startswith("ocid1.aidataplatform.")
-    assert config["gateway_url"] == ""
-    assert "spark_compute_key" not in config
-    assert "catalog_key" not in config and "schema_keys" not in config
+def test_agent_is_global_two_tool_read_only_and_uses_official_aidp_api() -> None:
+    source = rendered_agent()
     compile(source, "governance_agent.py", "exec")
+    assert source.count("    @tool\n") == 2
+    tree = ast.parse(source)
+    tools = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and any(isinstance(decorator, ast.Name) and decorator.id == "tool" for decorator in node.decorator_list)
+    }
+    assert tools == {"catalog_inventory", "catalog_lineage"}
+    assert "20260430/" in source and "aiDataPlatforms/" in source
+    assert '== "ACTIVE"' in source
+    assert 'catalog_name == "oci_medallion" and _name(schema) == "oci_artifacts"' in source
+    for forbidden in (
+        "governance_" + "access_token",
+        "governance_" + "policy_explain",
+        "governed_" + "query",
+        "gateway" + "_url",
+        "Authorization",
+    ):
+        assert forbidden not in source
 
 
-def test_agent_prompt_is_dama_grounded_and_explainable() -> None:
-    source = rendered_agent_source()
+def test_generated_agent_pagination_fails_closed_on_repeated_token() -> None:
+    source = rendered_agent()
+    calls = 0
 
-    assert "DAMA-DMBOK" in DAMA_SYSTEM_PROMPT
-    assert all(
-        heading in DAMA_SYSTEM_PROMPT
-        for heading in ("Evidence", "Explanation", "Governance implication", "Recommendation or limitation")
-    )
-    assert "another participant" in DAMA_SYSTEM_PROMPT
-    assert "If evidence is unavailable" in DAMA_SYSTEM_PROMPT
-    assert "Use match_count and counts_by_layer exactly as returned" in DAMA_SYSTEM_PROMPT
-    assert "timeUpdated as the last Master Catalog metadata update" in DAMA_SYSTEM_PROMPT
-    assert "job metadata provides notebook_path" in DAMA_SYSTEM_PROMPT
-    assert "search_term and include_columns=true" in DAMA_SYSTEM_PROMPT
-    expected_prompt = (
-        DAMA_SYSTEM_PROMPT
-        + "\nThe only allowed participant is u101. A different participant "
-        "identifier in the request requires an immediate refusal without a tool call."
-    )
-    assert repr(expected_prompt) in source
-    assert "complete live scope" in source
-    assert "observed Master Catalog metadata and lineage" in source
+    def request(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return {"items": []}, {"opc-next-page": "same"}
+
+    namespace = {"_request": request, "_items": lambda body: body["items"]}
+    list_all = _function(source, "_list", namespace)
+    with pytest.raises(RuntimeError, match="repeated pagination token"):
+        list_all(None, None, "/catalogs")
+    assert calls == 2
 
 
-def test_column_lineage_selects_only_the_connected_field_component() -> None:
-    component = rendered_agent_function("_column_lineage_component")
+def test_catalog_lineage_removes_control_nodes_descendants_and_links() -> None:
+    source = rendered_agent()
+    namespace: dict = {}
+    _function(source, "_is_control_qualified_name", namespace)
+    _function(source, "_is_control_lineage_node", namespace)
+    filter_lineage = _function(source, "_filter_control_lineage", namespace)
     graph = {
         "nodes": [
+            {"id": "source", "qualifiedName": "aidp://catalogs@p/o/business.sales.orders"},
+            {"id": "control", "qualifiedName": "aidp://catalogs@p/o/oci_medallion.oci_artifacts.data_governance_config"},
+            {"id": "control-column", "parentId": "control", "qualifiedName": "opaque-column"},
             {
-                "id": "gold-document",
-                "displayName": "document_number",
-                "properties": {"default": {"tableName": "u101_lab_customer_360"}},
+                "id": "control-from-properties",
+                "properties": {"default": {"catalogName": "oci_medallion", "schemaName": "oci_artifacts"}},
             },
-            {
-                "id": "silver-document",
-                "displayName": "document_number",
-                "properties": {"default": {"tableName": "u101_lab_customer_master"}},
-            },
-            {
-                "id": "gold-customer",
-                "displayName": "customer_id",
-                "properties": {"default": {"tableName": "u101_lab_customer_360"}},
-            },
+            {"id": "control-direct", "catalogName": "oci_medallion", "schemaName": "oci_artifacts"},
+            {"id": "target", "qualifiedName": "aidp://catalogs@p/o/business.gold.report"},
+            {"id": "safe", "qualifiedName": "not_oci_medallion.oci_artifacts_backup.table"},
         ],
         "links": [
-            {"fromNodeId": "silver-document", "toNodeId": "gold-document"},
-            {"fromNodeId": "gold-customer", "toNodeId": "unrelated-customer"},
+            {"fromNodeId": "source", "toNodeId": "control"},
+            {"fromNodeId": "control", "toNodeId": "control-column"},
+            {"fromNodeId": "control-column", "toNodeId": "target"},
+            {"fromNodeId": "control-from-properties", "toNodeId": "target"},
+            {"fromNodeId": "source", "toNodeId": "control-direct"},
+            {"fromNodeId": "source", "toNodeId": "target"},
+            {"fromNodeId": "target", "toNodeId": "safe"},
         ],
+        "requestId": "preserved",
     }
 
-    selected = component(graph, "u101_lab_customer_360", "document_number")
+    filtered = filter_lineage(graph)
 
-    assert {node["id"] for node in selected["nodes"]} == {
-        "gold-document",
-        "silver-document",
-    }
-    assert selected["links"] == [
-        {"fromNodeId": "silver-document", "toNodeId": "gold-document"}
+    assert [node["id"] for node in filtered["nodes"]] == ["source", "target", "safe"]
+    assert filtered["links"] == [
+        {"fromNodeId": "source", "toNodeId": "target"},
+        {"fromNodeId": "target", "toNodeId": "safe"},
+    ]
+    assert filtered["requestId"] == "preserved"
+    assert '"lineage": _filter_control_lineage(graph)' in source
+
+
+def test_sync_notebook_declares_exact_delta_contract_and_continuous_delay() -> None:
+    source = rendered_sync(bootstrap_snapshot=True)
+    compile(source, "data_governance_sync.py", "exec")
+    for table in GOVERNANCE_TABLES:
+        assert f".{table}" in source
+    assert 'return f"oci://oci_artifacts@{CONFIG[\'namespace\']}/oci_artifacts/{table}"' in source
+    assert "has_access INT" in source
+    assert "enabled INT" in source
+    assert "time.sleep(max(0, 30 - elapsed))" in source
+    assert "data_governance_access_policy target" not in source
+    assert 'status="ERROR"' in source
+    assert "error_code = hashlib.sha256(type(exc).__name__.encode())" in source
+
+
+def test_sync_state_frame_uses_explicit_schema_for_nullable_fields() -> None:
+    source = rendered_sync()
+
+    class FakeSpark:
+        def createDataFrame(self, rows, schema=None):
+            self.rows = rows
+            self.schema = schema
+            return "sync-state-frame"
+
+    fake_spark = FakeSpark()
+    sync_state_frame = _function(
+        source,
+        "_sync_state_frame",
+        {"spark": fake_spark, "Row": lambda **values: values},
+    )
+
+    result = sync_state_frame(
+        source="master_catalog",
+        snapshot_version="",
+        snapshot_hash="",
+        status="ERROR",
+        observed_count=0,
+        inserted_count=0,
+        updated_count=0,
+        deleted_count=0,
+        started_at="now",
+        last_success_at=None,
+        error_code=None,
+    )
+
+    assert result == "sync-state-frame"
+    assert "last_success_at TIMESTAMP" in fake_spark.schema
+    assert "error_code STRING" in fake_spark.schema
+    assert fake_spark.rows[0]["last_success_at"] is None
+    assert fake_spark.rows[0]["error_code"] is None
+
+
+def test_disabled_sync_records_disabled_without_snapshot_or_policy_mutation() -> None:
+    source = rendered_sync()
+    disabled = source.index('CONFIG["desired_enabled"] is False or')
+    snapshot = source.index("records, existing_metadata = _snapshot()")
+    assert disabled < snapshot
+    assert 'status, current_timestamp() started_at' in source
+    assert 'dbutils.notebook.exit("DISABLED")' in source
+    assert '"continuous" = {"pauseStatus": "PAUSED"}' not in source
+    assert 'payload["continuous"] = {"pauseStatus": "PAUSED"}' in source
+    assert 'if CONFIG["desired_enabled"] is None:\n        _pause_workflow()' in source
+    assert "data_governance_access_policy" in source
+    assert "DeltaTable.forName(spark, f\"{CONTROL_SCHEMA}.data_governance_access_policy\")" not in source
+
+
+def test_vm_disable_does_not_self_pause_but_external_config_disable_does() -> None:
+    vm_source = rendered_sync(desired_enabled=False)
+    external_source = rendered_sync(desired_enabled=None)
+    assert '"desired_enabled": false' in vm_source
+    assert '"desired_enabled": null' in external_source
+    disabled_start = vm_source.index("if SHOULD_DISABLE:")
+    disabled_block = vm_source[disabled_start:vm_source.index("\ntry:", disabled_start)]
+    assert 'if CONFIG["desired_enabled"] is None:\n        _pause_workflow()' in disabled_block
+    assert disabled_block.count("_pause_workflow()") == 1
+    assert disabled_block.index('status, current_timestamp() started_at') < disabled_block.index(
+        'dbutils.notebook.exit("DISABLED")'
+    )
+
+
+def test_sync_config_is_an_exact_binary_singleton() -> None:
+    source = rendered_sync()
+    validate = _function(source, "_validated_enabled", {})
+    assert validate([{"enabled": 0}]) == 0
+    assert validate([{"enabled": 1}]) == 1
+    for invalid in ([], [{"enabled": 0}, {"enabled": 1}], [{"enabled": 2}], [{"enabled": None}]):
+        with pytest.raises(ValueError, match="config singleton"):
+            validate(invalid)
+    assert ".limit(2).collect()" in source
+    assert 'status="ERROR"' in source
+
+
+def test_identity_resolver_preserves_exact_and_unambiguous_rename() -> None:
+    existing = [{
+        "object_id": "stable",
+        "table_fingerprint": "table-a",
+        "column_name": "old_name",
+        "column_ordinal": 2,
+        "data_type": "STRING",
+        "is_deleted": 0,
+    }]
+    exact = [{"table_fingerprint": "table-a", "column_name": "old_name", "column_ordinal": 2, "data_type": "STRING"}]
+    renamed = [{"table_fingerprint": "table-a", "column_name": "new_name", "column_ordinal": 2, "data_type": "string"}]
+    assert resolve_column_identities(exact, existing)[0][1:] == ("stable", "EXACT")
+    assert resolve_column_identities(renamed, existing)[0][1:] == ("stable", "INFERRED_RENAME")
+
+
+def test_identity_resolver_never_inherits_policy_for_ambiguous_change() -> None:
+    existing = [
+        {"object_id": "old-a", "table_fingerprint": "table-a", "column_name": "a", "column_ordinal": 1, "data_type": "STRING", "is_deleted": 0},
+        {"object_id": "old-b", "table_fingerprint": "table-a", "column_name": "b", "column_ordinal": 2, "data_type": "STRING", "is_deleted": 0},
+    ]
+    incoming = [
+        {"table_fingerprint": "table-a", "column_name": "x", "column_ordinal": 1, "data_type": "STRING"},
+        {"table_fingerprint": "table-a", "column_name": "y", "column_ordinal": 2, "data_type": "STRING"},
+    ]
+    resolved = resolve_column_identities(incoming, existing)
+    assert {status for _, _, status in resolved} == {"NEW"}
+    assert not {object_id for _, object_id, _ in resolved} & {"old-a", "old-b"}
+
+
+def test_identity_resolver_prefers_stable_column_keys_for_simultaneous_renames() -> None:
+    existing = [
+        {"object_id": "id-a", "table_fingerprint": "table-a", "column_key": "key-a", "column_name": "a", "column_ordinal": 1, "data_type": "STRING", "is_deleted": 0},
+        {"object_id": "id-b", "table_fingerprint": "table-a", "column_key": "key-b", "column_name": "b", "column_ordinal": 2, "data_type": "STRING", "is_deleted": 0},
+    ]
+    incoming = [
+        {"table_fingerprint": "table-a", "column_key": "key-a", "column_name": "renamed_a", "column_ordinal": 1, "data_type": "STRING"},
+        {"table_fingerprint": "table-a", "column_key": "key-b", "column_name": "renamed_b", "column_ordinal": 2, "data_type": "STRING"},
+    ]
+    assert [(object_id, status) for _, object_id, status in resolve_column_identities(incoming, existing)] == [
+        ("id-a", "EXACT"),
+        ("id-b", "EXACT"),
     ]
 
 
-def test_agent_pack_has_diverse_dama_acceptance_cases() -> None:
-    cases = load_lab_pack("agent").agent["evaluation_cases"]
-    assert len(cases) >= 10
-    assert {tool for case in cases for tool in case["expected_tools"]} == {
-        "catalog_inventory",
-        "catalog_lineage",
-        "governance_policy_explain",
-        "governed_query",
+def test_identity_resolver_only_recovers_retired_rows_by_stable_key() -> None:
+    source = rendered_sync(bootstrap_snapshot=True)
+    generated = _generated_identity_resolver(source)
+    resolvers = (resolve_column_identities, generated)
+    retired = [{
+        "object_id": "retired-id",
+        "table_fingerprint": "table-a",
+        "column_key": "",
+        "column_name": "customer_id",
+        "column_ordinal": 1,
+        "data_type": "STRING",
+        "fingerprint": "old-fingerprint",
+        "source_version": "v1",
+        "is_deleted": 1,
+    }]
+    recreated = [{
+        "table_fingerprint": "table-a",
+        "column_key": "",
+        "column_name": "customer_id",
+        "column_ordinal": 1,
+        "data_type": "STRING",
+        "fingerprint": "new-fingerprint",
+        "source_version": "v2",
+    }]
+    stable_retired = [{**retired[0], "column_key": "stable-key"}]
+    stable_recreated = [{**recreated[0], "column_key": "stable-key", "column_name": "renamed_id"}]
+    active_other_name = {
+        **retired[0],
+        "object_id": "active-other",
+        "column_name": "other_name",
+        "is_deleted": 0,
     }
-    assert {case["category"] for case in cases} >= {
-        "catalog",
-        "metadata",
-        "discovery",
-        "quality",
-        "entity_lineage",
-        "column_lineage",
-        "stewardship",
-        "security",
-    }
-    assert all(case["required_concepts"] for case in cases)
+
+    for resolver in resolvers:
+        _, new_id, status = resolver(recreated, retired)[0]
+        assert status == "NEW"
+        assert new_id != "retired-id"
+        assert resolver(recreated, retired + [active_other_name])[0][2] == "NEW"
+        assert resolver(recreated, retired)[0][1] == new_id
+        assert resolver([{**recreated[0], "source_version": "v3"}], retired)[0][1] != new_id
+        assert resolver([{**recreated[0], "fingerprint": "another-fingerprint"}], retired)[0][1] != new_id
+        assert resolver(recreated, retired + [{**retired[0], "object_id": "older-id"}])[0][1] != new_id
+        assert resolver(stable_recreated, stable_retired)[0][1:] == ("retired-id", "EXACT")
 
 
-def test_agent_provisions_from_shared_master_catalog_without_autonomous_mirror() -> None:
-    client = bare_client()
-    pack = load_lab_pack("agent")
-    manifest = {
-        "layout_version": 5,
-        "owner_key": participant_owner_key(USER_OCID),
-        "participant_key": "u101",
-        "participant_code": 101,
-        "participant_email": EMAIL,
-        "external_catalog": None,
-        "labs": {
-            "agent": {
-                "pack_version": pack.pack_version,
-                "pack_hash": pack.pack_sha256,
-                "workspace_path": f"/Workspace/agent/u101_{EMAIL}",
-                "job_name": "u101_agent_data_governance",
-                "phase": "workspace",
-                "operation": None,
-            }
-        },
-    }
-    captured: dict[str, object] = {}
-    writes: list[dict] = []
-    client._workspace = lambda: {"key": "workspace"}
-    client._ensure_workspace_layout = lambda *_args: False
-    client._ensure_catalog = lambda name: (
-        ({"key": "u101-catalog-key"}, False)
-        if name == "oci_medallion"
-        else (_ for _ in ()).throw(AssertionError("unexpected catalog"))
-    )
-    client._ensure_catalog_contract = lambda key, name: (
-        (
-            {
-                "landing": {"key": "landing-key"},
-                "bronze": {"key": "bronze-key"},
-                "silver": {"key": "silver-key"},
-                "gold": {"key": "gold-key"},
-            },
-            False,
-        )
-        if (key, name) == ("u101-catalog-key", "oci_medallion")
-        else (_ for _ in ()).throw(AssertionError("unexpected schema contract"))
-    )
-    client._ensure_agent_compute = lambda workspace: ({"key": "ai-compute-key"}, False)
-    client._ensure_agent = lambda workspace, compute, name, root, source, descriptor, **_kwargs: (
-        captured.update(
-            workspace=workspace,
-            compute=compute,
-            name=name,
-            root=root,
-            source=source.decode("utf-8"),
-            descriptor=json.loads(descriptor),
-        )
-        or ("agent-key", False)
-    )
-    permission_paths: list[str] = []
-    client._ensure_permission = lambda path, *_args, **_kwargs: (
-        permission_paths.append(path) or False
-    )
-    absent_permissions: list[tuple[str, str]] = []
-    client._assert_permission_absent = lambda path, _user, permission: absent_permissions.append(
-        (path, permission)
-    )
-    client._ensure_agent_deployment = lambda *_args, **_kwargs: (
-        {"key": "deployment-key", "lifecycleState": "ACTIVE"},
-        False,
-    )
-    client._advance_lab_manifest = lambda _workspace, value, lab_id, phase: value[
-        "labs"
-    ][lab_id].update(phase=phase)
-    client.governance_database = SimpleNamespace(
-        ready=lambda: (_ for _ in ()).throw(AssertionError("Autonomous must not be read")),
-        ensure_participant=lambda *_args: (_ for _ in ()).throw(
-            AssertionError("Autonomous participant users must not be created")
-        ),
-    )
-    client._write_manifest = lambda _workspace, _owner, value: writes.append(
-        json.loads(json.dumps(value))
-    )
-
-    material = client._provision_agent(
-        USER_OCID, EMAIL, manifest, manifest["labs"]["agent"], pack
-    )
-
-    assert material.participant_key == "u101"
-    assert manifest["labs"]["agent"]["phase"] == "active"
-    assert manifest["external_catalog"] is None
-    assert "/workspaces/workspace/clusters/ai-compute-key" in permission_paths
-    assert ("/catalogs/u101-catalog-key", "SELECT") in absent_permissions
-    source = str(captured["source"])
-    assert "oci_medallion" in source and "shared-spark-key" not in source
-    assert "LAB_METRICS" not in source and "LINEAGE_RELATIONS" not in source
-    assert captured["descriptor"]["participant_key"] == "u101"
-    assert captured["descriptor"]["entry_file"] == "governance_agent.py"
-    assert captured["descriptor"]["schema_version"] == 2
-    assert captured["descriptor"]["tool_contract_version"] == "2.0.0"
-    assert set(captured["descriptor"]["tools"]) == {
-        "catalog_inventory",
-        "catalog_lineage",
-        "governance_policy_explain",
-        "governed_query",
-    }
-    assert manifest["labs"]["agent"]["deployment_source_hash"] == captured[
-        "descriptor"
-    ]["entry_sha256"]
-    assert writes[-1]["agent"]["catalog_name"] == "oci_medallion"
-
-
-def test_active_agent_verifies_deployment_without_rotating_database_credentials() -> None:
-    client = bare_client()
-    pack = load_lab_pack("agent")
-    state = {
-        "pack_version": pack.pack_version,
-        "pack_hash": pack.pack_sha256,
-        "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/agent",
-        "job_name": "u101_agent_data_governance",
-        "phase": "active",
-        "operation": None,
-        "agent_key": "agent-key",
-        "compute_key": "compute-key",
-    }
-    manifest = {
-        "layout_version": 4,
-        "owner_key": participant_owner_key(USER_OCID),
-        "participant_key": "u101",
-        "participant_code": 101,
-        "participant_email": EMAIL,
-        "external_catalog": {"key": "catalog-key"},
-        "agent": {"key": "agent-key", "compute_key": "compute-key"},
-        "labs": {"agent": state},
-    }
-    client._workspace = lambda: {"key": "workspace"}
-    client._write_manifest = lambda *_args: None
-    client.governance_database = SimpleNamespace(
-        ready=lambda: (_ for _ in ()).throw(AssertionError("database must not be touched")),
-        ensure_participant=lambda *_args: (_ for _ in ()).throw(
-            AssertionError("credentials must not rotate")
-        ),
-    )
-    client._ensure_agent_deployment = lambda *args: (
-        {"key": "deployment-key", "lifecycleState": "ACTIVE"},
-        False,
-    ) if args == (
-        "workspace", "agent-key", "compute-key", "u101_agent_data_governance"
-    ) else (_ for _ in ()).throw(AssertionError("unexpected deployment lookup"))
-
-    material = client._provision_agent(USER_OCID, EMAIL, manifest, state, pack)
-
-    assert material.participant_key == "u101"
-    assert state["deployment_key"] == "deployment-key"
-    assert manifest["agent"]["deployment_key"] == "deployment-key"
-
-
-def test_active_agent_deployment_is_reused() -> None:
-    client = bare_client()
-    client._list = lambda *_args, **_kwargs: [
-        {"key": "deployment-key", "lifecycleState": "ACTIVE"}
+def test_identity_exact_name_ignores_retired_rows_when_an_active_generation_exists() -> None:
+    existing = [
+        {"object_id": "retired", "table_fingerprint": "table-a", "column_name": "id", "column_ordinal": 1, "data_type": "STRING", "is_deleted": 1},
+        {"object_id": "active", "table_fingerprint": "table-a", "column_name": "id", "column_ordinal": 1, "data_type": "STRING", "is_deleted": 0},
     ]
-    client._request = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        AssertionError("an active deployment must be reused")
-    )
-
-    deployment, created = client._ensure_agent_deployment(
-        "workspace", "agent-key", "compute-key", "u101_agent_data_governance"
-    )
-
-    assert deployment["key"] == "deployment-key"
-    assert created is False
+    incoming = [{"table_fingerprint": "table-a", "column_name": "id", "column_ordinal": 1, "data_type": "STRING"}]
+    assert resolve_column_identities(incoming, existing)[0][1:] == ("active", "EXACT")
 
 
-def test_existing_agent_is_updated_after_workspace_source_changes() -> None:
-    client = bare_client()
-    uploads = iter((True, False, False))
-    client._upload_file = lambda *_args, **_kwargs: next(uploads)
-    client._agents = lambda *_args: [{"key": "agent-key"}]
-    requests: list[tuple[str, str, dict, str]] = []
-    client._request = lambda method, path, **kwargs: requests.append(
-        (method, path, kwargs["payload"], kwargs["retry_scope"])
-    )
-
-    agent_key, changed = client._ensure_agent(
-        "workspace",
-        "compute-key",
-        "u101_agent_data_governance",
-        "/Workspace/medallon/u101_person@example.com/agent",
-        b"print('revision')\n",
-        b"{}",
-        repair_drift=True,
-    )
-
-    assert changed and agent_key == "agent-key"
-    assert requests[0][0:2] == (
-        "PUT",
-        "/workspaces/workspace/agents/agent-key",
-    )
-    assert requests[0][2]["entryFilePath"].endswith("/governance_agent.py")
-    assert requests[0][2]["computeKey"] == "compute-key"
-    assert requests[0][2]["sessionConfig"] == {
-        "variables": {
-            "governance_access_token": {
-                "name": "governance_access_token",
-                "description": (
-                    "Short-lived effective-user OAuth token for the private "
-                    "governance gateway"
-                ),
-                "isRequired": True,
-                "shouldLog": False,
-                "isSystem": False,
-            }
-        }
-    }
-    assert requests[0][3].startswith("agent-update:")
+def test_sync_source_uses_creation_identity_and_rejects_ambiguous_tables() -> None:
+    source = rendered_sync(bootstrap_snapshot=True)
+    assert 'catalog.get("catalogGuid") or catalog["key"]' in source
+    assert '"\\0".join((catalog_guid, created_at, created_by, entity_type))' in source
+    assert '"\\0".join((catalog_guid, table_key))' in source
+    assert "AIDP returned ambiguous table creation identities" in source
+    assert "if len(columns) != 1:" in source
+    assert "if len(candidates) != 1:" in source
 
 
-def test_agent_source_rejects_unsafe_governance_gateway_origins() -> None:
-    with pytest.raises(ValueError, match="credential-free HTTPS origin"):
-        agent_source(
-            model_id="model",
-            region="us-chicago-1",
-            compartment_id="compartment",
-            platform_id="platform",
-            participant_key="u101",
-            catalog_name="u101_aidp",
-            gateway_url="https://user:secret@example.invalid/path?token=secret",
-        )
+def test_generated_sync_pagination_and_table_key_are_hardened() -> None:
+    source = rendered_sync(bootstrap_snapshot=True)
+    assert "seen_pages = set()" in source
+    assert "AIDP pagination exceeded the safety limit" in source
+    assert 'quote(table_key, safe=\'\')' in source
 
 
-def test_agent_source_preserves_aidp_autonomous_checkpointer_contract() -> None:
-    source = agent_source(
-        model_id="model",
-        region="us-chicago-1",
-        compartment_id="compartment",
-        platform_id="platform",
-        participant_key="u101",
-        catalog_name="u101_aidp",
-        gateway_url="https://governance.example.invalid",
-    ).decode("utf-8")
-
-    assert 'checkpointer = globals().get("checkpointer")' in source
-    assert "create_react_agent(checkpointer=checkpointer" in source
-    assert '"gateway_url": "https://governance.example.invalid"' in source
-    assert "Authorization" in source and "governance_access_token" in source
+def test_sync_fingerprint_covers_names_ordinals_types_descriptions_and_source_version() -> None:
+    source = rendered_sync(bootstrap_snapshot=True)
+    fingerprint = _function(source, "_metadata_fingerprint", {"hashlib": hashlib, "json": json})
+    base = ["catalog-key", "catalog-guid", "catalog", "schema-key", "schema", "table-key", "table-fp", "table", "created", "creator", "TABLE", "column-key", "column", 1, "STRING", "description", "v1"]
+    original = fingerprint(*base)
+    for index in (2, 4, 7, 12, 13, 14, 15, 16):
+        changed = list(base)
+        changed[index] = f"changed-{index}"
+        assert fingerprint(*changed) != original
 
 
-def test_active_agent_deployment_is_redeployed_for_new_source_revision() -> None:
-    client = bare_client()
-    client._list = lambda *_args, **_kwargs: [
-        {
-            "key": "deployment-key",
-            "displayName": "u101_agent_data_governance_deployment",
-            "lifecycleState": "ACTIVE",
-        }
+def test_sync_counts_no_change_insert_update_delete_and_empty_snapshot() -> None:
+    source = rendered_sync(bootstrap_snapshot=True)
+    counts = _function(source, "_change_counts", {})
+    existing = [
+        {"object_id": "same", "fingerprint": "one", "is_deleted": 0},
+        {"object_id": "changed", "fingerprint": "old", "is_deleted": 0},
+        {"object_id": "deleted", "fingerprint": "gone", "is_deleted": 0},
     ]
-    requests: list[tuple[str, str, dict, str]] = []
-    client._request = lambda method, path, **kwargs: (
-        requests.append(
-            (method, path, kwargs["payload"], kwargs["retry_scope"])
-        )
-        or {"key": "deployment-key", "lifecycleState": "CREATING"}
-    )
-
-    deployment, changed = client._ensure_agent_deployment(
-        "workspace",
-        "agent-key",
-        "compute-key",
-        "u101_agent_data_governance",
-        redeploy_revision="abc123",
-    )
-
-    assert changed and deployment["key"] == "deployment-key"
-    assert requests == [
-        (
-            "POST",
-            "/workspaces/workspace/agents/agent-key/deployments/actions/redeploy",
-            {
-                "displayName": "u101_agent_data_governance_deployment",
-                "description": "Production deployment for the participant governance Agent",
-                "agentComputeKey": "compute-key",
-                "agentKey": "agent-key",
-            },
-            "agent-redeploy:agent-key:abc123",
-        )
+    incoming = [
+        {"object_id": "same", "fingerprint": "one"},
+        {"object_id": "changed", "fingerprint": "new"},
+        {"object_id": "inserted", "fingerprint": "new"},
     ]
+    assert counts(incoming, existing) == (1, 1, 1)
+    assert counts(incoming, existing, True) == (0, 0, 0)
+    assert counts([], existing) == (0, 0, 3)
+    assert 'if records:' in source
+    assert 'deletion_condition = col("is_deleted") == 0' in source
 
 
-def test_missing_agent_deployment_is_created_on_shared_ai_compute(monkeypatch) -> None:
-    client = bare_client()
-    monkeypatch.setattr(
-        "app.aidp.uuid.uuid4", lambda: SimpleNamespace(hex="revision12345678")
-    )
-    client._list = lambda *_args, **_kwargs: []
-    requests: list[tuple[str, str, dict]] = []
-    client._request = lambda method, path, **kwargs: (
-        requests.append((method, path, kwargs["payload"]))
-        or {"key": "deployment-key", "lifecycleState": "CREATING"}
-    )
-
-    deployment, created = client._ensure_agent_deployment(
-        "workspace", "agent-key", "compute-key", "u101_agent_data_governance"
-    )
-
-    assert created and deployment["key"] == "deployment-key"
-    assert requests == [
-        (
-            "POST",
-            "/workspaces/workspace/agents/agent-key/deployments/actions/deploy",
-            {
-                "displayName": "u101_agent_data_governance_agent-ke_revision_deployment",
-                "description": "Production deployment for the participant governance Agent",
-                "agentComputeKey": "compute-key",
-                "agentKey": "agent-key",
-            },
-        )
-    ]
-
-
-def test_external_catalog_cleanup_waits_while_aidp_is_deleting() -> None:
-    client = bare_client()
-    client._catalog = lambda *_args, **_kwargs: {
-        "key": "u101-external-catalog",
-        "lifecycleState": "DELETING",
-    }
-    client._request = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        AssertionError("DELETE must not be repeated while AIDP is already deleting")
-    )
-
-    with pytest.raises(AidpProvisionPending) as raised:
-        client._cleanup_external_catalog("u101", {})
-
-    assert raised.value.phase == "cleanup"
-
-
-def test_agent_cleanup_forgets_deleted_manifest_resources() -> None:
-    manifest = {
-        "agent": {"key": "stale-agent"},
-        "external_catalog": {"key": "stale-catalog"},
-        "labs": {"agent": {"phase": "workspace"}},
-    }
-
-    AidpClient._forget_agent_resources(manifest)
-
-    assert manifest == {
-        "agent": None,
-        "external_catalog": None,
-        "labs": {"agent": {"phase": "workspace"}},
-    }
-
-
-def test_agent_cleanup_removes_aidp_then_autonomous_then_workspace() -> None:
-    client = bare_client()
-    pack = load_lab_pack("agent")
-    state = {
-        "pack_version": pack.pack_version,
-        "pack_hash": pack.pack_sha256,
-        "workspace_path": f"/Workspace/medallon/u101_{EMAIL}/agent",
-        "job_name": "u101_agent_data_governance",
-        "phase": "active",
-        "operation": None,
-        "external_catalog_name": external_catalog_name("u101"),
-    }
-    calls: list[tuple[str, ...]] = []
-    client._cleanup_agent = lambda workspace, name: calls.append(("agent", workspace, name))
-    client._cleanup_external_catalog = lambda key, value: calls.append(
-        ("catalog", key, str(value["external_catalog_name"]))
-    )
-    client.governance_database = SimpleNamespace(
-        drop_participant=lambda key: calls.append(("autonomous", key))
-    )
-    client._delete_workspace_path = lambda workspace, path, _message: calls.append(
-        ("workspace", workspace, path)
-    )
-
-    client._cleanup_lab("workspace", "u101", "agent", state)
-
-    assert calls == [
-        ("agent", "workspace", "u101_agent_data_governance"),
-        ("catalog", "u101", external_catalog_name("u101")),
-        ("autonomous", "u101"),
-        ("workspace", "workspace", f"/Workspace/medallon/u101_{EMAIL}/agent"),
-    ]
+def test_sync_uses_source_ordinal_and_one_based_fallback() -> None:
+    source = rendered_sync(bootstrap_snapshot=True)
+    assert "enumerate(columns, start=1)" in source
+    assert 'column.get("fieldPosition")' in source
+    assert 'column.get("ordinalPosition")' in source

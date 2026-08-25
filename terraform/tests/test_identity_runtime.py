@@ -12,10 +12,10 @@ def _resource(source: str, resource_type: str, label: str) -> str:
     return source[start:] if next_resource == -1 else source[start:next_resource]
 
 
-def test_operator_identity_is_reused_and_governance_resources_are_isolated() -> None:
+def test_operator_identity_is_reused_without_gateway_control_plane_resources() -> None:
     identity = (ROOT / "terraform/h_oci_identity.tf").read_text(encoding="utf-8")
     compute = (ROOT / "terraform/g_oci_core_instance.tf").read_text(encoding="utf-8")
-    edge = (ROOT / "terraform/i_oci_data_governance_edge.tf").read_text(encoding="utf-8")
+    terraform = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "terraform").glob("*.tf"))
 
     assert 'resource "oci_identity_domains_user"' not in identity
     assert 'resource "oci_identity_domains_group" "provisioner"' not in identity
@@ -26,30 +26,20 @@ def test_operator_identity_is_reused_and_governance_resources_are_isolated() -> 
     assert 'resource "oci_vault_' not in identity
     assert 'resource "oci_identity_policy" "vm_secret"' not in compute
     assert "secret-bundles" not in compute
-    assert edge.count('resource "oci_identity_domains_app" "governance_public_client"') == 1
-    assert edge.count('resource "oci_kms_vault" "governance"') == 1
-    assert edge.count('data "oci_kms_vault" "governance_existing"') == 1
-    assert edge.count('resource "oci_kms_key" "governance"') == 1
-    assert edge.count('resource "oci_vault_secret" "governance_jdbc"') == 1
-    assert "client_secret" not in edge
-    assert 'client_type       = "public"' in edge
-    assert "allowed_scopes" not in edge
-    assert "fqs = local.governance_gateway_scope" not in edge
-    assert 'methods = ["GET", "POST", "PUT", "DELETE"]' in edge
-    assert 'email          = "governance-jdbc-${local.suffix}@example.invalid"' in edge
-    assert "vault_id = local.governance_existing_vault_ocid" in edge
-    assert "split(\".\", local.governance_existing_vault_ocid)[3] == var.region" in edge
-    assert "local.governance_vault_management_endpoint" in edge
-    assert "local.governance_vault_crypto_endpoint" in (
-        ROOT / "terraform/i_oci_data_governance_deployment.tf"
-    ).read_text(encoding="utf-8")
-    assert 'resource "terraform_data" "governance_vault_dns_wait"' in edge
-    assert "socket.getaddrinfo(sys.argv[1], 443)" in edge
-    assert 'while [ "$attempt" -le 90 ]' in edge
-    assert "Vault management endpoint DNS was not stable after 900 seconds" in edge
-    assert 'GOVERNANCE_VAULT_HOST = trimprefix(local.governance_vault_management_endpoint, "https://")' in edge
-    assert "depends_on = [terraform_data.validate_governance_inputs]" in edge
-    assert "depends_on = [terraform_data.governance_vault_dns_wait]" in edge
+    for resource_type in (
+        "oci_containerengine_",
+        "oci_kms_",
+        "oci_vault_",
+        "oci_apigateway_",
+        "oci_devops_",
+    ):
+        assert resource_type not in terraform
+    for filename in (
+        "i_oci_data_governance_gateway.tf",
+        "i_oci_data_governance_edge.tf",
+        "i_oci_data_governance_deployment.tf",
+    ):
+        assert not (ROOT / "terraform" / filename).exists()
 
 
 def test_identity_groups_ignore_service_managed_schema_extensions() -> None:
@@ -126,7 +116,7 @@ def test_vm_bootstrap_identity_is_authorized_before_instance_launch() -> None:
     assert "target.object.name = '.bootstrap/operator-credentials.json'" in bootstrap_policy
     assert "oci_identity_policy.vm_bootstrap" in instance
     assert "terraform_data.validate_existing_autonomous_database" in instance
-    assert "oci_containerengine_node_pool.governance" in instance
+    assert "oci_containerengine_node_pool" not in instance
     assert '"${oci_identity_tag_namespace.vm_bootstrap.name}.${oci_identity_tag.vm_bootstrap.name}" = local.suffix' in instance
 
 
