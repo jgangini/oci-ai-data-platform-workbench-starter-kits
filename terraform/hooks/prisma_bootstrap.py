@@ -55,7 +55,7 @@ def items(api, path, params=None):
 
 def named(api, path, name):
     matches = [item for item in items(api, path) if (item.get("displayName") or item.get("name")) == name
-               and (item.get("lifecycleState") or item.get("state")) != "DELETED"]
+               and (item.get("lifecycleState") or item.get("lifeCycleState") or item.get("state")) != "DELETED"]
     if len(matches) > 1:
         raise RuntimeError("Duplicate managed PRISMA resource")
     if matches:
@@ -101,21 +101,23 @@ def hidden_compute_detail(api, path, name, key, status):
 def ensure(api, path, name, payload, *, ready=False):
     current = named(api, path, name)
     if not current:
+        if payload is None:
+            raise RuntimeError("Managed PRISMA resource disappeared before readiness check")
         operation(api, api.request("POST", path, payload=payload))
     while True:
         current = named(api, path, name)
         if current:
-            state = str(current.get("lifecycleState") or current.get("state") or "").upper()
+            state = str(current.get("lifecycleState") or current.get("lifeCycleState") or current.get("state") or "").upper()
             if state in {"FAILED", "INACTIVE", "DELETED", "DELETING", "CANCELED", "CANCELLED"} or state.endswith("_FAILED"):
                 raise RuntimeError("Managed PRISMA resource entered terminal state " + state)
             if not ready or state in {"ACTIVE", "STOPPED"}:
                 return current
+        elif payload is None:
+            raise RuntimeError("Managed PRISMA resource disappeared before readiness check")
         pause()
 
 
 def credential(api, name, values):
-    if named(api, "/credentials", name):
-        return
     ensure(api, "/credentials", name, {"displayName": name, "type": "SECRET_TOKEN",
         "credentialDescription": "PRISMA managed runtime; never return secret values",
         "credentialDetails": {"credentialType": "SECRET_TOKEN", "secretTokenPair":
@@ -134,6 +136,7 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
             cursor = connection.cursor()
             for user, name, reader in (("PRISMA_WRITER", "PrismaWriterRuntime", False), ("PRISMA_READER", "PrismaReaderRuntime", True)):
                 if named(api, "/credentials", name):
+                    ensure(api, "/credentials", name, None, ready=True)
                     continue
                 generated_password = generate_password()
                 cursor.execute("SELECT COUNT(*) FROM ALL_USERS WHERE USERNAME=:name", name=user)
@@ -342,9 +345,11 @@ def run_initial_job(api, workspace, job, revision):
             })
             if len(tasks) == 1 and tasks[0].get("taskKey") == "prisma_tick" and status(tasks[0]) in {"SUCCESS", "SUCCEEDED"}:
                 return key
-            if any(status(task) in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED"} for task in tasks):
+            if any(status(task) in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED",
+                "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED"} for task in tasks):
                 raise RuntimeError("PRISMA initial task failed; no readiness claimed")
-        elif state in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED"}:
+        elif state in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED",
+            "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED"}:
             raise RuntimeError("PRISMA initial job failed; no readiness claimed")
         pause(10)
 

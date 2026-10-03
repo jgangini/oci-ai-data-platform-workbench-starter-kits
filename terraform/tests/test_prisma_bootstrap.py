@@ -59,7 +59,8 @@ class Api:
             self.resources[path].update(payload)
             return response(self.resources[path])
         if method == "POST":
-            value = {**payload, "key": "key-" + (payload.get("displayName") or payload["name"]), "lifecycleState": "ACTIVE"}
+            state_field = "lifeCycleState" if path == "/credentials" else "lifecycleState"
+            value = {**payload, "key": "key-" + (payload.get("displayName") or payload["name"]), state_field: "ACTIVE"}
             self.resources.setdefault(path, []).append(value)
             self.resources[path + "/" + value["key"]] = value
             return response(value)
@@ -85,6 +86,65 @@ def test_bundle_is_deterministic_compilable_and_contains_classification():
         for name in archive.namelist():
             ast.parse(archive.read(name), filename=name)
     ast.parse(bootstrap.bundle_prelude(bundle))
+
+
+def test_credential_summary_casing_waits_for_active_and_reuses_existing(monkeypatch):
+    api, pauses = Api(), []
+    request = api.request
+
+    def create_pending(method, path, **kwargs):
+        response = request(method, path, **kwargs)
+        if method == "POST" and path == "/credentials":
+            response.body["lifeCycleState"] = "CREATING"
+        return response
+
+    def complete(_seconds=5):
+        if not _seconds:
+            return
+        pauses.append(True)
+        assert len(pauses) == 1, "ACTIVE credential must stop polling"
+        api.resources["/credentials"][0]["lifeCycleState"] = "ACTIVE"
+
+    monkeypatch.setattr(api, "request", create_pending)
+    monkeypatch.setattr(bootstrap, "pause", complete)
+    bootstrap.credential(api, "PrismaReaderRuntime", {"db_user": "PRISMA_READER"})
+    assert len(pauses) == 1
+    bootstrap.credential(api, "PrismaReaderRuntime", {"db_user": "must_not_rotate"})
+    writes = [call for call in api.calls if call[0] != "GET"]
+    assert len(writes) == 1 and writes[0][:2] == ("POST", "/credentials")
+    assert writes[0][2]["credentialDetails"]["secretTokenPair"] == [{"secretKey": "db_user", "secretValue": "PRISMA_READER"}]
+
+
+def test_credential_summary_casing_filters_deleted_and_rejects_deleting():
+    api = Api()
+    api.resources["/credentials"] = [{"key": "old", "displayName": "PrismaReaderRuntime", "lifeCycleState": "DELETED"}]
+    bootstrap.credential(api, "PrismaReaderRuntime", {"db_user": "PRISMA_READER"})
+    assert bootstrap.named(api, "/credentials", "PrismaReaderRuntime")["key"] != "old"
+    api.resources["/credentials"][-1]["lifeCycleState"] = "DELETING"
+    with pytest.raises(RuntimeError, match="terminal state DELETING"):
+        bootstrap.ensure(api, "/credentials", "PrismaReaderRuntime", {}, ready=True)
+
+
+def test_existing_credential_readiness_waits_without_recreating(monkeypatch):
+    api, pauses = Api(), []
+    api.resources["/credentials"] = [{"key": "existing", "displayName": "PrismaReaderRuntime", "lifeCycleState": "CREATING"}]
+
+    def complete(_seconds=5):
+        if not _seconds:
+            return
+        pauses.append(True)
+        assert len(pauses) == 1
+        api.resources["/credentials"][0]["lifeCycleState"] = "ACTIVE"
+
+    monkeypatch.setattr(bootstrap, "pause", complete)
+    bootstrap.credential(api, "PrismaReaderRuntime", {"db_user": "must_not_rotate"})
+    assert len(pauses) == 1
+    assert bootstrap.ensure(api, "/credentials", "PrismaReaderRuntime", None, ready=True)["key"] == "existing"
+    assert all(method == "GET" for method, *_ in api.calls)
+    api.resources["/credentials"] = []
+    with pytest.raises(RuntimeError, match="disappeared"):
+        bootstrap.ensure(api, "/credentials", "PrismaReaderRuntime", None, ready=True)
+    assert all(method == "GET" for method, *_ in api.calls)
 
 
 def test_agent_publish_waits_async_and_detail_active_without_deleting_prior_release():
@@ -148,15 +208,31 @@ def test_deployment_helpers_reject_duplicates_and_mismatched_endpoint_retention(
         bootstrap.deployment_endpoint({**detail, "sessionRetentionConfig": {"retentionPeriodInDays": 1}}, "us-chicago-1")
 
 
-def test_initial_job_requires_native_run_and_task_success_and_revision_token():
+@pytest.mark.parametrize("failed_state", ["FAILED", "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED", "BLOCKED"])
+@pytest.mark.parametrize("failed_resource", ["job", "task"])
+def test_initial_job_requires_native_run_and_task_success_and_revision_token(monkeypatch, failed_state, failed_resource):
     api = Api()
     assert bootstrap.run_initial_job(api, "ws", "job", "revision") == "run-one"
     method, path, payload, headers = api.calls[0]
     assert (method, path, payload) == ("POST", "/workspaces/ws/jobRuns", {"jobKey": "job", "parameters": []})
     assert len(headers["opc-retry-token"]) == 64
     assert api.calls[-1][1] == "/workspaces/ws/taskRuns"
-    api.run_state = "FAILED"
-    with pytest.raises(RuntimeError, match="no readiness claimed"):
+    request = api.request
+
+    def failed_response(method, path, **kwargs):
+        response = request(method, path, **kwargs)
+        if failed_resource == "job" and path.endswith("/jobRuns/run-one"):
+            response.body["state"]["status"] = failed_state
+        elif failed_resource == "task" and path.endswith("/taskRuns"):
+            response.body["items"][0]["state"]["status"] = failed_state
+        return response
+
+    def no_terminal_wait(seconds=5):
+        assert seconds == 0, "Terminal state must fail without polling"
+
+    monkeypatch.setattr(api, "request", failed_response)
+    monkeypatch.setattr(bootstrap, "pause", no_terminal_wait)
+    with pytest.raises(RuntimeError, match=f"initial {failed_resource} failed; no readiness claimed"):
         bootstrap.run_initial_job(api, "ws", "job", "next-revision")
 
 
