@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.prisma import pipeline
-from app.prisma.landing import write_objects
+from app.prisma import pipeline, x
+from app.prisma.landing import records, write_objects
 from app.prisma.core import default_source, normalize_event, simulation_events
 from app.prisma.classification import classify
 from app.prisma.runtime_secrets import runtime_auth
@@ -25,10 +25,8 @@ class Lake:
 
     def consume(self, config):
         for key, body in self.objects.data.items():
-            if key.startswith(config["landing_prefix"]):
-                for line in body.splitlines():
-                    row = json.loads(line)
-                    self.put("bronze", [{**json.loads(row["payload"]), "id": row["id"]}])
+            if key.startswith(config["landing_prefix"]) and key.endswith((".csv", ".ndjson")):
+                self.put("bronze", records(body, suffix=".csv" if key.endswith(".csv") else ".ndjson"))
         return {"query_id": "test-stream", "microbatches": 1, "last_input_rows": len(self.data["bronze"])}
 
     def put(self, layer, records):
@@ -157,7 +155,7 @@ def test_failed_classification_retries_bronze_without_fabricating_success(runtim
 def test_queued_manual_run_cannot_bypass_persisted_x_rate_limit(runtime):
     _, docs, _, lake, objects = runtime
     docs["checkpoint_x"] = {"retry_at": NOW + 90, "cursor": {"next_token": "page2"}, "revision": 1}
-    source = {**default_source("x"), "mode": "real", "credential_configured": True}
+    source = {**default_source("x"), "mode": "real", "credential_configured": True, "query": "#Bogota"}
     pipeline.poll_source(object(), objects, lake, CONFIG, source, {"requested_action": "run"}, None, NOW, object())
     assert docs["status_x"]["status"] == "rate_limited"
     assert docs["checkpoint_x"]["cursor"] == {"next_token": "page2"}
@@ -182,14 +180,14 @@ def test_old_tick_does_not_clear_newer_pending_request(runtime):
 
 def test_x_received_count_tracks_successful_pages_and_survives_later_error(runtime, monkeypatch):
     _, docs, _, lake, objects = runtime
-    source = {**default_source("x"), "mode": "real", "credential_configured": True}
+    source = {**default_source("x"), "mode": "real", "credential_configured": True, "query": "#Bogota", "capture_running": True}
     pages = [([simulation_events(0)[0]], {"next_token": "page2"}), ([], {"since_id": "30"})]
-    monkeypatch.setattr(pipeline, "fetch_page", lambda *_args, **_kwargs: pages.pop(0))
+    monkeypatch.setattr(x, "fetch_page", lambda *_args, **_kwargs: pages.pop(0))
     pipeline.poll_source(object(), objects, lake, CONFIG, source, {}, lambda **_: "fake-token", NOW, object())
     assert docs["status_x"]["last_received_count"] == 1
     def fail(*_args, **_kwargs):
         raise pipeline.XFailure("access_denied")
-    monkeypatch.setattr(pipeline, "fetch_page", fail)
+    monkeypatch.setattr(x, "fetch_page", fail)
     pipeline.poll_source(object(), objects, lake, CONFIG, source, {"requested_action": "run"}, lambda **_: "fake-token", NOW, object())
     assert docs["status_x"]["last_received_count"] == 1 and docs["status_x"]["last_error"] == "access_denied"
 

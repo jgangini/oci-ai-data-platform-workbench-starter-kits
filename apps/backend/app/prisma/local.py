@@ -11,10 +11,11 @@ from tempfile import NamedTemporaryFile
 
 import httpx
 
-from .core import utc_text
+from .core import default_source, source_migration, utc_text
 from .store import PrismaStore
-from .x import XFailure, fetch_page
-from .capture import search_terms
+from .x import XFailure, poll_queries
+from . import landing
+from .capture import validate_source
 
 
 class LocalCredentials:
@@ -57,6 +58,13 @@ class LocalPrismaRuntime:
     def __init__(self, directory: Path, *, clock=time.time, client_factory=httpx.Client):
         self.store = PrismaStore(directory / "prisma.sqlite3", clock)
         self.credentials = LocalCredentials(directory / "prisma-secrets")
+        for source in self.store.sources():
+            configured = self.credentials.exists(source["secret_ref"])
+            changes = source_migration(source["platform"], {**source, "credential_configured": configured})
+            if configured != source["credential_configured"]:
+                changes["credential_configured"] = configured
+            if changes:
+                self.store.update_source(source["platform"], changes)
         self.clock, self.client_factory = clock, client_factory
         self.lock = asyncio.Lock()
 
@@ -71,16 +79,15 @@ class LocalPrismaRuntime:
             token = values.pop("bearer_token", None)
             current = self.store.source(platform)
             candidate = {**current, **values}
-            if candidate["mode"] == "real" and platform != "x":
-                raise ValueError("Only X has a real connector; other platforms are prepared for simulation")
-            if candidate["mode"] == "real" and not candidate["query"].strip():
-                raise ValueError("Real X capture requires a query")
-            if candidate["mode"] == "simulation":
-                search_terms(candidate["query"])
+            validate_source(candidate)
             if token:
+                if candidate["secret_ref"] in {f"prisma-{platform}", f"PrismaSource_{platform}"}:
+                    candidate["secret_ref"] = values["secret_ref"] = default_source(platform)["secret_ref"]
                 self.credentials.put(candidate["secret_ref"], token)
             values["credential_configured"] = self.credentials.exists(candidate["secret_ref"])
             values.update(status="ready" if candidate["mode"] == "real" else "simulation", last_error=None, next_due=None)
+            if not candidate["enabled"] or candidate["mode"] != current["mode"]:
+                values["capture_running"] = False
             if not candidate["enabled"]:
                 values["status"] = "disabled"
             return self.store.update_source(platform, values)
@@ -90,13 +97,16 @@ class LocalPrismaRuntime:
             source = self.store.source(platform)
             if not source["enabled"]:
                 return {"status": "disabled", "message": "Fuente pausada", "source": source}
+            if not test:
+                source = self.store.start_capture(platform)
             if source["status"] == "rate_limited" and source["next_due"]:
                 retry = datetime.fromisoformat(source["next_due"].replace("Z", "+00:00")).timestamp()
                 if retry > self.clock():
                     return {"status": "rate_limited", "message": "Esperando la ventana de cuota de X", "source": source}
             if source["mode"] == "simulation":
-                self.store.advance_simulation(force=not test)
-                return {"status": "simulation", "message": "Simulated source; the network was not contacted", "source": source}
+                if not test:
+                    self.store.advance_simulation(force=True, platform=platform)
+                return {"status": "simulation", "message": "Simulated source; the network was not contacted", "source": self.store.source(platform)}
             result = await asyncio.to_thread(self._poll, source, test)
             return {"status": result["status"], "message": "Prueba finalizada" if test else "Captura procesada", "source": result}
 
@@ -104,21 +114,16 @@ class LocalPrismaRuntime:
         now, platform = self.clock(), source["platform"]
         try:
             token = self.credentials.get(source["secret_ref"])
-            cursor = {} if test else self.store.checkpoint(platform)
-            received = 0
+            saved = {} if test else self.store.checkpoint(platform)
+            def on_page(events, checkpoint):
+                directory = self.store.path.parent / "prisma-landing"
+                name = landing.write_file(directory, events, {"platform": platform, "checkpoint": checkpoint})
+                self.store.persist_page(platform, landing.records((directory / name).read_bytes()), checkpoint)
+            def on_checkpoint(checkpoint):
+                self.store.persist_page(platform, [], checkpoint)
             with self.client_factory() as client:
-                for _ in range(1 if test else 2):
-                    events, cursor = fetch_page(client, token, source["query"], cursor, now, page_size=10 if test else 50)
-                    received += len(events)
-                    if not test:
-                        self.store.persist_page(platform, events, cursor)
-                    if not cursor.get("next_token"):
-                        break
-            status = "tested" if test else ("backlog" if cursor.get("next_token") else "ready")
-            wait = 60 if cursor.get("next_token") and not test else source["interval_minutes"] * 60
-            return self.store.record_source(platform, {"status": status, "last_error": None,
-                "last_run_at": utc_text(now), "next_due": utc_text(now + wait),
-                **({"last_received_count": received} if not test else {})})
+                result = poll_queries(client, token, source, saved, now, on_page, on_checkpoint, test=test)
+            return self.store.record_source(platform, {**result, "last_run_at": utc_text(now)})
         except XFailure as exc:
             return self.store.record_source(platform, {"status": exc.code, "last_error": exc.code,
                 "last_run_at": utc_text(now), "next_due": utc_text(exc.retry_at) if exc.retry_at else None})
@@ -144,7 +149,7 @@ class LocalPrismaRuntime:
     async def tick(self) -> None:
         self.store.advance_simulation()
         for source in self.store.sources():
-            if not source["enabled"] or source["mode"] != "real":
+            if not source["enabled"] or not source.get("capture_running", False) or source["mode"] != "real":
                 continue
             if source["last_error"] and not source["next_due"]:
                 continue

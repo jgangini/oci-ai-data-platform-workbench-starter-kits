@@ -227,7 +227,7 @@ def fixture_reply(payload: ChatRequest, snapshot: dict) -> dict:
     if matches:
         selected = [item for item in selected if normalize(item.get("locality", "")) in matches]
     refs = list(dict.fromkeys(ref for item in selected for ref in item.get("evidence_ids", [])))
-    descriptions = [f"{'REAL' if item.get('mode') == 'real' else 'SIMULADO'} · {item.get('category')} en {item.get('locality')}: {item.get('severity')} ({item['id']})" for item in selected[:10]]
+    descriptions = [f"{item.get('category')} en {item.get('locality')}: {item.get('severity')} ({item['id']})" for item in selected[:10]]
     answer = "DEMOSTRACIÓN LOCAL · Respuesta de prueba; no interviene un agente AIDP.\n"
     answer += "\n".join(descriptions) if descriptions else "No hay evidencia que coincida en esta publicación."
     return {"answer": answer, "version": snapshot["version"], "evidence_ids": refs,

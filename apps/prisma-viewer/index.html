@@ -8,9 +8,9 @@
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/admin/prisma"><span class="brand-icon" aria-hidden="true">◈</span><span>Territorial Control<small>BOGOTÁ · OBSERVATION CENTER</small></span></a>
+      <a class="brand" href="/admin/gods-eye-view"><span class="brand-icon" aria-hidden="true">◈</span><span>Territorial Control<small>BOGOTÁ · OBSERVATION CENTER</small></span></a>
       <div class="snapshot-state"><span id="runtime">Connecting…</span><span id="published">No publication</span></div>
-      <a class="admin-link" href="/admin/prisma">Manage sources ↗</a>
+      <a class="admin-link" href="/admin/gods-eye-view">Manage sources ↗</a>
     </header>
     <main class="workspace">
       <section class="map-panel" aria-label="Bogotá incident map">
@@ -23,19 +23,17 @@
           <div id="weather-context">Loading weather context…</div><div id="camera-context">Loading public camera references…</div>
         </details>
         <div id="map-credits"></div>
-        <div class="map-attribution"><a href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noreferrer">God’s Eye View · MIT modules</a> · <a href="/prisma/THIRD-PARTY-NOTICES.txt" target="_blank">Licenses</a></div>
+        <div class="map-attribution"><a href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noreferrer">God’s Eye View · MIT modules</a> · <a href="/gods-eye-view/THIRD-PARTY-NOTICES.txt" target="_blank">Licenses</a></div>
       </section>
       <aside class="operations" aria-label="Alerts and assistant">
         <div class="operations-title"><div><span class="eyebrow">OPERATIONS DASHBOARD</span><h2>Events to review</h2></div><span id="count" class="count">0</span></div>
         <p id="connection" role="status">Loading publication…</p>
-        <p id="mode-status" class="mode-banner" role="status">Loading data origin · human review required</p>
         <p id="area-status" role="status" class="metadata"></p>
         <form id="filters" class="filters" aria-label="Incident filters">
           <input type="hidden" name="bbox" value="" />
           <label>Locality<select name="locality"><option value="">All</option></select></label>
           <label>Severity<select name="severity"><option value="">All</option></select></label>
           <label>Source<select name="platform"><option value="">All</option></select></label>
-          <label>Origin<select name="mode"><option value="">All</option><option value="simulation">SIMULATED</option><option value="real">REAL</option></select></label>
           <label>Category<select name="category"><option value="">All</option></select></label>
           <button id="clear-filters" type="button" class="quiet">Clear filters</button>
           <label>From · Bogotá time<input type="datetime-local" step="1" name="date_from" /></label>
@@ -50,7 +48,15 @@
           <p>Ask about the current publication, selected area or event. Decisions require human review.</p>
           <div class="examples"><button type="button">¿Qué alertas tienen mayor criticidad?</button><button type="button">¿Qué evidencia respalda la alerta seleccionada?</button></div>
           <div id="conversation" class="conversation" role="log" aria-live="polite"></div>
-          <form id="chat"><label for="question">Your question</label><textarea id="question" maxlength="2000" rows="3" required placeholder="Ask in English or Spanish about the selected event, area or sources…"></textarea><div class="chat-actions"><span id="chat-status" role="status"></span><button type="button" id="cancel" hidden>Cancel</button><button id="send" type="submit">Ask agent ↗</button></div></form>
+          <form id="chat">
+            <label for="question">Your question</label>
+            <div class="chat-composer">
+              <textarea id="question" maxlength="2000" rows="4" required placeholder="Ask in English or Spanish about the selected event, area or sources…" aria-describedby="question-count"></textarea>
+              <button id="send" type="submit" aria-label="Send question" title="Send question" aria-busy="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M12 19V5m-6 6 6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+            </div>
+            <div class="chat-meta"><output id="question-count" aria-label="Questions submitted in this conversation" aria-live="polite">0 questions submitted</output><button type="button" id="cancel" hidden>Cancel</button></div>
+            <p id="chat-status" role="status"></p>
+          </form>
         </section>
       </aside>
     </main>

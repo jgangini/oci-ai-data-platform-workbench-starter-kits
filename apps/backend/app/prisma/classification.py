@@ -32,6 +32,8 @@ def classify(events, config, signed=None, client=None):
                   "devuelve locality=Sin localizar y category=por_clasificar. Si hay riesgo en Bogotá pero faltan datos de localidad, "
                   "o varias localidades hacen ambigua la ubicación, conserva la categoría de riesgo y devuelve locality=Sin localizar "
                   "para revisión humana sin coordenadas. "
+                  "Lluvia, aguaceros o reportes de que está lloviendo corresponden a lluvia; no infieras inundacion solo por lluvia. "
+                  "Si el reporte describe inundación o anegamiento, usa inundacion aunque también mencione lluvia. "
                   f"Categorías: {list(CATEGORIES)} o por_clasificar. Localidad: {list(LOCALITIES)} o Sin localizar. "
                   "Severity: low, medium, high. Confidence: número entre 0 y 1. Devuelve únicamente JSON "
                   "{\"items\":[{\"id\":\"identificador original\",\"category\":\"...\",\"locality\":\"...\",\"severity\":\"...\",\"confidence\":0.5}]}. "

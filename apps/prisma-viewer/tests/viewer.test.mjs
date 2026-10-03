@@ -60,9 +60,10 @@ test('evidence links reject executable, relative, credential-bearing and unencry
 });
 
 test('agent actions are restricted to known incidents and filter names', () => {
-  const accepted = [{ type: 'focus_incident', incident_id: 'real-1' }, { type: 'filter_incidents', filters: { locality: 'Suba', mode: 'simulation' } }];
+  const accepted = [{ type: 'focus_incident', incident_id: 'real-1' }, { type: 'filter_incidents', filters: { locality: 'Suba' } }];
   assert.deepEqual(allowedActions([...accepted, { type: 'focus_incident', incident_id: 'missing' }, { type: 'run_script', code: 'alert(1)' }, { type: 'filter_incidents', filters: { url: 'https://example.com' } }], snapshot), accepted);
   assert.deepEqual(allowedActions([{ type: 'filter_incidents', filters: { locality: 'Unknown option' } }], snapshot), []);
+  for (const mode of ['', 'real', 'simulation']) assert.deepEqual(allowedActions([{ type: 'filter_incidents', filters: { mode } }], snapshot), [], 'The agent cannot apply an invisible origin filter');
 });
 
 test('area is inclusive, rejects invalid bounds and keeps the same incident evidence scope', () => {
@@ -158,6 +159,52 @@ test('follow-up questions preserve the session and publication context with peri
   assert.deepEqual(sent[1].filters, context.filters);
   assert.equal(sent[1].incident_id, 'sim-1');
   session.destroy();
+});
+
+test('question count tracks submitted turns, survives cancellation and resets with an isolated session', async () => {
+  const counts = [];
+  const bodies = [];
+  const replies = [];
+  const errors = [];
+  let finishCancelled;
+  const options = {
+    context: () => ({ version: 'v1' }),
+    request: async (_path, request) => {
+      const body = JSON.parse(request.body);
+      bodies.push(body);
+      if (body.question === 'Fail') throw new Error('Service unavailable');
+      if (body.question === 'Cancel') return new Promise((resolve) => { finishCancelled = resolve; });
+      return { answer: 'Evidence e1', version: 'v1', session_id: 'first-session' };
+    },
+    onReply: (reply) => replies.push(reply), onError: (error) => errors.push(error),
+    onBusy: () => {}, onSubmitted: (count) => counts.push(count),
+  };
+  const first = createPrismaSession(options);
+  await first.start();
+  await first.sendText('   ');
+  assert.deepEqual(counts, [0]);
+  assert.equal(bodies.length, 0);
+  await first.sendText('One question, regardless of length');
+  await first.sendText('Fail');
+  const cancelled = first.sendText('Cancel');
+  first.stop();
+  finishCancelled({ answer: 'Late response', version: 'v1', session_id: 'late-session' });
+  await cancelled;
+  await first.start();
+  await first.sendText('Follow up');
+  assert.deepEqual(counts, [0, 1, 2, 3, 4]);
+  assert.equal(replies.length, 2);
+  assert.equal(errors.length, 1);
+  assert.equal(bodies.at(-1).session_id, 'first-session');
+  first.destroy();
+  const nextCounts = [];
+  const second = createPrismaSession({ ...options, onSubmitted: (count) => nextCounts.push(count) });
+  await second.start();
+  await second.sendText('New conversation');
+  assert.deepEqual(nextCounts, [0, 1]);
+  assert.equal(bodies.at(-1).session_id, undefined);
+  assert.deepEqual(counts, [0, 1, 2, 3, 4]);
+  second.destroy();
 });
 
 test('vendored GodEye matches the pinned allowlist; no third-party datasets are bundled', async () => {

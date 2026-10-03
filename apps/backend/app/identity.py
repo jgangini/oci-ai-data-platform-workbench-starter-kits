@@ -453,7 +453,7 @@ class LocalIdentityClient:
             password = secrets.token_urlsafe(24)
             _write_private_json(self.artifact_dir / f"welcome-{user_id}.json", {
                 "mode": "SIMULADO", "username": email, "password": password,
-                "login_url": "/local/prisma/login", "aidp_url": "/local/prisma/workspace",
+                "login_url": "/local/gods-eye-view/login", "aidp_url": "/local/gods-eye-view/workspace",
                 "message": "Acceso local de demostración. No se envió correo ni se creó una cuenta OCI.",
             })
             self.password_hashes[user_id] = hash_secret(password)
@@ -505,7 +505,7 @@ class LocalIdentityClient:
         if not user:
             raise IdentityPending("Local lab user is not ready")
         public = {key: material[key] for key in ("participant_key", "participant_code", "labs") if key in material}
-        public.update(mode="SIMULADO", aidp_url="/local/prisma/workspace", login_url="/local/prisma/login")
+        public.update(mode="SIMULADO", aidp_url="/local/gods-eye-view/workspace", login_url="/local/gods-eye-view/login")
         user["material"] = public
         self._save()
         if self.artifact_dir:

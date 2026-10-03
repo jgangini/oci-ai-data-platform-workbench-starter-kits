@@ -15,22 +15,26 @@ assert.ok(['127.0.0.1', 'localhost'].includes(base.hostname) && ['http:', 'https
 const { chromium } = createRequire(import.meta.url)(values['playwright-module']);
 const browser = await chromium.launch({ headless: true, channel: values.channel });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-const page = await context.newPage();
-page.setDefaultTimeout(20000);
+let page = await context.newPage();
 const errors = [];
 const requests = [];
 const consoleErrors = [];
 const checks = [];
-page.on('pageerror', (error) => errors.push(error.message));
-page.on('console', (message) => {
-  if (message.type() !== 'error') return;
-  const location = message.location().url;
-  consoleErrors.push({ origin: location ? new URL(location).origin : '', path: location ? new URL(location).pathname : '', text: message.text() });
-});
-page.on('requestfailed', (request) => {
-  const url = new URL(request.url());
-  requests.push({ origin: url.origin, path: url.pathname, error: request.failure()?.errorText });
-});
+function observePage(target) {
+  target.setDefaultTimeout(20000);
+  target.on('pageerror', (error) => errors.push(error.message));
+  target.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    const location = message.location().url;
+    consoleErrors.push({ origin: location ? new URL(location).origin : '', path: location ? new URL(location).pathname : '', text: message.text() });
+  });
+  target.on('requestfailed', (request) => {
+    const url = new URL(request.url());
+    requests.push({ origin: url.origin, path: url.pathname, error: request.failure()?.errorText });
+  });
+}
+observePage(page);
+context.on('page', observePage);
 try {
   const unauthorized = await context.request.get(`${base.origin}/api/prisma/snapshot`);
   assert.equal(unauthorized.status(), 401);
@@ -44,26 +48,38 @@ try {
   assert.ok(state.sources.every((source) => source.mode === 'simulation'), 'All tested sources must be simulated');
   checks.push('proxy authentication');
 
-  await page.goto(`${base.origin}/admin/prisma`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${base.origin}/admin/gods-eye-view`, { waitUntil: 'domcontentloaded' });
   await page.locator('.prisma-source').last().waitFor();
   assert.deepEqual(await page.locator('.prisma-source-heading h2').allTextContents(), ['X', 'Facebook', 'Instagram', 'TikTok']);
-  assert.equal(await page.getByRole('link', { name: 'Territorial Control', exact: true }).getAttribute('aria-current'), 'page');
   assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).count(), 4);
   assert.equal(await page.getByRole('button', { name: 'Test', exact: true }).count(), 4);
   assert.equal(await page.getByRole('button', { name: 'Run now', exact: true }).count(), 4);
-  checks.push('four source controls and admin navigation');
+  checks.push('four source controls on canonical administration route');
 
-  await page.getByRole('button', { name: 'Restart simulation', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.prisma-runtime')?.textContent.includes('idle'));
-  await page.getByRole('button', { name: 'Start scenario', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.prisma-runtime')?.textContent.includes('running'));
-  await page.getByRole('button', { name: 'Pause', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.prisma-runtime')?.textContent.includes('paused'));
-  assert.ok(await page.getByRole('button', { name: 'Resume', exact: true }).isEnabled());
-  checks.push('reset, start and pause through DOM');
+  assert.equal(await page.getByRole('button', { name: 'Start scenario', exact: true }).count(), 0);
+  const sourceCard = page.locator('.prisma-source').filter({ has: page.getByRole('heading', { name: 'X', exact: true }) });
+  await sourceCard.getByRole('checkbox', { name: 'Source enabled', exact: true }).check();
+  await sourceCard.getByLabel('Searches · one per line', { exact: true }).fill('#bogota #inundacion');
+  const savedResponse = page.waitForResponse((response) => response.url().endsWith('/api/admin/prisma/sources/x') && response.request().method() === 'PUT');
+  await sourceCard.getByRole('button', { name: 'Save', exact: true }).click();
+  assert.equal((await savedResponse).status(), 200);
+  const runResponse = page.waitForResponse((response) => response.url().endsWith('/api/admin/prisma/sources/x/run'));
+  await sourceCard.getByRole('button', { name: 'Run now', exact: true }).click();
+  const started = await (await runResponse).json();
+  assert.equal(started.source.capture_running, true);
+  assert.ok(started.source.last_received_count > 0, 'Fixture run must capture matching records immediately');
+  await sourceCard.getByRole('checkbox', { name: 'Source enabled', exact: true }).uncheck();
+  const stoppedResponse = page.waitForResponse((response) => response.url().endsWith('/api/admin/prisma/sources/x') && response.request().method() === 'PUT');
+  await sourceCard.getByRole('button', { name: 'Save', exact: true }).click();
+  const stopped = await (await stoppedResponse).json();
+  assert.equal(stopped.capture_running, false);
+  assert.equal(stopped.enabled, false);
+  checks.push('per-source search save, immediate capture and pause by disabling');
 
-  await page.getByRole('link', { name: 'Open God’s Eye View' }).click();
-  await page.waitForURL('**/prisma/');
+  const popup = page.waitForEvent('popup');
+  await page.getByRole('link', { name: 'Open God’s Eye View ↗', exact: true }).click();
+  page = await popup;
+  await page.waitForURL('**/gods-eye-view/');
   await page.locator('#incidents .incident').first().waitFor();
   await page.locator('#map canvas').waitFor({ state: 'visible' });
   assert.doesNotMatch(await page.locator('#map-status').innerText(), /cannot display the 3D map/);
@@ -76,21 +92,22 @@ try {
   await page.getByRole('button', { name: 'Clear area', exact: true }).click();
   assert.equal(await page.locator('input[name="bbox"]').inputValue(), '');
   checks.push('Bogotá camera, real map tiles and map-area filter');
-  await page.locator('#incidents .incident').first().click();
+  await page.locator('#incidents .incident').filter({ hasText: 'Kennedy' }).first().click();
   await page.locator('#detail .evidence').first().waitFor();
   assert.match(await page.locator('#detail').innerText(), /Kennedy/);
   assert.equal(await page.locator('#detail .badge').first().innerText(), 'SIMULATED');
   assert.ok(await page.getByRole('button', { name: 'Validate', exact: true }).isEnabled());
   checks.push('GodEye canvas, selection and linked simulated evidence');
 
-  await page.getByRole('combobox', { name: /^Origin/ }).selectOption('real');
-  assert.equal(await page.locator('#incidents .incident').count(), 0);
-  await page.getByRole('combobox', { name: /^Origin/ }).selectOption('simulation');
-  assert.ok(await page.locator('#incidents .incident').count() > 0);
-  checks.push('REAL and SIMULADO filters');
+  assert.equal(await page.getByRole('combobox', { name: /^Origin/ }).count(), 0);
+  assert.equal(await page.locator('#mode-status').count(), 0);
+  assert.doesNotMatch(await page.locator('#incidents').innerText(), /SIMULATED|REAL/);
+  checks.push('ingestion-neutral operating view retains provenance in evidence details');
 
   const snapshot = await (await context.request.get(`${base.origin}/api/prisma/snapshot`)).json();
-  const incidentTime = Date.parse(snapshot.incidents.find((item) => item.locality === 'Kennedy').created_at);
+  const selectedIncidentId = await page.locator('#detail').getAttribute('data-incident-id');
+  const selectedIncident = snapshot.incidents.find((item) => item.id === selectedIncidentId);
+  const incidentTime = Date.parse(selectedIncident.created_at);
   const minute = Math.floor(incidentTime / 60000) * 60000;
   const inBogota = (time) => new Date(time - 5 * 60 * 60 * 1000).toISOString().slice(0, 16);
   await page.getByLabel('From · Bogotá time', { exact: true }).fill(inBogota(minute));
@@ -103,20 +120,26 @@ try {
   assert.match(await page.locator('#period-status').innerText(), /cannot be later/);
   await page.getByLabel('From · Bogotá time', { exact: true }).fill(inBogota(minute));
   await page.getByLabel('From · Bogotá time', { exact: true }).blur();
-  await page.locator('#incidents .incident').first().click();
+  await page.locator('#incidents .incident').filter({ hasText: 'Kennedy' }).first().click();
   checks.push('inclusive Bogotá period, invalid range and selection reset');
 
   const question = '¿Qué evidencia hay de inundación en Kennedy?';
   await page.getByLabel('Your question', { exact: true }).fill(question);
+  assert.equal(await page.getByLabel('Questions submitted in this conversation', { exact: true }).innerText(), '0 questions submitted');
   const firstReply = page.waitForResponse((response) => response.url().endsWith('/api/prisma/chat') && response.status() === 200);
-  await page.getByRole('button', { name: 'Ask agent ↗', exact: true }).click();
+  await page.getByRole('button', { name: 'Send question', exact: true }).click();
   const first = await (await firstReply).json();
   await page.locator('.reply').first().waitFor();
+  assert.equal(await page.getByLabel('Questions submitted in this conversation', { exact: true }).innerText(), '1 question submitted');
   assert.match(await page.locator('.reply').first().innerText(), /Kennedy/);
-  assert.match(await page.locator('.reply').first().innerText(), /SIMULADO/);
+  assert.match(await page.locator('.reply').first().innerText(), /DEMOSTRACIÓN LOCAL/);
   await page.locator('.reply summary').first().click();
   await page.locator('.reply .evidence').first().waitFor({ state: 'visible' });
-  assert.match(await page.locator('.reply .evidence').first().innerText(), /x:lluvia-1/);
+  assert.ok(first.evidence_ids.length > 0);
+  for (const id of first.evidence_ids) {
+    assert.ok(selectedIncident.evidence_ids.includes(id), 'Agent citation must belong to the selected incident');
+    assert.ok((await page.locator('.reply .evidence').allTextContents()).some((value) => value.includes(id)), 'Cited evidence must be inspectable');
+  }
   await page.getByRole('button', { name: 'Focus event on map', exact: true }).first().click();
   assert.equal(await page.locator('#incidents .incident[aria-pressed="true"]').count(), 1);
   checks.push('Kennedy question, cited evidence and explicit map action');
@@ -124,12 +147,13 @@ try {
   const followupText = '¿Qué evidencia lo respalda?';
   await page.getByLabel('Your question', { exact: true }).fill(followupText);
   const followupReply = page.waitForResponse((response) => response.url().endsWith('/api/prisma/chat') && response.status() === 200);
-  await page.getByRole('button', { name: 'Ask agent ↗', exact: true }).click();
+  await page.getByRole('button', { name: 'Send question', exact: true }).click();
   const followup = await (await followupReply).json();
   assert.equal(followup.session_id, first.session_id);
   assert.equal(followup.version, first.version);
   assert.deepEqual(followup.evidence_ids, first.evidence_ids);
   await page.locator('.reply').nth(1).waitFor();
+  assert.equal(await page.getByLabel('Questions submitted in this conversation', { exact: true }).innerText(), '2 questions submitted');
   checks.push('follow-up keeps session, version and evidence context');
   await page.getByLabel('Your question', { exact: true }).fill(question);
 
@@ -137,27 +161,44 @@ try {
     const data = route.request().postDataJSON();
     await route.continue({ postData: JSON.stringify({ ...data, version: 'deliberately-stale' }) });
   }, { times: 1 });
-  await page.getByRole('button', { name: 'Ask agent ↗', exact: true }).click();
+  await page.getByRole('button', { name: 'Send question', exact: true }).click();
   await page.locator('#conversation [role="alert"]').last().waitFor();
   assert.match(await page.locator('#conversation [role="alert"]').last().innerText(), /publication changed/);
   assert.equal(await page.getByLabel('Your question', { exact: true }).inputValue(), question);
+  assert.equal(await page.getByLabel('Questions submitted in this conversation', { exact: true }).innerText(), '3 questions submitted');
   checks.push('real backend 409 retains the question');
 
   await page.route('**/api/prisma/chat', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await route.continue().catch(() => {});
   }, { times: 1 });
-  await page.getByRole('button', { name: 'Ask agent ↗', exact: true }).click();
+  await page.getByRole('button', { name: 'Send question', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: 'Sending question', exact: true }).getAttribute('aria-busy'), 'true');
+  assert.equal(await page.getByRole('button', { name: 'Sending question', exact: true }).isDisabled(), true);
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   assert.equal(await page.locator('#chat-status').innerText(), 'Request cancelled.');
-  assert.ok(await page.getByRole('button', { name: 'Ask agent ↗', exact: true }).isEnabled());
+  assert.ok(await page.getByRole('button', { name: 'Send question', exact: true }).isEnabled());
+  assert.equal(await page.getByLabel('Questions submitted in this conversation', { exact: true }).innerText(), '4 questions submitted');
   assert.equal(await page.locator('.reply').count(), 2);
   checks.push('cancel pending real request without an invented reply');
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#question').scrollIntoViewIfNeeded();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'Mobile layout overflows horizontally');
-  checks.push('mobile DOM fit');
+  assert.ok(await page.evaluate(() => {
+    const input = document.getElementById('question');
+    const box = input.getBoundingClientRect();
+    const send = document.getElementById('send').getBoundingClientRect();
+    const style = getComputedStyle(input);
+    return send.left >= box.left && send.right <= box.right && send.top >= box.top && send.bottom <= box.bottom
+      && Number.parseFloat(style.paddingBottom) >= box.bottom - send.top;
+  }), 'Send button must stay inside the composer with reserved text space');
+  checks.push('mobile DOM fit, circular composer control and question count');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#question-count').waitFor();
+  assert.equal(await page.getByLabel('Questions submitted in this conversation', { exact: true }).innerText(), '0 questions submitted');
+  assert.equal(await page.locator('.reply').count(), 0);
+  checks.push('new page conversation starts empty with a zero question count');
   const localFailures = requests.filter((item) => item.origin === base.origin && !/ERR_ABORTED/.test(item.error || ''));
   assert.deepEqual(localFailures, [], 'Local requests failed');
   assert.deepEqual(errors, [], 'Browser execution errors');

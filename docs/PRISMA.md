@@ -1,8 +1,11 @@
-# Territorial Control (PRISMA) Bogotá
+# Territorial Control · God’s Eye View Bogotá
 
-PRISMA is a shared operational project in Starter Kits. `/admin/prisma` configures
-the sources and replay; `/prisma/` opens the private God’s Eye viewer through the
+Territorial Control is a shared operational project in Starter Kits.
+`/admin/gods-eye-view` configures sources inside Settings → Application;
+`/gods-eye-view/` opens the private God’s Eye viewer through the
 same authenticated nginx ingress. It does not provision a project per student.
+Legacy public URLs redirect to these routes. Internal API, database and storage
+identifiers remain stable so the rename does not move or erase existing data.
 
 ## Local acceptance
 
@@ -38,9 +41,28 @@ it through the source form; the credential is write-only. Only X supports real
 mode. Facebook, Instagram and TikTok are simulations. The collector never treats
 HTTP errors as empty searches, and commits its cursor only after durable Landing persistence.
 
-The VM captures due synthetic sources into immutable Landing NDJSON. The AIDP Job runs a finite availableNow stream once a minute, using an external Landing Volume, a managed checkpoint Volume and one shared Spark cluster. OCI URI streaming/checkpoints are not used. Real X capture uses the AIDP credential store and writes the same Landing envelope. There is no periodic run queue. Explicit actions submit finite runs to the same Job and may
-queue behind the current run. The periodic schedule pauses when replay finishes
-and no real source is enabled. A five-minute interval is not a latency SLA.
+The VM captures due synthetic sources into immutable Landing CSV, with `id` and
+JSON `payload` columns; commas, quotes, multiline text and photo metadata retain
+their content. Each source defaults to a five-minute interval. Each nonempty
+query line is a separate search (up to ten, 512 characters each); query-specific
+X checkpoints preserve continuation while original platform IDs deduplicate
+overlapping results. A successful empty search produces a header-only CSV;
+upstream failures remain errors, never fabricated empty results.
+
+“Run now” starts continuous capture for that source. Disabling the source and
+saving stops capture without deleting evidence. Synthetic input repeats the
+Bogotá scenario with distinct cycle IDs; ordinary service restarts preserve its
+progress. The legacy finite replay API remains available for reproducible tests.
+
+The AIDP Job runs finite `availableNow` file streams once a minute, using an
+external Landing Volume, a managed checkpoint Volume and one shared Spark
+cluster. This uses Spark file streaming, not the OCI Streaming service. Legacy
+NDJSON keeps its checkpoint; CSV uses a separate checkpoint and the same Bronze
+MERGE. Real cloud X capture uses the AIDP credential store and writes the same
+Landing CSV envelope from AIDP. There is no periodic run queue. Explicit actions
+submit finite runs to the same Job and may queue behind the current run. The
+schedule pauses when no capture or legacy replay is running. A five-minute
+capture interval is not an end-to-end latency SLA.
 Pause the job and stop idle compute outside demo/test sessions. Do not run the
 educational `Redeploy lab` cleanup against PRISMA data.
 
@@ -59,12 +81,13 @@ shipped in the browser bundle or release images.
 ## Demonstration script
 
 1. Open source administration; show simulation versus the separately tested X connector.
-2. Start replay and open the Bogotá viewer. Flooding appears in Kennedy/Bosa,
-   followed by slope movement and vegetation fire. Every synthetic record is labelled.
+2. Press “Run now” for the selected sources and open the Bogotá viewer in its new
+   tab. Flooding appears in Kennedy/Bosa, followed by slope movement and vegetation
+   fire. Source provenance remains available in each evidence detail.
 3. Filter locality/platform and inspect the original supporting publications.
 4. Ask “¿Qué reportes de inundación hay en Kennedy?” and then ask for its evidence.
 5. Focus a returned incident using its explicit action button and record a human review.
-6. Pause replay. Show the latest pipeline/source timestamps and any connector errors.
+6. Disable the sources and save. Confirm capture stops while published evidence remains.
 
 ## Acceptance evidence
 
@@ -82,8 +105,8 @@ are outside this implementation.
 
 ## Bogotá geography
 
-The viewer's public name is Territorial Control; internal `/prisma/` routes stay
-stable. “Filter map area” fixes the current WGS84 view rectangle and applies it
+The viewer's public name is Territorial Control. “Filter map area” fixes the
+current WGS84 view rectangle and applies it
 inclusively to points, the list and agent queries. Unresolved locations stay
 outside an active area filter. Clear the area to restore those reports.
 
@@ -122,15 +145,17 @@ reported warning is documented rather than suppressed or rebased away.
 Open `http://localhost:18081/admin/login` with the explicitly configured local
 `admin` / `admin` account. Registration code: `aidp-2026`. HTTP binds only to
 loopback; deployed OCI ingress keeps HTTPS. Application settings include the
-Territorial Control global module, its activation status and settings link.
-Activation checks the already provisioned VM, native Job, publication and agent;
-installations without the Terraform viewer option report deployment required.
-It does not provision another VM from an application request.
+Territorial Control global module version and a gear link in the Configuration
+column. Its configuration replaces the release block within the Application tab;
+“Return” restores the versions table. Lab registration code lives at the bottom
+of the Workbench tab. Deployment is still owned by Deploy Studio, not a web form.
+Source references use `gods-eye-view-{platform}`. Existing configured legacy
+credentials continue working until an explicit token update replaces their reference.
 
 Create a local participant with **Territorial Control** selected. Docker writes
 private welcome files and identity state to the host `.local/prisma` directory.
 The welcome file supplies the generated sign-in credentials at
-`/local/prisma/login`. No email is sent and no OCI identity is created in this
+`/local/gods-eye-view/login`. No email is sent and no OCI identity is created in this
 mode. Participants can read published data and ask questions; source changes,
 review decisions and administration require the administrator session. Revoking
 access invalidates existing sessions. Local lab material survives restarts.
@@ -144,8 +169,11 @@ item for multi-user production access.
 
 ## Evidence and context
 
-The incident card leads with the event category; the global simulation banner and
-each evidence item retain provenance. Corroboration is a bounded heuristic based
+The incident card leads with the event category. The operational view combines
+all sources without an Origin filter or separate real/synthetic counters; each
+evidence item retains provenance. Synthetic records are never relabelled as real.
+The chat composer has a circular send control and a per-conversation submitted
+question count, including failed or cancelled requests. Corroboration is a bounded heuristic based
 on independent author/platform sources after near-copy suppression, not a
 probability or automatic confirmation. Classification confidence remains separate.
 Only real X photos from the allowed media host can appear in a human-validated
@@ -162,3 +190,11 @@ validation, persisted local access and cloud activation checks. These explicit
 failure paths implement requested boundaries and are covered by unit/integration
 checks; the warning is retained and is not reported as a passing gate. No baseline
 reset is used to suppress it.
+
+Postflight for the continuous CSV capture and viewer navigation increment
+(2026-10-03), including the newly tracked tests: quality 6722 → 6689,
+coupling 0.08, cycles 0, god files 0. Sentrux gate passed without architectural
+degradation. The separate rules check is not configured because this repository
+has no `.sentrux/rules.toml`; no constraints were invented. The final
+refactor removed duplicate validation and repeated capture-window selection;
+the historical v2.3.2 warning above remains part of the record.

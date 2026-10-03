@@ -30,7 +30,7 @@ const modeBadge = (mode) => text('span', modeLabel(mode), `badge ${mode === 'rea
 const date = (value) => value ? new Date(value).toLocaleString('es-CO', { timeZone: 'America/Bogota' }) : 'No date';
 const severityColor = (value) => /critical|critica|crítica|alta|high|^4$|^5$/i.test(String(value)) ? '#fb786e' : '#efbe64';
 const platformNames = { x: 'X', facebook: 'Facebook', instagram: 'Instagram', tiktok: 'TikTok' };
-const categoryName = (value) => ({ inundacion: 'Flooding', incendio: 'Fire', movimiento_masa: 'Landslide', infraestructura: 'Infrastructure', lluvia: 'Rain' }[value] || value);
+const categoryName = (value) => ({ inundacion: 'Flooding', incendio: 'Fire', movimiento_masa: 'Landslide', infraestructura: 'Infrastructure', lluvia: 'Rainfall' }[value] || value);
 const reviewName = (value) => ({ pending: 'Pending review', validated: 'Validated', rejected: 'Rejected' }[value] || value);
 
 function platformBadge(platform) {
@@ -109,7 +109,7 @@ function renderIncidents() {
     if (!Number.isFinite(item.lat) || !Number.isFinite(item.lon)) continue;
     viewer.entities.add({ id: item.id, position: Cesium.Cartesian3.fromDegrees(item.lon, item.lat),
       point: { pixelSize: item.id === selectedId ? 17 : 11, color: Cesium.Color.fromCssColorString(severityColor(item.severity)), outlineColor: Cesium.Color.WHITE, outlineWidth: item.id === selectedId ? 3 : 1, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
-      label: { text: `${modeLabel(item.mode)} · ${item.locality}`, font: '12px sans-serif', fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#10252de6'), pixelOffset: new Cesium.Cartesian2(0, -25), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 70000) },
+      label: { text: `${categoryName(item.category)} · ${item.locality}`, font: '12px sans-serif', fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#10252de6'), pixelOffset: new Cesium.Cartesian2(0, -25), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 70000) },
     });
   }
 }
@@ -199,16 +199,13 @@ async function refresh() {
     const changed = next.version !== snapshot.version;
     snapshot = next;
     const adminLink = document.querySelector('.admin-link');
-    const portal = snapshot.can_admin === false ? '/local/prisma/workspace' : '/admin/prisma';
+    const portal = snapshot.can_admin === false ? '/local/gods-eye-view/workspace' : '/admin/gods-eye-view';
     adminLink.href = portal;
     adminLink.textContent = snapshot.can_admin === false ? 'Participant workspace ↗' : 'Manage sources ↗';
     document.querySelector('.brand').href = portal;
-    const real = snapshot.incidents.filter((item) => item.mode === 'real').length;
-    const simulated = snapshot.incidents.filter((item) => item.mode === 'simulation').length;
-    $('mode-status').textContent = `REAL: ${real} events · SIMULATED: ${simulated} events · Human review required`;
-    $('runtime').textContent = snapshot.runtime === 'aidp' ? 'AIDP · Active publication' : 'DEMO · Local runtime';
+    $('runtime').textContent = 'Active publication';
     $('published').textContent = `Published ${date(snapshot.published_at)}`;
-    $('connection').textContent = `Refresh every 10 s · ${snapshot.simulation?.status || 'Active sources'} · Bogotá time`;
+    $('connection').textContent = 'Refresh every 10 s · Bogotá time';
     $('connection').classList.remove('error');
     if (changed) { updateFilterOptions(); renderIncidents(); renderDetail(); }
   } catch (error) {
@@ -222,10 +219,8 @@ function renderReply(reply, question) {
   const card = text('article', '', 'reply');
   const cited = basis.evidence.filter((item) => reply.evidence_ids?.includes(item.id));
   card.append(text('strong', question));
-  const modes = [...new Set(cited.map((item) => item.mode))];
-  for (const mode of modes) card.append(modeBadge(mode));
-  if (!modes.length) card.append(text('span', 'NO EVIDENCE', 'badge'));
-  card.append(text('small', `${reply.runtime === 'aidp' ? 'AIDP agent' : 'Local demo'} · ${date(reply.published_at)}`), text('p', reply.answer));
+  if (!cited.length) card.append(text('span', 'NO EVIDENCE', 'badge'));
+  card.append(text('small', `Publication · ${date(reply.published_at)}`), text('p', reply.answer));
   if (cited.length) {
     const disclosure = document.createElement('details');
     disclosure.append(text('summary', `Inspect ${cited.length} evidence items`));
@@ -254,7 +249,14 @@ function renderReply(reply, question) {
 const session = createPrismaSession({ request,
   context: () => ({ version: turnSnapshot.version, incident_id: selectedId, filters: filters() }),
   onReply: renderReply,
-  onBusy: (busy) => { $('send').disabled = busy; $('cancel').hidden = !busy; $('chat-status').textContent = busy ? 'Asking agent…' : ''; },
+  onSubmitted: (count) => { $('question-count').textContent = `${count} ${count === 1 ? 'question' : 'questions'} submitted`; },
+  onBusy: (busy) => {
+    $('send').disabled = busy;
+    $('send').setAttribute('aria-busy', String(busy));
+    $('send').setAttribute('aria-label', busy ? 'Sending question' : 'Send question');
+    $('cancel').hidden = !busy;
+    $('chat-status').textContent = busy ? 'Asking agent…' : '';
+  },
   onError: (error) => {
     const message = error.status === 409 ? 'The publication changed. Refresh the context and ask again; your question was preserved.' : error.message;
     const card = text('p', message, 'error'); card.setAttribute('role', 'alert'); $('conversation').append(card);

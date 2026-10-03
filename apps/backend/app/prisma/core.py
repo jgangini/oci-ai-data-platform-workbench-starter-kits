@@ -10,7 +10,7 @@ from .media import photos
 
 
 PLATFORMS = ("x", "facebook", "instagram", "tiktok")
-SOURCE_FIELDS = {"enabled", "mode", "query", "interval_minutes", "secret_ref", "credential_configured",
+SOURCE_FIELDS = {"enabled", "mode", "query", "interval_minutes", "secret_ref", "credential_configured", "capture_running",
                  "status", "last_run_at", "next_due", "last_error", "last_received_count"}
 # Representative anchors, not incident coordinates or mathematical centroids. All six
 # verified inside SDP/IDECA locality polygons on 2026-10-02 (EPSG:4326 point intersects).
@@ -25,19 +25,31 @@ LOCALITIES = {
     "Bosa": (4.609, -74.184),
 }
 CATEGORIES = {
-    "inundacion": ("inund", "lluvia", "aneg", "nivel del rio"),
+    "inundacion": ("inund", "aneg", "nivel del rio"),
     "incendio": ("incend", "humo", "fuego"),
     "movimiento_masa": ("desliz", "derrum", "ladera"),
     "infraestructura": ("poste", "cable", "arbol caido"),
+    "lluvia": ("lluvia", "llov", "aguacero"),
 }
 SEVERITIES = {"low": 0, "medium": 1, "high": 2}
 
 
 def default_source(platform: str) -> dict:
-    query = "(Bogotá OR Bogota OR #Bogota) (inundación OR inundacion OR incendio OR deslizamiento OR derrumbe OR lluvia) -is:retweet"
-    return {"platform": platform, "enabled": True, "mode": "simulation", "query": query if platform == "x" else "",
-            "interval_minutes": 5, "secret_ref": f"prisma-{platform}", "credential_configured": False,
+    query = "#bogota #inundacion\n#colombia #incendio\n#desastre"
+    return {"platform": platform, "enabled": True, "capture_running": False, "mode": "simulation", "query": query,
+            "interval_minutes": 5, "secret_ref": f"gods-eye-view-{platform}", "credential_configured": False,
             "status": "simulation", "last_run_at": None, "next_due": None, "last_error": None, "last_received_count": None}
+
+
+def source_migration(platform: str, source: dict) -> dict:
+    """Upgrade unchanged defaults while keeping custom queries and live secret references."""
+    defaults, changes = default_source(platform), {}
+    previous_query = "(Bogotá OR Bogota OR #Bogota) (inundación OR inundacion OR incendio OR deslizamiento OR derrumbe OR lluvia) -is:retweet" if platform == "x" else ""
+    if source.get("query") == previous_query:
+        changes["query"] = defaults["query"]
+    if not source.get("credential_configured") and source.get("secret_ref") in {f"prisma-{platform}", f"PrismaSource_{platform}"}:
+        changes["secret_ref"] = defaults["secret_ref"]
+    return changes
 
 
 def utc_text(timestamp: float) -> str:
@@ -78,6 +90,9 @@ def normalize_event(event: dict) -> dict:
     platform, source_id = str(event["platform"]), str(event["source_id"])
     if event.get("mode") not in {"simulation", "real"} or not source_id:
         raise ValueError("Each event needs an explicit mode and source identifier")
+    simulated = event["mode"] == "simulation"
+    if "is_simulated" in event and (type(event["is_simulated"]) is not bool or event["is_simulated"] != simulated):
+        raise ValueError("Simulation provenance must agree with the event mode")
     text = str(event.get("text", ""))[:12000]
     normalized = folded(text)
     locality, lat, lon, method = _event_location(event, normalized)
@@ -89,7 +104,7 @@ def normalize_event(event: dict) -> dict:
     return {
         "id": f"{platform}:{source_id}", "platform": platform, "source_id": source_id,
         "text": text, "created_at": created_at, "observed_at": event.get("observed_at", created_at),
-        "source_uri": event.get("source_uri", ""), "mode": event["mode"],
+        "source_uri": event.get("source_uri", ""), "mode": event["mode"], "is_simulated": simulated,
         "category": category, "locality": locality, "lat": lat, "lon": lon,
         "location_method": method, "severity": event.get("severity", "medium"),
         "classification_method": event.get("classification_method", "provided" if event.get("category") else "keyword_rules"),
@@ -141,7 +156,7 @@ def build_snapshot(events: list[dict], reviews: dict, version: str, published_at
             "severity": max((item["severity"] for item in evidence), key=lambda item: SEVERITIES.get(item, 0)),
             "confidence": max(item["confidence"] for item in evidence),
             "lat": first["lat"], "lon": first["lon"], "location_method": first["location_method"],
-            "mode": first["mode"], "evidence_ids": sorted(item["id"] for item in evidence),
+            "mode": first["mode"], "is_simulated": first["mode"] == "simulation", "evidence_ids": sorted(item["id"] for item in evidence),
             "review_status": review.get("status", "pending"), "review_note": review.get("note", ""),
             **corroboration(evidence),
         })
@@ -168,7 +183,11 @@ def simulation_events(elapsed_seconds: float, anchor_at: float | None = None) ->
     )
     anchor = datetime.fromtimestamp(anchor_at, timezone.utc) if anchor_at is not None else datetime(2026, 10, 5, 14, tzinfo=timezone.utc)
     return [
-        {"platform": platform, "source_id": source_id, "text": text + " · Bogotá", "mode": "simulation",
+        {"platform": platform, "source_id": source_id, "text": text + " · Bogotá #Bogota #Colombia"
+          + (" #desastre #inundacion" if any(word in folded(text) for word in ("inund", "aneg", "rio")) else
+             " #desastre #lluvia" if "lluvia" in folded(text) else
+             " #desastre #incendio" if any(word in folded(text) for word in ("incend", "humo")) else
+             " #desastre" if "cultura" not in folded(text) else ""), "mode": "simulation", "is_simulated": True,
          "created_at": (anchor + timedelta(seconds=offset)).isoformat().replace("+00:00", "Z"),
          "source_uri": "", "severity": severity, "confidence": 0.8,
          "raw_metadata": {"scenario": "bogota-10min-v1", "offset_seconds": offset, "synthetic": True}}

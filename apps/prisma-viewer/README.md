@@ -1,4 +1,4 @@
-# PRISMA Bogotá / God’s Eye View
+# Territorial Control Bogotá / God’s Eye View
 
 This viewer reuses the original God’s Eye View application viewer, device atmosphere
 compatibility, keyless terrain/retry and protocol-independent session modules. The
@@ -27,13 +27,19 @@ docker build -f apps/prisma-viewer/Dockerfile -t prisma-viewer:dev .
 
 Run npm commands from this directory, and Docker from the repository root.
 The image serves `dist` as `/app/static` using `server.py` on port 8081. The authenticated
-VM1 proxy strips `/prisma/` for static files and forwards `/api/prisma/*` unchanged.
+VM1 proxy strips `/gods-eye-view/` for static files and forwards `/api/prisma/*` unchanged.
+Public administration lives at `/admin/gods-eye-view`; participant access uses
+`/local/gods-eye-view/login` and `/local/gods-eye-view/workspace`. Internal PRISMA data
+and API names remain unchanged.
 Never expose VM2 directly to the internet. Browser requests contain no upstream tokens.
 
-The viewer polls immutable snapshots every ten seconds. Each event and cited answer
-shows REAL or SIMULADO. A chat query carries the snapshot version, selection and filters;
+The viewer polls immutable snapshots every ten seconds. Operational filters and counts
+cover all ingestion modes; event details and cited evidence retain their real or simulated
+provenance. A chat query carries the snapshot version, selection and filters;
 responses from a different version fail visibly. A 409 refreshes the snapshot and retains
 the question for manual retry. Cancel aborts the request and ignores late responses.
+The question counter tracks submitted user turns, including failed or cancelled requests;
+it does not count typed characters or agent replies. A new page session starts at zero.
 Only explicit buttons can apply validated focus/filter suggestions; no model output is
 executed as code or HTML. AIDP answers are final JSON, not an OpenAI Realtime or SSE stream.
 

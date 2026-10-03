@@ -54,7 +54,7 @@ class TerritorialModule:
         return {"module_id": PACKAGE["package_id"], "display_name": PACKAGE["display_name"],
                 "installed": bool(state.get("enabled")), "enabled": bool(state.get("enabled")),
                 "status": state.get("status", "available"), "operation_id": state.get("operation_id"),
-                "viewer_url": "/prisma/", "runtime": "local_fixture" if self.settings.local_development_mode else "aidp",
+                "viewer_url": "/gods-eye-view/", "runtime": "local_fixture" if self.settings.local_development_mode else "aidp",
                 "message": state.get("message", "Enable the module to validate its viewer, native workflow and agent."), **values}
 
     def _prerequisites(self):

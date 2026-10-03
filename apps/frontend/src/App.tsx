@@ -10,7 +10,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { PrismaAdmin } from "./PrismaAdmin";
-import { TerritorialModule } from "./TerritorialModule";
 import { LocalPrismaAccess } from "./LocalPrismaAccess";
 
 import { labAssignmentChanges } from "./labAssignments";
@@ -1120,7 +1119,7 @@ function Shell({
               <a
                 href="/admin/settings"
                 aria-current={
-                  currentPath === "/admin/settings" ? "page" : undefined
+                  currentPath === "/admin/settings" || currentPath === "/admin/gods-eye-view" ? "page" : undefined
                 }
               >
                 Settings
@@ -2286,9 +2285,6 @@ function AdminUsers() {
                             </span>
                           )}
                         </div>
-                        {publicConfig?.local_participant_access && <label className="project-grant"><input type="checkbox" checked={!!user.prisma_access} aria-label={`Territorial Control access for ${user.email}`} onChange={event => {
-                          void api(`/api/admin/prisma/users/${encodeURIComponent(user.id)}`, { method: "PUT", body: JSON.stringify({ enabled: event.target.checked }) }).then(loadUsers).catch(reason => setTableError(reason instanceof Error ? reason.message : "Access update failed"));
-                        }} />Territorial Control</label>}
                       </td>
                       <td>
                         <span
@@ -2580,7 +2576,7 @@ function SettingsRegistrationCodeField({
   );
 }
 
-function ApplicationAccessSettings({
+function RegistrationAccessSettings({
   deploymentMode,
   registrationCode,
   registrationCodeConfigured,
@@ -2615,7 +2611,7 @@ function ApplicationAccessSettings({
           onClick={onSave}
           disabled={!registrationCode}
         >
-          Save Settings
+          Save registration code
         </button>
       </div>
     </>
@@ -2713,14 +2709,22 @@ function ApplicationReleaseSettings({
                   <th scope="col">Starter kit</th>
                   <th scope="col">Bundled version</th>
                   <th scope="col">Scope</th>
+                  <th scope="col" className="release-package-actions">Configuration</th>
                 </tr>
               </thead>
               <tbody>
                 {release.packages.map((item) => (
                   <tr key={item.package_id}>
-                    <td><strong>{item.display_name}</strong>{item.package_id === "territorial_control" && <TerritorialModule api={api} />}</td>
+                    <td><strong>{item.display_name}</strong></td>
                     <td>{item.bundled_version}</td>
                     <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
+                    <td className="release-package-actions">
+                      {item.package_id === "territorial_control" && (
+                        <a className="module-configure" href="/admin/gods-eye-view" aria-label="Configure Territorial Control" title="Configure Territorial Control">
+                          <AdminLoginIcon />
+                        </a>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2741,8 +2745,9 @@ function ApplicationReleaseSettings({
 
 function AdminSettings() {
   const adminSession = useAdminSession();
+  const configuringModule = window.location.pathname === "/admin/gods-eye-view";
   type SettingsTab = "workbench" | "application";
-  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("workbench");
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>(configuringModule || window.location.hash === "#application" ? "application" : "workbench");
   const [aidpServiceEndpoint, setAidpServiceEndpoint] = useState("");
   const [aidpUrl, setAidpUrl] = useState("");
   const [aidpPlatformId, setAidpPlatformId] = useState("");
@@ -2834,9 +2839,9 @@ function AdminSettings() {
     }
     setToast(`${label} copied.`);
   }
-  async function saveSettings(section: "workbench" | "application") {
+  async function saveSettings(section: "workbench" | "registration") {
     setError("");
-    const rotatesRegistrationCode = section === "application" && Boolean(registrationCode);
+    const rotatesRegistrationCode = section === "registration" && Boolean(registrationCode);
     if (rotatesRegistrationCode && !/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)) {
       setError("Enter four letters followed by four numbers.");
       return;
@@ -2851,7 +2856,7 @@ function AdminSettings() {
       });
       applyAdminSettings(result);
       setRegistrationCode("");
-      setToast(section === "application" ? "Application settings saved." : "AI Data Platform Workbench settings saved.");
+      setToast(section === "registration" ? "Registration code saved." : "AI Data Platform Workbench settings saved.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save settings");
     }
@@ -3042,6 +3047,13 @@ function AdminSettings() {
                 Save Settings
               </button>
             </div>
+            <RegistrationAccessSettings
+              deploymentMode={deploymentMode}
+              registrationCode={registrationCode}
+              registrationCodeConfigured={registrationCodeConfigured}
+              onRegistrationCodeChange={setRegistrationCode}
+              onSave={() => void saveSettings("registration")}
+            />
           </section>
           <section
             id="settings-panel-application"
@@ -3056,25 +3068,18 @@ function AdminSettings() {
               </span>
               <div>
                 <strong>Application</strong>
-                <p>Manage the application release, starter kit versions and participant access.</p>
+                <p>Manage the application release, starter kit versions and module configuration.</p>
               </div>
-              {applicationRelease && (applicationRelease.update_available || (applicationRelease.operation && applicationUpdateStates.has(applicationRelease.operation.status))) &&
+              {!configuringModule && applicationRelease && (applicationRelease.update_available || (applicationRelease.operation && applicationUpdateStates.has(applicationRelease.operation.status))) &&
                 <button type="button" className="settings-save application-update" disabled={!applicationRelease.updater_available || releaseBusy} onClick={() => void updateApplication()}>
                   <RefreshIcon />{releaseBusy ? "Updating…" : "Update from GitHub"}
                 </button>}
             </div>
-            <ApplicationReleaseSettings
+            {configuringModule ? <PrismaAdmin api={api} /> : <ApplicationReleaseSettings
               release={applicationRelease}
               busy={releaseBusy}
               error={releaseError}
-            />
-            <ApplicationAccessSettings
-              deploymentMode={deploymentMode}
-              registrationCode={registrationCode}
-              registrationCodeConfigured={registrationCodeConfigured}
-              onRegistrationCodeChange={setRegistrationCode}
-              onSave={() => void saveSettings("application")}
-            />
+            />}
           </section>
           {error && (
             <p className="notice error" role="alert">
@@ -3096,19 +3101,10 @@ function AdminSettings() {
   );
 }
 
-function AdminPrisma() {
-  const session = useAdminSession();
-  async function logout() {
-    await api("/api/admin/logout", { method: "POST" });
-    window.location.assign("/");
-  }
-  return <Shell onSignOut={logout} operatorUsername={session?.operator_username || session?.username}><PrismaAdmin api={api} /></Shell>;
-}
-
 export function App() {
-  if (window.location.pathname === "/local/prisma/login") return <Shell><LocalPrismaAccess api={api} /></Shell>;
-  if (window.location.pathname === "/local/prisma/workspace") return <Shell><LocalPrismaAccess api={api} workspace /></Shell>;
-  if (window.location.pathname === "/admin/prisma") return <AdminPrisma />;
+  if (window.location.pathname === "/local/gods-eye-view/login") return <Shell><LocalPrismaAccess api={api} /></Shell>;
+  if (window.location.pathname === "/local/gods-eye-view/workspace") return <Shell><LocalPrismaAccess api={api} workspace /></Shell>;
+  if (window.location.pathname === "/admin/gods-eye-view") return <AdminSettings />;
   if (window.location.pathname === "/admin/settings") return <AdminSettings />;
   if (window.location.pathname === "/admin/login")
     return <RegisterPage initialAdminLogin />;

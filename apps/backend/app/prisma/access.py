@@ -55,7 +55,7 @@ def mount_access(app, require_admin, cookie_name):
                 raise HTTPException(404, "Sign in with a local participant account")
             return {"mode": "SIMULATED", "project": "Territorial Control", "user": user,
                     "project_access": {"workspace_path": "/Workspace/medallon/prisma", "role": "reader", "simulated": True},
-                    "viewer_url": "/prisma/", "message": "Local access simulation. No OCI identity or email was created."}
+                    "viewer_url": "/gods-eye-view/", "message": "Local access simulation. No OCI identity or email was created."}
 
         @app.put("/api/admin/prisma/users/{user_id}")
         async def grant(user_id: str, payload: ProjectGrant, _admin=Depends(require_admin)):

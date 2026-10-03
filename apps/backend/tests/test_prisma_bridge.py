@@ -49,7 +49,11 @@ def test_chat_is_grounded_versioned_and_preserves_public_session(client):
     body = response.json()
     assert body["session_id"] == PUBLIC_ID
     assert body["evidence_ids"] == ["x:1"]
-    assert "SIMULADO" in body["answer"] and "DEMOSTRACIÓN LOCAL" in body["answer"]
+    assert "DEMOSTRACIÓN LOCAL" in body["answer"] and "no interviene un agente AIDP" in body["answer"]
+    assert "inundacion en Kennedy: high (incident-1)" in body["answer"]
+    assert "SIMULADO ·" not in body["answer"] and "REAL ·" not in body["answer"]
+    evidence = client.get("/api/prisma/snapshot", headers=HEADERS).json()["evidence"]
+    assert next(item for item in evidence if item["id"] == "x:1")["mode"] == "simulation"
     assert body["runtime"] == "local_fixture"
     assert UUID(client.post("/api/prisma/chat", headers=HEADERS, json={"question": "Resumen", "version": "v1"}).json()["session_id"])
 
