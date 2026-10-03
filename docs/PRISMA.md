@@ -192,7 +192,9 @@ checks; the warning is retained and is not reported as a passing gate. No baseli
 reset is used to suppress it.
 
 Postflight for the continuous CSV capture and viewer navigation increment
-(2026-10-03): quality 6722 → 6708, coupling 0.08, cycles 0, god files 0.
-Sentrux check and gate passed without architectural degradation. The final
+(2026-10-03), including the newly tracked tests: quality 6722 → 6689,
+coupling 0.08, cycles 0, god files 0. Sentrux gate passed without architectural
+degradation. The separate rules check is not configured because this repository
+has no `.sentrux/rules.toml`; no constraints were invented. The final
 refactor removed duplicate validation and repeated capture-window selection;
 the historical v2.3.2 warning above remains part of the record.
