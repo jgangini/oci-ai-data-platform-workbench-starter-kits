@@ -94,7 +94,7 @@ def mount_prisma(app, require_admin, require_viewer=None):
         try:
             return await getattr(runtime_for(app), method)(*args)
         except KeyError as exc:
-            raise HTTPException(404, "PRISMA record not found") from exc
+            raise HTTPException(404, "Territorial Control record not found") from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 
@@ -132,7 +132,7 @@ def mount_prisma(app, require_admin, require_viewer=None):
     @router.post("/api/admin/prisma/chat")
     async def chat(payload: ChatRequest, request: Request):
         if app.state.settings.local_development_mode:
-            raise HTTPException(503, "Local fixture chat is available only in the PRISMA viewer")
+            raise HTTPException(503, "Local fixture chat is available only in God's Eye View")
         return await runtime_for(app).chat(payload.model_dump(mode="json"), request.headers.get("cookie", ""), app.state.session_key)
 
     app.include_router(router)

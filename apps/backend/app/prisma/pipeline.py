@@ -7,7 +7,7 @@ import re
 import time
 from datetime import datetime
 
-from .core import PLATFORMS, build_snapshot, default_source, simulation_state, utc_text
+from .core import PLATFORMS, build_snapshot, default_source, simulation_state, utc_text, aidp_credential_name
 from .database import mutate_document, publish, read_document
 from .landing import decode_record, write_objects
 from .runtime_secrets import database_connection, runtime_auth
@@ -146,7 +146,7 @@ def _source_token(secret_get, source):
     if not source.get("credential_configured"):
         raise XFailure("credential_required")
     try:
-        token = secret_get(name=source["secret_ref"], key="bearer_token")
+        token = secret_get(name=aidp_credential_name(source["platform"], source["secret_ref"]), key="bearer_token")
     except Exception:
         raise XFailure("credential_unavailable") from None
     if not isinstance(token, str) or not token:

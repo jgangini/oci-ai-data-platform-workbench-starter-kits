@@ -605,8 +605,10 @@ def reconcile(root: Path, operation_id: str) -> None:
     update_dir = state_dir / "update"
     releases_dir = root / "releases"
     status_path = update_dir / "status/status.json"
-    release_state_path = root / "release.json"
-    current_release, current_sha = _release_state(release_state_path)
+    # Atomic replacement needs a writable directory; the legacy file remains read-only.
+    release_state_path = releases_dir / "current.json"
+    current_state_path = release_state_path if release_state_path.exists() else root / "release.json"
+    current_release, current_sha = _release_state(current_state_path)
     previous = _json(status_path)
     if (
         previous.get("operation_id") == operation_id
@@ -618,7 +620,7 @@ def reconcile(root: Path, operation_id: str) -> None:
     target_sha = ""
     stage: Path | None = None
     snapshot: Path | None = None
-    current_release_state = _json(release_state_path)
+    current_release_state = _json(current_state_path)
     try:
         _status(
             status_path,
@@ -771,7 +773,7 @@ def main() -> int:
     if not operation_id:
         return 0
     try:
-        with _singleton_lock(Path("/run/aidp-lab-update.lock")):
+        with _singleton_lock(Path("/run/aidp-lab-update/update.lock")):
             reconcile(root, operation_id)
     except Exception as exc:
         print(f"AIDP application update failed ({type(exc).__name__})", file=sys.stderr)

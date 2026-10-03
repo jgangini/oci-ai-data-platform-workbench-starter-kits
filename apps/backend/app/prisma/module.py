@@ -35,7 +35,7 @@ class TerritorialModule:
             except HTTPException:
                 raise
             except Exception as exc:
-                raise HTTPException(503, "The PRISMA native runtime is not ready. Check the Deploy Studio post-apply result and retry.") from exc
+                raise HTTPException(503, "The Territorial Control native runtime is not ready. Check the Deploy Studio post-apply result and retry.") from exc
 
     def _read(self):
         if self.settings.local_development_mode:
@@ -62,7 +62,7 @@ class TerritorialModule:
         client = self.runtime.aidp_factory()
         job = client._request("GET", job_path(runtime))
         if not any(task.get("taskKey") == "prisma_tick" for task in job.get("tasks", [])):
-            raise HTTPException(503, "The provisioned PRISMA workflow is incomplete.")
+            raise HTTPException(503, "The provisioned Territorial Control workflow is incomplete.")
         response = client.object_storage.get_object(runtime["namespace"], runtime["bucket"], ".control/prisma/agent.json")
         metadata = json.loads(response.data.content)
         checked_endpoint(metadata["endpoint"], runtime["region"])
@@ -71,10 +71,10 @@ class TerritorialModule:
         )
         agent = client._request("GET", path)
         if str(agent.get("lifecycleState") or agent.get("state")) != "ACTIVE":
-            raise HTTPException(503, "The PRISMA agent deployment is not active.")
+            raise HTTPException(503, "The Territorial Control agent deployment is not active.")
         viewer = os.environ.get("PRISMA_VIEWER_URL", "").rstrip("/")
         if not viewer:
-            raise HTTPException(503, "The private viewer URL is missing; redeploy with the PRISMA viewer option.")
+            raise HTTPException(503, "The private viewer URL is missing; redeploy with the God's Eye View option.")
         with httpx.Client(timeout=10, follow_redirects=False) as http:
             ready = http.get(viewer + "/ready")
             ready.raise_for_status()
@@ -87,7 +87,7 @@ class TerritorialModule:
         status = run_state(result)
         if status in FAILED:
             return self._write({**state, "status": "failed", "enabled": False,
-                                "message": "Native PRISMA activation failed; inspect the AIDP job run before retrying."})
+                                "message": "Native Territorial Control activation failed; inspect the AIDP job run before retrying."})
         if status in SUCCESS:
             tasks = client._list(base + "/taskRuns", params={"jobRunKey": state["run_key"]})
             if len(tasks) == 1 and tasks[0].get("taskKey") == "prisma_tick" and run_state(tasks[0]) in SUCCESS:
@@ -95,12 +95,12 @@ class TerritorialModule:
                 return self._write({**state, "status": "ready", "enabled": True, "snapshot_version": snapshot["version"],
                                     "message": "Native workflow, publication, agent and private viewer verified. Configure sources to start capture."})
             if any(run_state(task) in FAILED for task in tasks):
-                return self._write({**state, "status": "failed", "enabled": False, "message": "The native PRISMA task failed."})
+                return self._write({**state, "status": "failed", "enabled": False, "message": "The native Territorial Control task failed."})
         return state
 
     def _status(self, deploy):
         if not self.settings.prisma_enabled:
-            message = "Deploy this release with the PRISMA viewer option in Deploy Studio before enabling the module."
+            message = "Deploy this release with the God's Eye View option in Deploy Studio before enabling the module."
             if deploy:
                 raise HTTPException(409, message)
             return self._response({}, status="deployment_required", message=message)
@@ -115,7 +115,7 @@ class TerritorialModule:
             state = self._poll(state, client, runtime)
         if deploy and not state.get("enabled") and state.get("status") != "activating":
             state = self._write({"status": "activating", "enabled": False, "operation_id": str(uuid4()), "run_key": None,
-                                 "message": "Waiting for the native PRISMA activation run and its publication."})
+                                 "message": "Waiting for the native Territorial Control activation run and its publication."})
         if deploy and state.get("status") == "activating" and not state.get("run_key"):
             result = submit_run(client._request, runtime, state["operation_id"])
             if not result.get("key"):

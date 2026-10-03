@@ -23,6 +23,7 @@ class Api:
         self.run_state = "SUCCESS"
         self.base = "https://datalake.us-chicago-1.oci.oraclecloud.com/20240831/dataLakes/platform"
         self.api_version = kwargs.get("api_version", "20240831")
+        self.resource_segment = kwargs.get("resource_segment", "dataLakes")
 
     def request(self, method, path, *, payload=None, params=None, headers=None):
         self.calls.append((method, path, payload, headers))
@@ -212,16 +213,22 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
     outputs = {"objectstorage_namespace": "ns", "bucket_name": "landing",
                "medallion_bucket_names": {"gold": "gold", "landing": "landing"}, "agent_model_id": "model",
                "compartment_ocid": "compartment", "ai_data_platform_id": "platform"}
-    published, runtime_documents = [], []
+    published, runtime_documents, credential_apis = [], [], []
     database = SimpleNamespace(commit=lambda: None)
     monkeypatch.setitem(sys.modules, "oracledb", SimpleNamespace(connect=lambda **_: nullcontext(database)))
     monkeypatch.setattr(bootstrap.tempfile, "TemporaryDirectory", lambda **_: nullcontext(str(tmp_path)))
-    monkeypatch.setattr(bootstrap, "database_users", lambda *_, **__: None)
-    monkeypatch.setattr(bootstrap, "install_job", lambda *_, **__: "job")
+    def database_users(api, *_, **__):
+        assert (api.api_version, api.resource_segment) == ("20260430", "aiDataPlatforms")
+        credential_apis.append(api)
+    def install_job(api, *_, **__):
+        assert (api.api_version, api.resource_segment) == ("20240831", "dataLakes")
+        return "job"
+    monkeypatch.setattr(bootstrap, "database_users", database_users)
+    monkeypatch.setattr(bootstrap, "install_job", install_job)
     monkeypatch.setattr(bootstrap, "read_document", lambda *_: {"revision": 0})
     monkeypatch.setattr(bootstrap, "write_document", lambda _db, _name, data, _revision: runtime_documents.append(data))
     def agent(api, *_):
-        assert api.api_version == "20260430"
+        assert api is credential_apis[0]
         return {"state": "ACTIVE", "revision": "bundle", "endpoint": "native"}
     monkeypatch.setattr(bootstrap, "publish_agent", agent)
     def check(phase, result):
@@ -230,7 +237,10 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
         if failed_phase == phase:
             raise RuntimeError("PRISMA " + phase + " failed")
         return result
-    monkeypatch.setattr(bootstrap, "run_initial_job", lambda *_: check("job", "run"))
+    def initial_job(api, *_):
+        assert (api.api_version, api.resource_segment) == ("20240831", "dataLakes")
+        return check("job", "run")
+    monkeypatch.setattr(bootstrap, "run_initial_job", initial_job)
     monkeypatch.setattr(bootstrap, "validate_publication", lambda *_: check("snapshot", "gold-version"))
     storage = SimpleNamespace(put_object=lambda *args, **_: published.append(args))
     wallet = io.BytesIO()

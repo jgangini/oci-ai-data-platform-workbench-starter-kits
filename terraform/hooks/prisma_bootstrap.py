@@ -371,7 +371,9 @@ def bootstrap_prisma(api, context, outputs, config, signer, storage, wallet, wal
     global _deadline
     _deadline = deadline
     import oracledb
-    database_users(api, wallet, wallet_password, admin_password, {**config, "region": context["region"]}, outputs,
+    agent_api = api.__class__(context["region"], outputs["ai_data_platform_id"], signer, context["deployment_id"],
+                             api_version="20260430", resource_segment="aiDataPlatforms")
+    database_users(agent_api, wallet, wallet_password, admin_password, {**config, "region": context["region"]}, outputs,
                    wallet_dsn=wallet_dsn, validate_wallet=validate_wallet, generate_password=generate_password)
     bundle = runtime_archive()
     runtime = {"namespace": outputs["objectstorage_namespace"], "bucket": outputs["medallion_bucket_names"]["gold"], "workbench_base": api.base,
@@ -391,8 +393,6 @@ def bootstrap_prisma(api, context, outputs, config, signer, storage, wallet, wal
             if any(current.get(key) != value for key, value in desired.items()):
                 write_document(connection, "runtime", desired, current["revision"])
             connection.commit()
-    agent_api = api.__class__(context["region"], outputs["ai_data_platform_id"], signer, context["deployment_id"],
-                             api_version="20260430", resource_segment="aiDataPlatforms")
     agent = publish_agent(agent_api, workspace, bundle, context["region"])
     # Materialize the otherwise empty external-volume prefix; Spark ignores this hidden non-event object.
     storage.put_object(runtime["namespace"], runtime["landing_bucket"], runtime["landing_prefix"] + ".keep",

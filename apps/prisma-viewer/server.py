@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from prisma.area import parse_bbox, within_bbox
 
-app = FastAPI(title="PRISMA Bogotá", docs_url=None, redoc_url=None)
+app = FastAPI(title="Territorial Control · Bogotá", docs_url=None, redoc_url=None)
 MODE = os.getenv("PRISMA_MODE", "oci")
 STATIC = Path(os.getenv("PRISMA_STATIC_DIR", "/app/static"))
 FILTERS = {"locality", "platform", "category", "severity", "mode", "date_from", "date_to", "bbox"}
@@ -41,7 +41,7 @@ def principal(request: Request) -> str:
     # The private listener accepts only VM1; nginx overwrites this header after auth_request.
     value = request.headers.get("x-prisma-user", "")
     if not value or len(value) > 200 or not request.headers.get("cookie"):
-        raise HTTPException(401, "Se requiere una sesión administrativa")
+        raise HTTPException(401, "An authenticated session is required")
     return value
 
 
@@ -52,10 +52,10 @@ async def admin_request(request: Request, method: str, path: str, payload=None):
             response = await client.request(method, base + path,
                 headers={"Cookie": request.headers.get("cookie", "")}, json=payload)
         if response.status_code >= 400:
-            raise HTTPException(response.status_code, "La administración no pudo completar la solicitud")
+            raise HTTPException(response.status_code, "The administration service could not complete the request")
         return response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(503, "Administración PRISMA no disponible") from exc
+        raise HTTPException(503, "Territorial Control administration is unavailable") from exc
 
 
 def cloud_object(key: str) -> dict:
@@ -69,17 +69,17 @@ def cloud_object(key: str) -> dict:
             raise ValueError("Snapshot exceeds the bounded demo publication")
         return json.loads(body)
     except Exception as exc:
-        raise HTTPException(503, "La publicación AIDP no está disponible") from exc
+        raise HTTPException(503, "The AIDP publication is unavailable") from exc
 
 
 def published_snapshot() -> dict:
     pointer = cloud_object(os.getenv("PRISMA_SNAPSHOT_KEY", "04_gold/prisma/current.json"))
     key = str(pointer.get("snapshot_key", ""))
     if not key.startswith("04_gold/prisma/snapshots/") or ".." in key:
-        raise HTTPException(503, "La publicación PRISMA es inválida")
+        raise HTTPException(503, "The Territorial Control publication is invalid")
     snapshot = cloud_object(key)
     if snapshot.get("version") != pointer.get("version"):
-        raise HTTPException(503, "La publicación PRISMA está incompleta")
+        raise HTTPException(503, "The Territorial Control publication is incomplete")
     return {**snapshot, "runtime": "aidp"}
 
 
@@ -88,7 +88,7 @@ async def snapshot_for(request: Request):
     if MODE == "local":
         return await admin_request(request, "GET", "/api/prisma/snapshot")
     if MODE != "oci":
-        raise HTTPException(503, "Modo PRISMA inválido")
+        raise HTTPException(503, "Invalid Territorial Control mode")
     from starlette.concurrency import run_in_threadpool
     return await run_in_threadpool(published_snapshot)
 
@@ -105,15 +105,15 @@ def period_bounds(filters: dict, status: int = 422):
         if all(bounds) and bounds[0] > bounds[1]:
             raise ValueError("Reversed period")
     except (ValueError, TypeError, AttributeError) as exc:
-        raise HTTPException(status, "Período inválido: use fechas ISO con zona horaria y Desde no posterior a Hasta") from exc
+        raise HTTPException(status, "Invalid period: use ISO dates with a timezone and a start no later than the end") from exc
     return bounds
 
 
 def validate_filters(filters, status=422):
     if not isinstance(filters, dict) or set(filters) - FILTERS:
-        raise HTTPException(status, "Filtro no permitido")
+        raise HTTPException(status, "This filter is not allowed")
     if any(not isinstance(value, str) or len(value) > 100 for value in filters.values()):
-        raise HTTPException(status, "Valor de filtro inválido")
+        raise HTTPException(status, "Invalid filter value")
     period_bounds(filters, status)
     try:
         parse_bbox(filters.get("bbox"))
@@ -123,11 +123,11 @@ def validate_filters(filters, status=422):
 
 def validate_context(payload: ChatRequest, snapshot: dict) -> dict:
     if payload.version != snapshot.get("version"):
-        raise HTTPException(409, "Los datos cambiaron; actualice el mapa y repita la pregunta")
+        raise HTTPException(409, "The data changed; refresh the map and ask again")
     validate_filters(payload.filters)
     ids = {str(item["id"]) for item in snapshot.get("incidents", [])}
     if payload.incident_id and payload.incident_id not in ids:
-        raise HTTPException(422, "Incidente desconocido en esta publicación")
+        raise HTTPException(422, "Unknown incident in this publication")
     return {"version": payload.version, "incident_id": payload.incident_id,
             "filters": payload.filters, "published_at": snapshot.get("published_at")}
 
@@ -138,40 +138,40 @@ def endpoint_from(metadata: dict, region: str) -> str:
     if (url.scheme != "https" or url.netloc != f"gateway.aidp.{region}.oci.oraclecloud.com"
         or not re.fullmatch(r"/agentendpoint/[A-Za-z0-9_.-]+/chat", url.path)
         or url.query or url.fragment or metadata.get("state") != "ACTIVE"):
-        raise HTTPException(503, "El endpoint del agente no está validado")
+        raise HTTPException(503, "The agent endpoint has not been validated")
     return endpoint
 
 
 def validate_reply_text(reply, version):
     if not isinstance(reply, dict):
-        raise HTTPException(502, "La respuesta del agente es inválida")
+        raise HTTPException(502, "The agent response is invalid")
     answer = reply.get("answer")
     if not isinstance(answer, str) or not answer.strip() or len(answer) > 20000:
-        raise HTTPException(502, "El agente no devolvió un texto válido")
+        raise HTTPException(502, "The agent did not return valid text")
     if reply.get("version") != version:
-        raise HTTPException(502, "La respuesta no coincide con la publicación")
+        raise HTTPException(502, "The response does not match the publication")
 
 
 def validate_references(refs, evidence):
     if not isinstance(refs, list):
-        raise HTTPException(502, "Referencias del agente inválidas")
+        raise HTTPException(502, "Invalid agent references")
     if any(not isinstance(ref, str) or ref not in evidence for ref in refs):
-        raise HTTPException(502, "La respuesta no coincide con las evidencias publicadas")
+        raise HTTPException(502, "The response does not match the published evidence")
 
 
 def validate_actions(actions, incidents):
     if not isinstance(actions, list) or len(actions) > 10:
-        raise HTTPException(502, "Acciones del agente inválidas")
+        raise HTTPException(502, "Invalid agent actions")
     for action in actions:
         if not isinstance(action, dict):
-            raise HTTPException(502, "Acción del agente inválida")
+            raise HTTPException(502, "Invalid agent action")
         if action.get("type") == "focus_incident":
             if not isinstance(action.get("incident_id"), str) or action["incident_id"] not in incidents:
-                raise HTTPException(502, "Incidente del agente fuera de contexto")
+                raise HTTPException(502, "The agent incident is outside the current context")
         elif action.get("type") == "filter_incidents":
             validate_filters(action.get("filters"), 502)
         else:
-            raise HTTPException(502, "Acción del agente no permitida")
+            raise HTTPException(502, "This agent action is not allowed")
 
 
 def grounded_reply(reply: dict, snapshot: dict, payload: ChatRequest | None = None) -> dict:
@@ -272,7 +272,7 @@ async def chat(payload: ChatRequest, request: Request):
 async def review(incident_id: str, payload: ReviewRequest, request: Request):
     principal(request)
     if not re.fullmatch(r"[A-Za-z0-9:_-]{1,200}", incident_id):
-        raise HTTPException(422, "Identificador inválido")
+        raise HTTPException(422, "Invalid identifier")
     return await admin_request(request, "POST", f"/api/prisma/incidents/{incident_id}/review", payload.model_dump())
 
 
@@ -291,7 +291,7 @@ def static(path: str):
     if not target.is_file():
         target = STATIC / "index.html"
     if not target.is_file():
-        raise HTTPException(503, "El visor todavía no está construido")
+        raise HTTPException(503, "God's Eye View has not been built yet")
     return FileResponse(target)
 
 
