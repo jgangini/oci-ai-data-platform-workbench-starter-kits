@@ -7,8 +7,9 @@ import re
 import time
 from datetime import datetime
 
-from .core import PLATFORMS, build_snapshot, default_source, normalize_event, simulation_events, utc_text
+from .core import PLATFORMS, build_snapshot, default_source, simulation_state, utc_text
 from .database import mutate_document, publish, read_document
+from .landing import write_objects
 from .runtime_secrets import database_connection, runtime_auth
 from .x import XFailure, fetch_page
 
@@ -23,6 +24,7 @@ class DeltaLake:
         catalog = config.get("catalog", "oci_medallion")
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", catalog):
             raise ValueError("Invalid PRISMA catalog")
+        ensure_volumes(spark, config)
         for layer, prefix in (("bronze", "02_bronze"), ("silver", "03_silver"), ("gold", "04_gold")):
             schema = f"{catalog}.oci_{layer}"
             table = f"{schema}.prisma_{'publications' if layer == 'gold' else 'events'}"
@@ -32,6 +34,9 @@ class DeltaLake:
             spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
             spark.sql(f"CREATE TABLE IF NOT EXISTS {table} (id STRING, payload STRING) USING DELTA LOCATION '{uri}'")
             self.tables[layer] = table
+
+    def consume(self, config):
+        return consume_landing(self.spark, self, config["landing_volume_path"], config["checkpoint_volume_path"])
 
     def put(self, layer, records):
         if not records:
@@ -66,36 +71,50 @@ def _put_object(objects, config, key, document):
 
 
 def ingest_page(connection, objects, lake, config, platform, events, checkpoint=None):
-    """The landing object and Bronze commit must finish before the source cursor moves."""
-    records = [{**event, "id": f"{event['platform']}:{event['source_id']}"} for event in events]
-    document = {"platform": platform, "events": records}
-    digest = hashlib.sha256(encoded(document)).hexdigest()
-    _put_object(objects, config, f"01_landing/prisma/{platform}/{digest}.json", document)
-    lake.put("bronze", records)
+    """A source cursor advances after immutable Landing; the separate stream checkpoint owns Bronze delivery."""
+    write_objects(objects, config, events)
     if checkpoint is not None:
         mutate_document(connection, "checkpoint_" + platform, lambda current: {**current, **checkpoint})
 
 
-def simulation_state(document, now):
-    elapsed = float(document.get("elapsed_seconds", 0))
-    if document.get("status") == "running":
-        elapsed += max(0, now - float(document.get("started_at", now)))
-    elapsed = min(600, elapsed)
-    return {"status": "completed" if elapsed >= 600 else document.get("status", "idle"),
-            "elapsed_seconds": elapsed, "duration_seconds": 600, "run_id": document.get("run_id"), "anchor_at": document.get("anchor_at")}
+def ensure_volumes(spark, config):
+    catalog = config.get("catalog", "oci_medallion")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", catalog):
+        raise ValueError("Invalid PRISMA catalog")
+    schema = catalog + ".prisma_ingest"
+    uri = f"oci://{config['landing_bucket']}@{config['namespace']}/{config['landing_prefix']}"
+    if "'" in uri or config["landing_volume_path"] != f"/Volumes/{catalog}/prisma_ingest/landing" or config["checkpoint_volume_path"] != f"/Volumes/{catalog}/prisma_ingest/checkpoints/bronze-v1":
+        raise ValueError("Invalid PRISMA governed streaming path")
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+    for name, kind in (("landing", "EXTERNAL"), ("checkpoints", "MANAGED")):
+        declaration = "EXTERNAL " if kind == "EXTERNAL" else ""
+        location = f" LOCATION '{uri}'" if kind == "EXTERNAL" else ""
+        spark.sql(f"CREATE {declaration}VOLUME IF NOT EXISTS {schema}.{name}{location}")
+        details = {str(row[0]).strip().lower().replace("_", " "): str(row[1]).strip() for row in spark.sql(f"DESCRIBE VOLUME {schema}.{name}").collect()}
+        if details.get("volume type", "").upper() != kind or (kind == "EXTERNAL" and details.get("location", "").rstrip("/") != uri.rstrip("/")):
+            raise RuntimeError("PRISMA volume type or storage location does not match the deployment")
 
 
-def _simulate(connection, objects, lake, config, sources, state):
-    if not state.get("run_id") or state["status"] == "idle" or (state["status"] == "paused" and state["elapsed_seconds"] == 0):
-        return
-    allowed = {source["platform"] for source in sources if source["enabled"] and source["mode"] == "simulation"}
-    events = []
-    for event in simulation_events(state["elapsed_seconds"], state.get("anchor_at")):
-        if event["platform"] in PLATFORMS and event["platform"] not in allowed:
-            continue
-        events.append({**event, "source_id": f"{state['run_id']}:{event['source_id']}",
-            "raw_metadata": {**event["raw_metadata"], "scenario_run_id": state["run_id"]}})
-    ingest_page(connection, objects, lake, config, "simulation", events)
+def consume_landing(spark, lake, path, checkpoint):
+    """Spark 3.5 file stream. Production supplies verified /Volumes paths; local checks use temp directories."""
+    if path.startswith("oci:") or checkpoint.startswith("oci:"):
+        raise ValueError("AIDP streaming requires governed volume paths, not oci://")
+    def commit(frame, _batch_id):
+        rows = frame.limit(5001).collect()
+        if len(rows) > 5000:
+            raise RuntimeError("PRISMA microbatch exceeds its 5000-record bound")
+        events = []
+        for row in rows:
+            event = json.loads(row.payload)
+            if row.id != f"{event['platform']}:{event['source_id']}" or event.get("mode") not in {"real", "simulation"}:
+                raise ValueError("Invalid PRISMA Landing envelope")
+            events.append({**event, "id": row.id})
+        lake.put("bronze", events)  # MERGE by event ID makes replay after callback failure idempotent.
+    stream = spark.readStream.schema("id STRING, payload STRING").option("maxFilesPerTrigger", 5).json(path)
+    query = stream.writeStream.foreachBatch(commit).option("checkpointLocation", checkpoint).trigger(availableNow=True).start()
+    query.awaitTermination()
+    return {"query_id": str(query.id), "microbatches": len(query.recentProgress),
+            "last_input_rows": (query.lastProgress or {}).get("numInputRows", 0)}
 
 
 def _status(connection, platform, values, request_id=None):
@@ -193,21 +212,23 @@ def _tick(connection, objects, lake, config, secret_get, now, classifier, client
     document = read_document(connection, "configuration")
     sources = [{**default_source(platform), **document.get("sources", {}).get(platform, {})} for platform in PLATFORMS]
     state = simulation_state(read_document(connection, "simulation"), now)
-    _simulate(connection, objects, lake, config, sources, state)
     config = {**config, "configuration_revision": document.get("revision", 0)}
     for source in sources:
-        poll_source(connection, objects, lake, config, source, read_document(connection, "status_" + source["platform"]), secret_get, now, client)
+        if source["mode"] == "real":
+            poll_source(connection, objects, lake, config, source, read_document(connection, "status_" + source["platform"]), secret_get, now, client)
+    progress = lake.consume(config)
     pending = lake.pending()
-    if pending:
+    while pending:
         classified = classifier(pending)
         if {item["id"] for item in classified} != {item["id"] for item in pending}:
             raise ValueError("Classifier returned incomplete evidence")
         lake.put("silver", classified)
+        pending = lake.pending()
     events = lake.visible(state.get("run_id"), now)
     reviews = read_document(connection, "reviews").get("items", {})
     snapshot = publish_snapshot(connection, objects, lake, config, events, reviews, state, now)
     mutate_document(connection, "status_pipeline", lambda current: {**current, "status": "ready", "last_error": None,
-        "last_run_at": utc_text(now), "version": snapshot["version"]})
+        "last_run_at": utc_text(now), "version": snapshot["version"], "stream": progress})
     return snapshot
 
 

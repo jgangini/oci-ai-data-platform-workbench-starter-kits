@@ -2,20 +2,21 @@
 import argparse
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="https://127.0.0.1:18444")
+    parser.add_argument("--url", default="http://localhost:18081")
     parser.add_argument("--access-file", type=Path, default=Path(".tmp/prisma-local-access.json"))
     args = parser.parse_args()
     access = json.loads(args.access_file.read_text())
-    # Local fixture nginx uses its generated self-signed certificate, never an OCI endpoint.
-    if not args.url.startswith(("https://127.0.0.1:", "https://localhost:")):
+    target = urlsplit(args.url)
+    if target.scheme not in {"http", "https"} or target.hostname not in {"127.0.0.1", "localhost", "::1"}:
         raise SystemExit("This smoke runner is restricted to loopback fixture services")
-    with httpx.Client(base_url=args.url, verify=False, timeout=30) as client:
+    with httpx.Client(base_url=args.url, trust_env=False, timeout=30) as client:
         assert client.get("/api/prisma/snapshot").status_code == 401
         login = client.post("/api/admin/login", json=access)
         assert login.status_code == 204, f"Login failed: {login.status_code}"
@@ -32,7 +33,7 @@ def main():
         assert all(event["mode"] == "simulation" for event in snapshot["evidence"])
         viewer = client.get("/prisma/")
         viewer.raise_for_status()
-        assert "PRISMA" in viewer.text
+        assert "Territorial Control" in viewer.text
         chat = client.post("/api/prisma/chat", json={"question": "¿Qué incidentes hay en Bogotá?", "version": snapshot["version"]})
         chat.raise_for_status()
         answer = chat.json()

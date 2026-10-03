@@ -82,11 +82,14 @@ class Settings:
     vm_update_enabled: bool = False
     cookie_secure: bool = True
     local_development_mode: bool = False
+    prisma_enabled: bool = False
+    local_identity_artifact_dir: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
             admin_username=os.getenv("ADMIN_USERNAME", "admin"),
+            local_identity_artifact_dir=os.getenv("LOCAL_IDENTITY_ARTIFACT_DIR", ""),
             admin_password_hash=os.getenv("ADMIN_PASSWORD_HASH", ""),
             deployment_mode=_deployment_mode(os.getenv("DEPLOYMENT_MODE", "laboratory")),
             registration_code_hash=os.getenv("REGISTRATION_CODE_HASH", ""),
@@ -130,6 +133,7 @@ class Settings:
             in {"1", "true", "yes"},
             cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
             local_development_mode=os.getenv("LOCAL_DEVELOPMENT_MODE", "false").lower() in {"1", "true", "yes"},
+            prisma_enabled=os.getenv("PRISMA_VIEWER_ENABLED", "false").lower() in {"1", "true", "yes"},
         )
 
     def identity_ready(self) -> bool:

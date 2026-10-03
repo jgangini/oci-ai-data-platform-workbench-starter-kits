@@ -49,6 +49,13 @@
         "group": "application_vm"
       },
       {
+        "name": "enable_public_ip_tls",
+        "label": "Publicly trusted HTTPS certificate for the application IP",
+        "type": "boolean",
+        "default": false,
+        "group": "application_vm"
+      },
+      {
         "name": "admin_username",
         "label": "Username",
         "type": "text",
@@ -302,6 +309,7 @@
     "prisma_viewer_instance_id",
     "prisma_viewer_principal_group",
     "application_url",
+    "public_ip_tls_enabled",
     "admin_url",
     "aidp_workbench_url",
     "aidp_web_socket_endpoint",
@@ -392,6 +400,16 @@
   },
   "post_apply": {
     "entrypoint": "terraform/hooks/post_apply.py",
+    "include_paths": [
+      "apps/backend/app/prisma",
+      "apps/backend/app/__init__.py",
+      "apps/backend/app/aidp.py",
+      "apps/backend/app/config.py",
+      "apps/backend/app/security.py",
+      "apps/backend/app/governance.py",
+      "apps/backend/app/lab_packs.py",
+      "apps/backend/app/notebooks.py"
+    ],
     "timeout_seconds": 3600,
     "requires_oci_credentials": true,
     "secret_inputs": ["autonomous_database_admin_password", "autonomous_database_wallet_password"]

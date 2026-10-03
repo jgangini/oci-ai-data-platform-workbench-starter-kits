@@ -13,7 +13,7 @@ def needs_schedule(configuration, simulation, now=None):
     elapsed = float(simulation.get("elapsed_seconds", 0))
     if simulation.get("status") == "running":
         elapsed += max(0, now - float(simulation.get("started_at", now)))
-        if elapsed < 600:
+        if elapsed < 600 or not simulation.get("capture_complete", False) or simulation.get("final_job_pending"):
             return True
     return any(source.get("enabled") and source.get("mode") == "real" for source in configuration.get("sources", {}).values())
 

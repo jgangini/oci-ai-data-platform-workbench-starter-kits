@@ -116,6 +116,7 @@ resource "oci_core_instance" "lab" {
       source_commit_sha       = var.source_commit_sha
       prisma_viewer_url       = var.enable_prisma_viewer ? "http://${oci_core_instance.prisma[0].private_ip}:8081" : "http://127.0.0.1:8081"
       enable_prisma_viewer    = var.enable_prisma_viewer
+      enable_public_ip_tls    = var.enable_public_ip_tls
       prisma_admin_private_ip = local.prisma_admin_private_ip
     }))
   }

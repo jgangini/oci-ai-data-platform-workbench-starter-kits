@@ -416,7 +416,8 @@ def test_application_release_and_update_are_admin_only_and_idempotent(tmp_path: 
     assert release.json()["current_release"] == "v2.2.0"
     assert release.json()["latest_release"] == "v2.3.0"
     assert release.json()["update_available"] is True
-    assert release.json()["packages"][-1]["package_id"] == "ai_data_governance_vsc_extension"
+    package_ids = {item["package_id"] for item in release.json()["packages"]}
+    assert {"ai_data_governance_vsc_extension", "territorial_control"} <= package_ids
 
     operation_id = "d9282ff6-8717-4db7-9f59-241469a2c526"
     pending = client.post(

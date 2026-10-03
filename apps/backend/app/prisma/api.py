@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -56,16 +57,32 @@ def runtime_for(app):
 
 
 async def run_local_prisma(app):
-    """Local Docker tick only; cloud scheduling belongs exclusively to AIDP Jobs."""
-    if not app.state.settings.local_development_mode:
-        raise RuntimeError("Local PRISMA processing is forbidden in cloud mode")
+    """VM source producer only in OCI; classification/publication remain native AIDP work."""
     while True:
-        await runtime_for(app).tick()
+        try:
+            await runtime_for(app).tick()
+        except Exception as exc:
+            logging.getLogger(__name__).error("PRISMA source producer failed (%s); retrying", type(exc).__name__)
         await asyncio.sleep(60)
 
 
-def mount_prisma(app, require_admin):
+def mount_prisma(app, require_admin, require_viewer=None):
     router = APIRouter(dependencies=[Depends(require_admin)])
+    viewer = APIRouter(dependencies=[Depends(require_viewer or require_admin)])
+
+    async def module_status(deploy=False):
+        from .module import TerritorialModule
+        if not getattr(app.state, "territorial_module", None):
+            app.state.territorial_module = TerritorialModule(app.state.settings, runtime_for(app))
+        return await app.state.territorial_module.status(deploy)
+
+    @router.get("/api/admin/prisma/module")
+    async def module():
+        return await module_status()
+
+    @router.post("/api/admin/prisma/module/deploy")
+    async def deploy_module():
+        return await module_status(True)
 
     async def invoke(method, *args):
         try:
@@ -98,7 +115,7 @@ def mount_prisma(app, require_admin):
     async def simulation(payload: SimulationAction):
         return await invoke("simulation", payload.action)
 
-    @router.get("/api/prisma/snapshot")
+    @viewer.get("/api/prisma/snapshot")
     async def snapshot():
         return await invoke("snapshot")
 
@@ -113,3 +130,4 @@ def mount_prisma(app, require_admin):
         return await runtime_for(app).chat(payload.model_dump(mode="json"), request.headers.get("cookie", ""), app.state.session_key)
 
     app.include_router(router)
+    app.include_router(viewer)

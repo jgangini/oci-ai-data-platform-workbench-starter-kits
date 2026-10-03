@@ -10,6 +10,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { PrismaAdmin } from "./PrismaAdmin";
+import { TerritorialModule } from "./TerritorialModule";
+import { LocalPrismaAccess } from "./LocalPrismaAccess";
 
 import { labAssignmentChanges } from "./labAssignments";
 
@@ -41,6 +43,7 @@ type LabUser = {
   labs: AssignedLab[];
   active: boolean;
   managed?: boolean;
+  prisma_access?: boolean;
   is_aidp_admin: boolean;
   participant_code?: number | null;
 };
@@ -62,7 +65,7 @@ type CatalogLab = {
   status: "available" | "planned";
   available: boolean;
 };
-type UserDraft = { name: string; email: string; lab_ids: string[] };
+type UserDraft = { name: string; email: string; lab_ids: string[]; territorial_control?: boolean };
 type AdminSettingsResponse = {
   aidp_service_endpoint: string;
   aidp_url: string;
@@ -91,6 +94,7 @@ type AdminModuleOperationResponse = {
   message?: string;
 };
 type PublicConfig = {
+  local_participant_access?: boolean;
   deployment_mode: "laboratory" | "production";
   labs: CatalogLab[];
 };
@@ -447,8 +451,10 @@ function CreateUserModal({
   onDraftChange,
   onClose,
   onSubmit,
+  localParticipantAccess,
 }: {
   open: boolean;
+  localParticipantAccess?: boolean;
   catalog: CatalogLab[];
   draft: UserDraft;
   creating: boolean;
@@ -561,6 +567,8 @@ function CreateUserModal({
               </tbody>
             </table>
           </div>
+          {localParticipantAccess && <label><input type="checkbox" checked={!!draft.territorial_control} onChange={event => onDraftChange({ ...draft, territorial_control: event.target.checked })} disabled={creating} />Territorial Control · God’s Eye View and local AIDP project access</label>}
+          {localParticipantAccess && <p className="settings-help">Local mode: credentials are saved to a welcome file; no email is sent.</p>}
           {error && <p className="lab-manager-error" role="alert">{error}</p>}
           <footer>
             <button className="secondary" type="button" disabled={creating} onClick={onClose}>
@@ -1086,7 +1094,6 @@ function Shell({
   onSignOut,
   onAdminLogin,
   onHome,
-  operatorUsername,
 }: {
   children: React.ReactNode;
   onSignOut?: () => void;
@@ -1118,17 +1125,9 @@ function Shell({
               >
                 Settings
               </a>
-              <a href="/admin/prisma" aria-current={currentPath === "/admin/prisma" ? "page" : undefined}>
-                PRISMA
-              </a>
             </nav>
           )}
           <div className="header-actions">
-            {operatorUsername && (
-              <span className="operator-identity" title={operatorUsername}>
-                Deployed by {operatorUsername}
-              </span>
-            )}
             {onSignOut ? (
               <button
                 className="header-signout"
@@ -1724,7 +1723,7 @@ function AdminUsers() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createProgress, setCreateProgress] = useState<RegistrationResponse | null>(null);
-  const [draft, setDraft] = useState({ name: "", email: "", lab_ids: ["banking"] as string[] });
+  const [draft, setDraft] = useState<UserDraft>({ name: "", email: "", lab_ids: ["banking"] as string[] });
   const createAbortRef = useRef<AbortController | null>(null);
   const operationAbortRef = useRef<AbortController | null>(null);
   const moduleAbortRef = useRef<AbortController | null>(null);
@@ -2287,6 +2286,9 @@ function AdminUsers() {
                             </span>
                           )}
                         </div>
+                        {publicConfig?.local_participant_access && <label className="project-grant"><input type="checkbox" checked={!!user.prisma_access} aria-label={`Territorial Control access for ${user.email}`} onChange={event => {
+                          void api(`/api/admin/prisma/users/${encodeURIComponent(user.id)}`, { method: "PUT", body: JSON.stringify({ enabled: event.target.checked }) }).then(loadUsers).catch(reason => setTableError(reason instanceof Error ? reason.message : "Access update failed"));
+                        }} />Territorial Control</label>}
                       </td>
                       <td>
                         <span
@@ -2356,6 +2358,7 @@ function AdminUsers() {
         </section>
       </Shell>
       <CreateUserModal
+        localParticipantAccess={publicConfig?.local_participant_access}
         open={createOpen}
         catalog={catalog}
         draft={draft}
@@ -2632,18 +2635,13 @@ function ApplicationReleaseSettings({
   release,
   busy,
   error,
-  onUpdate,
 }: {
   release: AdminApplicationRelease | null;
   busy: boolean;
   error: string;
-  onUpdate: () => void;
 }) {
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
-  );
-  const canUpdate = Boolean(
-    release?.updater_available && (release.update_available || operationRunning),
   );
   const statusLabel = operationRunning
     ? "Updating"
@@ -2705,16 +2703,6 @@ function ApplicationReleaseSettings({
             </p>
           )}
           {error && <p className="release-operation error" role="alert">{error}</p>}
-          <div className="settings-actions release-actions">
-            <button
-              type="button"
-              className="settings-save"
-              onClick={onUpdate}
-              disabled={!canUpdate || busy}
-            >
-              {operationRunning ? "Continue update" : "Update from GitHub"}
-            </button>
-          </div>
           {!release.updater_available && (
             <p className="settings-help">In-place updates are enabled only on the deployed application VM.</p>
           )}
@@ -2730,7 +2718,7 @@ function ApplicationReleaseSettings({
               <tbody>
                 {release.packages.map((item) => (
                   <tr key={item.package_id}>
-                    <td><strong>{item.display_name}</strong></td>
+                    <td><strong>{item.display_name}</strong>{item.package_id === "territorial_control" && <TerritorialModule api={api} />}</td>
                     <td>{item.bundled_version}</td>
                     <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
                   </tr>
@@ -3070,12 +3058,15 @@ function AdminSettings() {
                 <strong>Application</strong>
                 <p>Manage the application release, starter kit versions and participant access.</p>
               </div>
+              {applicationRelease && (applicationRelease.update_available || (applicationRelease.operation && applicationUpdateStates.has(applicationRelease.operation.status))) &&
+                <button type="button" className="settings-save application-update" disabled={!applicationRelease.updater_available || releaseBusy} onClick={() => void updateApplication()}>
+                  <RefreshIcon />{releaseBusy ? "Updating…" : "Update from GitHub"}
+                </button>}
             </div>
             <ApplicationReleaseSettings
               release={applicationRelease}
               busy={releaseBusy}
               error={releaseError}
-              onUpdate={() => void updateApplication()}
             />
             <ApplicationAccessSettings
               deploymentMode={deploymentMode}
@@ -3115,6 +3106,8 @@ function AdminPrisma() {
 }
 
 export function App() {
+  if (window.location.pathname === "/local/prisma/login") return <Shell><LocalPrismaAccess api={api} /></Shell>;
+  if (window.location.pathname === "/local/prisma/workspace") return <Shell><LocalPrismaAccess api={api} workspace /></Shell>;
   if (window.location.pathname === "/admin/prisma") return <AdminPrisma />;
   if (window.location.pathname === "/admin/settings") return <AdminSettings />;
   if (window.location.pathname === "/admin/login")

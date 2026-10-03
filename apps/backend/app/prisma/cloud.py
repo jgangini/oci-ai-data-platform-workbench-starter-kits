@@ -4,13 +4,15 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import threading
 from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import HTTPException
 
 from ..autonomous import AutonomousGovernanceClient
-from .core import PLATFORMS, utc_text, default_source
+from .core import PLATFORMS, utc_text, default_source, simulation_state
+from . import capture, landing
 from .database import read_document, mutate_document
 from .scheduling import needs_schedule, set_schedule, submit_run
 
@@ -19,6 +21,7 @@ class CloudRuntime:
     def __init__(self, settings, aidp_factory):
         self.settings, self.aidp_factory = settings, aidp_factory
         self.database = AutonomousGovernanceClient(settings.autonomous_runtime_file)
+        self.capture_lock = threading.RLock()
 
     def _connect(self):
         return self.database._connect(self.database._runtime())
@@ -29,7 +32,7 @@ class CloudRuntime:
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(503, "El runtime PRISMA AIDP/Autonomous no está listo; revise el despliegue") from exc
+            raise HTTPException(503, "The Territorial Control AIDP/Autonomous runtime is not ready; check deployment") from exc
 
     def _doc(self, name):
         with self._connect() as connection:
@@ -49,12 +52,11 @@ class CloudRuntime:
                 {"status", "last_run_at", "next_due", "last_error", "requested_action", "request_id", "last_received_count"}})
             if not source["enabled"]:
                 source.update(status="disabled", next_due=None)
-            elif source["mode"] == "simulation" and not status.get("requested_action"):
-                source.update(status="simulation", last_error=None, next_due=None)
-            elif status.get("configuration_revision") != configuration.get("revision", 0) and not status.get("requested_action"):
+            elif source["mode"] == "real" and status.get("configuration_revision") != configuration.get("revision", 0) and not status.get("requested_action"):
                 source.update(status="ready", last_error=None, next_due=None)
             sources.append(source)
-        return {"sources": sources, "simulation": self._simulation_state(), "runtime": "aidp"}
+        return {"sources": sources, "simulation": self._simulation_state(), "runtime": "aidp",
+                "pipeline": self._doc("status_pipeline"), "capture_summary": self._doc("status_synthetic")}
 
     async def sources(self):
         return await self._io(self._sources)
@@ -65,7 +67,7 @@ class CloudRuntime:
         existing = [item for item in client._list("/credentials", params={"displayName": name}, phase="control")
                     if (item.get("displayName") or item.get("name")) == name]
         if len(existing) > 1:
-            raise HTTPException(409, "Existen credenciales PRISMA duplicadas")
+            raise HTTPException(409, "Duplicate source credentials exist")
         payload = {"displayName": name, "type": "SECRET_TOKEN", "credentialDescription": "PRISMA API source credential",
                    "credentialDetails": {"credentialType": "SECRET_TOKEN", "secretTokenPair": [{"secretKey": "bearer_token", "secretValue": token}]}}
         if existing:
@@ -82,15 +84,17 @@ class CloudRuntime:
         old = {**default_source(platform), **self._doc("configuration").get("sources", {}).get(platform, {})}
         candidate = {**old, **fields}
         if candidate["mode"] == "real" and platform != "x":
-            raise HTTPException(422, "Solo X tiene conector real; las demás plataformas admiten simulación")
+            raise HTTPException(422, "Only X supports real capture; other platforms support simulation")
         if candidate["mode"] == "real" and not candidate["query"].strip():
             raise HTTPException(422, "La captura real de X requiere una consulta")
+        if candidate["mode"] == "simulation":
+            capture.search_terms(candidate["query"])
         if payload.get("secret_ref", old["secret_ref"]) not in {old["secret_ref"], "PrismaSource_" + platform}:
             raise HTTPException(422, "AIDP administra la referencia de credencial de esta fuente")
         token = payload.get("bearer_token")
         if token:
             if len(token) > 8192 or any(character.isspace() for character in token):
-                raise HTTPException(422, "Valor de credencial inválido")
+                raise HTTPException(422, "Invalid credential value")
             fields.update(secret_ref=self._credential(platform, token), credential_configured=True)
         def change(document):
             sources = dict(document.get("sources", {}))
@@ -119,14 +123,20 @@ class CloudRuntime:
             raise HTTPException(404, "Plataforma desconocida")
         source = next(item for item in self._sources()["sources"] if item["platform"] == platform)
         if not source["enabled"]:
-            raise HTTPException(409, "Habilite la fuente antes de ejecutarla")
+            raise HTTPException(409, "Enable the source before running it")
         if source["mode"] == "real" and (platform != "x" or not source["credential_configured"]):
-            raise HTTPException(409, "La fuente real requiere un conector y credencial habilitados")
+            raise HTTPException(409, "Real capture requires a validated connector and credential")
+        if source["mode"] == "simulation":
+            capture.search_terms(source["query"])
+            if action == "run":
+                self._produce(force=True)
+                self._wake(str(uuid4()))
+            return {"status": "simulation", "message": "Synthetic query validated on the VM producer", "source": source}
         request_id = str(uuid4())
         self._change("status_" + platform, lambda doc: {**doc, "status": "queued", "requested_action": action,
             "request_id": request_id, "next_due": utc_text(time.time()), "last_error": None})
         self._wake(request_id)
-        return {"status": "queued", "message": "Solicitud registrada como ejecución finita AIDP", "source": {**source, "status": "queued"}}
+        return {"status": "queued", "message": "Request queued as a finite AIDP run", "source": {**source, "status": "queued"}}
 
     async def test_source(self, platform):
         return await self._io(self._request_source, platform, "test")
@@ -135,25 +145,66 @@ class CloudRuntime:
         return await self._io(self._request_source, platform, "run")
 
     def _simulation_state(self):
-        state = self._doc("simulation")
-        elapsed = float(state.get("elapsed_seconds", 0))
-        if state.get("status") == "running":
-            elapsed = min(600, elapsed + max(0, time.time() - state.get("started_at", time.time())))
-        return {"status": "completed" if elapsed >= 600 else state.get("status", "idle"),
-                "elapsed_seconds": elapsed, "duration_seconds": 600, "run_id": state.get("run_id"), "anchor_at": state.get("anchor_at")}
+        return simulation_state(self._doc("simulation"), time.time())
 
     def _simulation(self, action):
         if action not in {"start", "pause", "resume", "reset", "replay"}:
-            raise HTTPException(422, "Acción de simulación inválida")
+            raise HTTPException(422, "Invalid simulation action")
         state = self._simulation_state()
         if action in {"start", "reset", "replay"}:
-            state = {"elapsed_seconds": 0, "run_id": str(uuid4()), "anchor_at": time.time()}
+            state = {"elapsed_seconds": 0, "run_id": str(uuid4()), "anchor_at": time.time(), "capture_complete": False,
+                     "final_job_pending": False}
         elif state.get("anchor_at") is None:
             state["anchor_at"] = time.time() - state["elapsed_seconds"]
         state.update(status="paused" if action in {"pause", "reset"} else "running", started_at=time.time())
         self._change("simulation", lambda current: {**current, **state})
+        self._produce(force=True)
         self._wake(str(uuid4()))
         return self._simulation_state()
+
+    def _produce(self, force=False):
+        with self.capture_lock:
+            now, control = time.time(), self._doc("simulation")
+            state = simulation_state(control, now)
+            if not state.get("run_id") or state["status"] == "idle":
+                return False
+            if state["capture_complete"] and not force:
+                return control.get("final_job_pending", False)
+            config = self._doc("configuration")
+            sources = [{**default_source(name), **config.get("sources", {}).get(name, {})} for name in PLATFORMS]
+            runtime, client = self._doc("runtime"), self.aidp_factory()
+            for source in capture.sources(sources):
+                name = source["platform"]
+                saved = self._doc("checkpoint_synthetic").get("sources", {}).get(name, {})
+                result = capture.batch(source, state, saved, now, force)
+                if result is None:
+                    continue
+                events, cursor = result
+                try:
+                    key = landing.write_objects(client.object_storage, runtime, events)
+                    self._change("checkpoint_synthetic", lambda doc: {**doc, "sources": {**doc.get("sources", {}), name: cursor}})
+                    self._change("status_synthetic", lambda doc: {**doc, "status": "ready", "last_error": None,
+                        "last_run_at": utc_text(now), "landing_count": doc.get("landing_count", 0) + bool(key),
+                        "last_landing_key": key or doc.get("last_landing_key")})
+                    if name in PLATFORMS:
+                        self._change("status_" + name, lambda doc: {**doc, "status": "simulation", "last_error": None,
+                            "last_run_at": utc_text(now), "next_due": utc_text(cursor["next_due"]),
+                            "last_received_count": len(events), "configuration_revision": config.get("revision", 0)})
+                except Exception as exc:
+                    self._change("status_synthetic", lambda doc: {**doc, "status": "error", "last_error": type(exc).__name__})
+                    raise
+            completed = state["elapsed_seconds"] >= 600 and not state["capture_complete"]
+            if completed:
+                self._change("simulation", lambda doc: {**doc, "capture_complete": True, "final_job_pending": True}
+                             if doc.get("run_id") == state["run_id"] else doc)
+            return completed or control.get("final_job_pending", False)
+
+    async def tick(self):
+        if await self._io(self._produce):
+            run_id = (await self._io(self._doc, "simulation")).get("run_id")
+            await self._io(self._wake, str(run_id) + "-final")
+            await self._io(self._change, "simulation", lambda doc: {**doc, "final_job_pending": False}
+                           if doc.get("run_id") == run_id else doc)
 
     async def simulation(self, action):
         return await self._io(self._simulation, action)
@@ -167,10 +218,10 @@ class CloudRuntime:
         pointer = fetch("04_gold/prisma/current.json")
         key = str(pointer.get("snapshot_key", ""))
         if not key.startswith("04_gold/prisma/snapshots/") or ".." in key:
-            raise HTTPException(503, "Publicación PRISMA inválida")
+            raise HTTPException(503, "Invalid Territorial Control publication")
         snapshot = fetch(key)
         if snapshot.get("version") != pointer.get("version"):
-            raise HTTPException(503, "Publicación PRISMA incompleta")
+            raise HTTPException(503, "Incomplete Territorial Control publication")
         return {**snapshot, "runtime": "aidp"}
 
     async def snapshot(self):
@@ -197,7 +248,7 @@ class CloudRuntime:
             bucket, ".control/prisma/agent.json")
         metadata = json.loads(response.data.content)
         if metadata.get("state") != "ACTIVE":
-            raise HTTPException(503, "El agente PRISMA no está activo")
+            raise HTTPException(503, "The Territorial Control agent is not active")
         return invoke(client, metadata["endpoint"], payload, cookie, key, self._snapshot())
 
     async def chat(self, payload, cookie, key):

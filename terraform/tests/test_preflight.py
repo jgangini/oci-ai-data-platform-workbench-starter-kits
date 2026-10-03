@@ -368,6 +368,13 @@ def test_preflight_rejects_zero_or_missing_capacity() -> None:
         _select({preflight.E5_SHAPE: (available, "0"), preflight.E4_SHAPE: (unsupported, "0")})
 
 
+@pytest.mark.parametrize("enabled", [True, "true", False, "false"])
+def test_preflight_counts_viewer_with_deploy_studio_serialized_boolean(enabled) -> None:
+    result, _ = _select({preflight.E5_SHAPE: ("AVAILABLE", "1"), preflight.E4_SHAPE: ("AVAILABLE", "2")},
+                        input_overrides={"enable_prisma_viewer": enabled})
+    assert result["inputs"]["preferred_vm_shape"] == (preflight.E4_SHAPE if enabled in (True, "true") else preflight.E5_SHAPE)
+
+
 def test_preflight_accepts_any_available_fault_domain() -> None:
     model = preflight.oci.core.models.CapacityReportShapeAvailability
 

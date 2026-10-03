@@ -10,7 +10,8 @@ await cp('vendor/gods-eye-view/PROVENANCE.json', 'dist/GODSEYE-PROVENANCE.json')
 await cp('node_modules/cesium/LICENSE.md', 'dist/CESIUM-LICENSE.md');
 await cp('node_modules/cesium/ThirdParty.json', 'dist/CESIUM-THIRD-PARTY.json');
 const lock = JSON.parse(await readFile('package-lock.json', 'utf8'));
-const notices = ['God’s Eye View\n' + await readFile('vendor/gods-eye-view/LICENSE', 'utf8')];
+const notices = ['God’s Eye View\n' + await readFile('vendor/gods-eye-view/LICENSE', 'utf8'),
+  'Simple Icons @ d9ea58066506bc80da65d5516813636b22b58a06\n' + await readFile('public/brand-icons/LICENSE.md', 'utf8') + '\n' + await readFile('public/brand-icons/DISCLAIMER.md', 'utf8')];
 for (const [path, metadata] of Object.entries(lock.packages)) {
   if (!path || metadata.dev || metadata.optional) continue;
   const licenses = (await readdir(path)).filter((name) => /^(license|licence|copying|notice)(\.|$)/i.test(name));

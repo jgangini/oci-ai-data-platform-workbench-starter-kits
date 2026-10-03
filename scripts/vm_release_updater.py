@@ -487,7 +487,7 @@ def _run_container(
     arguments.extend(
         [
             "-v",
-            f"{root / 'tls'}:/etc/aidp-lab/tls:ro,Z",
+            f"{root / 'tls'}:/etc/aidp-lab/tls:ro,z",
             "-v",
             f"{root / '.oci'}:/etc/aidp-lab/oci:ro,Z",
             "-v",
@@ -497,6 +497,8 @@ def _run_container(
         ]
     )
     if not candidate:
+        if Path("/var/lib/letsencrypt").is_dir():
+            arguments.extend(["-v", "/var/lib/letsencrypt:/var/lib/letsencrypt:ro,z"])
         arguments.extend(
             [
                 "-v",

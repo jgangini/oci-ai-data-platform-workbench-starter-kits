@@ -228,7 +228,7 @@ def _assert_empty_legacy_catalog(api: FakeApi, reconciled: dict, events: list[st
         "AIDP_LAB_DEVELOPER",
         "AIDP_LAB_PENDING",
     }
-    assert any("zero existing schemas and zero external volumes" in event for event in events)
+    assert any("zero legacy schemas; 0 approved PRISMA external volumes" in event for event in events)
 
 
 def _assert_shared_compute(api: FakeApi, reconciled: dict) -> None:
@@ -1319,7 +1319,8 @@ def test_aidp_api_uses_workbench_data_plane_endpoint() -> None:
     )
 
 
-def test_application_health_uses_self_signed_https(monkeypatch) -> None:
+@pytest.mark.parametrize("public_tls", [False, True])
+def test_application_health_verifies_public_tls_and_preserves_legacy_default(monkeypatch, public_tls) -> None:
     observed: dict[str, object] = {}
 
     class Response:
@@ -1336,9 +1337,31 @@ def test_application_health_uses_self_signed_https(monkeypatch) -> None:
             return Response()
 
     monkeypatch.setattr(post_apply.requests, "Session", Session)
-    post_apply.wait_for_application("https://192.0.2.10")
+    post_apply.wait_for_application("https://192.0.2.10", verify_tls=public_tls)
     assert observed["url"] == "https://192.0.2.10/api/health"
-    assert observed["verify"] is False
+    assert observed["verify"] is public_tls
+
+
+@pytest.mark.parametrize("enabled,schema,name,location,accepted", [
+    (True, "prisma_ingest", "landing", "oci://landing@namespace/01_landing/prisma/raw/", True),
+    (False, "prisma_ingest", "landing", "oci://landing@namespace/01_landing/prisma/raw/", False),
+    (True, "other", "landing", "oci://landing@namespace/01_landing/prisma/raw/", False),
+    (True, "prisma_ingest", "other", "oci://landing@namespace/01_landing/prisma/raw/", False),
+    (True, "prisma_ingest", "landing", "oci://landing@namespace/01_landing/", False),
+])
+def test_fresh_catalog_only_allows_exact_opted_in_prisma_landing(enabled, schema, name, location, accepted):
+    api = FakeApi()
+    api.resources["/schemas"] = [{"displayName": schema, "key": "schema-key"}]
+    api.resources["/volumes"] = [{"displayName": name, "key": "volume-key",
+                                  "volumeType": "EXTERNAL", "storageLocation": location}]
+    arguments = (api, "catalog-key", "namespace", "landing")
+    options = {"prisma_landing_bucket": "landing" if enabled else ""}
+    if accepted:
+        assert post_apply.assert_fresh_catalog(*arguments, **options) == (0, 1)
+    else:
+        with pytest.raises(post_apply.ReconcileError):
+            post_apply.assert_fresh_catalog(*arguments, **options)
+    assert all(method != "DELETE" for method, *_ in api.calls)
 
 
 def test_workbench_url_uses_oci_web_socket_endpoint() -> None:

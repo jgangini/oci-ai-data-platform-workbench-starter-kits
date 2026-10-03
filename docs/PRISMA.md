@@ -1,4 +1,4 @@
-# PRISMA Bogotá
+# Territorial Control (PRISMA) Bogotá
 
 PRISMA is a shared operational project in Starter Kits. `/admin/prisma` configures
 the sources and replay; `/prisma/` opens the private God’s Eye viewer through the
@@ -8,7 +8,9 @@ same authenticated nginx ingress. It does not provision a project per student.
 
 Use `docker/docker-compose.dev.yml` and a private `.env.dev` with
 `LOCAL_DEVELOPMENT_MODE=true`. It starts the administration and viewer as separate
-containers. The existing localhost ports are 18081 (redirect) and 18444 (HTTPS).
+containers. Open `http://localhost:18081`; the development profile binds only to
+loopback, uses the existing local nginx configuration and requires no certificate
+installation. Public OCI deployments retain their separate TLS configuration.
 Configure a new fixture account in that profile; never replace production user
 passwords. Keep the test account JSON in the ignored `.tmp/prisma-local-access.json`.
 
@@ -34,10 +36,9 @@ The workflow and its source bundle are versioned independently of captured data.
 X requires a separate API Bearer credential and sufficient X access/credits. Add
 it through the source form; the credential is write-only. Only X supports real
 mode. Facebook, Instagram and TikTok are simulations. The collector never treats
-HTTP errors as empty searches, and commits its cursor only after durable Bronze.
+HTTP errors as empty searches, and commits its cursor only after durable Landing persistence.
 
-The Job checks due sources once a minute, using one shared Spark cluster and no
-periodic run queue. Explicit actions submit finite runs to the same Job and may
+The VM captures due synthetic sources into immutable Landing NDJSON. The AIDP Job runs a finite availableNow stream once a minute, using an external Landing Volume, a managed checkpoint Volume and one shared Spark cluster. OCI URI streaming/checkpoints are not used. Real X capture uses the AIDP credential store and writes the same Landing envelope. There is no periodic run queue. Explicit actions submit finite runs to the same Job and may
 queue behind the current run. The periodic schedule pauses when replay finishes
 and no real source is enabled. A five-minute interval is not a latency SLA.
 Pause the job and stop idle compute outside demo/test sessions. Do not run the
@@ -68,8 +69,8 @@ shipped in the browser bundle or release images.
 ## Acceptance evidence
 
 Retain test logs and DOM assertions, not screenshots. Cloud acceptance must show a
-successful native Spark run, matching publication versions, a real X record, an
-AIDP answer citing that record, conversational follow-up, session isolation, and
+successful native Spark run, matching publication versions, synthetic VM capture through Landing, an
+AIDP answer citing that evidence, conversational follow-up, session isolation, and
 recovery after retry/restart. `ACTIVE`, a healthy container, or a simulated chat
 alone is not evidence that the integrated deployment works.
 
@@ -80,6 +81,18 @@ dispatch, autonomous critical decisions and unrestricted social-network scraping
 are outside this implementation.
 
 ## Bogotá geography
+
+The viewer's public name is Territorial Control; internal `/prisma/` routes stay
+stable. “Filter map area” fixes the current WGS84 view rectangle and applies it
+inclusively to points, the list and agent queries. Unresolved locations stay
+outside an active area filter. Clear the area to restore those reports.
+
+Context layers stay separate from incident evidence: NASA GIBS MODIS imagery is
+dated daily imagery (clouds may obscure Bogotá), and Open-Meteo weather is a model
+estimate for six locality anchors. News lists only linked reports already in the
+publication. Camera references link to the official Bogotá source; no public live
+camera feed has been verified or invented. NASA uses its documented
+[GIBS WMTS interface](https://nasa-gibs.github.io/gibs-api-docs/access-basics/).
 
 Kennedy is locality 08 and Bosa is locality 07, as described by
 [Bogotá's locality directory](https://bogota.gov.co/mi-ciudad/localidades/kennedy).
@@ -102,3 +115,50 @@ cycle or god file is accepted. Input validation, collection, deployment waiting
 and publication retain explicit failure branches covered by executable checks;
 the absolute complex-function count grows with this new subsystem. The gate's
 reported warning is documented rather than suppressed or rebased away.
+
+
+## Local access and module administration
+
+Open `http://localhost:18081/admin/login` with the explicitly configured local
+`admin` / `admin` account. Registration code: `aidp-2026`. HTTP binds only to
+loopback; deployed OCI ingress keeps HTTPS. Application settings include the
+Territorial Control global module, its activation status and settings link.
+Activation checks the already provisioned VM, native Job, publication and agent;
+installations without the Terraform viewer option report deployment required.
+It does not provision another VM from an application request.
+
+Create a local participant with **Territorial Control** selected. Docker writes
+private welcome files and identity state to the host `.local/prisma` directory.
+The welcome file supplies the generated sign-in credentials at
+`/local/prisma/login`. No email is sent and no OCI identity is created in this
+mode. Participants can read published data and ask questions; source changes,
+review decisions and administration require the administrator session. Revoking
+access invalidates existing sessions. Local lab material survives restarts.
+The workspace preview is explicitly simulated; it is not the AIDP cloud UI.
+
+Cloud participant sign-in is not enabled by this local adapter. Until a real
+participant identity integration is configured, cloud Territorial Control
+assignment requests fail before any user mutation. The cloud demo uses the
+existing authenticated administrator session. This remains a separate acceptance
+item for multi-user production access.
+
+## Evidence and context
+
+The incident card leads with the event category; the global simulation banner and
+each evidence item retain provenance. Corroboration is a bounded heuristic based
+on independent author/platform sources after near-copy suppression, not a
+probability or automatic confirmation. Classification confidence remains separate.
+Only real X photos from the allowed media host can appear in a human-validated
+incident. Synthetic, pending and rejected incident photos are never rendered.
+
+Area filtering uses the visible map bounds and carries the same validated bounds
+into the agent query, evidence validation and focus actions. Approximate locality
+anchors remain approximate. A map filter never changes the underlying publication.
+
+Postflight for the Territorial Control increment (2026-10-03): quality 6712 →
+6722, coupling 0.09 → 0.08, cycles 0, god files 0. The gate reports an intentional
+increase from 7 to 14 complex functions across source filtering, media/area
+validation, persisted local access and cloud activation checks. These explicit
+failure paths implement requested boundaries and are covered by unit/integration
+checks; the warning is retained and is not reported as a passing gate. No baseline
+reset is used to suppress it.

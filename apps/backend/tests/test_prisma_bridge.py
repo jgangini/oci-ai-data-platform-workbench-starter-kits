@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from app.prisma import agent_gateway
 
 
+sys.path.insert(0, str(Path(__file__).parents[1] / "app"))
 spec = importlib.util.spec_from_file_location("prisma_viewer_bridge", Path(__file__).parents[2] / "prisma-viewer" / "server.py")
 bridge = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = bridge
@@ -85,6 +86,25 @@ def test_period_is_inclusive_and_the_local_answer_uses_the_same_window(client):
     with pytest.raises(HTTPException) as error:
         bridge.grounded_reply({**ANSWER, "actions": [{"type": "filter_incidents", "filters": {"date_from": "not-a-date"}}]}, SNAPSHOT)
     assert error.value.status_code == 502
+
+
+def test_area_preserves_evidence_and_focus_scope():
+    data = {**SNAPSHOT, "incidents": [
+        {**SNAPSHOT["incidents"][0], "lat": 4.627, "lon": -74.155},
+        {**SNAPSHOT["incidents"][1], "lat": 4.741, "lon": -74.084},
+    ]}
+    payload = bridge.ChatRequest(question="Resumen", version="v1", filters={"bbox": "-74.2,4.6,-74.1,4.7"})
+    bridge.validate_context(payload, data)
+    assert bridge.fixture_reply(payload, data)["evidence_ids"] == ["x:1"]
+    assert bridge.grounded_reply(ANSWER, data, payload)["evidence_ids"] == ["x:1"]
+    for changes in [{"evidence_ids": ["sensor:2"]}, {"actions": [{"type": "focus_incident", "incident_id": "incident-2"}]}]:
+        with pytest.raises(HTTPException) as error:
+            bridge.grounded_reply({**ANSWER, **changes}, data, payload)
+        assert error.value.status_code == 502
+    payload.filters["bbox"] = "bad"
+    with pytest.raises(HTTPException) as error:
+        bridge.validate_context(payload, data)
+    assert error.value.status_code == 422
 
 
 @pytest.mark.parametrize("context", [{"incident_id": "incident-1"}, {"filters": {"platform": "x"}}, {"filters": {"locality": "Kennedy"}}, {"filters": {"date_to": "2026-10-05T14:00:00Z"}}])

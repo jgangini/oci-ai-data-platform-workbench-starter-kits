@@ -5,19 +5,31 @@ from types import SimpleNamespace
 import pytest
 
 from app.prisma import pipeline
+from app.prisma.landing import write_objects
 from app.prisma.core import default_source, normalize_event, simulation_events
 from app.prisma.classification import classify
 from app.prisma.runtime_secrets import runtime_auth
 
 
 CONFIG = {"namespace": "namespace", "bucket": "gold-bucket", "region": "test-region", "model_id": "model",
-          "compartment_id": "compartment", "catalog": "oci_medallion"}
+          "compartment_id": "compartment", "catalog": "oci_medallion", "landing_bucket": "landing-bucket",
+          "landing_prefix": "01_landing/prisma/raw/", "landing_volume_path": "/Volumes/oci_medallion/prisma_ingest/landing",
+          "checkpoint_volume_path": "/Volumes/oci_medallion/prisma_ingest/checkpoints/bronze-v1"}
 NOW = 1791209100.0
 
 
 class Lake:
-    def __init__(self, log):
+    def __init__(self, log, objects):
         self.log, self.data, self.fail = log, {"bronze": {}, "silver": {}, "gold": {}}, None
+        self.objects = objects
+
+    def consume(self, config):
+        for key, body in self.objects.data.items():
+            if key.startswith(config["landing_prefix"]):
+                for line in body.splitlines():
+                    row = json.loads(line)
+                    self.put("bronze", [{**json.loads(row["payload"]), "id": row["id"]}])
+        return {"query_id": "test-stream", "microbatches": 1, "last_input_rows": len(self.data["bronze"])}
 
     def put(self, layer, records):
         self.log.append(layer)
@@ -42,7 +54,7 @@ class Objects:
         self.log.append(key)
         if self.fail and key.startswith(self.fail):
             raise RuntimeError("Injected Object Storage failure")
-        assert namespace == CONFIG["namespace"] and bucket == CONFIG["bucket"]
+        assert namespace == CONFIG["namespace"] and bucket == CONFIG["landing_bucket" if key.startswith("01_landing/") else "bucket"]
         self.data[key] = data
 
 
@@ -68,19 +80,26 @@ def runtime(monkeypatch):
     monkeypatch.setattr(pipeline, "read_document", read)
     monkeypatch.setattr(pipeline, "mutate_document", mutate)
     monkeypatch.setattr(pipeline, "publish", publish)
-    return log, docs, publications, Lake(log), Objects(log)
+    objects = Objects(log)
+    return log, docs, publications, Lake(log, objects), objects
 
 
-def test_cursor_is_not_committed_before_landing_and_bronze(runtime):
+def test_source_cursor_commits_after_landing_and_stream_owns_bronze_recovery(runtime):
     log, docs, _, lake, objects = runtime
-    lake.fail = "bronze"
+    objects.fail = CONFIG["landing_prefix"]
     with pytest.raises(RuntimeError):
         pipeline.ingest_page(object(), objects, lake, CONFIG, "x", simulation_events(0), {"cursor": {"since_id": "30"}})
     assert "checkpoint_x" not in docs
-    assert any(key.startswith("01_landing/prisma/") for key in objects.data)
-    lake.fail = None
+    assert objects.data == {}
+    objects.fail = None
     pipeline.ingest_page(object(), objects, lake, CONFIG, "x", simulation_events(0), {"cursor": {"since_id": "30"}})
-    assert log[-2:] == ["bronze", "doc:checkpoint_x"]
+    assert log[-1] == "doc:checkpoint_x" and lake.data["bronze"] == {}
+    lake.fail = "bronze"
+    with pytest.raises(RuntimeError):
+        lake.consume(CONFIG)
+    assert docs["checkpoint_x"]["cursor"]["since_id"] == "30"
+    lake.fail = None
+    lake.consume(CONFIG)
     assert len(lake.data["bronze"]) == 1
 
 
@@ -117,6 +136,9 @@ def test_empty_bootstrap_runs_actual_publication_path_without_simulated_data(run
 def test_failed_classification_retries_bronze_without_fabricating_success(runtime):
     _, docs, _, lake, objects = runtime
     docs["simulation"] = {"revision": 1, "run_id": "run-one", "status": "running", "started_at": NOW, "elapsed_seconds": 0}
+    raw = simulation_events(0)[0]
+    write_objects(objects, CONFIG, [{**raw, "source_id": "run-one:" + raw["source_id"],
+        "raw_metadata": {**raw["raw_metadata"], "scenario_run_id": "run-one"}}])
     def failure(_events):
         raise ValueError("untrusted-sensitive-error")
     with pytest.raises(RuntimeError) as error:

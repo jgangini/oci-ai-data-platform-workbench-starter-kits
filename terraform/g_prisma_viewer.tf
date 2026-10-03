@@ -198,6 +198,12 @@ output "prisma_viewer_url" {
   value = var.enable_prisma_viewer ? "https://${data.oci_core_vnic.lab.public_ip_address}/prisma/" : null
 }
 
+output "prisma_viewer_private_url" {
+  description = "Server-side viewer upstream; browsers use prisma_viewer_url through VM1 authentication."
+  sensitive   = true
+  value       = var.enable_prisma_viewer ? "http://${oci_core_instance.prisma[0].private_ip}:8081" : null
+}
+
 output "prisma_viewer_instance_id" {
   value = var.enable_prisma_viewer ? oci_core_instance.prisma[0].id : null
 }

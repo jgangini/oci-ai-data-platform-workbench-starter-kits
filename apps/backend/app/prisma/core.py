@@ -6,6 +6,8 @@ import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 
+from .media import photos
+
 
 PLATFORMS = ("x", "facebook", "instagram", "tiktok")
 SOURCE_FIELDS = {"enabled", "mode", "query", "interval_minutes", "secret_ref", "credential_configured",
@@ -40,6 +42,16 @@ def default_source(platform: str) -> dict:
 
 def utc_text(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def simulation_state(document, now):
+    elapsed = float(document.get("elapsed_seconds", 0))
+    if document.get("status") == "running":
+        elapsed += max(0, now - float(document.get("started_at", now)))
+    elapsed = min(600, elapsed)
+    return {"status": "completed" if elapsed >= 600 else document.get("status", "idle"),
+            "elapsed_seconds": elapsed, "duration_seconds": 600, "run_id": document.get("run_id"),
+            "anchor_at": document.get("anchor_at"), "capture_complete": document.get("capture_complete", False)}
 
 
 def folded(text: str) -> str:
@@ -83,8 +95,29 @@ def normalize_event(event: dict) -> dict:
         "classification_method": event.get("classification_method", "provided" if event.get("category") else "keyword_rules"),
         "confidence": float(event.get("confidence", 0.55)),
         "raw_metadata": event.get("raw_metadata", {}),
+        "media": photos(platform, event.get("media", [])),
         "content_hash": hashlib.sha256(" ".join(normalized.split()).encode()).hexdigest(),
     }
+
+
+def corroboration(evidence):
+    sources, distinct = set(), []
+    for event in evidence:
+        source = (event["platform"], event["raw_metadata"].get("author_id") or "unknown")
+        if source in sources:
+            continue
+        words = set(re.findall(r"\w+", folded(event["text"])))
+        # ponytail: pairwise copy detection is bounded by the 5,000-event demo;
+        # larger publications need an indexed similarity search before correlation.
+        if any(words and len(words & prior) / len(words | prior) >= 0.8 for prior in distinct):
+            continue
+        distinct.append(words)
+        # Missing author IDs never turn two posts on one platform into two witnesses.
+        sources.add(source)
+    count = len(sources)
+    return {"independent_source_count": count, "corroboration_score": min(100, max(0, count - 1) * 25),
+            "corroboration_status": "multiple_sources" if count >= 2 else "single_source",
+            "corroboration_method": "independent_sources_text_similarity_v1"}
 
 
 def build_snapshot(events: list[dict], reviews: dict, version: str, published_at: str) -> dict:
@@ -101,8 +134,6 @@ def build_snapshot(events: list[dict], reviews: dict, version: str, published_at
     for incident_id, evidence in sorted(groups.items()):
         first = min(evidence, key=lambda item: item["created_at"])
         review = reviews.get(incident_id, {})
-        unique_content = {item["content_hash"]: item for item in evidence}
-        independent_sources = {(item["platform"], item["raw_metadata"].get("author_id")) for item in unique_content.values()}
         incidents.append({
             "id": incident_id, "title": f"{first['category'].replace('_', ' ').capitalize()} · {first['locality']}",
             "summary": first["text"], "created_at": first["created_at"],
@@ -112,7 +143,7 @@ def build_snapshot(events: list[dict], reviews: dict, version: str, published_at
             "lat": first["lat"], "lon": first["lon"], "location_method": first["location_method"],
             "mode": first["mode"], "evidence_ids": sorted(item["id"] for item in evidence),
             "review_status": review.get("status", "pending"), "review_note": review.get("note", ""),
-            "independent_source_count": len(independent_sources),
+            **corroboration(evidence),
         })
     return {"version": version, "published_at": published_at, "incidents": incidents, "evidence": sorted(events, key=lambda item: (item["created_at"], item["id"]))}
 
@@ -137,7 +168,7 @@ def simulation_events(elapsed_seconds: float, anchor_at: float | None = None) ->
     )
     anchor = datetime.fromtimestamp(anchor_at, timezone.utc) if anchor_at is not None else datetime(2026, 10, 5, 14, tzinfo=timezone.utc)
     return [
-        {"platform": platform, "source_id": source_id, "text": text, "mode": "simulation",
+        {"platform": platform, "source_id": source_id, "text": text + " · Bogotá", "mode": "simulation",
          "created_at": (anchor + timedelta(seconds=offset)).isoformat().replace("+00:00", "Z"),
          "source_uri": "", "severity": severity, "confidence": 0.8,
          "raw_metadata": {"scenario": "bogota-10min-v1", "offset_seconds": offset, "synthetic": True}}

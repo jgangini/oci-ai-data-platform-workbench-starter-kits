@@ -45,6 +45,9 @@ dnf -y makecache
 dnf -y install dnf-plugins-core firewalld curl git openssl python3 sudo
 
 install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$UPDATE_DIR" "$UPDATE_INBOX_DIR" "$UPDATE_STATUS_DIR" "$RELEASES_DIR" "$OCI_DIR" "$AUTONOMOUS_DIR" "$BOOTSTRAP_DIR"
+%{ if enable_public_ip_tls ~}
+install -d -m 0755 /var/lib/letsencrypt
+%{ endif ~}
 umask 077
 if [ ! -s "$BOOTSTRAP_DIR/key.pem" ]; then
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$BOOTSTRAP_DIR/key.pem"
@@ -269,7 +272,10 @@ docker run -d \
 %{ if enable_prisma_viewer ~}
   -p ${prisma_admin_private_ip}:8000:8000 \
 %{ endif ~}
-  -v "$TLS_DIR:/etc/aidp-lab/tls:ro,Z" \
+  -v "$TLS_DIR:/etc/aidp-lab/tls:ro,z" \
+%{ if enable_public_ip_tls ~}
+  -v /var/lib/letsencrypt:/var/lib/letsencrypt:ro,z \
+%{ endif ~}
   -v "$OCI_DIR:/etc/aidp-lab/oci:ro,Z" \
   -v "$AUTONOMOUS_DIR:/etc/aidp-lab/autonomous:ro,Z" \
   -v "$STATE_DIR:/var/lib/aidp-lab:Z" \
@@ -277,8 +283,45 @@ docker run -d \
   -v "$UPDATE_INBOX_DIR:/var/lib/aidp-lab/update/inbox:rw,Z" \
   "$LOCAL_IMAGE"
 
+%{ if enable_public_ip_tls ~}
+install -m 0755 "$SOURCE_DIR/scripts/ensure_public_ip_tls.sh" /usr/local/sbin/aidp-lab-public-tls
+printf '%s\n' "$PUBLIC_IP" >/etc/aidp-lab-public-ip
+chmod 0600 /etc/aidp-lab-public-ip
+retry 6 /usr/local/sbin/aidp-lab-public-tls issue
+cat >/etc/systemd/system/aidp-lab-public-tls.service <<'EOF'
+[Unit]
+Description=Renew the public application IP certificate
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aidp-lab-public-tls renew
+UMask=0077
+EOF
+cat >/etc/systemd/system/aidp-lab-public-tls.timer <<'EOF'
+[Unit]
+Description=Check the six-day application certificate twice daily
+
+[Timer]
+OnCalendar=*-*-* 00,12:00:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now aidp-lab-public-tls.timer
+%{ endif ~}
+
 for attempt in $(seq 1 120); do
+%{ if enable_public_ip_tls ~}
+  HEALTH_STATUS=$(curl --silent --output /dev/null --write-out '%%{http_code}' "https://$PUBLIC_IP/api/health") || HEALTH_STATUS=""
+%{ else ~}
   HEALTH_STATUS=$(curl --silent --insecure --output /dev/null --write-out '%%{http_code}' https://127.0.0.1/api/health) || HEALTH_STATUS=""
+%{ endif ~}
   if [ "$HEALTH_STATUS" = "200" ]; then
     break
   fi

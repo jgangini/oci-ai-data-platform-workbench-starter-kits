@@ -47,3 +47,17 @@ The build exports GodEye's exact MIT license, Cesium's third-party inventory and
 installed runtime packages' license/notice texts in `THIRD-PARTY-NOTICES.txt`. Runtime
 npm licenses are Apache-2.0, MIT, ISC, BSD/0BSD and Zlib; DOMPurify offers Apache-2.0 as
 an alternative to MPL-2.0. Python runtime versions reuse the backend pins.
+
+## Context layers
+
+`/api/prisma/context` uses the authenticated viewer boundary. Open-Meteo model estimates
+cover six fixed Bogotá locality anchors, with an eight-second timeout and a shared
+15-minute cache. Failed refreshes are labelled stale; an initial failure returns no
+weather points. These values are contextual model output, never sensor observations or
+incident evidence. Current-value semantics: https://open-meteo.com/en/docs.
+
+The free endpoint is for evaluation/prototyping. Commercial operation requires a
+licensed customer endpoint: https://open-meteo.com/en/pricing and
+https://open-meteo.com/en/terms. The UI retains Open-Meteo/CC BY 4.0 attribution.
+The camera layer links the official Bogotá camera-location page only; no publicly
+authorized live video feed has been verified or embedded.

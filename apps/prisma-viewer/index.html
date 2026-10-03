@@ -1,48 +1,56 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
-    <title>PRISMA · Bogotá</title>
+    <title>Territorial Control · Bogotá</title>
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/admin/prisma"><span class="brand-icon" aria-hidden="true">◈</span><span>PRISMA<small>BOGOTÁ · CENTRO DE OBSERVACIÓN</small></span></a>
-      <div class="snapshot-state"><span id="runtime">Conectando…</span><span id="published">Sin publicación</span></div>
-      <a class="admin-link" href="/admin/prisma">Administrar fuentes ↗</a>
+      <a class="brand" href="/admin/prisma"><span class="brand-icon" aria-hidden="true">◈</span><span>Territorial Control<small>BOGOTÁ · OBSERVATION CENTER</small></span></a>
+      <div class="snapshot-state"><span id="runtime">Connecting…</span><span id="published">No publication</span></div>
+      <a class="admin-link" href="/admin/prisma">Manage sources ↗</a>
     </header>
     <main class="workspace">
-      <section class="map-panel" aria-label="Mapa de incidentes en Bogotá">
+      <section class="map-panel" aria-label="Bogotá incident map">
         <div id="map"></div>
-        <div class="map-heading"><span class="eyebrow">PULSO DE LA CIUDAD</span><h1>Bogotá</h1><p>Emergencias climáticas · evidencia y contexto</p></div>
-        <div class="map-tools"><button id="home" type="button">Centrar Bogotá</button><label><input type="checkbox" id="terrain" /> Relieve</label></div>
+        <div class="map-heading"><span class="eyebrow">CITY PULSE</span><h1>Bogotá</h1><p>Climate emergencies · evidence and context</p></div>
+        <div class="map-tools"><button id="home" type="button">Center Bogotá</button><label><input type="checkbox" id="terrain" /> Terrain</label><button id="filter-area" type="button">Filter map area</button><button id="clear-area" type="button" hidden>Clear area</button></div>
         <p id="map-status" role="status" class="map-status"></p>
+        <details class="context-panel"><summary>Weather · NASA · Cameras</summary>
+          <div class="satellite-controls"><label><input type="checkbox" id="satellite" /> NASA MODIS imagery</label><label>Observation date<input type="date" id="satellite-date" /></label><p id="satellite-status">Daily imagery; not a live camera. Clouds can obscure the ground.</p></div>
+          <div id="weather-context">Loading weather context…</div><div id="camera-context">Loading public camera references…</div>
+        </details>
         <div id="map-credits"></div>
-        <div class="map-attribution"><a href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noreferrer">God’s Eye View · módulos MIT</a> · <a href="/prisma/THIRD-PARTY-NOTICES.txt" target="_blank">Licencias</a></div>
+        <div class="map-attribution"><a href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noreferrer">God’s Eye View · MIT modules</a> · <a href="/prisma/THIRD-PARTY-NOTICES.txt" target="_blank">Licenses</a></div>
       </section>
-      <aside class="operations" aria-label="Alertas y consulta">
-        <div class="operations-title"><div><span class="eyebrow">TABLERO OPERATIVO</span><h2>Señales para validar</h2></div><span id="count" class="count">0</span></div>
-        <p id="connection" role="status">Cargando la publicación…</p>
-        <form id="filters" class="filters" aria-label="Filtros de incidentes">
-          <label>Localidad<select name="locality"><option value="">Todas</option></select></label>
-          <label>Criticidad<select name="severity"><option value="">Todas</option></select></label>
-          <label>Fuente<select name="platform"><option value="">Todas</option></select></label>
-          <label>Origen<select name="mode"><option value="">Todos</option><option value="simulation">SIMULADO</option><option value="real">REAL</option></select></label>
-          <label>Categoría<select name="category"><option value="">Todas</option></select></label>
-          <button id="clear-filters" type="button" class="quiet">Limpiar filtros</button>
-          <label>Desde · hora Bogotá<input type="datetime-local" step="1" name="date_from" /></label>
-          <label>Hasta · hora Bogotá<input type="datetime-local" step="1" name="date_to" /></label>
-          <p id="period-status" role="status" class="metadata period-status">Período inclusivo por fecha de creación de la alerta.</p>
+      <aside class="operations" aria-label="Alerts and assistant">
+        <div class="operations-title"><div><span class="eyebrow">OPERATIONS DASHBOARD</span><h2>Events to review</h2></div><span id="count" class="count">0</span></div>
+        <p id="connection" role="status">Loading publication…</p>
+        <p id="mode-status" class="mode-banner" role="status">Loading data origin · human review required</p>
+        <p id="area-status" role="status" class="metadata"></p>
+        <form id="filters" class="filters" aria-label="Incident filters">
+          <input type="hidden" name="bbox" value="" />
+          <label>Locality<select name="locality"><option value="">All</option></select></label>
+          <label>Severity<select name="severity"><option value="">All</option></select></label>
+          <label>Source<select name="platform"><option value="">All</option></select></label>
+          <label>Origin<select name="mode"><option value="">All</option><option value="simulation">SIMULATED</option><option value="real">REAL</option></select></label>
+          <label>Category<select name="category"><option value="">All</option></select></label>
+          <button id="clear-filters" type="button" class="quiet">Clear filters</button>
+          <label>From · Bogotá time<input type="datetime-local" step="1" name="date_from" /></label>
+          <label>To · Bogotá time<input type="datetime-local" step="1" name="date_to" /></label>
+          <p id="period-status" role="status" class="metadata period-status">Inclusive period by incident creation time.</p>
         </form>
-        <div id="incidents" class="incident-list" aria-label="Lista de incidentes"></div>
-        <section id="detail" class="detail" aria-label="Detalle y evidencias"><p>Selecciona una señal en el mapa o en la lista para revisar su evidencia.</p></section>
-        <section class="chat-panel" aria-label="Consultar al agente PRISMA">
-          <div class="chat-heading"><h2>Consulta PRISMA</h2><span>CON EVIDENCIA</span></div>
-          <p>Pregunta sobre la publicación actual. Las alertas requieren validación humana.</p>
+        <div id="incidents" class="incident-list" aria-label="Incident list"></div>
+        <section id="detail" class="detail" aria-label="Details and evidence"><p>Select an event on the map or list to inspect its evidence.</p></section>
+        <details class="news-panel"><summary>News &amp; institutional reports</summary><div id="news-context"></div><p>Linked publication evidence. External context does not confirm an incident.</p></details>
+        <section class="chat-panel" aria-label="Ask the Territorial Control agent">
+          <div class="chat-heading"><h2>Ask Territorial Control</h2><span>GROUNDED IN EVIDENCE</span></div>
+          <p>Ask about the current publication, selected area or event. Decisions require human review.</p>
           <div class="examples"><button type="button">¿Qué alertas tienen mayor criticidad?</button><button type="button">¿Qué evidencia respalda la alerta seleccionada?</button></div>
           <div id="conversation" class="conversation" role="log" aria-live="polite"></div>
-          <form id="chat"><label for="question">Tu consulta</label><textarea id="question" maxlength="2000" rows="2" required placeholder="Ej. Resume las alertas de inundación en Suba"></textarea><div class="chat-actions"><span id="chat-status" role="status"></span><button type="button" id="cancel" hidden>Cancelar</button><button id="send" type="submit">Consultar ↗</button></div></form>
+          <form id="chat"><label for="question">Your question</label><textarea id="question" maxlength="2000" rows="3" required placeholder="Ask in English or Spanish about the selected event, area or sources…"></textarea><div class="chat-actions"><span id="chat-status" role="status"></span><button type="button" id="cancel" hidden>Cancel</button><button id="send" type="submit">Ask agent ↗</button></div></form>
         </section>
       </aside>
     </main>

@@ -86,6 +86,7 @@ def test_release_snapshot_uses_image_metadata_and_pack_manifests(tmp_path: Path)
         ("retail", "2.0.0"),
         ("healthcare", "2.0.0"),
         ("ai_data_governance_vsc_extension", "3.0.0"),
+        ("territorial_control", "1.0.0"),
     }
 
 

@@ -257,7 +257,7 @@ Copy-Item .env.example .env.dev
 docker compose -f docker/docker-compose.dev.yml up --build -d
 ```
 
-Open `https://localhost:18444`. The example profile uses administrator credentials `admin` / `admin` and registration code `AIDP-2026`; change them before sharing the environment.
+Open `http://localhost:18081`. This local profile binds only to loopback and requires no certificate installation. The example profile uses administrator credentials `admin` / `admin` and registration code `AIDP-2026`; change them before sharing the environment.
 
 Stop the profile with:
 

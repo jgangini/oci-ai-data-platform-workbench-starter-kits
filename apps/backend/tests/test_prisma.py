@@ -118,7 +118,7 @@ def test_simulation_restart_pause_resume_replay_and_real_evidence_survives(tmp_p
     finished = restarted.snapshot()
     assert finished["simulation"]["status"] == "completed"
     expected_ids = {event["id"] for event in finished["evidence"]}
-    assert len(expected_ids) == 13
+    assert len(expected_ids) == 12  # The configured X risk query excludes the cultural post.
     assert "Kennedy" in {item["locality"] for item in finished["incidents"]}
     assert len(finished["incidents"]) == 5  # Four located risks plus one risk pending location.
     assert finished["simulation"]["anchor_at"] == NOW
@@ -131,8 +131,10 @@ def test_simulation_restart_pause_resume_replay_and_real_evidence_survives(tmp_p
     assert len(restarted.snapshot()["evidence"]) == 2
     clock.now += 600
     replayed = restarted.snapshot()
-    assert {item["id"] for item in replayed["evidence"] if item["mode"] == "simulation"} == expected_ids
-    assert len(replayed["evidence"]) == 14
+    replay_ids = {item["id"] for item in replayed["evidence"] if item["mode"] == "simulation"}
+    assert {item.rsplit(":", 1)[-1] for item in replay_ids} == {item.rsplit(":", 1)[-1] for item in expected_ids}
+    assert not replay_ids.intersection(expected_ids)
+    assert len(replayed["evidence"]) == 13
     assert replayed["simulation"]["anchor_at"] == NOW + 720
     assert replayed["simulation"]["run_id"] != finished["simulation"]["run_id"]
     restarted.control_simulation("reset")

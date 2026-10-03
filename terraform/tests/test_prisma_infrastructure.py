@@ -91,11 +91,31 @@ def test_optional_viewer_requires_capacity_for_both_vms():
     assert k_preflight._available_shape(report, candidates, 2) is None
 
 
+def test_active_updater_preserves_acme_webroot_and_shared_certificates(monkeypatch, tmp_path):
+    (tmp_path / ".env").write_text("")
+    original_is_dir = Path.is_dir
+    monkeypatch.setattr(Path, "is_dir", lambda path: (
+        True if str(path).replace("\\", "/") == "/var/lib/letsencrypt" else original_is_dir(path)
+    ))
+    calls = []
+    monkeypatch.setattr(updater, "_run", lambda args: calls.append(args))
+    updater._run_container(tmp_path, "active", "image", candidate=False)
+    assert "/var/lib/letsencrypt:/var/lib/letsencrypt:ro,z" in calls[0]
+    assert any(value.endswith(":/etc/aidp-lab/tls:ro,z") for value in calls[0])
+    source = (ROOT / "scripts" / "ensure_public_ip_tls.sh").read_text()
+    assert "--preferred-profile shortlived" in source and '--ip-address "$PUBLIC_IP"' in source
+    assert source.index("openssl verify") < source.index('mv -f "$TLS/tls.crt.next"') < source.index("nginx -s reload")
+    cloud_init = (ROOT / "terraform/templatefile/user_data.sh").read_text()
+    assert "retry 6 /usr/local/sbin/aidp-lab-public-tls issue" in cloud_init
+    assert "OnCalendar=*-*-* 00,12:00:00" in cloud_init
+    assert 'https://$PUBLIC_IP/api/health' in cloud_init
+
+
 def test_both_reverse_proxies_authenticate_and_overwrite_viewer_identity():
     for name in ("nginx.conf", "nginx.oci-local.conf"):
         proxy = (ROOT / "docker" / name).read_text()
         assert "location = /_prisma_session" in proxy and "internal;" in proxy
-        assert "http://127.0.0.1:8000/api/admin/session" in proxy
+        assert "http://127.0.0.1:8000/api/prisma/session" in proxy
         assert proxy.count("auth_request /_prisma_session;") == 2
         assert proxy.count("proxy_set_header X-PRISMA-User $prisma_user;") == 2
         assert "$http_x_prisma_user" not in proxy

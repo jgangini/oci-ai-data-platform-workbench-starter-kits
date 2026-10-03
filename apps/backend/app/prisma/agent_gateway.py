@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import HTTPException
+from .area import parse_bbox
 
 
 def assistant_texts(value, assistant=False):
@@ -30,7 +31,7 @@ def assistant_texts(value, assistant=False):
 
 
 def validated_filters(filters):
-    if not isinstance(filters, dict) or set(filters) - {"locality", "platform", "category", "severity", "mode", "date_from", "date_to"}:
+    if not isinstance(filters, dict) or set(filters) - {"locality", "platform", "category", "severity", "mode", "date_from", "date_to", "bbox"}:
         raise HTTPException(422, "Filtros inválidos")
     if any(not isinstance(v, str) or len(v) > 100 for v in filters.values()):
         raise HTTPException(422, "Filtros inválidos")
@@ -41,6 +42,10 @@ def validated_filters(filters):
             raise ValueError("Invalid period")
     except ValueError as exc:
         raise HTTPException(422, "Periodo inválido") from exc
+    try:
+        parse_bbox(filters.get("bbox"))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     return filters
 
 

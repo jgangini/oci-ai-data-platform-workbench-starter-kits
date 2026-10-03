@@ -16,6 +16,7 @@ import httpx
 
 from .config import Settings
 from .lab_packs import lab_catalog
+from .prisma.module import PACKAGE as TERRITORIAL_PACKAGE
 
 
 REPOSITORY = "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
@@ -217,7 +218,7 @@ class ApplicationReleaseManager:
                     "status": pack.status,
                 }
                 for pack in lab_catalog()
-            ],
+            ] + [dict(TERRITORIAL_PACKAGE)],
         }
 
     @staticmethod

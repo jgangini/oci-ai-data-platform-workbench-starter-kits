@@ -210,7 +210,7 @@ def test_existing_api_preserves_explicit_revision_retry_token(monkeypatch):
 @pytest.mark.parametrize("failed_phase", ["job", "snapshot", None])
 def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypatch, tmp_path, failed_phase):
     outputs = {"objectstorage_namespace": "ns", "bucket_name": "landing",
-               "medallion_bucket_names": {"gold": "gold"}, "agent_model_id": "model",
+               "medallion_bucket_names": {"gold": "gold", "landing": "landing"}, "agent_model_id": "model",
                "compartment_ocid": "compartment", "ai_data_platform_id": "platform"}
     published, runtime_documents = [], []
     database = SimpleNamespace(commit=lambda: None)
@@ -225,7 +225,8 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
         return {"state": "ACTIVE", "revision": "bundle", "endpoint": "native"}
     monkeypatch.setattr(bootstrap, "publish_agent", agent)
     def check(phase, result):
-        assert not published
+        assert all(item[2] != ".control/prisma/agent.json" for item in published)
+        assert published[0][:4] == ("ns", "landing", "01_landing/prisma/raw/.keep", b"")
         if failed_phase == phase:
             raise RuntimeError("PRISMA " + phase + " failed")
         return result
@@ -243,10 +244,13 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
     if failed_phase:
         with pytest.raises(RuntimeError, match=failed_phase + " failed"):
             bootstrap.bootstrap_prisma(*arguments, deadline=bootstrap.time.monotonic() + 100, **helpers)
-        assert not published
+        assert all(item[2] != ".control/prisma/agent.json" for item in published)
     else:
         result = bootstrap.bootstrap_prisma(*arguments, deadline=bootstrap.time.monotonic() + 100, **helpers)
         assert result["prisma_snapshot_version"] == "gold-version"
-        assert published[0][:3] == ("ns", "gold", ".control/prisma/agent.json")
+        assert published[-1][:3] == ("ns", "gold", ".control/prisma/agent.json")
     assert runtime_documents[0]["bucket"] == "gold"
     assert runtime_documents[0]["workbench_base"] == arguments[0].base
+    assert runtime_documents[0]["landing_bucket"] == "landing"
+    assert runtime_documents[0]["landing_volume_path"] == "/Volumes/catalog/prisma_ingest/landing"
+    assert runtime_documents[0]["checkpoint_volume_path"] == "/Volumes/catalog/prisma_ingest/checkpoints/bronze-v1"

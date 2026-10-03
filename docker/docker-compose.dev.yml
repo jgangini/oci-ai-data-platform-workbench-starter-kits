@@ -9,11 +9,16 @@ services:
     environment:
       PRISMA_VIEWER_URL: http://prisma-viewer:8081
       PRISMA_VIEWER_ENABLED: "true"
+      COOKIE_SECURE: "false"
+      LOCAL_IDENTITY_ARTIFACT_DIR: /var/lib/aidp-lab/local-artifacts
     ports:
       - "127.0.0.1:18081:80"
-      - "127.0.0.1:18444:443"
     volumes:
       - aidp-session-dev:/var/lib/aidp-lab
+      - ./nginx.oci-local.conf:/etc/nginx/nginx.conf:ro
+      - ../../../.local/prisma:/var/lib/aidp-lab/local-artifacts
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1/api/health"]
     restart: unless-stopped
 
   prisma-viewer:
