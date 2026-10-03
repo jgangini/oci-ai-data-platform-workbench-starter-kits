@@ -17,8 +17,10 @@ from urllib.parse import quote, urlsplit
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "apps/backend"))
 from app.prisma.database import install_schema, read_document, write_document
+from app.prisma.scheduling import RUN_FAILED, RUN_SUCCESS, TASK_RUN_QUERY, run_state, task_outcome
 
 SESSION_RETENTION = {"retentionPeriodInDays": 7}
+PIPELINE_REQUIREMENTS = "httpx==0.28.1\noracledb==3.4.2\n"
 _deadline = 0.0
 
 
@@ -53,8 +55,8 @@ def items(api, path, params=None):
             return result
 
 
-def named(api, path, name):
-    matches = [item for item in items(api, path) if (item.get("displayName") or item.get("name")) == name
+def named(api, path, name, params=None):
+    matches = [item for item in items(api, path, params) if (item.get("displayName") or item.get("name")) == name
                and (item.get("lifecycleState") or item.get("lifeCycleState") or item.get("state")) != "DELETED"]
     if len(matches) > 1:
         raise RuntimeError("Duplicate managed PRISMA resource")
@@ -98,14 +100,14 @@ def hidden_compute_detail(api, path, name, key, status):
     return detail
 
 
-def ensure(api, path, name, payload, *, ready=False):
-    current = named(api, path, name)
+def ensure(api, path, name, payload, *, ready=False, params=None):
+    current = named(api, path, name, params)
     if not current:
         if payload is None:
             raise RuntimeError("Managed PRISMA resource disappeared before readiness check")
         operation(api, api.request("POST", path, payload=payload))
     while True:
-        current = named(api, path, name)
+        current = named(api, path, name, params)
         if current:
             state = str(current.get("lifecycleState") or current.get("lifeCycleState") or current.get("state") or "").upper()
             if state in {"FAILED", "INACTIVE", "DELETED", "DELETING", "CANCELED", "CANCELLED"} or state.endswith("_FAILED"):
@@ -220,15 +222,91 @@ def upload(api, workspace, path, content, kind="file"):
         raise RuntimeError("PRISMA workspace content round-trip mismatch")
 
 
+def install_volumes(api, config):
+    catalog = named(api, "/catalogs", config["catalog"])
+    if not catalog:
+        raise RuntimeError("PRISMA requires its existing governed catalog")
+    schema = ensure(api, "/schemas", "prisma_ingest", {"displayName": "prisma_ingest", "catalogName": config["catalog"]},
+                    ready=True, params={"catalogKey": catalog["key"]})
+    schema_detail = api.request("GET", "/schemas/" + quote(str(schema["key"]), safe="")).body
+    if schema_detail.get("catalogName") != config["catalog"] or schema_detail.get("displayName") != "prisma_ingest":
+        raise RuntimeError("PRISMA ingest schema does not match the governed catalog")
+    for name, kind in (("landing", "EXTERNAL"), ("checkpoints", "MANAGED")):
+        payload = {"displayName": name, "catalogName": config["catalog"], "schemaName": "prisma_ingest", "volumeType": kind}
+        if kind == "EXTERNAL":
+            payload["storageLocation"] = f"oci://{config['landing_bucket']}@{config['namespace']}/{config['landing_prefix']}"
+        volume = ensure(api, "/volumes", name, payload, ready=True,
+                        params={"catalogKey": catalog["key"], "schemaKey": schema["key"]})
+        detail = api.request("GET", "/volumes/" + quote(str(volume["key"]), safe="")).body
+        if any(detail.get(field) != value for field, value in payload.items()):
+            raise RuntimeError("PRISMA volume type or location differs from its configured contract")
+
+
+def cluster_idle(api, workspace, compute):
+    base = f"/workspaces/{workspace}"
+    detail = api.request("GET", base + "/clusters/" + quote(compute, safe="")).body
+    if detail.get("attachedSessions") or detail.get("attachedNotebooks"):
+        raise RuntimeError("PRISMA library installation requires a cluster without attached notebook sessions")
+    jobs = items(api, base + "/jobs")
+    for job in jobs:
+        body = api.request("GET", base + "/jobs/" + quote(str(job["key"]), safe="")).body
+        clusters = body.get("jobClusters", []) + [task.get("cluster") or {} for task in body.get("tasks", [])]
+        if any(cluster.get("clusterKey") == compute for cluster in clusters):
+            if any((body.get(kind) or {}).get("pauseStatus") == "UNPAUSED" for kind in ("schedule", "continuous")):
+                raise RuntimeError("Pause jobs using the shared cluster before installing PRISMA libraries")
+    # ponytail: conservatively block on any active workspace run; per-compute task filtering can relax this later.
+    runs = items(api, base + "/jobRuns", {"sortBy": "timeCreated", "sortOrder": "DESC", "limit": 100})
+    if any((run.get("state") or {}).get("status") in {"PENDING", "QUEUED", "RUNNING", "CANCELING"} for run in runs):
+        raise RuntimeError("PRISMA library installation will not restart a cluster while workspace jobs are active")
+
+
+def install_cluster_libraries(api, workspace, compute, *, ensure_folder):
+    digest = hashlib.sha256(PIPELINE_REQUIREMENTS.encode()).hexdigest()[:12]
+    directory = "/Workspace/medallon/prisma/dependencies_" + digest
+    ensure_folder(api, workspace, "/Workspace/medallon/prisma")
+    ensure_folder(api, workspace, directory)
+    path = directory + "/requirements.txt"
+    upload(api, workspace, path, PIPELINE_REQUIREMENTS)
+    base = f"/workspaces/{workspace}/clusters/{quote(compute, safe='')}"
+
+    def status():
+        matches = [item for item in items(api, base + "/libraries") if item.get("path") == path and item.get("status") != "DELETED"]
+        if len(matches) > 1:
+            raise RuntimeError("Duplicate PRISMA cluster library")
+        state = matches[0].get("status") if matches else None
+        if state in {"FAILED", "SKIPPED", "UNINSTALL_ON_RESTART"}:
+            raise RuntimeError("PRISMA cluster library is not usable: " + state)
+        return state
+
+    current = status()
+    if current == "INSTALLED":
+        return path
+    cluster_idle(api, workspace, compute)
+    if current is None:
+        operation(api, api.request("PATCH", base + "/libraries", payload={"items": [
+            {"operation": "INSTALL", "type": "WORKSPACE_FILE", "path": path}]}))
+    while status() not in {"INSTALLED", "INSTALL_ON_RESTART"}:
+        pause()
+    cluster_idle(api, workspace, compute)
+    operation(api, api.request("POST", base + "/actions/restart", payload={}))
+    while True:
+        state = api.request("GET", base).body.get("state")
+        if state in {"FAILED", "DELETED", "DELETING"} or str(state).endswith("_FAILED"):
+            raise RuntimeError("PRISMA cluster failed while installing libraries")
+        if state == "ACTIVE" and status() == "INSTALLED":
+            return path
+        pause()
+
+
 def install_job(api, workspace, compute, config, bundle, *, ensure_folder):
     from app.aidp import AidpClient
     root = "/Workspace/medallon/prisma"
     ensure_folder(api, workspace, root)
-    source = bundle_prelude(bundle) + f"\nfrom prisma.pipeline import run\nrun(spark, oidlUtils.secrets.get, {config!r})\n"
+    source = bundle_prelude(bundle) + f"\nfrom prisma.pipeline import run\nrun(spark, aidputils.secrets.get, {config!r})\n"
     cells = [{"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": value.splitlines(keepends=True)}
-             for value in ("%pip install oracledb==3.4.2 httpx==0.28.1 oci==2.160.3\n", source)]
+             for value in (source,)]
     notebook = {"nbformat": 4, "nbformat_minor": 5, "metadata": {"language_info": {"name": "python"}}, "cells": cells}
-    path = root + "/prisma_tick_" + hashlib.sha256(bundle).hexdigest()[:12] + ".ipynb"
+    path = root + "/prisma_tick_" + hashlib.sha256(json.dumps(notebook, sort_keys=True).encode()).hexdigest()[:12] + ".ipynb"
     upload(api, workspace, path, notebook, "notebook")
     payload = {"name": "prisma_bogota_tick", "path": root, "description": "Finite PRISMA collection and publication tick",
         "maxConcurrentRuns": 1, "queue": {"isEnabled": False}, "timeoutSeconds": 600,
@@ -244,13 +322,11 @@ def install_job(api, workspace, compute, config, bundle, *, ensure_folder):
     key = str(job["key"])
     detail = api.request("GET", f"/workspaces/{workspace}/jobs/{key}")
     # Preserve a live operator's schedule when updating only the versioned notebook.
-    payload["schedule"] = detail.body.get("schedule", payload["schedule"])
+    payload["schedule"] = detail.body.get("schedule") or payload["schedule"]
     def matches(body):
         return (all(AidpClient._notebook_matches(body.get(field), value) for field, value in payload.items() if field != "tasks")
                 and AidpClient._job_tasks_match(body.get("tasks"), payload["tasks"], compute))
     if not matches(detail.body):
-        if current and not detail.headers.get("etag"):
-            raise RuntimeError("PRISMA job changed and cannot be updated without an ETag")
         operation(api, api.request("PUT", f"/workspaces/{workspace}/jobs/{key}", payload=payload,
                                   headers={"If-Match": detail.headers["etag"]} if detail.headers.get("etag") else None))
         if not matches(api.request("GET", f"/workspaces/{workspace}/jobs/{key}").body):
@@ -323,7 +399,11 @@ def publish_agent(api, workspace, bundle, region):
 
 def run_initial_job(api, workspace, job, revision):
     base = f"/workspaces/{workspace}/jobRuns"
-    token = hashlib.sha256(f"{api.deployment_id}:prisma:{job}:{revision}".encode()).hexdigest()
+    detail = api.request("GET", f"/workspaces/{workspace}/jobs/{quote(job, safe='')}").body
+    notebooks = [task.get("notebookPath", "") for task in detail.get("tasks", []) if task.get("type") == "NOTEBOOK_TASK"]
+    if len(notebooks) != 1 or not re.fullmatch(r"/Workspace/medallon/prisma/prisma_tick_[a-f0-9]{12}\.ipynb", notebooks[0]):
+        raise RuntimeError("PRISMA initial job must reference one content-versioned notebook")
+    token = hashlib.sha256(f"{api.deployment_id}:prisma:{job}:{revision}:{notebooks[0]}".encode()).hexdigest()
     response = api.request("POST", base, payload={"jobKey": job, "parameters": []},
                            headers={"opc-retry-token": token})
     operation(api, response)
@@ -331,25 +411,19 @@ def run_initial_job(api, workspace, job, revision):
     if not key:
         raise RuntimeError("PRISMA initial job run did not return a key")
 
-    def status(value):
-        state = value.get("state") or {}
-        result = state.get("status") if isinstance(state, dict) else state
-        return str(result or value.get("status") or "").upper()
-
     while True:
         pause(0)
-        state = status(api.request("GET", base + "/" + quote(key, safe="")).body)
-        if state in {"SUCCESS", "SUCCEEDED"}:
+        state = run_state(api.request("GET", base + "/" + quote(key, safe="")).body)
+        if state in RUN_SUCCESS:
             tasks = items(api, f"/workspaces/{workspace}/taskRuns", {
-                "jobRunKey": key, "sortBy": "timeCreated", "sortOrder": "ASC", "limit": 1000,
+                "jobRunKey": key, **TASK_RUN_QUERY,
             })
-            if len(tasks) == 1 and tasks[0].get("taskKey") == "prisma_tick" and status(tasks[0]) in {"SUCCESS", "SUCCEEDED"}:
+            outcome = task_outcome(tasks)
+            if outcome == "SUCCESS":
                 return key
-            if any(status(task) in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED",
-                "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED"} for task in tasks):
+            if outcome == "FAILED":
                 raise RuntimeError("PRISMA initial task failed; no readiness claimed")
-        elif state in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED",
-            "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED"}:
+        elif state in RUN_FAILED:
             raise RuntimeError("PRISMA initial job failed; no readiness claimed")
         pause(10)
 
@@ -387,6 +461,8 @@ def bootstrap_prisma(api, context, outputs, config, signer, storage, wallet, wal
         landing_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/landing",
         checkpoint_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/checkpoints/bronze-v1")
     workspace = reconciled["workspace_key"]
+    install_volumes(agent_api, runtime)
+    install_cluster_libraries(agent_api, workspace, reconciled["shared_compute_key"], ensure_folder=ensure_folder)
     job = install_job(api, workspace, reconciled["shared_compute_key"], runtime, bundle, ensure_folder=ensure_folder)
     with tempfile.TemporaryDirectory(prefix="prisma-config-") as directory:
         with zipfile.ZipFile(io.BytesIO(wallet)) as archive:

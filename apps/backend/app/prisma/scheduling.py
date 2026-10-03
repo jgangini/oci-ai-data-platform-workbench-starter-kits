@@ -5,7 +5,26 @@ from urllib.parse import quote, urlsplit
 from .database import read_document
 
 
-JOB_FIELDS = ("name", "path", "description", "maxConcurrentRuns", "jobClusters", "tasks", "queue", "schedule", "timeoutSeconds")
+JOB_FIELDS = ("runAs", "name", "path", "description", "maxConcurrentRuns", "jobClusters", "tasks",
+              "queue", "schedule", "continuous", "gitConfig", "parameters", "timeoutSeconds")
+RUN_SUCCESS = {"SUCCESS", "SUCCEEDED"}
+RUN_FAILED = {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED",
+              "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED"}
+TASK_RUN_QUERY = {"sortBy": "timeCreated", "sortOrder": "ASC", "limit": 100}
+
+
+def run_state(document):
+    state = document.get("state") or {}
+    value = state.get("status") if isinstance(state, dict) else state
+    return str(value or document.get("status") or "").upper()
+
+
+def task_outcome(tasks):
+    if any(task.get("taskKey") != "prisma_tick" or run_state(task) in RUN_FAILED for task in tasks):
+        return "FAILED"
+    if tasks and all(run_state(task) in RUN_SUCCESS for task in tasks):
+        return "SUCCESS"
+    return "RUNNING"
 
 
 def needs_schedule(configuration, simulation, now=None):
@@ -27,13 +46,12 @@ def job_path(runtime):
 def set_schedule(request, runtime, enabled):
     path = job_path(runtime)
     job, headers = request("GET", path, phase="content", include_headers=True)
-    etag = headers.get("etag")
-    if not etag:
-        raise RuntimeError("PRISMA job schedule update requires an ETag")
+    etag = headers.get("etag") or headers.get("ETag")
     payload = {key: job[key] for key in JOB_FIELDS if key in job}
     payload.update(maxConcurrentRuns=1, queue={"isEnabled": False},
         schedule={"quartzCronExpression": "0 * * * * ?", "timezoneId": "UTC", "pauseStatus": "UNPAUSED" if enabled else "PAUSED"})
-    request("PUT", path, payload=payload, headers={"If-Match": etag}, phase="content")
+    # ponytail: GET may omit ETag, making concurrent edits last-write-wins; server ETags restore conditional protection.
+    request("PUT", path, payload=payload, headers={"If-Match": etag} if etag else None, phase="content")
 
 
 def submit_run(request, runtime, request_id):

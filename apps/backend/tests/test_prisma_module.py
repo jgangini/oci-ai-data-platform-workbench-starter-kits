@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from app.aidp import AidpClient
 from app.prisma.local import LocalPrismaRuntime
 from app.prisma.module import TerritorialModule, run_state
 
@@ -65,3 +66,33 @@ def test_failed_prerequisites_cannot_start_or_enable_module(monkeypatch):
     with pytest.raises(HTTPException) as error:
         asyncio.run(module.status(True))
     assert error.value.status_code == 503
+
+
+@pytest.mark.parametrize("task_key,task_status,expected", [
+    ("prisma_tick", "SUCCESS", "ready"), ("other", "SUCCESS", "failed"),
+    ("prisma_tick", "RUNNING", "activating"), ("prisma_tick", "FAILED", "failed"),
+    ("prisma_tick", "INTERNAL_ERROR", "failed"), ("prisma_tick", "UPSTREAM_FAILED", "failed"),
+    ("prisma_tick", "UPSTREAM_CANCELED", "failed"), ("prisma_tick", "EXCLUDED", "failed"),
+])
+def test_activation_checks_all_native_task_attempts_across_pages(monkeypatch, task_key, task_status, expected):
+    pages = []
+    def request(method, path, **kwargs):
+        assert method == "GET"
+        if "/jobRuns/" in path:
+            return {"state": {"status": "SUCCESS"}}
+        assert path.endswith("/taskRuns")
+        query = kwargs["params"]
+        assert {key: query[key] for key in ("jobRunKey", "sortBy", "sortOrder", "limit")} == {
+            "jobRunKey": "run", "sortBy": "timeCreated", "sortOrder": "ASC", "limit": 100}
+        pages.append(query.get("page"))
+        task = {"taskKey": task_key, "state": {"status": task_status}} if query.get("page") else {
+            "taskKey": "prisma_tick", "state": {"status": "SUCCESS"}}
+        return {"items": [task]}, {} if query.get("page") else {"opc-next-page": "second"}
+    client = SimpleNamespace(_request=request, _page_items=AidpClient._page_items)
+    client._list = lambda path, **kwargs: AidpClient._list(client, path, **kwargs)
+    module = TerritorialModule(SimpleNamespace(local_development_mode=False),
+        SimpleNamespace(_snapshot=lambda: {"version": "verified"}))
+    monkeypatch.setattr(module, "_write", lambda value: value)
+    result = module._poll({"status": "activating", "enabled": False, "run_key": "run"}, client, {"workspace_key": "ws"})
+    assert result["status"] == expected and result["enabled"] is (expected == "ready")
+    assert pages == [None, "second"]

@@ -161,7 +161,8 @@ class AidpApi:
             request_headers.setdefault("opc-retry-token", str(
                 uuid.uuid5(
                     uuid.NAMESPACE_URL,
-                    f"{self.deployment_id}:{method.upper()}:{path}:{object_type}:{payload_hash}",
+                    f"{self.deployment_id}:{method.upper()}:{path}:{object_type}:{payload_hash}"
+                    + (f":{request_headers['path']}" if request_headers.get("path") else ""),
                 )
             ))
         response = self._send(method, path, request_headers, payload, data, params)

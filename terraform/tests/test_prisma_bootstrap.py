@@ -54,6 +54,7 @@ class Api:
         if path.endswith("/jobRuns/run-one"):
             return response({"state": {"status": self.run_state}})
         if path.endswith("/taskRuns"):
+            assert params["limit"] == 100, "Native task-run API rejects limit=1000"
             return response({"items": [{"taskKey": "prisma_tick", "state": {"status": self.run_state}}]})
         if method == "PUT" and "/jobs/" in path:
             self.resources[path].update(payload)
@@ -212,8 +213,10 @@ def test_deployment_helpers_reject_duplicates_and_mismatched_endpoint_retention(
 @pytest.mark.parametrize("failed_resource", ["job", "task"])
 def test_initial_job_requires_native_run_and_task_success_and_revision_token(monkeypatch, failed_state, failed_resource):
     api = Api()
+    api.resources["/workspaces/ws/jobs/job"] = {"tasks": [{"type": "NOTEBOOK_TASK",
+        "notebookPath": "/Workspace/medallon/prisma/prisma_tick_aaaaaaaaaaaa.ipynb"}]}
     assert bootstrap.run_initial_job(api, "ws", "job", "revision") == "run-one"
-    method, path, payload, headers = api.calls[0]
+    method, path, payload, headers = api.calls[1]
     assert (method, path, payload) == ("POST", "/workspaces/ws/jobRuns", {"jobKey": "job", "parameters": []})
     assert len(headers["opc-retry-token"]) == 64
     assert api.calls[-1][1] == "/workspaces/ws/taskRuns"
@@ -248,6 +251,208 @@ def test_job_uses_native_notebook_create_rename_export_and_preserves_live_schedu
     assert any("/actions/export/contents/" in path for _, path, _, _ in api.calls)
     assert len([1 for method, path, _, _ in api.calls if method == "POST" and path.endswith("/jobs")]) == 1
     assert len([1 for method, path, _, _ in api.calls if method == "PUT" and "/jobs/" in path]) == 1
+
+
+@pytest.mark.parametrize("second_task,state", [("prisma_tick", "SUCCESS"), ("prisma_tick", "FAILED"), ("other_task", "SUCCESS")])
+def test_initial_job_accepts_successful_native_task_attempts_but_never_hides_failure(monkeypatch, second_task, state):
+    api = Api()
+    job = bootstrap.install_job(api, "ws", "compute", {}, bootstrap.runtime_archive(), ensure_folder=lambda *_: None)
+    original = api.request
+
+    def request(method, path, **kwargs):
+        response = original(method, path, **kwargs)
+        if path.endswith("/taskRuns"):
+            response.body["items"].append({"key": "second-native-attempt", "taskKey": second_task, "state": {"status": state}})
+        return response
+
+    def no_wait(seconds=5):
+        assert seconds == 0, "Completed native task attempts must not wait indefinitely"
+
+    monkeypatch.setattr(api, "request", request)
+    monkeypatch.setattr(bootstrap, "pause", no_wait)
+    if second_task == "prisma_tick" and state == "SUCCESS":
+        assert bootstrap.run_initial_job(api, "ws", job, "same-notebook") == "run-one"
+    else:
+        with pytest.raises(RuntimeError, match="initial task failed; no readiness claimed"):
+            bootstrap.run_initial_job(api, "ws", job, "same-notebook")
+
+
+@pytest.mark.parametrize("etag", [None, "native-version"])
+def test_existing_job_reconciles_without_required_etag_and_defaults_null_schedule(monkeypatch, etag):
+    api, bundle = Api(), bootstrap.runtime_archive()
+    job = bootstrap.install_job(api, "ws", "compute", {}, bundle, ensure_folder=lambda *_: None)
+    path = "/workspaces/ws/jobs/" + job
+    api.resources[path].update(schedule=None, timeoutSeconds=42)
+    request = api.request
+
+    def with_etag(method, resource, **kwargs):
+        response = request(method, resource, **kwargs)
+        if method == "GET" and resource == path and etag:
+            response.headers["etag"] = etag
+        return response
+
+    monkeypatch.setattr(api, "request", with_etag)
+    assert bootstrap.install_job(api, "ws", "compute", {}, bundle, ensure_folder=lambda *_: None) == job
+    updates = [call for call in api.calls if call[:2] == ("PUT", path)]
+    assert len(updates) == 2
+    assert updates[-1][3] == ({"If-Match": etag} if etag else None)
+    assert api.resources[path]["schedule"]["pauseStatus"] == "PAUSED"
+    assert api.resources[path]["timeoutSeconds"] == 600
+
+
+def test_notebook_uses_native_aidputils_and_versions_the_complete_content(monkeypatch, tmp_path):
+    api, bundle, calls = Api(), bootstrap.runtime_archive(), []
+    config = {"bucket": "gold"}
+    secret_get = lambda **_: None
+    spark = object()
+    monkeypatch.setitem(sys.modules, "aidputils", None)
+    monkeypatch.setitem(sys.modules, "prisma.pipeline", SimpleNamespace(run=lambda *args: calls.append(args)))
+    monkeypatch.setattr(bootstrap.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    job = bootstrap.install_job(api, "ws", "compute", config, bundle, ensure_folder=lambda *_: None)
+    notebooks = {path: value for path, value in api.contents.items() if value["type"] == "notebook"}
+    cells = next(iter(notebooks.values()))["content"]["cells"]
+    assert len(cells) == 1 and "%pip" not in "".join(cells[0]["source"])
+    cell = cells[0]
+    exec("".join(cell["source"]), {"spark": spark, "oidlUtils": SimpleNamespace(),
+        "aidputils": SimpleNamespace(secrets=SimpleNamespace(get=secret_get))})
+    assert calls == [(spark, secret_get, config)]
+    assert bootstrap.install_job(api, "ws", "compute", {"bucket": "updated"}, bundle, ensure_folder=lambda *_: None) == job
+    assert len({path for path, value in api.contents.items() if value["type"] == "notebook"}) == 2
+    assert all(api.contents[path] == value for path, value in notebooks.items())
+    bootstrap.run_initial_job(api, "ws", job, "same-bundle")
+    first_token = next(call[3]["opc-retry-token"] for call in reversed(api.calls) if call[:2] == ("POST", "/workspaces/ws/jobRuns"))
+    bootstrap.run_initial_job(api, "ws", job, "same-bundle")
+    assert next(call[3]["opc-retry-token"] for call in reversed(api.calls) if call[:2] == ("POST", "/workspaces/ws/jobRuns")) == first_token
+    bootstrap.install_job(api, "ws", "compute", {"bucket": "wrapper-only-update"}, bundle, ensure_folder=lambda *_: None)
+    bootstrap.run_initial_job(api, "ws", job, "same-bundle")
+    assert next(call[3]["opc-retry-token"] for call in reversed(api.calls) if call[:2] == ("POST", "/workspaces/ws/jobRuns")) != first_token
+
+
+@pytest.mark.parametrize("initial_status", [None, "INSTALL_ON_RESTART", "INSTALLED"])
+def test_cluster_libraries_install_once_then_reuse_without_restart(monkeypatch, initial_status):
+    api, state = Api(), {"status": initial_status, "path": None}
+    original = api.request
+    base = "/workspaces/ws/clusters/compute"
+
+    def request(method, path, **kwargs):
+        if path == base + "/libraries":
+            api.calls.append((method, path, kwargs.get("payload"), kwargs.get("headers")))
+            state["path"] = next(value["path"] for value in api.contents.values() if value["name"] == "requirements.txt")
+            if method == "PATCH":
+                assert kwargs["payload"] == {"items": [{"operation": "INSTALL", "type": "WORKSPACE_FILE", "path": state["path"]}]}
+                state["status"] = "INSTALL_ON_RESTART"
+            return SimpleNamespace(body={"items": [{"path": state["path"], "status": state["status"]}] if state["status"] else []}, headers={})
+        if path == base + "/actions/restart":
+            assert kwargs["payload"] == {}
+            state["status"] = "INSTALLED"
+            api.calls.append((method, path, kwargs["payload"], None))
+            return SimpleNamespace(body={}, headers={})
+        return original(method, path, **kwargs)
+
+    api.resources[base] = {"state": "ACTIVE", "attachedSessions": [], "attachedNotebooks": []}
+    monkeypatch.setattr(api, "request", request)
+    installed = bootstrap.install_cluster_libraries(api, "ws", "compute", ensure_folder=lambda *_: None)
+    assert installed.endswith("/requirements.txt")
+    assert bootstrap.install_cluster_libraries(api, "ws", "compute", ensure_folder=lambda *_: None) == installed
+    assert len([call for call in api.calls if call[:2] == ("PATCH", base + "/libraries")]) == int(initial_status is None)
+    assert len([call for call in api.calls if call[:2] == ("POST", base + "/actions/restart")]) == int(initial_status != "INSTALLED")
+    assert next(iter(api.contents.values()))["content"] == "httpx==0.28.1\noracledb==3.4.2\n"
+
+
+@pytest.mark.parametrize("drift", [None, "location", "type", "schema"])
+def test_native_volumes_are_scoped_idempotent_and_reject_drift(monkeypatch, drift):
+    api = Api()
+    api.resources["/catalogs"] = [{"key": "catalog-key", "displayName": "catalog"}]
+    config = {"catalog": "catalog", "namespace": "ns", "landing_bucket": "landing", "landing_prefix": "01_landing/prisma/raw/"}
+    original = api.request
+
+    def request(method, path, **kwargs):
+        if method == "GET" and path == "/schemas":
+            assert kwargs["params"] == {"catalogKey": "catalog-key"}
+        if method == "GET" and path == "/volumes":
+            assert kwargs["params"] == {"catalogKey": "catalog-key", "schemaKey": "key-prisma_ingest"}
+        return original(method, path, **kwargs)
+
+    monkeypatch.setattr(api, "request", request)
+    bootstrap.install_volumes(api, config)
+    bootstrap.install_volumes(api, config)
+    writes = [call for call in api.calls if call[0] != "GET"]
+    assert len(writes) == 3
+    assert writes[1][2] == {"displayName": "landing", "catalogName": "catalog", "schemaName": "prisma_ingest",
+        "volumeType": "EXTERNAL", "storageLocation": "oci://landing@ns/01_landing/prisma/raw/"}
+    assert writes[2][2] == {"displayName": "checkpoints", "catalogName": "catalog", "schemaName": "prisma_ingest", "volumeType": "MANAGED"}
+    if drift:
+        target, field, value = {"location": ("/volumes/key-landing", "storageLocation", "oci://elsewhere@ns/"),
+            "type": ("/volumes/key-checkpoints", "volumeType", "EXTERNAL"),
+            "schema": ("/schemas/key-prisma_ingest", "catalogName", "foreign")}[drift]
+        api.resources[target][field] = value
+        with pytest.raises(RuntimeError, match="differs|does not match"):
+            bootstrap.install_volumes(api, config)
+        assert [call for call in api.calls if call[0] != "GET"] == writes
+
+
+@pytest.mark.parametrize("busy", ["session", "schedule", "continuous", "run"])
+def test_cluster_libraries_refuse_to_restart_busy_shared_compute(busy):
+    api = Api()
+    api.resources["/workspaces/ws/clusters/compute"] = {"state": "ACTIVE", "attachedSessions": ["session"] if busy == "session" else []}
+    api.resources["/workspaces/ws/jobs"] = [{"key": "existing"}]
+    api.resources["/workspaces/ws/jobs/existing"] = {"tasks": [{"cluster": {"clusterKey": "compute"}}],
+        "schedule": None if busy == "continuous" else {"pauseStatus": "UNPAUSED" if busy == "schedule" else "PAUSED"},
+        "continuous": {"pauseStatus": "UNPAUSED" if busy == "continuous" else "PAUSED"}}
+    api.resources["/workspaces/ws/jobRuns"] = [{"state": {"status": "RUNNING"}}] if busy == "run" else []
+    with pytest.raises(RuntimeError, match="session|Pause jobs|active"):
+        bootstrap.install_cluster_libraries(api, "ws", "compute", ensure_folder=lambda *_: None)
+    assert not any(path.endswith("/libraries") and method == "PATCH" or path.endswith("/actions/restart") for method, path, *_ in api.calls)
+
+
+def test_cluster_idle_does_not_block_on_other_compute_continuous_job():
+    api = Api()
+    api.resources["/workspaces/ws/clusters/compute"] = {"state": "ACTIVE"}
+    api.resources["/workspaces/ws/jobs"] = [{"key": "other"}]
+    api.resources["/workspaces/ws/jobs/other"] = {"jobClusters": [{"clusterKey": "other-compute"}],
+        "tasks": [{"cluster": {"clusterKey": "other-compute"}}], "schedule": None, "continuous": {"pauseStatus": "UNPAUSED"}}
+    bootstrap.cluster_idle(api, "ws", "compute")
+    assert all(method == "GET" for method, *_ in api.calls)
+
+
+def test_failed_cluster_library_does_not_restart_or_retry_install():
+    api = Api()
+    digest = bootstrap.hashlib.sha256(bootstrap.PIPELINE_REQUIREMENTS.encode()).hexdigest()[:12]
+    api.resources["/workspaces/ws/clusters/compute/libraries"] = [{"path": f"/Workspace/medallon/prisma/dependencies_{digest}/requirements.txt", "status": "FAILED"}]
+    with pytest.raises(RuntimeError, match="not usable: FAILED"):
+        bootstrap.install_cluster_libraries(api, "ws", "compute", ensure_folder=lambda *_: None)
+    assert not any(method == "PATCH" or path.endswith("/actions/restart") for method, path, *_ in api.calls)
+
+
+def test_cluster_library_waits_for_restart_and_installed_readiness(monkeypatch):
+    api, waits = Api(), []
+    digest = bootstrap.hashlib.sha256(bootstrap.PIPELINE_REQUIREMENTS.encode()).hexdigest()[:12]
+    base = "/workspaces/ws/clusters/compute"
+    library = {"path": f"/Workspace/medallon/prisma/dependencies_{digest}/requirements.txt", "status": "INSTALLING"}
+    api.resources[base] = {"state": "ACTIVE"}
+    api.resources[base + "/libraries"] = [library]
+    original = api.request
+
+    def request(method, path, **kwargs):
+        if path.endswith("/actions/restart"):
+            api.calls.append((method, path, kwargs["payload"], None))
+            api.resources[base]["state"] = "RESTARTING"
+            return SimpleNamespace(body={}, headers={})
+        return original(method, path, **kwargs)
+
+    def advance(seconds=5):
+        if seconds:
+            waits.append(seconds)
+            assert len(waits) <= 2
+            library["status"] = "INSTALL_ON_RESTART" if len(waits) == 1 else "INSTALLED"
+            api.resources[base]["state"] = "ACTIVE"
+
+    monkeypatch.setattr(api, "request", request)
+    monkeypatch.setattr(bootstrap, "pause", advance)
+    bootstrap.install_cluster_libraries(api, "ws", "compute", ensure_folder=lambda *_: None)
+    assert len(waits) == 2
+    assert not any(method == "PATCH" for method, *_ in api.calls)
 
 
 def test_publication_requires_matching_version_and_safe_snapshot_key():
@@ -300,6 +505,10 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
         assert (api.api_version, api.resource_segment) == ("20240831", "dataLakes")
         return "job"
     monkeypatch.setattr(bootstrap, "database_users", database_users)
+    monkeypatch.setattr(bootstrap, "install_volumes", lambda *_: None)
+    def install_libraries(api, *_, **__):
+        assert (api.api_version, api.resource_segment) == ("20260430", "aiDataPlatforms")
+    monkeypatch.setattr(bootstrap, "install_cluster_libraries", install_libraries)
     monkeypatch.setattr(bootstrap, "install_job", install_job)
     monkeypatch.setattr(bootstrap, "read_document", lambda *_: {"revision": 0})
     monkeypatch.setattr(bootstrap, "write_document", lambda _db, _name, data, _revision: runtime_documents.append(data))
