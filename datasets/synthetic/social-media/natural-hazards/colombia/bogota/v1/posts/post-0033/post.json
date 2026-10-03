@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0033",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0033",
+    "username": "sim_bogota_0033",
+    "display_name": "Fictional Bogotá Reporter 033"
+  },
+  "message": "El agua de escorrentía llega al primer escalón de una casa de Bosa; no tengo una medición exacta. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 96,
+  "available_offset_seconds": 96,
+  "attachments": []
+}

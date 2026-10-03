@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0060",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0060",
+    "username": "sim_bogota_0060",
+    "display_name": "Fictional Bogotá Reporter 060"
+  },
+  "message": "El viento cambia la dirección de la columna de humo de Chapinero durante algunos segundos. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 132,
+  "available_offset_seconds": 132,
+  "attachments": []
+}

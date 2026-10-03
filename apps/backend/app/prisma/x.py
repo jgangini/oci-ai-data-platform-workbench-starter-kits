@@ -79,7 +79,8 @@ def fetch_page(client, token: str, query: str, checkpoint: dict, now: float, *, 
         if "meta" not in payload or not isinstance(posts, list) or not isinstance(meta, dict) or (payload.get("errors") and not posts):
             raise ValueError("Invalid page")
         media = {item["media_key"]: item for item in payload.get("includes", {}).get("media", [])}
-        events = [_post_event(post, now, media) for post in posts]
+        users = {str(item["id"]): item for item in payload.get("includes", {}).get("users", [])}
+        events = [_post_event(post, now, media, users) for post in posts]
     except (ValueError, TypeError, AttributeError, KeyError) as exc:
         raise XFailure("invalid_response", now + 60) from exc
     if not cursor.get("pending_newest_id") and meta.get("newest_id"):
@@ -90,11 +91,13 @@ def fetch_page(client, token: str, query: str, checkpoint: dict, now: float, *, 
     return events, cursor
 
 
-def _post_event(post: dict, now: float, media=None) -> dict:
+def _post_event(post: dict, now: float, media=None, users=None) -> dict:
     source_id = str(post["id"])
     if not source_id.isdigit():
         raise ValueError("Invalid post id")
+    author = (users or {}).get(str(post.get("author_id")), {})
     return {"platform": "x", "source_id": source_id, "mode": "real", "text": post["text"],
+            "username": str(author.get("username", ""))[:100], "display_name": str(author.get("name", ""))[:200],
             "created_at": post["created_at"], "observed_at": utc_text(now),
             "source_uri": f"https://x.com/i/web/status/{source_id}",
             "media": photos("x", [(media or {}).get(key, {}) for key in post.get("attachments", {}).get("media_keys", [])]),

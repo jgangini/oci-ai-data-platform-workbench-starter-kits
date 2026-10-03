@@ -45,7 +45,7 @@ def test_cloud_activation_requires_native_job_task_and_snapshot_and_deduplicates
             {"key": "run"} if method == "POST" else {"state": {"status": "SUCCEEDED"}}),
         _list=lambda *_args, **_kwargs: [{"taskKey": "prisma_tick", "state": {"status": task_status}}],
     )
-    monkeypatch.setattr(module, "_prerequisites", lambda: (client, {"workspace_key": "workspace", "job_key": "job"}))
+    monkeypatch.setattr(module, "_prerequisites", lambda **_: (client, {"workspace_key": "workspace", "job_key": "job"}))
     monkeypatch.setattr(module, "_read", lambda: dict(document))
     monkeypatch.setattr(module, "_write", lambda values: document.update(values) or dict(document))
     first = asyncio.run(module.status(True))
@@ -61,11 +61,26 @@ def test_cloud_activation_requires_native_job_task_and_snapshot_and_deduplicates
 def test_failed_prerequisites_cannot_start_or_enable_module(monkeypatch):
     module = TerritorialModule(SimpleNamespace(local_development_mode=False, prisma_enabled=True), None)
     monkeypatch.setattr(module, "_read", lambda: {})
-    monkeypatch.setattr(module, "_prerequisites", lambda: (_ for _ in ()).throw(RuntimeError("not ready")))
+    monkeypatch.setattr(module, "_prerequisites", lambda **_: (_ for _ in ()).throw(RuntimeError("not ready")))
     monkeypatch.setattr(module, "_write", lambda _: pytest.fail("No state mutation before native readiness"))
     with pytest.raises(HTTPException) as error:
         asyncio.run(module.status(True))
     assert error.value.status_code == 503
+
+
+@pytest.mark.parametrize("state", [{}, {"status": "activating", "run_key": None, "enabled": False}])
+def test_persistent_job_cannot_be_queued_for_finite_module_activation(monkeypatch, state):
+    calls = []
+    client = SimpleNamespace(_request=lambda method, path, **_: calls.append((method, path)) or {
+        "tasks": [{"taskKey": "prisma_tick", "isStreaming": True}]})
+    runtime = SimpleNamespace(_doc=lambda _: {"workspace_key": "ws", "job_key": "job"}, aidp_factory=lambda: client)
+    module = TerritorialModule(SimpleNamespace(local_development_mode=False, prisma_enabled=True), runtime)
+    monkeypatch.setattr(module, "_read", lambda: state)
+    monkeypatch.setattr(module, "_write", lambda _: pytest.fail("Activation must not mutate state or enqueue streaming"))
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(module.status(True))
+    assert error.value.status_code == 409
+    assert calls == [("GET", "/workspaces/ws/jobs/job")]
 
 
 @pytest.mark.parametrize("task_key,task_status,expected", [

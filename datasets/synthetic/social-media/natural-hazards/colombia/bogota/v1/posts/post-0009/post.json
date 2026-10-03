@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0009",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0009",
+    "username": "sim_bogota_0009",
+    "display_name": "Fictional Bogotá Reporter 009"
+  },
+  "message": "La acumulación en Kennedy ya tapa la parte baja del bordillo, aunque no puedo medir la profundidad. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 96,
+  "available_offset_seconds": 96,
+  "attachments": []
+}

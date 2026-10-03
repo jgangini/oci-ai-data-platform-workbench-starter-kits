@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0068",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0068",
+    "username": "sim_bogota_0068",
+    "display_name": "Fictional Bogotá Reporter 068"
+  },
+  "message": "En el borde visible de Chapinero quedan zonas de pasto ennegrecido que todavía desprenden humo. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 228,
+  "available_offset_seconds": 228,
+  "attachments": []
+}

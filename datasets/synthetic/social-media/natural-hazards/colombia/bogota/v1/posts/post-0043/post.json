@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0043",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0043",
+    "username": "sim_bogota_0043",
+    "display_name": "Fictional Bogotá Reporter 043"
+  },
+  "message": "Nueva observación en Bosa: el agua retrocedió algunos centímetros respecto de una marca del muro. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 216,
+  "available_offset_seconds": 216,
+  "attachments": []
+}

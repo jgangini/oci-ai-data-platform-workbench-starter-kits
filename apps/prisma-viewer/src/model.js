@@ -30,9 +30,23 @@ export function modeLabel(mode) {
   return mode === 'real' ? 'REAL' : mode === 'simulation' ? 'SIMULATED' : 'UNCLASSIFIED';
 }
 
+export const displayLocality = (value) => value === 'Sin localizar' ? 'Location unresolved' : value;
+export const displaySeverity = (value) => ({ low: 'Low', medium: 'Medium', high: 'High' }[value] || value);
+
 export function evidenceFor(snapshot, incident) {
   const ids = new Set(incident?.evidence_ids ?? []);
   return snapshot.evidence.filter((item) => ids.has(item.id));
+}
+
+export function reportActivity(incident) {
+  const labels = { below_threshold: 'Below threshold', low: 'Low', medium: 'Medium', high: 'High' };
+  const counts = incident.report_counts;
+  return {
+    level: labels[incident.report_activity] || 'Unavailable',
+    networks: Object.entries(counts && typeof counts === 'object' && !Array.isArray(counts) ? counts : {})
+      .filter(([, count]) => Number.isSafeInteger(count) && count >= 0)
+      .map(([platform, count]) => ({ platform, count, level: labels[incident.report_activity_by_platform?.[platform]] || 'Unavailable' })),
+  };
 }
 
 export function parseBbox(value) {
@@ -78,7 +92,7 @@ export function safeSourceUrl(value) {
 }
 
 export function photosFor(evidence, incident) {
-  if (evidence.mode !== 'real' || incident?.review_status !== 'validated' || !incident.evidence_ids?.includes(evidence.id) || evidence.platform !== 'x' || !Array.isArray(evidence.media)) return [];
+  if (evidence.mode !== 'real' || incident?.review_status !== 'validated' || !incident.evidence_ids?.includes(evidence.id) || !incident.reviewed_evidence_ids?.includes(evidence.id) || evidence.platform !== 'x' || !Array.isArray(evidence.media)) return [];
   return evidence.media.filter((media) => {
     const safe = safeSourceUrl(media?.url);
     if (media?.type !== 'photo' || !safe) return false;

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0055",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0055",
+    "username": "sim_bogota_0055",
+    "display_name": "Fictional Bogotá Reporter 055"
+  },
+  "message": "Toda la vegetación de Chapinero fue consumida por el incendio; no quedó ningún árbol en pie. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 72,
+  "available_offset_seconds": 72,
+  "attachments": []
+}

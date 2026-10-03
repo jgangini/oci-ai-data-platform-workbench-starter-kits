@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0100",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0100",
+    "username": "sim_bogota_0100",
+    "display_name": "Fictional Bogotá Reporter 100"
+  },
+  "message": "En Bosa empieza a entrar agua de lluvia en un patio bajo; reporto una inundación localizada. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 300,
+  "available_offset_seconds": 300,
+  "attachments": []
+}

@@ -1,4 +1,4 @@
-"""Native AIDP schedule reconciliation; manual work uses finite queued job runs."""
+"""Native AIDP schedules and single-run persistent task admission."""
 import time
 from urllib.parse import quote, urlsplit
 
@@ -47,18 +47,51 @@ def set_schedule(request, runtime, enabled):
     path = job_path(runtime)
     job, headers = request("GET", path, phase="content", include_headers=True)
     etag = headers.get("etag") or headers.get("ETag")
+    persistent = any(task.get("isStreaming") for task in job.get("tasks", []))
     payload = {key: job[key] for key in JOB_FIELDS if key in job}
     payload.update(maxConcurrentRuns=1, queue={"isEnabled": False},
-        schedule={"quartzCronExpression": "0 * * * * ?", "timezoneId": "UTC", "pauseStatus": "UNPAUSED" if enabled else "PAUSED"})
+        schedule={"quartzCronExpression": "0 * * * * ?", "timezoneId": "UTC", "pauseStatus": "UNPAUSED" if enabled and not persistent else "PAUSED"})
+    if persistent and payload.get("continuous"):
+        payload["continuous"] = {**payload["continuous"], "pauseStatus": "PAUSED"}
     # ponytail: GET may omit ETag, making concurrent edits last-write-wins; server ETags restore conditional protection.
     request("PUT", path, payload=payload, headers={"If-Match": etag} if etag else None, phase="content")
+    return persistent
 
 
-def submit_run(request, runtime, request_id):
+def active_run(request, runtime):
+    path = f"/workspaces/{quote(runtime['workspace_key'], safe='')}/jobRuns"
+    params = {"jobKey": runtime["job_key"], "sortBy": "timeCreated", "sortOrder": "DESC", "limit": 100}
+    seen = set()
+    # ponytail: cap history at 500 runs; a larger history requires operator inspection, never an unsafe duplicate.
+    for _ in range(5):
+        body, headers = request("GET", path, params=params, include_headers=True, phase="content")
+        rows = body if isinstance(body, list) else body.get("items") if isinstance(body, dict) else None
+        if not isinstance(rows, list):
+            raise RuntimeError("Native run inspection returned an invalid collection")
+        for run in rows:
+            if not isinstance(run, dict) or not run.get("jobKey") or not run.get("key"):
+                raise RuntimeError("Native run inspection returned an incomplete identity")
+            if run["jobKey"] == runtime["job_key"] and run_state(run) not in RUN_SUCCESS | RUN_FAILED:
+                return run
+        page = headers.get("opc-next-page") or headers.get("Opc-Next-Page")
+        if not page:
+            return None
+        if page in seen:
+            break
+        seen.add(page)
+        params["page"] = page
+    raise RuntimeError("Native run inspection exceeded its pagination bound")
+
+
+def submit_run(request, runtime, request_id, *, persistent=False):
     job_path(runtime)
-    # Queue only this explicit run. Periodic ticks retain queue=false and cannot accumulate a backlog.
+    if persistent:
+        existing = active_run(request, runtime)
+        if existing:
+            return existing
+    # Native maxConcurrentRuns=1 plus queue=false closes the race between simultaneous streaming starts.
     return request("POST", f"/workspaces/{quote(runtime['workspace_key'], safe='')}/jobRuns",
-        payload={"jobKey": runtime["job_key"], "parameters": [], "queue": {"isEnabled": True}},
+        payload={"jobKey": runtime["job_key"], "parameters": [], "queue": {"isEnabled": not persistent}},
         phase="content", retry_scope="prisma-run:" + request_id)
 
 
@@ -84,4 +117,6 @@ def reconcile_after_tick(connection, request, now):
     configuration = read_document(connection, "configuration")
     simulation = read_document(connection, "simulation")
     runtime = read_document(connection, "runtime")
-    set_schedule(request, runtime, needs_schedule(configuration, simulation, now))
+    pipeline = read_document(connection, "status_pipeline")
+    pending = pipeline.get("pending_count", 0) > 0 and not pipeline.get("needs_attention")
+    set_schedule(request, runtime, needs_schedule(configuration, simulation, now) or pending)

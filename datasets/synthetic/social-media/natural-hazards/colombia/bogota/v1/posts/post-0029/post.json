@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0029",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0029",
+    "username": "sim_bogota_0029",
+    "display_name": "Fictional Bogotá Reporter 029"
+  },
+  "message": "En Bosa cerraron temporalmente un acceso peatonal porque el piso quedó cubierto de agua. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 48,
+  "available_offset_seconds": 48,
+  "attachments": []
+}

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0085",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0085",
+    "username": "sim_bogota_0085",
+    "display_name": "Fictional Bogotá Reporter 085"
+  },
+  "message": "El tramo afectado de Ciudad Bolívar sigue cerrado al paso informal de peatones por precaución. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 144,
+  "available_offset_seconds": 144,
+  "attachments": []
+}

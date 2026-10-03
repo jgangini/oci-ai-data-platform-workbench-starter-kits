@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0071",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0071",
+    "username": "sim_bogota_0071",
+    "display_name": "Fictional Bogotá Reporter 071"
+  },
+  "message": "Comparto tarde un registro anterior de Chapinero: al inicio se veían pequeñas llamas entre hojas secas. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 264,
+  "available_offset_seconds": 520,
+  "attachments": []
+}

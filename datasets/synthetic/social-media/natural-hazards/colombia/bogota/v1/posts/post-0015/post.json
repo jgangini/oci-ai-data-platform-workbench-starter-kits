@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0015",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0015",
+    "username": "sim_bogota_0015",
+    "display_name": "Fictional Bogotá Reporter 015"
+  },
+  "message": "Una alcantarilla visible en Kennedy permanece rodeada de residuos y no absorbe la escorrentía. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 168,
+  "available_offset_seconds": 168,
+  "attachments": []
+}

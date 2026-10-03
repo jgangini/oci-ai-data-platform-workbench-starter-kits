@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0109",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0109",
+    "username": "sim_bogota_0109",
+    "display_name": "Fictional Bogotá Reporter 109"
+  },
+  "message": "Se observa una cortina de lluvia densa en Suba y viento que mueve los árboles del sector. · Bogotá #Bogota #Colombia #lluvia #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Suba",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.741,
+    "lon": -74.084
+  },
+  "published_offset_seconds": 84,
+  "available_offset_seconds": 84,
+  "attachments": []
+}

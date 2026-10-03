@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0004",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0004",
+    "username": "sim_bogota_0004",
+    "display_name": "Fictional Bogotá Reporter 004"
+  },
+  "message": "El drenaje de una vía residencial de Kennedy no evacua el agua y el charco sigue creciendo. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 36,
+  "available_offset_seconds": 36,
+  "attachments": []
+}

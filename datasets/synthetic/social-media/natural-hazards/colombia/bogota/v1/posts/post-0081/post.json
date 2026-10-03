@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0081",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0081",
+    "username": "sim_bogota_0081",
+    "display_name": "Fictional Bogotá Reporter 081"
+  },
+  "message": "Una parte del paso peatonal de Ciudad Bolívar queda bloqueada por barro y piedras de la ladera. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 96,
+  "available_offset_seconds": 96,
+  "attachments": []
+}

@@ -186,7 +186,7 @@ def test_local_correlation_upgrade_invalidates_old_version_and_retains_old_revie
         db.execute("INSERT INTO reviews VALUES (?,?)", (old_id, json.dumps(review)))
     restarted = PrismaStore(path, clock)
     snapshot = restarted.snapshot()
-    assert snapshot["version"] == f"local-v2-{publication['revision']}"
+    assert snapshot["version"].startswith(f"local-v3-{publication['revision']}-")
     assert snapshot["version"] != f"local-{publication['revision']}"
     assert snapshot["incidents"][0]["id"] != old_id
     assert snapshot["incidents"][0]["review_status"] == "pending"

@@ -12,9 +12,10 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from prisma.area import parse_bbox, within_bbox
+from prisma import native_proxy
 
 app = FastAPI(title="Territorial Control · Bogotá", docs_url=None, redoc_url=None)
 MODE = os.getenv("PRISMA_MODE", "oci")
@@ -45,6 +46,40 @@ def principal(request: Request) -> str:
     return value
 
 
+def admin_failure(response, path):
+    detail, headers = "The administration service could not complete the request", {}
+    if path in {"/api/prisma/oci-provider", "/api/prisma/oci-chat"}:
+        try:
+            supplied = response.json().get("detail", {})
+        except (ValueError, AttributeError):
+            supplied = {}
+        messages = {
+            "oci_authentication_failed": "OCI did not accept the server operator credentials",
+            "oci_access_denied": "The server operator cannot access this OCI resource",
+            "oci_model_unavailable": "The selected OCI model is unavailable in this deployment",
+            "oci_rate_limited": "OCI quota or rate limit reached; try again later",
+            "oci_unavailable": "The OCI provider is unavailable; check the server configuration",
+            "oci_not_configured": "OCI server credentials and compartment are not configured",
+            "oci_model_required": "Select an OCI conversational model first",
+            "oci_model_not_selectable": "Choose an active on-demand GENERIC chat model from the current OCI catalog",
+            "oci_invalid_response": "OCI did not return a bounded text response",
+            "oci_request_limit": "Too many OCI assistant requests; try again shortly",
+        }
+        code = supplied.get("code") if isinstance(supplied, dict) else None
+        if isinstance(code, str) and code in messages:
+            # Only known local messages cross the bridge, never a provider's raw error text.
+            detail = {"code": code, "message": messages[code]}
+            status, identifier = supplied.get("provider_status"), supplied.get("request_id")
+            if type(status) is int and 100 <= status <= 599:
+                detail["provider_status"] = status
+            if isinstance(identifier, str) and re.fullmatch(r"[A-Za-z0-9/_.:-]{1,256}", identifier):
+                detail["request_id"] = identifier
+            retry = response.headers.get("retry-after", "")
+            if re.fullmatch(r"[0-9]{1,6}", retry):
+                headers["Retry-After"] = retry
+    return HTTPException(response.status_code, detail, headers=headers)
+
+
 async def admin_request(request: Request, method: str, path: str, payload=None):
     base = os.environ.get("PRISMA_ADMIN_URL", "http://aidp-lab:8000")
     try:
@@ -52,7 +87,7 @@ async def admin_request(request: Request, method: str, path: str, payload=None):
             response = await client.request(method, base + path,
                 headers={"Cookie": request.headers.get("cookie", "")}, json=payload)
         if response.status_code >= 400:
-            raise HTTPException(response.status_code, "The administration service could not complete the request")
+            raise admin_failure(response, path)
         return response.json()
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(503, "Territorial Control administration is unavailable") from exc
@@ -236,11 +271,13 @@ def fixture_reply(payload: ChatRequest, snapshot: dict) -> dict:
 
 @app.get("/health")
 def health():
+    native_proxy.health()
     return {"status": "ok", "mode": MODE}
 
 
 @app.get("/ready")
 def ready():
+    native_proxy.health()
     if MODE == "oci":
         published_snapshot()
         endpoint_from(cloud_object(os.getenv("PRISMA_AGENT_ENDPOINT_KEY", ".control/prisma/agent.json")), os.environ["OCI_REGION"])
@@ -283,8 +320,51 @@ async def context(request: Request):
     return await context_layers()
 
 
-@app.get("/{path:path}")
-def static(path: str):
+@app.get("/api/prisma/oci-provider")
+async def oci_provider(request: Request):
+    principal(request)
+    return await admin_request(request, "GET", "/api/prisma/oci-provider")
+
+
+@app.post("/api/prisma/oci-chat")
+async def oci_chat(request: Request, payload: dict):
+    principal(request)
+    native_proxy.check_origin(request)
+    return await admin_request(request, "POST", "/api/prisma/oci-chat", payload)
+
+
+@app.get("/api/setup/status")
+def provider_status(request: Request):
+    principal(request)
+    native_proxy.check_origin(request)
+    status = native_proxy.native_json("/__native_setup")
+    # Original provider secrets are supplied in the server environment. The OCI
+    # extension uses authenticated VM1 controls instead of the dev-only .env writer.
+    return {**status, "keys": [{**key, "managed": "external"} for key in status.get("keys", [])],
+            "store": "server environment", "server_managed": True}
+
+
+@app.get("/api/setup/browser")
+def browser_provider_settings(request: Request):
+    principal(request)
+    native_proxy.check_origin(request)
+    values = native_proxy.native_json("/__native_browser")
+    # These two upstream providers deliberately use origin-restricted browser keys.
+    return JSONResponse({key: values.get(key, "") for key in ("googleApiKey", "cesiumToken")},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.api_route("/api/{path:path}", methods=["GET", "HEAD", "POST"])
+async def native_api(request: Request, path: str):
+    principal(request)
+    return await native_proxy.proxy(request, "api/" + path)
+
+
+@app.api_route("/{path:path}", methods=["GET", "HEAD"])
+async def static(request: Request, path: str):
+    if native_proxy.enabled():
+        principal(request)
+        return await native_proxy.proxy(request, path)
     target = (STATIC / path).resolve()
     if not target.is_relative_to(STATIC.resolve()):
         raise HTTPException(404)

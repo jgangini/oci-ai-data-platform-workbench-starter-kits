@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0037",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0037",
+    "username": "sim_bogota_0037",
+    "display_name": "Fictional Bogotá Reporter 037"
+  },
+  "message": "El nivel se mantiene en el punto que observo de Bosa y todavía entra agua por un portón. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 144,
+  "available_offset_seconds": 144,
+  "attachments": []
+}

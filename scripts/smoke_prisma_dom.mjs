@@ -20,6 +20,7 @@ const errors = [];
 const requests = [];
 const consoleErrors = [];
 const checks = [];
+let fixtureVerified = false;
 function observePage(target) {
   target.setDefaultTimeout(20000);
   target.on('pageerror', (error) => errors.push(error.message));
@@ -46,35 +47,68 @@ try {
   const state = await sourceResponse.json();
   assert.equal(state.runtime, 'local_fixture', 'Mutating smoke requires the explicit local fixture runtime');
   assert.ok(state.sources.every((source) => source.mode === 'simulation'), 'All tested sources must be simulated');
+  fixtureVerified = true;
+  if (state.sources.find(source => source.platform === 'x').capture_running) {
+    assert.ok((await context.request.post(`${base.origin}/api/admin/prisma/sources/x/pause`)).ok());
+  }
   checks.push('proxy authentication');
 
   await page.goto(`${base.origin}/admin/gods-eye-view`, { waitUntil: 'domcontentloaded' });
-  await page.locator('.prisma-source').last().waitFor();
-  assert.deepEqual(await page.locator('.prisma-source-heading h2').allTextContents(), ['X', 'Facebook', 'Instagram', 'TikTok']);
-  assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).count(), 4);
-  assert.equal(await page.getByRole('button', { name: 'Test', exact: true }).count(), 4);
-  assert.equal(await page.getByRole('button', { name: 'Run now', exact: true }).count(), 4);
-  checks.push('four source controls on canonical administration route');
+  const networkTabs = page.getByRole('tablist', { name: 'Social networks', exact: true });
+  await networkTabs.waitFor();
+  assert.deepEqual(await networkTabs.getByRole('tab').allTextContents(), ['X', 'Facebook', 'Instagram', 'TikTok']);
+  await networkTabs.getByRole('tab', { name: 'X', exact: true }).click();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await networkTabs.getByRole('tab', { name: 'Facebook', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: 'Test', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: 'Run now', exact: true }).count(), 1);
+  checks.push('four accessible network tabs and one active configuration panel');
 
   assert.equal(await page.getByRole('button', { name: 'Start scenario', exact: true }).count(), 0);
-  const sourceCard = page.locator('.prisma-source').filter({ has: page.getByRole('heading', { name: 'X', exact: true }) });
+  const sourceCard = page.locator('#prisma-panel-x .prisma-source');
   await sourceCard.getByRole('checkbox', { name: 'Source enabled', exact: true }).check();
   await sourceCard.getByLabel('Searches · one per line', { exact: true }).fill('#bogota #inundacion');
+  const refreshed = page.waitForResponse(response => response.url().endsWith('/api/admin/prisma/sources') && response.request().method() === 'GET');
+  await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+  await refreshed;
+  assert.equal(await sourceCard.getByLabel('Searches · one per line', { exact: true }).inputValue(), '#bogota #inundacion');
+  await networkTabs.getByRole('tab', { name: 'Facebook', exact: true }).click();
+  await networkTabs.getByRole('tab', { name: 'X', exact: true }).click();
+  assert.equal(await sourceCard.getByLabel('Searches · one per line', { exact: true }).inputValue(), '#bogota #inundacion');
   const savedResponse = page.waitForResponse((response) => response.url().endsWith('/api/admin/prisma/sources/x') && response.request().method() === 'PUT');
   await sourceCard.getByRole('button', { name: 'Save', exact: true }).click();
-  assert.equal((await savedResponse).status(), 200);
+  const saved = await savedResponse;
+  assert.equal(saved.status(), 200);
+  assert.equal((await saved.json()).capture_running, false, 'Save must not start capture');
   const runResponse = page.waitForResponse((response) => response.url().endsWith('/api/admin/prisma/sources/x/run'));
   await sourceCard.getByRole('button', { name: 'Run now', exact: true }).click();
   const started = await (await runResponse).json();
   assert.equal(started.source.capture_running, true);
   assert.ok(started.source.last_received_count > 0, 'Fixture run must capture matching records immediately');
-  await sourceCard.getByRole('checkbox', { name: 'Source enabled', exact: true }).uncheck();
-  const stoppedResponse = page.waitForResponse((response) => response.url().endsWith('/api/admin/prisma/sources/x') && response.request().method() === 'PUT');
-  await sourceCard.getByRole('button', { name: 'Save', exact: true }).click();
-  const stopped = await (await stoppedResponse).json();
-  assert.equal(stopped.capture_running, false);
-  assert.equal(stopped.enabled, false);
-  checks.push('per-source search save, immediate capture and pause by disabling');
+  const stoppedResponse = page.waitForResponse(response => response.url().endsWith('/api/admin/prisma/sources/x/pause'));
+  await sourceCard.getByRole('button', { name: 'Pause', exact: true }).click();
+  assert.equal((await (await stoppedResponse).json()).source.capture_running, false);
+  await sourceCard.locator('.prisma-capture-state').filter({ hasText: 'Paused' }).waitFor();
+  checks.push('draft survives refresh and tabs; save does not start; run captures; explicit pause');
+
+  const posts = page.locator('#prisma-panel-x .prisma-posts');
+  await posts.locator('tbody tr').first().waitFor();
+  const previewButton = posts.getByRole('button', { name: /^Preview publication by / }).first();
+  await previewButton.click();
+  const preview = page.getByRole('dialog', { name: 'Publication preview', exact: true });
+  await preview.waitFor();
+  assert.match(await preview.innerText(), /Synthetic fixture/);
+  assert.equal(await preview.getByRole('link', { name: 'Open original publication ↗' }).count(), 0);
+  assert.equal(await preview.locator('video[autoplay]').count(), 0);
+  await page.keyboard.press('Escape');
+  await preview.waitFor({ state: 'hidden' });
+  assert.ok(await previewButton.evaluate(button => button === document.activeElement));
+  await networkTabs.getByRole('tab', { name: 'Facebook', exact: true }).click();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  assert.equal(await page.getByRole('tab', { name: 'Facebook', exact: true }).getAttribute('aria-selected'), 'true');
+  checks.push('publication table, accessible preview, honest synthetic provenance and selected-tab persistence');
 
   const popup = page.waitForEvent('popup');
   await page.getByRole('link', { name: 'Open God’s Eye View ↗', exact: true }).click();
@@ -209,6 +243,7 @@ try {
     externalConsoleErrors: consoleErrors.filter((item) => item.origin !== base.origin).length,
     externalFailures: requests.filter((item) => item.origin !== base.origin), screenshots: 0 }));
 } finally {
+  if (fixtureVerified) await context.request.post(`${base.origin}/api/admin/prisma/sources/x/pause`).catch(() => {});
   await context.close();
   await browser.close();
 }

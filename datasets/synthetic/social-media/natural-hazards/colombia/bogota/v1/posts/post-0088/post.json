@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0088",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0088",
+    "username": "sim_bogota_0088",
+    "display_name": "Fictional Bogotá Reporter 088"
+  },
+  "message": "La lluvia disminuyó en Ciudad Bolívar, pero la superficie del talud continúa muy húmeda. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 180,
+  "available_offset_seconds": 180,
+  "attachments": []
+}

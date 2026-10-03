@@ -16,6 +16,7 @@ from .store import PrismaStore
 from .x import XFailure, poll_queries
 from . import landing
 from .capture import validate_source
+from .source_rules import check_revision, source_view, validate_rules
 
 
 class LocalCredentials:
@@ -70,45 +71,53 @@ class LocalPrismaRuntime:
 
     async def sources(self) -> dict:
         snapshot = self.store.snapshot()
-        return {"sources": self.store.sources(), "simulation": self.store.simulation_state(), "runtime": "local_fixture",
+        return {"sources": [source_view(source) for source in self.store.sources()], "simulation": self.store.simulation_state(), "runtime": "local_fixture",
                 "capture_summary": self.store.capture_summary(), "pipeline": {"status": "local_fixture", "version": snapshot["version"], "last_run_at": snapshot.get("published_at")}}
 
     async def update_source(self, platform: str, payload: dict) -> dict:
         async with self.lock:
             values = dict(payload)
             token = values.pop("bearer_token", None)
+            expected = values.pop("expected_revision", None)
             current = self.store.source(platform)
+            check_revision(current, expected)
             candidate = {**current, **values}
             validate_source(candidate)
+            validate_rules(candidate)
             if token:
                 if candidate["secret_ref"] in {f"prisma-{platform}", f"PrismaSource_{platform}"}:
                     candidate["secret_ref"] = values["secret_ref"] = default_source(platform)["secret_ref"]
                 self.credentials.put(candidate["secret_ref"], token)
             values["credential_configured"] = self.credentials.exists(candidate["secret_ref"])
-            values.update(status="ready" if candidate["mode"] == "real" else "simulation", last_error=None, next_due=None)
+            values.update(status="ready" if candidate["mode"] == "real" else "simulation", last_error=None,
+                          config_version=current.get("config_version", 1) + 1)
             if not candidate["enabled"] or candidate["mode"] != current["mode"]:
-                values["capture_running"] = False
+                values.update(capture_running=False, capture_paused=False, next_due=None)
             if not candidate["enabled"]:
                 values["status"] = "disabled"
-            return self.store.update_source(platform, values)
+            return source_view(self.store.update_source(platform, values))
 
-    async def _capture(self, platform: str, test: bool) -> dict:
+    async def _capture(self, platform: str, test: bool, scheduled=False) -> dict:
         async with self.lock:
             source = self.store.source(platform)
+            if scheduled:
+                due = datetime.fromisoformat(source["next_due"].replace("Z", "+00:00")).timestamp() if source["next_due"] else 0
+                if not source.get("capture_running") or due > self.clock():
+                    return {"status": "paused" if not source.get("capture_running") else "scheduled", "source": source_view(source)}
             if not source["enabled"]:
-                return {"status": "disabled", "message": "Fuente pausada", "source": source}
-            if not test:
+                return {"status": "disabled", "message": "Enable the source before running it", "source": source_view(source)}
+            if not test and not scheduled:
                 source = self.store.start_capture(platform)
             if source["status"] == "rate_limited" and source["next_due"]:
                 retry = datetime.fromisoformat(source["next_due"].replace("Z", "+00:00")).timestamp()
                 if retry > self.clock():
-                    return {"status": "rate_limited", "message": "Esperando la ventana de cuota de X", "source": source}
+                    return {"status": "rate_limited", "message": "Waiting for the X quota window", "source": source_view(source)}
             if source["mode"] == "simulation":
                 if not test:
                     self.store.advance_simulation(force=True, platform=platform)
-                return {"status": "simulation", "message": "Simulated source; the network was not contacted", "source": self.store.source(platform)}
+                return {"status": "simulation", "message": "Synthetic query validated" if test else "Continuous capture started", "source": source_view(self.store.source(platform))}
             result = await asyncio.to_thread(self._poll, source, test)
-            return {"status": result["status"], "message": "Prueba finalizada" if test else "Captura procesada", "source": result}
+            return {"status": result["status"], "message": "Connection test completed" if test else "Capture processed", "source": source_view(result)}
 
     def _poll(self, source: dict, test: bool) -> dict:
         now, platform = self.clock(), source["platform"]
@@ -137,6 +146,15 @@ class LocalPrismaRuntime:
     async def run_source(self, platform: str) -> dict:
         return await self._capture(platform, False)
 
+    async def pause_source(self, platform: str) -> dict:
+        async with self.lock:
+            source = self.store.record_source(platform, {"capture_running": False, "capture_paused": True,
+                "status": "paused", "next_due": None, "last_error": None})
+            return {"status": "paused", "message": "Capture paused; publications and checkpoints retained", "source": source_view(source)}
+
+    async def posts(self, platform, limit, before_seq=None, max_seq=None):
+        return self.store.posts(platform, limit, before_seq, max_seq)
+
     async def simulation(self, action: str) -> dict:
         return self.store.control_simulation(action)
 
@@ -155,4 +173,4 @@ class LocalPrismaRuntime:
                 continue
             due = datetime.fromisoformat(source["next_due"].replace("Z", "+00:00")).timestamp() if source["next_due"] else 0
             if due <= self.clock():
-                await self.run_source(source["platform"])
+                await self._capture(source["platform"], False, scheduled=True)

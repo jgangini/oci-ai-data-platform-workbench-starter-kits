@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0119",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0119",
+    "username": "sim_bogota_0119",
+    "display_name": "Fictional Bogotá Reporter 119"
+  },
+  "message": "RT @sim_bogota_0026: El sumidero de una esquina de Bosa devuelve agua mientras continúa el aguacero. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 333,
+  "available_offset_seconds": 333,
+  "attachments": []
+}

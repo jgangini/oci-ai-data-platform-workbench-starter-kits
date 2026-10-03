@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0010",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0010",
+    "username": "sim_bogota_0010",
+    "display_name": "Fictional Bogotá Reporter 010"
+  },
+  "message": "Un recorrido a pie por Kennedy muestra agua estancada junto a una parada de transporte. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 108,
+  "available_offset_seconds": 108,
+  "attachments": []
+}

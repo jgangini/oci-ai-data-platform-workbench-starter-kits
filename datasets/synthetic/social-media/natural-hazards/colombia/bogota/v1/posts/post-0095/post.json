@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0095",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0095",
+    "username": "sim_bogota_0095",
+    "display_name": "Fictional Bogotá Reporter 095"
+  },
+  "message": "Publicación atrasada de Ciudad Bolívar: vi el primer desprendimiento cuando todavía llovía con fuerza. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 264,
+  "available_offset_seconds": 520,
+  "attachments": []
+}

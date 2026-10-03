@@ -1,5 +1,6 @@
 """Executable release, ingress and optional-capacity boundaries; no cloud access."""
 import copy
+import importlib.util
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -116,13 +117,21 @@ def test_both_reverse_proxies_authenticate_and_overwrite_viewer_identity():
         proxy = (ROOT / "docker" / name).read_text()
         assert "location = /_prisma_session" in proxy and "internal;" in proxy
         assert "http://127.0.0.1:8000/api/prisma/session" in proxy
-        assert proxy.count("auth_request /_prisma_session;") == 2
-        assert proxy.count("proxy_set_header X-PRISMA-User $prisma_user;") == 2
+        blocks = [block for block in proxy.split("location ") if "proxy_pass http://127.0.0.1:8081" in block]
+        assert len(blocks) == 3
+        for block in blocks:
+            assert "auth_request /_prisma_session;" in block
+            assert "proxy_set_header X-PRISMA-User $prisma_user;" in block
+            assert 'proxy_set_header X-GEV-Origin "$scheme://$http_host";' in block
         assert "$http_x_prisma_user" not in proxy
 
 
 @pytest.mark.parametrize("candidate_ready", [False, True])
 def test_viewer_failed_update_keeps_or_restores_current_image(monkeypatch, tmp_path, candidate_ready):
+    cache = tmp_path / "native-cache"
+    cache.mkdir()
+    budget = cache / "provider-budget.json"
+    budget.write_text('{"used":3}')
     containers = {viewer_updater.APP: "old"}
     operations = []
     monkeypatch.setattr(viewer_updater, "load", lambda *_: "new")
@@ -147,3 +156,47 @@ def test_viewer_failed_update_keeps_or_restores_current_image(monkeypatch, tmp_p
     assert containers == {viewer_updater.APP: "old"}
     assert ("stop" in operations) is candidate_ready
     assert not (tmp_path / "release.json").exists()
+    assert budget.read_text() == '{"used":3}'
+
+
+def test_viewer_candidate_and_active_share_persistent_nonroot_cache(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(viewer_updater, "_run", lambda args: calls.append(args))
+    for name, candidate in (("candidate", True), ("active", False)):
+        viewer_updater.run_container(tmp_path, name, "image", candidate)
+    mount = f"{tmp_path / 'native-cache'}:/app/.upstream/.gev-cache:rw,z"
+    for install, docker in (calls[:2], calls[2:]):
+        assert install == ["install", "-d", "-m", "0700", "-o", "65534", "-g", "65534", str(tmp_path / "native-cache")]
+        assert mount in docker and "--read-only" in docker
+        assert all(":4173" not in value for value in docker)
+    assert "127.0.0.1:18081:8081" in calls[1]
+    assert "8081:8081" in calls[3]
+    template = (ROOT / "terraform/templatefile/prisma_user_data.sh").read_text()
+    assert "-v /opt/prisma/native-cache:/app/.upstream/.gev-cache:rw,z" in template
+
+
+@pytest.mark.parametrize("spawn_fails", [False, True])
+def test_native_supervisor_stops_sibling_when_runtime_exits_or_cannot_start(monkeypatch, spawn_fails):
+    spec = importlib.util.spec_from_file_location("native_entrypoint", ROOT / "apps/prisma-viewer/native/entrypoint.py")
+    supervisor = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(supervisor)
+    child = SimpleNamespace(poll=lambda: None, terminate=lambda: stopped.append("terminate"),
+                            wait=lambda **_: stopped.append("wait"))
+    stopped = []
+    calls = []
+
+    def spawn(command):
+        calls.append(command)
+        if len(calls) == 1:
+            return child
+        if spawn_fails:
+            raise OSError("runtime unavailable")
+        return SimpleNamespace(poll=lambda: 0, wait=lambda **_: None)
+
+    monkeypatch.setattr(supervisor.subprocess, "Popen", spawn)
+    if spawn_fails:
+        with pytest.raises(OSError, match="runtime unavailable"):
+            supervisor.supervise([["node"], ["python"]])
+    else:
+        assert supervisor.supervise([["node"], ["python"]]) == 1
+    assert stopped == ["terminate", "wait"]

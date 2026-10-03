@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0110",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0110",
+    "username": "sim_bogota_0110",
+    "display_name": "Fictional Bogotá Reporter 110"
+  },
+  "message": "Circula un reporte de deslizamiento en Bogotá sin punto de referencia ni datos suficientes para ubicarlo. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": null,
+  "location": {
+    "precision": "unresolved",
+    "provenance": "synthetic_scenario",
+    "lat": null,
+    "lon": null
+  },
+  "published_offset_seconds": 150,
+  "available_offset_seconds": 150,
+  "attachments": []
+}

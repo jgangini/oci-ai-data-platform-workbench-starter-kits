@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0065",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0065",
+    "username": "sim_bogota_0065",
+    "display_name": "Fictional Bogotá Reporter 065"
+  },
+  "message": "En Chapinero ya no veo una llama alta; quedan varios puntos humeantes difíciles de distinguir. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 192,
+  "available_offset_seconds": 192,
+  "attachments": []
+}

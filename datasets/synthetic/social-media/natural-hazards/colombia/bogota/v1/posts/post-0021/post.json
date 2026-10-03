@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0021",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0021",
+    "username": "sim_bogota_0021",
+    "display_name": "Fictional Bogotá Reporter 021"
+  },
+  "message": "El agua continúa frente al comercio de Kennedy y todavía no se habilita el paso peatonal del sector. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 240,
+  "available_offset_seconds": 240,
+  "attachments": []
+}

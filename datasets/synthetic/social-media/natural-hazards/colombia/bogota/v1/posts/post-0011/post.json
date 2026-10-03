@@ -1,0 +1,34 @@
+{
+  "fixture_id": "post-0011",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0011",
+    "username": "sim_bogota_0011",
+    "display_name": "Fictional Bogotá Reporter 011"
+  },
+  "message": "En Kennedy una familia sale de su entrada inundada por un corredor que todavía permanece seco. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 120,
+  "available_offset_seconds": 120,
+  "attachments": [
+    {
+      "id": "post-0011-image-01",
+      "type": "image",
+      "mime_type": "image/svg+xml",
+      "dataset_path": "posts/post-0011/media/image-01.svg",
+      "sha256": "4f0a8580fcc75432cf88b4e5d3e5359e196278a1c754484be28315a27da32370",
+      "license": "CC0-1.0",
+      "origin": "synthetic_diagram",
+      "alt_text": "Synthetic, nonphotographic diagram for Kennedy; not evidence of a real event.",
+      "is_simulated": true
+    }
+  ]
+}

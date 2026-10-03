@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0102",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0102",
+    "username": "sim_bogota_0102",
+    "display_name": "Fictional Bogotá Reporter 102"
+  },
+  "message": "Recorrí un sector de Kennedy: hay zonas secas y viviendas sin agua; no es cierto que toda la localidad esté sumergida. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 420,
+  "available_offset_seconds": 420,
+  "attachments": []
+}

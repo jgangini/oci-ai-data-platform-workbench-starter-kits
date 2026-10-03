@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0003",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0003",
+    "username": "sim_bogota_0003",
+    "display_name": "Fictional Bogotá Reporter 003"
+  },
+  "message": "En Kennedy hay agua acumulada frente a varios portones; vecinos levantan sus pertenencias. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 24,
+  "available_offset_seconds": 24,
+  "attachments": []
+}

@@ -139,6 +139,8 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
             for user, name, reader in (("PRISMA_WRITER", "PrismaWriterRuntime", False), ("PRISMA_READER", "PrismaReaderRuntime", True)):
                 if named(api, "/credentials", name):
                     ensure(api, "/credentials", name, None, ready=True)
+                    if reader:
+                        cursor.execute(f"GRANT SELECT ON ADMIN.PRISMA_V_SOCIAL_POSTS TO {user}")
                     continue
                 generated_password = generate_password()
                 cursor.execute("SELECT COUNT(*) FROM ALL_USERS WHERE USERNAME=:name", name=user)
@@ -146,7 +148,7 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
                 cursor.execute(f'{verb} USER {user} IDENTIFIED BY "{generated_password}"')
                 cursor.execute(f"GRANT CREATE SESSION TO {user}")
                 if reader:
-                    for view in ("PRISMA_V_SNAPSHOTS", "PRISMA_V_INCIDENTS", "PRISMA_V_EVIDENCE"):
+                    for view in ("PRISMA_V_SNAPSHOTS", "PRISMA_V_INCIDENTS", "PRISMA_V_EVIDENCE", "PRISMA_V_SOCIAL_POSTS"):
                         cursor.execute(f"GRANT SELECT ON ADMIN.{view} TO {user}")
                 else:
                     cursor.execute(f"GRANT EXECUTE ON ADMIN.PRISMA_CONTROL TO {user}")
@@ -162,7 +164,7 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
 
 def runtime_archive():
     buffer = io.BytesIO()
-    names = ("__init__.py", "core.py", "media.py", "area.py", "x.py", "database.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "landing.py", "pipeline.py", "agent.py")
+    names = ("__init__.py", "core.py", "correlation.py", "corpus.py", "media.py", "area.py", "x.py", "database.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "landing.py", "pipeline.py", "agent.py")
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in names:
             info = zipfile.ZipInfo("prisma/" + name, date_time=(2026, 1, 1, 0, 0, 0))
@@ -300,6 +302,9 @@ def install_cluster_libraries(api, workspace, compute, *, ensure_folder):
 
 def install_job(api, workspace, compute, config, bundle, *, ensure_folder):
     from app.aidp import AidpClient
+    if config.get("streaming_mode", "finite") not in {"finite", "persistent"}:
+        raise ValueError("Invalid Territorial Control streaming mode")
+    persistent = config.get("streaming_mode") == "persistent"
     root = "/Workspace/medallon/prisma"
     ensure_folder(api, workspace, root)
     source = bundle_prelude(bundle) + f"\nfrom prisma.pipeline import run\nrun(spark, aidputils.secrets.get, {config!r})\n"
@@ -314,6 +319,11 @@ def install_job(api, workspace, compute, config, bundle, *, ensure_folder):
         "jobClusters": [{"clusterKey": compute}], "tasks": [{"type": "NOTEBOOK_TASK", "taskKey": "prisma_tick",
         "dependsOn": [], "runIf": "ALL_SUCCESS", "maxRetries": 0, "isRetryOnTimeout": False,
         "notebookPath": path, "cluster": {"clusterKey": compute}, "parameters": []}]}
+    payload["tasks"][0]["isStreaming"] = persistent
+    if persistent:
+        payload.update(description="Territorial Control persistent ingestion and enrichment", timeoutSeconds=0)
+        payload["tasks"][0].pop("maxRetries")
+        payload["tasks"][0].pop("isRetryOnTimeout")
     jobs_path = f"/workspaces/{workspace}/jobs"
     current = named(api, jobs_path, payload["name"])
     job = current or ensure(api, jobs_path, payload["name"], {
@@ -323,9 +333,12 @@ def install_job(api, workspace, compute, config, bundle, *, ensure_folder):
     detail = api.request("GET", f"/workspaces/{workspace}/jobs/{key}")
     # Preserve a live operator's schedule when updating only the versioned notebook.
     payload["schedule"] = detail.body.get("schedule") or payload["schedule"]
+    if persistent:
+        payload["schedule"] = {**payload["schedule"], "pauseStatus": "PAUSED"}
     def matches(body):
         return (all(AidpClient._notebook_matches(body.get(field), value) for field, value in payload.items() if field != "tasks")
-                and AidpClient._job_tasks_match(body.get("tasks"), payload["tasks"], compute))
+                and AidpClient._job_tasks_match(body.get("tasks"), payload["tasks"], compute)
+                and all(bool(task.get("isStreaming")) == persistent for task in body.get("tasks", [])))
     if not matches(detail.body):
         operation(api, api.request("PUT", f"/workspaces/{workspace}/jobs/{key}", payload=payload,
                                   headers={"If-Match": detail.headers["etag"]} if detail.headers.get("etag") else None))
@@ -400,6 +413,8 @@ def publish_agent(api, workspace, bundle, region):
 def run_initial_job(api, workspace, job, revision):
     base = f"/workspaces/{workspace}/jobRuns"
     detail = api.request("GET", f"/workspaces/{workspace}/jobs/{quote(job, safe='')}").body
+    if any(task.get("isStreaming") for task in detail.get("tasks", [])):
+        raise RuntimeError("Initial acceptance requires the finite job; persistent task readiness is a separate check")
     notebooks = [task.get("notebookPath", "") for task in detail.get("tasks", []) if task.get("type") == "NOTEBOOK_TASK"]
     if len(notebooks) != 1 or not re.fullmatch(r"/Workspace/medallon/prisma/prisma_tick_[a-f0-9]{12}\.ipynb", notebooks[0]):
         raise RuntimeError("PRISMA initial job must reference one content-versioned notebook")

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0047",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0047",
+    "username": "sim_bogota_0047",
+    "display_name": "Fictional Bogotá Reporter 047"
+  },
+  "message": "Mensaje enviado tarde: durante el pico de lluvia vi agua desbordada sobre el patio de Bosa. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 264,
+  "available_offset_seconds": 520,
+  "attachments": []
+}

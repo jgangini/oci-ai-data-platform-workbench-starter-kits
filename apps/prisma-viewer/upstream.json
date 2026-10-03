@@ -1,0 +1,98 @@
+{
+  "repository": "https://github.com/bilawalsidhu/gods-eye-view",
+  "commit": "aa16b7c3b0166a89d8c7a6089e0aff53a22faaee",
+  "archive_url": "https://codeload.github.com/bilawalsidhu/gods-eye-view/tar.gz/aa16b7c3b0166a89d8c7a6089e0aff53a22faaee",
+  "archive_sha256": "a6020d0aa12a952585edee44a4765ab11f511e3f616927645d7ce04ce48487cb",
+  "license": "MIT source; separate third-party notices retained",
+  "excluded": [
+    ".agents",
+    ".github",
+    "docs/media",
+    "public/events/bhote-koshi-2026",
+    "src/data/local_data/telegeography_submarine_cables",
+    "src/data/bhoteKoshiFloodPath.js"
+  ],
+  "patches": [
+    {
+      "path": "src/main.js",
+      "sha256": "3eaccb0e89704d8177d3cc8bdfc90c7d33c62fdffe5dc5496b76b3062ea77794",
+      "replacements": [
+        {
+          "before": "import { createStandaloneApplication } from './standalone/application.js';\nimport { describeError } from './standalone/errors.js';\n\nconst application = createStandaloneApplication({\n  googleApiKey: import.meta.env.GOOGLE_MAPS_API_KEY,\n  cesiumToken: import.meta.env.CESIUM_ION_TOKEN,\n  allowQaRegistration: import.meta.env.DEV,\n});\n\napplication.start().catch((error) => {\n  console.error(\"God's Eye View initialization failed:\", error);\n  const loaderStatus = document.querySelector('#loading-screen .loader-status');\n  loaderStatus.textContent = `Error: ${describeError(error)}`;\n  loaderStatus.style.color = '#ff4444';\n});\n\nexport { application };\n",
+          "after": "import '../../native/main.js';\n"
+        }
+      ]
+    },
+    {
+      "path": "src/standalone/application.js",
+      "sha256": "5d9e5d9ff8156b930380605f33a1bc754eee1969a0aec59d627fba178b81dcfa",
+      "replacements": [
+        {
+          "before": "  allowQaRegistration = false,",
+          "after": "  allowQaRegistration = false,\n  extendCatalog = (catalog) => catalog,"
+        },
+        {
+          "before": "      return scene;",
+          "after": "      catalog = extendCatalog(catalog, { scene, signal: context.signal });\n      return scene;"
+        }
+      ]
+    },
+    {
+      "path": "src/app/constructCatalog.js",
+      "sha256": "d8ff750c5635e1982d198df1ffa134edf6132d7914536bec02cd552d7eabf7a2",
+      "replacements": [
+        {
+          "before": "  ...LAYER_STATE_REGISTRY,",
+          "after": "  ...LAYER_STATE_REGISTRY.filter(({ id }) => !['bhote-koshi-2026', 'bhote-koshi-locator'].includes(id)),"
+        },
+        {
+          "before": "import { createBhoteKoshiEventLayer } from '../data/bhoteKoshiEvent.js';\n",
+          "after": ""
+        },
+        {
+          "before": "import { createBhoteKoshiLocatorLayer } from '../data/bhoteKoshiLocator.js';\n",
+          "after": ""
+        },
+        {
+          "before": "        createBhoteKoshiEventLayer(),\n        createBhoteKoshiLocatorLayer({\n          boundaryResolver: nepalBoundaryResolver,\n        }),\n",
+          "after": ""
+        }
+      ]
+    },
+    {
+      "path": "src/scenes/recipes.js",
+      "sha256": "dc9a3ba12e061803474b8ce45855cf5db2954f527fe45fd30da94078c6025d70",
+      "keep_from": "const PUBLIC_SCENE_RECIPES = [",
+      "prepend": "// Restricted third-party Nepal scene data is excluded from this distribution.\nconst EVENT_RECIPES = [];\nconst BHOTE_KOSHI_NEPAL_APPEND_RECIPE = null;\n\n",
+      "replacements": []
+    },
+    {
+      "path": "src/scenes/packs/defaults.js",
+      "sha256": "90113d5814112357aa028071603ecbc6ac75f21766d7feb0b4d6df6f10ddc6ac",
+      "replacements": [
+        {
+          "before": "import { nepalScenePresentation } from './nepal.js';\n",
+          "after": ""
+        },
+        {
+          "before": "    adapters: [nepalScenePresentation],",
+          "after": "    adapters: [],"
+        }
+      ]
+    },
+    {
+      "path": "src/tools/index.js",
+      "sha256": "374ec011d7cad56a3943dc633bf3d31701ffeb8f4d3ec319812f098970d0cf03",
+      "replacements": [
+        {
+          "before": "import { getBhoteKoshiFlood } from './queries/events.js';\n",
+          "after": ""
+        },
+        {
+          "before": "  getBhoteKoshiFlood,\n",
+          "after": ""
+        }
+      ]
+    }
+  ]
+}

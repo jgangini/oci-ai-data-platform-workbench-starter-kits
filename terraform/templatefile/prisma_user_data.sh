@@ -10,6 +10,7 @@ systemctl stop firewalld >/dev/null 2>&1 || true
 firewall-offline-cmd --zone=public --add-port=8081/tcp
 systemctl enable --now firewalld
 install -d -m 0700 /opt/prisma
+install -d -m 0700 -o 65534 -g 65534 /opt/prisma/native-cache
 git clone --filter=blob:none '${source_repo_url}' /opt/prisma/source
 git -C /opt/prisma/source checkout --detach '${source_commit_sha}'
 test "$(git -C /opt/prisma/source rev-parse HEAD)" = '${source_commit_sha}'
@@ -37,6 +38,7 @@ EOF
 docker run -d --name prisma-viewer --restart unless-stopped \
   --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
   --security-opt no-new-privileges:true --cap-drop ALL \
+  -v /opt/prisma/native-cache:/app/.upstream/.gev-cache:rw,z \
   --env-file /opt/prisma/runtime.env -p 8081:8081 'prisma-viewer:${source_commit_sha}'
 for attempt in $(seq 1 60); do
   if curl --fail --silent http://127.0.0.1:8081/health; then

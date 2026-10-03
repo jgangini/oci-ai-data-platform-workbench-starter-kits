@@ -13,7 +13,8 @@ from fastapi import HTTPException
 from ..autonomous import AutonomousGovernanceClient
 from .core import PLATFORMS, utc_text, default_source, simulation_state, source_migration, aidp_credential_name
 from . import capture, landing
-from .database import read_document, mutate_document
+from .database import read_document, mutate_document, upsert_posts, query_posts
+from .source_rules import check_revision, source_view, validate_rules
 from .scheduling import needs_schedule, set_schedule, submit_run
 
 
@@ -65,7 +66,7 @@ class CloudRuntime:
                 source.update(status="disabled", next_due=None)
             elif source["mode"] == "real" and status.get("configuration_revision") != configuration.get("revision", 0) and not status.get("requested_action"):
                 source.update(status="ready", last_error=None, next_due=None)
-            sources.append(source)
+            sources.append(source_view(source))
         return {"sources": sources, "simulation": self._simulation_state(), "runtime": "aidp",
                 "pipeline": self._doc("status_pipeline"), "capture_summary": self._doc("status_synthetic")}
 
@@ -92,14 +93,16 @@ class CloudRuntime:
     def _update(self, platform, payload):
         if platform not in PLATFORMS:
             raise HTTPException(404, "Unknown platform")
-        fields = {name: value for name, value in payload.items() if name in {"enabled", "mode", "query", "interval_minutes"}}
+        fields = {name: value for name, value in payload.items() if name in {"enabled", "mode", "query", "interval_minutes", "correlation_window_minutes", "report_thresholds"}}
         old = {**default_source(platform), **self._doc("configuration").get("sources", {}).get(platform, {})}
+        check_revision(old, payload.get("expected_revision"))
         fields = {**source_migration(platform, old), **fields}
         candidate = {**old, **fields}
         if not candidate["enabled"] or candidate["mode"] != old["mode"]:
-            fields["capture_running"] = False
+            fields.update(capture_running=False, capture_paused=False)
         try:
             capture.validate_source(candidate)
+            validate_rules(candidate)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         if payload.get("secret_ref", old["secret_ref"]) not in {old["secret_ref"], default_source(platform)["secret_ref"]}:
@@ -112,15 +115,16 @@ class CloudRuntime:
         def change(document):
             sources = dict(document.get("sources", {}))
             old = {**default_source(platform), **sources.get(platform, {})}
+            check_revision(old, payload.get("expected_revision"))
             if fields.get("query", old["query"]) != old["query"] or fields.get("mode", old["mode"]) != old["mode"]:
                 fields["query_version"] = str(uuid4())
-            sources[platform] = {**old, **fields}
+            sources[platform] = {**old, **fields, "config_version": old.get("config_version", 1) + 1}
             return {**document, "sources": sources}
         document = self._change("configuration", change)
         if fields.get("capture_running") is False:
             self._change("status_" + platform, lambda doc: {**doc, "requested_action": None,
                 "next_due": None, "last_error": None, "status": "disabled" if not candidate["enabled"] else "ready"})
-        return document["sources"][platform]
+        return source_view(document["sources"][platform])
 
     async def update_source(self, platform, payload):
         def save():
@@ -136,11 +140,12 @@ class CloudRuntime:
     def _wake(self, request_id, only_if_active=False):
         runtime = self._doc("runtime")
         client = self.aidp_factory()
-        active = needs_schedule(self._doc("configuration"), self._doc("simulation"))
-        set_schedule(client._request, runtime, active)
+        pipeline = self._doc("status_pipeline")
+        active = needs_schedule(self._doc("configuration"), self._doc("simulation")) or (pipeline.get("pending_count", 0) > 0 and not pipeline.get("needs_attention"))
+        persistent = set_schedule(client._request, runtime, active)
         # Explicit Run/Test and publication controls still enqueue a finite run while the schedule is paused.
         if active or not only_if_active:
-            submit_run(client._request, runtime, request_id)
+            submit_run(client._request, runtime, request_id, persistent=persistent)
 
     def _request_source(self, platform, action):
         with self.capture_lock:
@@ -155,6 +160,8 @@ class CloudRuntime:
         if source["mode"] == "real" and (platform != "x" or not source["credential_configured"]):
             raise HTTPException(409, "Real capture requires a validated connector and credential")
         if action == "run":
+            self._change("checkpoint_enrichment", lambda doc: {**doc, "attempts": 0, "retry_at": 0,
+                "last_error": None, "circuit_open": False})
             source = self._start_capture(source)
         if source["mode"] == "simulation":
             for query in capture.query_lines(source["query"]):
@@ -176,18 +183,38 @@ class CloudRuntime:
                 return source
             configured = self._doc("configuration").get("sources", {})
             institutional = not any(item.get("capture_running") and item.get("enabled") and item.get("mode") == "simulation" for item in configured.values())
-            control = {"run_id": str(uuid4()), "anchor_at": time.time()}
+            control = self._doc("checkpoint_controls").get(source["platform"]) if source.get("capture_paused") else None
+            control = control or {"run_id": str(uuid4()), "anchor_at": time.time(), "seed": 0}
             self._change("checkpoint_controls", lambda doc: {**doc, source["platform"]: control,
                 **({"institutional": control} if institutional else {})})
             self._change("configuration", lambda doc: {**doc, "sources": {**doc.get("sources", {}),
-                source["platform"]: {**source, "capture_running": True}}})
-            return {**source, "capture_running": True}
+                source["platform"]: {**doc.get("sources", {}).get(source["platform"], source), "capture_running": True, "capture_paused": False}}})
+            return {**source, "capture_running": True, "capture_paused": False}
 
     async def test_source(self, platform):
         return await self._io(self._request_source, platform, "test")
 
     async def run_source(self, platform):
         return await self._io(self._request_source, platform, "run")
+
+    async def pause_source(self, platform):
+        def pause():
+            with self.capture_lock:
+                self._change("configuration", lambda doc: {**doc, "sources": {**doc.get("sources", {}),
+                    platform: {**default_source(platform), **doc.get("sources", {}).get(platform, {}),
+                               "capture_running": False, "capture_paused": True}}})
+                self._change("status_" + platform, lambda doc: {**doc, "status": "paused", "requested_action": None,
+                    "last_error": None, "next_due": None})
+                self._wake(str(uuid4()))
+                source = next(item for item in self._sources()["sources"] if item["platform"] == platform)
+                return {"status": "paused", "message": "Capture paused; publications and checkpoints retained", "source": source}
+        return await self._io(pause)
+
+    async def posts(self, platform, limit, before_seq=None, max_seq=None):
+        def read():
+            with self._connect() as connection:
+                return query_posts(connection, platform, limit, before_seq, max_seq)
+        return await self._io(read)
 
     def _simulation_state(self):
         return simulation_state(self._doc("simulation"), time.time())
@@ -207,6 +234,10 @@ class CloudRuntime:
         self._wake(str(uuid4()))
         return self._simulation_state()
 
+    def _project_posts(self, events, now, key):
+        with self._connect() as connection:
+            upsert_posts(connection, events, "captured", ingested_at=utc_text(now), batch_key=key)
+
     def _produce(self, force=False, platform=None):
         with self.capture_lock:
             now, control = time.time(), self._doc("simulation")
@@ -224,7 +255,10 @@ class CloudRuntime:
                     continue
                 events, cursor = result
                 try:
+                    if name in PLATFORMS:
+                        self._change("status_" + name, lambda doc: {**doc, "status": "capturing", "last_error": None})
                     key = landing.write_objects(client.object_storage, runtime, events, cursor["batch_key"])
+                    self._project_posts(events, now, key)
                     self._change("checkpoint_synthetic", lambda doc: {**doc, "sources": {**doc.get("sources", {}), name: cursor}})
                     self._change("status_synthetic", lambda doc: {**doc, "status": "ready", "last_error": None,
                         "last_run_at": utc_text(now), "landing_count": doc.get("landing_count", 0) + bool(key),
@@ -235,6 +269,8 @@ class CloudRuntime:
                             "last_received_count": len(events), "configuration_revision": config.get("revision", 0)})
                 except Exception as exc:
                     self._change("status_synthetic", lambda doc: {**doc, "status": "error", "last_error": type(exc).__name__})
+                    if name in PLATFORMS:
+                        self._change("status_" + name, lambda doc: {**doc, "status": "error", "last_error": type(exc).__name__})
                     raise
             completed = state["elapsed_seconds"] >= 600 and not state["capture_complete"]
             if completed:
@@ -276,7 +312,7 @@ class CloudRuntime:
         if incident is None:
             raise HTTPException(404, "Unknown incident")
         self._change("reviews", lambda doc: {**doc, "items": {**doc.get("items", {}),
-            incident_id: {"status": status, "note": note, "updated_at": utc_text(time.time())}}})
+            incident_id: {"status": status, "note": note, "updated_at": utc_text(time.time()), "evidence_ids": incident["evidence_ids"]}}})
         self._wake(str(uuid4()))
         return {**incident, "review_status": status, "review_pending_publication": True}
 

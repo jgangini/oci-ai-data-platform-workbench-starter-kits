@@ -59,7 +59,7 @@ def test_continuous_per_source_restart_interval_cycles_and_stop(tmp_path):
     asyncio.run(restarted.tick())
     events = restarted.store.snapshot()["evidence"]
     assert {"sensor", "sire", "linea123"} <= {item["platform"] for item in events}
-    assert len([item for item in events if item["platform"] == "x" and item["source_id"].endswith("lluvia-1")]) == 2
+    assert len([item for item in events if item["platform"] == "x" and item["source_id"].endswith(":post-0001")]) == 2
     assert original_ids <= {item["id"] for item in events}
     asyncio.run(restarted.update_source("x", {"interval_minutes": 2}))
     now[0] += 60
@@ -85,7 +85,18 @@ def test_continuous_catchup_retains_windows_instead_of_skipping_a_day():
         assert not ids.intersection(item["source_id"] for item in events)
         ids.update(item["source_id"] for item in events)
     assert cursor["elapsed"] == 86400
-    assert len([identifier for identifier in ids if identifier.endswith("lluvia-1")]) == 145
+    assert len([identifier for identifier in ids if identifier.endswith(":post-0001")]) == 145
+
+
+def test_existing_unversioned_continuous_cursor_keeps_legacy_generator():
+    source = default_source("x")
+    control = {"run_id": "existing", "anchor_at": NOW}
+    cursor = {"run_id": "existing", "query": source["query"], "elapsed": 0,
+              "interval_minutes": 5, "next_due": NOW + 300}
+    events, resumed = capture.continuous_batch(source, control, cursor, NOW + 600)
+    assert any(event["source_id"] == "existing:1:lluvia-1" for event in events)
+    assert all("dataset_version" not in event["raw_metadata"] for event in events)
+    assert "dataset_version" not in resumed and "dataset_version" not in resumed["batch_key"]
 
 
 def test_x_queries_keep_separate_cursors_stop_on_429_and_reuse_unchanged_query(monkeypatch):

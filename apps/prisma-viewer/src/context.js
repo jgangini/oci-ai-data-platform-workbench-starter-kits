@@ -1,4 +1,4 @@
-import { safeSourceUrl, modeLabel } from './model.js';
+import { safeSourceUrl, modeLabel, displayLocality } from './model.js';
 
 const node = (tag, value) => { const element = document.createElement(tag); element.textContent = value ?? ''; return element; };
 
@@ -22,7 +22,7 @@ function renderWeather(weather) {
   const root = document.getElementById('weather-context'); root.replaceChildren();
   root.append(node('p', `Weather · ${weather.status || 'unavailable'} · model estimate, not incident evidence`));
   for (const point of weather.points || []) {
-    const row = node('p', `${point.name || point.locality}: ${point.temperature_c ?? '—'} °C · rain ${point.precipitation_mm ?? '—'} mm · wind ${point.wind_kmh ?? '—'} km/h`);
+    const row = node('p', `${displayLocality(point.name || point.locality)}: ${point.temperature_c ?? '—'} °C · rain ${point.precipitation_mm ?? '—'} mm · wind ${point.wind_kmh ?? '—'} km/h`);
     row.append(node('small', `Valid ${point.valid_at || 'time unavailable'}`)); root.append(row);
   }
   root.append(referenceLink(weather.source || 'Open-Meteo', weather.source_url));

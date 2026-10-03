@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0066",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0066",
+    "username": "sim_bogota_0066",
+    "display_name": "Fictional Bogotá Reporter 066"
+  },
+  "message": "El incendio de vegetación destruyó todas las viviendas de Chapinero y obligó a evacuar toda la localidad. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 204,
+  "available_offset_seconds": 204,
+  "attachments": []
+}

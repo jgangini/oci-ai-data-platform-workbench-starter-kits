@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0070",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0070",
+    "username": "sim_bogota_0070",
+    "display_name": "Fictional Bogotá Reporter 070"
+  },
+  "message": "Observación reciente de Chapinero: no distingo expansión del foco, pero mantengo distancia de seguridad. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 252,
+  "available_offset_seconds": 252,
+  "attachments": []
+}

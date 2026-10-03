@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0116",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0116",
+    "username": "sim_bogota_0116",
+    "display_name": "Fictional Bogotá Reporter 116"
+  },
+  "message": "Alguien informa un derrumbe dentro de Bogotá, pero omite el sector y no puedo identificar el lugar. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": null,
+  "location": {
+    "precision": "unresolved",
+    "provenance": "synthetic_scenario",
+    "lat": null,
+    "lon": null
+  },
+  "published_offset_seconds": 170,
+  "available_offset_seconds": 170,
+  "attachments": []
+}

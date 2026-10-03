@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0039",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0039",
+    "username": "sim_bogota_0039",
+    "display_name": "Fictional Bogotá Reporter 039"
+  },
+  "message": "La cuneta de una vía de Bosa está llena y el agua se desvía hacia un ingreso residencial. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 168,
+  "available_offset_seconds": 168,
+  "attachments": []
+}

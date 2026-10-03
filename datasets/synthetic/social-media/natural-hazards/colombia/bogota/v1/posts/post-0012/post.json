@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0012",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0012",
+    "username": "sim_bogota_0012",
+    "display_name": "Fictional Bogotá Reporter 012"
+  },
+  "message": "El agua arrastra hojas y envases pequeños por una vía de Kennedy; nadie debería probar a cruzarla. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 132,
+  "available_offset_seconds": 132,
+  "attachments": []
+}

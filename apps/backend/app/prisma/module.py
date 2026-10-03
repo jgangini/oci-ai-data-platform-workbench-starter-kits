@@ -49,12 +49,14 @@ class TerritorialModule:
                 "viewer_url": "/gods-eye-view/", "runtime": "local_fixture" if self.settings.local_development_mode else "aidp",
                 "message": state.get("message", "Enable the module to validate its viewer, native workflow and agent."), **values}
 
-    def _prerequisites(self):
+    def _prerequisites(self, *, finite_activation=False):
         runtime = self.runtime._doc("runtime")
         client = self.runtime.aidp_factory()
         job = client._request("GET", job_path(runtime))
         if not any(task.get("taskKey") == "prisma_tick" for task in job.get("tasks", [])):
             raise HTTPException(503, "The provisioned Territorial Control workflow is incomplete.")
+        if finite_activation and any(task.get("isStreaming") for task in job.get("tasks", [])):
+            raise HTTPException(409, "Complete module activation with the finite workflow before enabling persistent streaming.")
         response = client.object_storage.get_object(runtime["namespace"], runtime["bucket"], ".control/prisma/agent.json")
         metadata = json.loads(response.data.content)
         checked_endpoint(metadata["endpoint"], runtime["region"])
@@ -86,9 +88,20 @@ class TerritorialModule:
             if outcome == "SUCCESS":
                 snapshot = self.runtime._snapshot()
                 return self._write({**state, "status": "ready", "enabled": True, "snapshot_version": snapshot["version"],
-                                    "message": "Native workflow, publication, agent and private viewer verified. Configure sources to start capture."})
+                                    "message": "Native workflow, publication and private viewer verified. Agent deployment is active; conversation acceptance is separate."})
             if outcome == "FAILED":
                 return self._write({**state, "status": "failed", "enabled": False, "message": "The native Territorial Control task failed."})
+        return state
+
+    def _activate(self, state, client, runtime):
+        if not state.get("enabled") and state.get("status") != "activating":
+            state = self._write({"status": "activating", "enabled": False, "operation_id": str(uuid4()), "run_key": None,
+                                 "message": "Waiting for the native Territorial Control activation run and its publication."})
+        if state.get("status") == "activating" and not state.get("run_key"):
+            result = submit_run(client._request, runtime, state["operation_id"])
+            if not result.get("key"):
+                raise HTTPException(503, "AIDP did not return the activation run key; retry the same operation.")
+            state = self._write({**state, "run_key": str(result["key"])})
         return state
 
     def _status(self, deploy):
@@ -103,15 +116,9 @@ class TerritorialModule:
                 state = self._write({"enabled": True, "status": "ready", "operation_id": str(uuid4()),
                                      "message": "Local simulation module enabled. OCI/AIDP deployment is not claimed."})
             return self._response(state)
-        client, runtime = self._prerequisites()
+        client, runtime = self._prerequisites(finite_activation=deploy and not state.get("enabled"))
         if state.get("status") == "activating" and state.get("run_key"):
             state = self._poll(state, client, runtime)
-        if deploy and not state.get("enabled") and state.get("status") != "activating":
-            state = self._write({"status": "activating", "enabled": False, "operation_id": str(uuid4()), "run_key": None,
-                                 "message": "Waiting for the native Territorial Control activation run and its publication."})
-        if deploy and state.get("status") == "activating" and not state.get("run_key"):
-            result = submit_run(client._request, runtime, state["operation_id"])
-            if not result.get("key"):
-                raise HTTPException(503, "AIDP did not return the activation run key; retry the same operation.")
-            state = self._write({**state, "run_key": str(result["key"])})
+        if deploy:
+            state = self._activate(state, client, runtime)
         return self._response(state)

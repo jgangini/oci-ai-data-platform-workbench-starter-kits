@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0078",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0078",
+    "username": "sim_bogota_0078",
+    "display_name": "Fictional Bogotá Reporter 078"
+  },
+  "message": "El suelo de una ladera de Ciudad Bolívar muestra un pequeño escalón nuevo cerca del sendero. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 60,
+  "available_offset_seconds": 60,
+  "attachments": []
+}

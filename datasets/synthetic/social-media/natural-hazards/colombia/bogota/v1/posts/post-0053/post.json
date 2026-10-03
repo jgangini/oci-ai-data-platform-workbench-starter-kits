@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0053",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0053",
+    "username": "sim_bogota_0053",
+    "display_name": "Fictional Bogotá Reporter 053"
+  },
+  "message": "Hay olor a material vegetal quemado en Chapinero y se mantiene un foco de fuego visible a distancia. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 48,
+  "available_offset_seconds": 48,
+  "attachments": []
+}

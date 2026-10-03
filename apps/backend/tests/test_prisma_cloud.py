@@ -14,12 +14,15 @@ class Aidp:
     def __init__(self):
         self.calls = []
         self.etag = "revision-1"
+        self.run_pages = {None: ({"items": []}, {})}
         self.job = {"name": "PRISMA", "tasks": [{"key": "tick"}], "timeoutSeconds": 900,
                     "schedule": {"pauseStatus": "PAUSED"}, "key": "not-a-write-field"}
 
     def _request(self, method, path, **kwargs):
         self.calls.append((method, path, kwargs))
         if method == "GET":
+            if path.endswith("/jobRuns"):
+                return copy.deepcopy(self.run_pages[kwargs["params"].get("page")])
             return copy.deepcopy(self.job), {"etag": self.etag} if self.etag else {}
         return {"key": "run-1"}
 
@@ -46,6 +49,9 @@ class Runtime(CloudRuntime):
     def _produce(self, force=False, platform=None):
         return False
 
+    def _project_posts(self, events, now, key):
+        self.projected = (events, now, key)
+
 
 def test_explicit_finite_run_is_queued_after_idle_schedule_is_paused():
     runtime = Runtime()
@@ -60,6 +66,51 @@ def test_explicit_finite_run_is_queued_after_idle_schedule_is_paused():
     assert body["maxConcurrentRuns"] == 1 and body["queue"] == {"isEnabled": False}
     assert body["schedule"]["pauseStatus"] == "PAUSED"
     assert body["tasks"] == [{"key": "tick"}] and body["timeoutSeconds"] == 900 and "key" not in body
+
+
+@pytest.mark.parametrize("state", ["PENDING", "RUNNING", "QUEUED", "CANCELING", "PAUSED_MAINTENANCE", ""])
+def test_persistent_wake_reuses_nonterminal_or_unknown_run_without_cron_or_queue(state):
+    runtime = Runtime()
+    runtime.client.job.update(tasks=[{"taskKey": "prisma_tick", "isStreaming": True}],
+                              continuous={"pauseStatus": "UNPAUSED"})
+    runtime.client.run_pages[None] = ({"items": [{"key": "live", "jobKey": "job", "state": {"status": state}}]}, {})
+    runtime.documents["configuration"] = {"sources": {"x": {"enabled": True, "capture_running": True}}}
+    runtime._wake("first")
+    runtime._wake("repeat")
+    assert [call[0] for call in runtime.client.calls] == ["GET", "PUT", "GET"] * 2
+    for _, _, options in runtime.client.calls[1::3]:
+        assert options["payload"]["schedule"]["pauseStatus"] == "PAUSED"
+        assert options["payload"]["continuous"]["pauseStatus"] == "PAUSED"
+        assert options["payload"]["maxConcurrentRuns"] == 1
+        assert options["payload"]["queue"] == {"isEnabled": False}
+
+
+def test_persistent_restart_checks_all_pages_and_never_enqueues_a_run():
+    runtime = Runtime()
+    runtime.client.run_pages = {
+        None: ({"items": [{"key": "done", "jobKey": "job", "state": {"status": "SUCCESS"}}]}, {"opc-next-page": "next"}),
+        "next": ({"items": [{"key": "other", "jobKey": "unrelated", "state": {"status": "RUNNING"}},
+                            {"key": "failed", "jobKey": "job", "state": {"status": "FAILED"}}]}, {})}
+    scheduling.submit_run(runtime.client._request, runtime._doc("runtime"), "restart", persistent=True)
+    assert [call[0] for call in runtime.client.calls] == ["GET", "GET", "POST"]
+    assert runtime.client.calls[0][2]["params"]["jobKey"] == "job"
+    assert runtime.client.calls[-1][2]["payload"]["queue"] == {"isEnabled": False}
+
+
+@pytest.mark.parametrize("pages", [
+    {None: ({"items": [{"jobKey": "job"}]}, {})},
+    {None: ({}, {})},
+    {None: ({"items": []}, {"opc-next-page": "same"}), "same": ({"items": []}, {"opc-next-page": "same"})},
+    {**{None: ({"items": []}, {"opc-next-page": "1"})},
+     **{str(page): ({"items": []}, {"opc-next-page": str(page + 1)}) for page in range(1, 6)}},
+])
+def test_persistent_run_fails_closed_on_incomplete_or_unbounded_inspection(pages):
+    runtime = Runtime()
+    runtime.client.run_pages = pages
+    with pytest.raises(RuntimeError, match="Native run inspection"):
+        scheduling.submit_run(runtime.client._request, runtime._doc("runtime"), "unsafe", persistent=True)
+    assert all(call[0] == "GET" for call in runtime.client.calls)
+    assert len(runtime.client.calls) <= 5
 
 
 def test_schedule_follows_active_work_and_stops_after_ten_minutes():

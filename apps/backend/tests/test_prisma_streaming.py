@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, call
 import pytest
 
 from app.prisma import capture, landing
-from app.prisma.core import build_snapshot, default_source, normalize_event
-from app.prisma.pipeline import DeltaLake, consume_landing
+from app.prisma.core import build_snapshot, default_source, normalize_event, utc_text
+from app.prisma.pipeline import DeltaLake, consume_landing, install_post_views, start_landing
 
 
 @pytest.mark.parametrize("path", ["/Volumes/oci_medallion/prisma_ingest/landing", "/tmp/prisma/landing"])
@@ -42,6 +42,26 @@ def test_invalid_mounted_paths_fail_before_starting_a_stream(path):
     with pytest.raises(ValueError, match="governed volume path"):
         consume_landing(spark, object(), path, "/Volumes/catalog/prisma_ingest/checkpoints/bronze-v1")
     assert not any(name.endswith((".load", ".start")) for name, _args, _kwargs in spark.mock_calls)
+
+
+def test_persistent_stream_starts_both_formats_without_awaiting_termination():
+    readers, started = [MagicMock(), MagicMock()], []
+    for index, reader in enumerate(readers):
+        for method in ("schema", "option", "options", "format", "load", "foreachBatch", "trigger"):
+            getattr(reader, method).return_value = reader
+        reader.writeStream = reader
+        reader.start.side_effect = lambda index=index: started.append(index) or MagicMock()
+    pending = iter(readers)
+    class Spark:
+        @property
+        def readStream(self):
+            return next(pending)
+    queries = start_landing(Spark(), object(), "/Volumes/catalog/prisma_ingest/landing",
+                            "/Volumes/catalog/prisma_ingest/checkpoints/bronze-v1", persistent=True)
+    assert started == [0, 1]
+    for reader, (_, query) in zip(readers, queries):
+        reader.trigger.assert_called_once_with(processingTime="30 seconds")
+        query.awaitTermination.assert_not_called()
 
 
 @pytest.mark.skipif(os.getenv("PRISMA_SPARK_INTEGRATION") != "1", reason="Requires Spark 3.5, Delta 3.2 and a supported JDK")
@@ -101,12 +121,57 @@ def test_real_stream_resumes_after_bronze_commit_without_duplicate_events(tmp_pa
         assert {event["raw_metadata"]["producer"] for event in events} == {"vm_search"}
         assert any(incident["locality"] == "Kennedy" for incident in snapshot["incidents"])
         assert any(incident["locality"] == "Sin localizar" for incident in snapshot["incidents"])
+        # Native SQL and the local reference agree at 5/10/20, inclusive window edges,
+        # duplicate content, future timestamps and custom per-network rule versions.
+        now = 1791209700.0
+        rules = {platform: {**default_source(platform), "config_version": 7}
+                 for platform in ("x", "facebook", "instagram", "tiktok")}
+        samples = []
+        for platform, count in (("x", 20), ("facebook", 10), ("instagram", 5), ("tiktok", 3)):
+            for index in range(count):
+                samples.append(normalize_event({**first[0], "platform": platform, "source_id": f"sql-{platform}-{index}",
+                    "text": f"Bogotá Kennedy inundación reporte {platform} {index}",
+                    "created_at": utc_text(now - (1800 if index == 0 else index))}))
+        samples.extend([{**samples[0], "id": "x:duplicate", "source_id": "duplicate"},
+                        {**samples[1], "id": "x:future", "source_id": "future", "created_at": utc_text(now + 1)},
+                        {**samples[2], "id": "x:old", "source_id": "old", "created_at": utc_text(now - 1801)}])
+        activity_snapshot = build_snapshot(samples, {}, "view-test", utc_text(now), rules=rules, now=now)
+        expected = json.loads(json.dumps(activity_snapshot))
+        lake.apply_activity(activity_snapshot, rules, now)
+        assert activity_snapshot == expected
+        assert any(item["report_counts"].get("x") == 20 for item in activity_snapshot["incidents"])
+        for layer in ("bronze", "silver", "gold"):
+            spark.sql(f"CREATE DATABASE IF NOT EXISTS oci_{layer}")
+        for table, values in (("prisma_silver_view_fixture", samples), ("prisma_gold_view_fixture", [activity_snapshot])):
+            rows = [(item.get("id", item.get("version")), json.dumps(item)) for item in values]
+            spark.createDataFrame(rows, "id STRING,payload STRING").write.format("delta").saveAsTable(table)
+        install_post_views(spark, "spark_catalog", {"bronze": lake.tables["bronze"],
+            "silver": "prisma_silver_view_fixture", "gold": "prisma_gold_view_fixture"})
+        assert spark.table("oci_bronze.social_posts_raw").count() == 3
+        assert "source_hash_kind" in spark.table("oci_bronze.social_posts_raw").columns
+        assert spark.table("oci_silver.social_posts").count() == len(samples)
+        assert spark.table("oci_gold.events").count() == len(activity_snapshot["incidents"])
+        published_event = spark.table("oci_gold.events").first().asDict()
+        expected_event = next(item for item in activity_snapshot["incidents"] if item["id"] == published_event["event_id"])
+        for field in ("summary", "revision", "updated_at", "rule_versions", "correlation_windows_minutes"):
+            assert published_event[field] == expected_event[field]
+        assert spark.table("oci_gold.event_posts").count() == len(activity_snapshot["event_posts"])
         landing.write_file(raw, [], {"platform": "x", "window": 123})
         consume_landing(spark, lake, str(raw), str(checkpoint))
         assert spark.table(lake.tables["bronze"]).count() == 3
+        queries = start_landing(spark, lake, str(raw), str(checkpoint), persistent=True)
+        try:
+            landing.write_file(raw, [{**first[0], "source_id": "continuous-arrival"}])
+            for _, query in queries:
+                query.processAllAvailable()
+            assert all(query.isActive for _, query in queries)
+            assert spark.table(lake.tables["bronze"]).count() == 4
+        finally:
+            for _, query in queries:
+                query.stop()
         (raw / "invalid.csv").write_text("payload,id\nwrong,data\n", encoding="utf-8")
         with pytest.raises(Exception):
             consume_landing(spark, lake, str(raw), str(checkpoint))
-        assert spark.table(lake.tables["bronze"]).count() == 3
+        assert spark.table(lake.tables["bronze"]).count() == 4
     finally:
         spark.stop()

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0014",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0014",
+    "username": "sim_bogota_0014",
+    "display_name": "Fictional Bogotá Reporter 014"
+  },
+  "message": "Comerciantes de Kennedy colocaron tablas para apartar mercancía; el agua sigue en la calzada. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 156,
+  "available_offset_seconds": 156,
+  "attachments": []
+}

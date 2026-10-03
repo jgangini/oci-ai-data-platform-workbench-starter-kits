@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0061",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0061",
+    "username": "sim_bogota_0061",
+    "display_name": "Fictional Bogotá Reporter 061"
+  },
+  "message": "En el mismo sector de Chapinero continúa saliendo humo aunque las llamas se ven más pequeñas. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 144,
+  "available_offset_seconds": 144,
+  "attachments": []
+}
