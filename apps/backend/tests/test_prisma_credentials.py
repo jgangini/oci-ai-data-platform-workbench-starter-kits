@@ -2,9 +2,13 @@ import asyncio
 import copy
 import json
 
+import pytest
+from fastapi import HTTPException
+
 from app.prisma.cloud import CloudRuntime
-from app.prisma.core import PLATFORMS, default_source, source_migration
+from app.prisma.core import PLATFORMS, default_source, source_migration, aidp_credential_name
 from app.prisma.local import LocalPrismaRuntime
+from app.prisma.pipeline import _source_token
 
 
 PREVIOUS_QUERY = "(Bogotá OR Bogota OR #Bogota) (inundación OR inundacion OR incendio OR deslizamiento OR derrumbe OR lluvia) -is:retweet"
@@ -37,7 +41,7 @@ def test_local_migration_preserves_real_credentials_until_explicit_rotation(tmp_
     assert b"new-test-token" not in (tmp_path / "prisma.sqlite3").read_bytes()
 
 
-def test_cloud_reference_is_persisted_and_rotation_uses_actual_new_credential_name():
+def test_cloud_reference_is_persisted_and_rotation_reuses_existing_credential():
     documents = {"configuration": {"revision": 1, "sources": {
         "x": {**default_source("x"), "secret_ref": "PrismaSource_x", "credential_configured": True, "query": "#custom"},
         "facebook": {**default_source("facebook"), "secret_ref": "prisma-facebook", "query": ""},
@@ -46,7 +50,7 @@ def test_cloud_reference_is_persisted_and_rotation_uses_actual_new_credential_na
     class Client:
         def _list(self, path, **kwargs):
             calls.append(("GET", path, kwargs))
-            return []
+            return [{"displayName": "PrismaSource_x", "key": "legacy"}]
         def _request(self, method, path, **kwargs):
             calls.append((method, path, kwargs))
             return {"key": "credential"}
@@ -66,6 +70,39 @@ def test_cloud_reference_is_persisted_and_rotation_uses_actual_new_credential_na
     runtime._sources()
     assert documents["configuration"]["revision"] == revision  # Idempotent migration.
     rotated = runtime._update("x", {"bearer_token": "new-test-token"})
-    assert rotated["secret_ref"] == "gods-eye-view-x"
-    assert calls[-1][1] == "/credentials" and calls[-1][2]["payload"]["displayName"] == rotated["secret_ref"]
+    assert rotated["secret_ref"] == "PrismaSource_x"
+    assert calls[-1][:2] == ("PUT", "/credentials/legacy")
+    assert calls[-1][2]["payload"]["displayName"] == "PrismaSource_x"
     assert "new-test-token" not in json.dumps(documents)
+
+
+def test_public_alias_uses_same_aidp_name_for_creation_update_and_spark_read():
+    calls, existing = [], []
+    class Client:
+        def _list(self, path, **kwargs):
+            assert kwargs["params"] == {"displayName": "gods_eye_view_x"}
+            return existing
+        def _request(self, method, path, **kwargs):
+            calls.append((method, path, kwargs["payload"]))
+    runtime = object.__new__(CloudRuntime)
+    runtime.aidp_factory = Client
+    assert runtime._credential("x", "test-only") == "gods-eye-view-x"
+    assert calls[-1][:2] == ("POST", "/credentials")
+    assert calls[-1][2]["displayName"] == "gods_eye_view_x"
+    existing.append({"displayName": "gods_eye_view_x", "key": "existing"})
+    assert runtime._credential("x", "rotated-test-only") == "gods-eye-view-x"
+    assert calls[-1][:2] == ("PUT", "/credentials/existing")
+    def secret_get(*, name, key):
+        assert (name, key) == ("gods_eye_view_x", "bearer_token")
+        return "test-only"
+    assert _source_token(secret_get, {**default_source("x"), "credential_configured": True}) == "test-only"
+    existing.append({"displayName": "gods_eye_view_x", "key": "duplicate"})
+    with pytest.raises(HTTPException) as caught:
+        runtime._credential("x", "unused")
+    assert caught.value.status_code == 409 and len(calls) == 2
+
+
+@pytest.mark.parametrize("reference", ["gods-eye-view-facebook", "../PrismaWriterRuntime", "PrismaSource_x\n", "custom-name", None])
+def test_credential_mapping_rejects_wrong_platform_alias_or_invalid_identifier(reference):
+    with pytest.raises(ValueError):
+        aidp_credential_name("x", reference)

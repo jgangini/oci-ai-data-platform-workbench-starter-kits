@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -174,6 +175,24 @@ def test_vm_update_bridge_keeps_docker_privilege_on_the_host() -> None:
     assert "/var/lib/aidp-lab/update/inbox:rw,Z" in cloud_init
     assert '"docker", "image", "load", "--input"' in updater_source
     assert "_build_image" not in updater_source
+
+
+def test_main_lock_and_atomic_release_state_stay_in_writable_directories(monkeypatch) -> None:
+    cloud_init = (ROOT / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")
+    settings = dict(line.split("=", 1) for line in cloud_init.splitlines() if line.startswith(("RuntimeDirectory=", "ReadWritePaths=")))
+    runtime = Path("/run") / settings["RuntimeDirectory"]
+    writable = settings["ReadWritePaths"].split()
+    observed = []
+    monkeypatch.setattr(updater, "_request", lambda _path: "d9282ff6-8717-4db7-9f59-241469a2c526")
+    monkeypatch.setattr(updater, "_singleton_lock", lambda path: observed.append(path) or nullcontext())
+    monkeypatch.setattr(updater, "reconcile", lambda *_args: None)
+
+    assert updater.main() == 0
+    assert observed == [runtime / "update.lock"]
+    assert runtime.as_posix() in writable
+    assert "/opt/aidp-lab/releases" in writable
+    assert "/opt/aidp-lab/release.json" not in writable
+    assert 'python3 - "/opt/aidp-lab/releases/current.json"' in cloud_init
 
 
 def test_candidate_uses_an_isolated_state_snapshot(tmp_path: Path) -> None:
@@ -384,3 +403,38 @@ def test_reconcile_reports_when_no_healthy_rollback_can_be_verified(
     assert status["status"] == "failed"
     assert "no healthy rollback could be verified" in status["message"]
     assert "Manual intervention is required" in status["message"]
+
+
+@pytest.mark.parametrize("candidate_healthy", [True, False])
+def test_legacy_release_state_migrates_atomically_without_losing_rollback(monkeypatch, tmp_path, candidate_healthy):
+    old_sha, new_sha = "a" * 40, "b" * 40
+    legacy = {"schema_version": 1, "repository": updater.REPOSITORY.removesuffix(".git"),
+              "release": "v2.2.0", "commit_sha": old_sha}
+    legacy_path = tmp_path / "release.json"
+    legacy_path.write_text(json.dumps(legacy), encoding="utf-8")
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state/settings.json").write_text('{"preserve":true}', encoding="utf-8")
+    containers, _ = _fake_containers(monkeypatch, {updater.APP_NAME: {"image": f"aidp-lab:{old_sha}", "running": True}})
+    monkeypatch.setattr(updater, "latest_release", lambda: updater.validated_release(release_payload()))
+    monkeypatch.setattr(updater, "_prepare_artifact", lambda directory, *_args:
+                        (directory / "stage", {"commit_sha": new_sha}, directory / updater.IMAGE_ASSET))
+    monkeypatch.setattr(updater, "_load_image", lambda *_args: f"aidp-lab:{new_sha}")
+    monkeypatch.setattr(updater, "_healthy", lambda url, **_kwargs: candidate_healthy or ":18443/" not in url)
+    operation = "d9282ff6-8717-4db7-9f59-241469a2c526"
+
+    if candidate_healthy:
+        updater.reconcile(tmp_path, operation)
+    else:
+        with pytest.raises(RuntimeError, match="candidate_health_failed"):
+            updater.reconcile(tmp_path, operation)
+
+    current = json.loads((tmp_path / "releases/current.json").read_text(encoding="utf-8"))
+    assert current["commit_sha"] == (new_sha if candidate_healthy else old_sha)
+    assert containers[updater.APP_NAME]["image"] == f"aidp-lab:{current['commit_sha']}"
+    assert json.loads(legacy_path.read_text(encoding="utf-8")) == legacy
+    assert json.loads((tmp_path / "state/settings.json").read_text(encoding="utf-8")) == {"preserve": True}
+    # New metadata is authoritative; a later check must not read the unchanged legacy file.
+    if candidate_healthy:
+        updater.reconcile(tmp_path, "f937d706-6299-4d6a-a7b5-ae63d17b943e")
+        status = json.loads((tmp_path / "state/update/status/status.json").read_text(encoding="utf-8"))
+        assert status["status"] == "up_to_date"

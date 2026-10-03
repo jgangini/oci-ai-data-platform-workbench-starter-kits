@@ -193,7 +193,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/opt/aidp-lab/release.json /opt/aidp-lab/state /opt/aidp-lab/releases /run/aidp-lab-update
+ReadWritePaths=/opt/aidp-lab/state /opt/aidp-lab/releases /run/aidp-lab-update
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
@@ -210,7 +210,7 @@ Unit=aidp-lab-update.service
 [Install]
 WantedBy=multi-user.target
 EOF
-python3 - "/opt/aidp-lab/release.json" "$SOURCE_REPO_URL" "$SOURCE_RELEASE_TAG" "$SOURCE_COMMIT_SHA" <<'PY'
+python3 - "/opt/aidp-lab/releases/current.json" "$SOURCE_REPO_URL" "$SOURCE_RELEASE_TAG" "$SOURCE_COMMIT_SHA" <<'PY'
 import json
 import os
 import sys

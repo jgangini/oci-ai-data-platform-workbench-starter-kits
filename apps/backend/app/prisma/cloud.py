@@ -11,7 +11,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from ..autonomous import AutonomousGovernanceClient
-from .core import PLATFORMS, utc_text, default_source, simulation_state, source_migration
+from .core import PLATFORMS, utc_text, default_source, simulation_state, source_migration, aidp_credential_name
 from . import capture, landing
 from .database import read_document, mutate_document
 from .scheduling import needs_schedule, set_schedule, submit_run
@@ -72,9 +72,10 @@ class CloudRuntime:
     async def sources(self):
         return await self._io(self._sources)
 
-    def _credential(self, platform, token):
+    def _credential(self, platform, token, reference=None):
         client = self.aidp_factory()
-        name = default_source(platform)["secret_ref"]
+        reference = reference or default_source(platform)["secret_ref"]
+        name = aidp_credential_name(platform, reference)
         existing = [item for item in client._list("/credentials", params={"displayName": name}, phase="control")
                     if (item.get("displayName") or item.get("name")) == name]
         if len(existing) > 1:
@@ -86,11 +87,11 @@ class CloudRuntime:
             client._request("PUT", "/credentials/" + quote(key, safe=""), payload=payload, phase="control")
         else:
             client._request("POST", "/credentials", payload=payload, phase="control")
-        return name
+        return reference
 
     def _update(self, platform, payload):
         if platform not in PLATFORMS:
-            raise HTTPException(404, "Plataforma desconocida")
+            raise HTTPException(404, "Unknown platform")
         fields = {name: value for name, value in payload.items() if name in {"enabled", "mode", "query", "interval_minutes"}}
         old = {**default_source(platform), **self._doc("configuration").get("sources", {}).get(platform, {})}
         fields = {**source_migration(platform, old), **fields}
@@ -102,12 +103,12 @@ class CloudRuntime:
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         if payload.get("secret_ref", old["secret_ref"]) not in {old["secret_ref"], default_source(platform)["secret_ref"]}:
-            raise HTTPException(422, "AIDP administra la referencia de credencial de esta fuente")
+            raise HTTPException(422, "AIDP manages this source's credential reference")
         token = payload.get("bearer_token")
         if token:
             if len(token) > 8192 or any(character.isspace() for character in token):
                 raise HTTPException(422, "Invalid credential value")
-            fields.update(secret_ref=self._credential(platform, token), credential_configured=True)
+            fields.update(secret_ref=self._credential(platform, token, candidate["secret_ref"]), credential_configured=True)
         def change(document):
             sources = dict(document.get("sources", {}))
             old = {**default_source(platform), **sources.get(platform, {})}
@@ -135,7 +136,7 @@ class CloudRuntime:
 
     def _request_source(self, platform, action):
         if platform not in PLATFORMS:
-            raise HTTPException(404, "Plataforma desconocida")
+            raise HTTPException(404, "Unknown platform")
         source = next(item for item in self._sources()["sources"] if item["platform"] == platform)
         if not source["enabled"]:
             raise HTTPException(409, "Enable the source before running it")
@@ -261,7 +262,7 @@ class CloudRuntime:
         snapshot = self._snapshot()
         incident = next((item for item in snapshot.get("incidents", []) if item["id"] == incident_id), None)
         if incident is None:
-            raise HTTPException(404, "Incidente desconocido")
+            raise HTTPException(404, "Unknown incident")
         self._change("reviews", lambda doc: {**doc, "items": {**doc.get("items", {}),
             incident_id: {"status": status, "note": note, "updated_at": utc_text(time.time())}}})
         self._wake(str(uuid4()))

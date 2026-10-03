@@ -41,6 +41,17 @@ def default_source(platform: str) -> dict:
             "status": "simulation", "last_run_at": None, "next_due": None, "last_error": None, "last_received_count": None}
 
 
+def aidp_credential_name(platform: str, reference: str) -> str:
+    """Map the public source alias to an AIDP identifier; preserve valid legacy names."""
+    if platform not in PLATFORMS or not isinstance(reference, str):
+        raise ValueError("Invalid source credential reference")
+    if reference == f"gods-eye-view-{platform}":
+        return f"gods_eye_view_{platform}"
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", reference):
+        raise ValueError("Invalid AIDP credential name")
+    return reference
+
+
 def source_migration(platform: str, source: dict) -> dict:
     """Upgrade unchanged defaults while keeping custom queries and live secret references."""
     defaults, changes = default_source(platform), {}
