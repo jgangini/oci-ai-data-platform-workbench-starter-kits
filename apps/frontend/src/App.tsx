@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { PrismaAdmin } from "./PrismaAdmin";
 
 import { labAssignmentChanges } from "./labAssignments";
 
@@ -1116,6 +1117,9 @@ function Shell({
                 }
               >
                 Settings
+              </a>
+              <a href="/admin/prisma" aria-current={currentPath === "/admin/prisma" ? "page" : undefined}>
+                PRISMA
               </a>
             </nav>
           )}
@@ -3101,7 +3105,17 @@ function AdminSettings() {
   );
 }
 
+function AdminPrisma() {
+  const session = useAdminSession();
+  async function logout() {
+    await api("/api/admin/logout", { method: "POST" });
+    window.location.assign("/");
+  }
+  return <Shell onSignOut={logout} operatorUsername={session?.operator_username || session?.username}><PrismaAdmin api={api} /></Shell>;
+}
+
 export function App() {
+  if (window.location.pathname === "/admin/prisma") return <AdminPrisma />;
   if (window.location.pathname === "/admin/settings") return <AdminSettings />;
   if (window.location.pathname === "/admin/login")
     return <RegisterPage initialAdminLogin />;

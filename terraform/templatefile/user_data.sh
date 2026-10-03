@@ -41,13 +41,6 @@ retry() {
   done
 }
 
-use_reachable_base_images() {
-  sed -i \
-    -e 's#^FROM node:#FROM public.ecr.aws/docker/library/node:#' \
-    -e 's#^FROM python:#FROM public.ecr.aws/docker/library/python:#' \
-    "$SOURCE_DIR/docker/Dockerfile"
-}
-
 dnf -y makecache
 dnf -y install dnf-plugins-core firewalld curl git openssl python3 sudo
 
@@ -82,6 +75,9 @@ visudo -cf /etc/sudoers.d/101-aidp-lab-bootstrap-public-key
 systemctl stop firewalld >/dev/null 2>&1 || true
 firewall-offline-cmd --zone=public --add-service=http
 firewall-offline-cmd --zone=public --add-service=https
+%{ if enable_prisma_viewer ~}
+firewall-offline-cmd --zone=public --add-port=8000/tcp
+%{ endif ~}
 systemctl enable --now firewalld
 
 dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
@@ -137,7 +133,8 @@ git -C "$SOURCE_DIR" checkout --detach "$SOURCE_COMMIT_SHA"
 test "$(git -C "$SOURCE_DIR" rev-parse HEAD)" = "$SOURCE_COMMIT_SHA"
 SOURCE_RELEASE_TAG=$(git -C "$SOURCE_DIR" describe --tags --exact-match "$SOURCE_COMMIT_SHA")
 printf '%s' "$SOURCE_RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-use_reachable_base_images
+retry 5 python3 "$SOURCE_DIR/scripts/load_release_image.py" \
+  --release "$SOURCE_RELEASE_TAG" --commit "$SOURCE_COMMIT_SHA" --component aidp-lab
 
 cat > /opt/aidp-lab/.env <<'EOF'
 ADMIN_USERNAME=${admin_username}
@@ -166,6 +163,11 @@ SESSION_SECRET_FILE=/var/lib/aidp-lab/session.key
 VM_UPDATE_ENABLED=true
 AIDP_UPDATE_DIR=/var/lib/aidp-lab/update
 COOKIE_SECURE=true
+PRISMA_VIEWER_URL=${prisma_viewer_url}
+PRISMA_VIEWER_ENABLED=${enable_prisma_viewer}
+%{ if enable_prisma_viewer ~}
+PRISMA_ADMIN_BIND=${prisma_admin_private_ip}
+%{ endif ~}
 EOF
 chmod 0600 /opt/aidp-lab/.env
 
@@ -228,13 +230,6 @@ systemctl daemon-reload
 systemctl enable aidp-lab-update.service
 systemctl enable --now aidp-lab-update.path
 
-retry 5 docker build \
-  -f "$SOURCE_DIR/docker/Dockerfile" \
-  -t "$LOCAL_IMAGE" \
-  --build-arg "APP_RELEASE_TAG=$SOURCE_RELEASE_TAG" \
-  --build-arg "APP_RELEASE_SHA=$SOURCE_COMMIT_SHA" \
-  --build-arg "APP_REPOSITORY=$SOURCE_REPO_URL" \
-  "$SOURCE_DIR"
 retry 60 docker run --rm \
   --network host \
   --security-opt no-new-privileges:true \
@@ -271,6 +266,9 @@ docker run -d \
   --env-file /opt/aidp-lab/.env \
   -p 80:80 \
   -p 443:443 \
+%{ if enable_prisma_viewer ~}
+  -p ${prisma_admin_private_ip}:8000:8000 \
+%{ endif ~}
   -v "$TLS_DIR:/etc/aidp-lab/tls:ro,Z" \
   -v "$OCI_DIR:/etc/aidp-lab/oci:ro,Z" \
   -v "$AUTONOMOUS_DIR:/etc/aidp-lab/autonomous:ro,Z" \

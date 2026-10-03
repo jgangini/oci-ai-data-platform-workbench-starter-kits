@@ -6,7 +6,8 @@ resource "oci_core_vcn" "lab" {
 }
 
 resource "oci_core_subnet" "public" {
-  cidr_block                 = var._oci_vcn.cidr_block
+  # ponytail: the optional fresh deployment splits this VCN once; existing labs keep their CIDR.
+  cidr_block                 = var.enable_prisma_viewer ? cidrsubnet(var._oci_vcn.cidr_block, 1, 0) : var._oci_vcn.cidr_block
   compartment_id             = local.target_compartment
   vcn_id                     = oci_core_vcn.lab.id
   display_name               = "${local.name_prefix}-public-subnet"

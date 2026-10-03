@@ -3,6 +3,8 @@
 .terraform
 .venv
 node_modules
+**/node_modules/
+**/dist/
 dist
 *.tsbuildinfo
 __pycache__

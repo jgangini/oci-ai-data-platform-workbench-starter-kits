@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, AsyncIterator, Callable
 from uuid import UUID, uuid4
 
@@ -23,6 +23,7 @@ from .aidp import (
 from .config import Settings, SettingsStore
 from .identity import IdentityClient, IdentityConflict, IdentityPending, IdentityRejected, LocalIdentityClient
 from .lab_packs import available_lab_ids, public_lab_catalog
+from .prisma.api import mount_prisma, run_local_prisma
 from .releases import (
     ApplicationReleaseManager,
     ReleaseUpdateConflict,
@@ -179,7 +180,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        yield
+        prisma_task = asyncio.create_task(run_local_prisma(app)) if settings.local_development_mode else None
+        try:
+            yield
+        finally:
+            if prisma_task:
+                prisma_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await prisma_task
         for client in (app.state.identity_client, app.state.aidp_client):
             if client is not None:
                 await client.close()
@@ -265,6 +273,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if username != settings.admin_username:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Administrator session required")
         return username
+
+    mount_prisma(app, require_admin)
 
     async def provision_user(name: str, email: str, lab_ids: list[str]) -> JSONResponse:
         try:
@@ -450,7 +460,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     @app.get("/api/admin/session")
-    async def admin_session(username: str = Depends(require_admin)) -> dict[str, str]:
+    async def admin_session(response: Response, username: str = Depends(require_admin)) -> dict[str, str]:
+        response.headers["X-PRISMA-User"] = username
         return {"username": username, "operator_username": settings.operator_username}
 
     async def admin_settings_payload() -> dict[str, str | bool]:

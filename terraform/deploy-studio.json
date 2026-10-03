@@ -42,6 +42,13 @@
   "form": {
     "fields": [
       {
+        "name": "enable_prisma_viewer",
+        "label": "Enable PRISMA private viewer VM",
+        "type": "boolean",
+        "default": false,
+        "group": "application_vm"
+      },
+      {
         "name": "admin_username",
         "label": "Username",
         "type": "text",
@@ -290,6 +297,10 @@
     "email_access_fields": ["deployment_mode", "admin_username", "admin_password", "registration_code"]
   },
   "outputs": [
+    "prisma_viewer_enabled",
+    "prisma_viewer_url",
+    "prisma_viewer_instance_id",
+    "prisma_viewer_principal_group",
     "application_url",
     "admin_url",
     "aidp_workbench_url",

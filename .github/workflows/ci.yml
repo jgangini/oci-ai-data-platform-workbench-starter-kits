@@ -63,3 +63,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -f docker/Dockerfile -t aidp-lab:test .
+      - run: docker build -f apps/prisma-viewer/Dockerfile -t prisma-viewer:test .

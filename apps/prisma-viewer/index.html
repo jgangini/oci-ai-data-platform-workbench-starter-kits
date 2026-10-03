@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <title>PRISMA · Bogotá</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/admin/prisma"><span class="brand-icon" aria-hidden="true">◈</span><span>PRISMA<small>BOGOTÁ · CENTRO DE OBSERVACIÓN</small></span></a>
+      <div class="snapshot-state"><span id="runtime">Conectando…</span><span id="published">Sin publicación</span></div>
+      <a class="admin-link" href="/admin/prisma">Administrar fuentes ↗</a>
+    </header>
+    <main class="workspace">
+      <section class="map-panel" aria-label="Mapa de incidentes en Bogotá">
+        <div id="map"></div>
+        <div class="map-heading"><span class="eyebrow">PULSO DE LA CIUDAD</span><h1>Bogotá</h1><p>Emergencias climáticas · evidencia y contexto</p></div>
+        <div class="map-tools"><button id="home" type="button">Centrar Bogotá</button><label><input type="checkbox" id="terrain" /> Relieve</label></div>
+        <p id="map-status" role="status" class="map-status"></p>
+        <div id="map-credits"></div>
+        <div class="map-attribution"><a href="https://github.com/bilawalsidhu/gods-eye-view" target="_blank" rel="noreferrer">God’s Eye View · módulos MIT</a> · <a href="/prisma/THIRD-PARTY-NOTICES.txt" target="_blank">Licencias</a></div>
+      </section>
+      <aside class="operations" aria-label="Alertas y consulta">
+        <div class="operations-title"><div><span class="eyebrow">TABLERO OPERATIVO</span><h2>Señales para validar</h2></div><span id="count" class="count">0</span></div>
+        <p id="connection" role="status">Cargando la publicación…</p>
+        <form id="filters" class="filters" aria-label="Filtros de incidentes">
+          <label>Localidad<select name="locality"><option value="">Todas</option></select></label>
+          <label>Criticidad<select name="severity"><option value="">Todas</option></select></label>
+          <label>Fuente<select name="platform"><option value="">Todas</option></select></label>
+          <label>Origen<select name="mode"><option value="">Todos</option><option value="simulation">SIMULADO</option><option value="real">REAL</option></select></label>
+          <label>Categoría<select name="category"><option value="">Todas</option></select></label>
+          <button id="clear-filters" type="button" class="quiet">Limpiar filtros</button>
+          <label>Desde · hora Bogotá<input type="datetime-local" step="1" name="date_from" /></label>
+          <label>Hasta · hora Bogotá<input type="datetime-local" step="1" name="date_to" /></label>
+          <p id="period-status" role="status" class="metadata period-status">Período inclusivo por fecha de creación de la alerta.</p>
+        </form>
+        <div id="incidents" class="incident-list" aria-label="Lista de incidentes"></div>
+        <section id="detail" class="detail" aria-label="Detalle y evidencias"><p>Selecciona una señal en el mapa o en la lista para revisar su evidencia.</p></section>
+        <section class="chat-panel" aria-label="Consultar al agente PRISMA">
+          <div class="chat-heading"><h2>Consulta PRISMA</h2><span>CON EVIDENCIA</span></div>
+          <p>Pregunta sobre la publicación actual. Las alertas requieren validación humana.</p>
+          <div class="examples"><button type="button">¿Qué alertas tienen mayor criticidad?</button><button type="button">¿Qué evidencia respalda la alerta seleccionada?</button></div>
+          <div id="conversation" class="conversation" role="log" aria-live="polite"></div>
+          <form id="chat"><label for="question">Tu consulta</label><textarea id="question" maxlength="2000" rows="2" required placeholder="Ej. Resume las alertas de inundación en Suba"></textarea><div class="chat-actions"><span id="chat-status" role="status"></span><button type="button" id="cancel" hidden>Cancelar</button><button id="send" type="submit">Consultar ↗</button></div></form>
+        </section>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
