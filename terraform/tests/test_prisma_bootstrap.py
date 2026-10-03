@@ -59,7 +59,8 @@ class Api:
             self.resources[path].update(payload)
             return response(self.resources[path])
         if method == "POST":
-            value = {**payload, "key": "key-" + (payload.get("displayName") or payload["name"]), "lifecycleState": "ACTIVE"}
+            state_field = "lifeCycleState" if path == "/credentials" else "lifecycleState"
+            value = {**payload, "key": "key-" + (payload.get("displayName") or payload["name"]), state_field: "ACTIVE"}
             self.resources.setdefault(path, []).append(value)
             self.resources[path + "/" + value["key"]] = value
             return response(value)
@@ -85,6 +86,65 @@ def test_bundle_is_deterministic_compilable_and_contains_classification():
         for name in archive.namelist():
             ast.parse(archive.read(name), filename=name)
     ast.parse(bootstrap.bundle_prelude(bundle))
+
+
+def test_credential_summary_casing_waits_for_active_and_reuses_existing(monkeypatch):
+    api, pauses = Api(), []
+    request = api.request
+
+    def create_pending(method, path, **kwargs):
+        response = request(method, path, **kwargs)
+        if method == "POST" and path == "/credentials":
+            response.body["lifeCycleState"] = "CREATING"
+        return response
+
+    def complete(_seconds=5):
+        if not _seconds:
+            return
+        pauses.append(True)
+        assert len(pauses) == 1, "ACTIVE credential must stop polling"
+        api.resources["/credentials"][0]["lifeCycleState"] = "ACTIVE"
+
+    monkeypatch.setattr(api, "request", create_pending)
+    monkeypatch.setattr(bootstrap, "pause", complete)
+    bootstrap.credential(api, "PrismaReaderRuntime", {"db_user": "PRISMA_READER"})
+    assert len(pauses) == 1
+    bootstrap.credential(api, "PrismaReaderRuntime", {"db_user": "must_not_rotate"})
+    writes = [call for call in api.calls if call[0] != "GET"]
+    assert len(writes) == 1 and writes[0][:2] == ("POST", "/credentials")
+    assert writes[0][2]["credentialDetails"]["secretTokenPair"] == [{"secretKey": "db_user", "secretValue": "PRISMA_READER"}]
+
+
+def test_credential_summary_casing_filters_deleted_and_rejects_deleting():
+    api = Api()
+    api.resources["/credentials"] = [{"key": "old", "displayName": "PrismaReaderRuntime", "lifeCycleState": "DELETED"}]
+    bootstrap.credential(api, "PrismaReaderRuntime", {"db_user": "PRISMA_READER"})
+    assert bootstrap.named(api, "/credentials", "PrismaReaderRuntime")["key"] != "old"
+    api.resources["/credentials"][-1]["lifeCycleState"] = "DELETING"
+    with pytest.raises(RuntimeError, match="terminal state DELETING"):
+        bootstrap.ensure(api, "/credentials", "PrismaReaderRuntime", {}, ready=True)
+
+
+def test_existing_credential_readiness_waits_without_recreating(monkeypatch):
+    api, pauses = Api(), []
+    api.resources["/credentials"] = [{"key": "existing", "displayName": "PrismaReaderRuntime", "lifeCycleState": "CREATING"}]
+
+    def complete(_seconds=5):
+        if not _seconds:
+            return
+        pauses.append(True)
+        assert len(pauses) == 1
+        api.resources["/credentials"][0]["lifeCycleState"] = "ACTIVE"
+
+    monkeypatch.setattr(bootstrap, "pause", complete)
+    bootstrap.credential(api, "PrismaReaderRuntime", {"db_user": "must_not_rotate"})
+    assert len(pauses) == 1
+    assert bootstrap.ensure(api, "/credentials", "PrismaReaderRuntime", None, ready=True)["key"] == "existing"
+    assert all(method == "GET" for method, *_ in api.calls)
+    api.resources["/credentials"] = []
+    with pytest.raises(RuntimeError, match="disappeared"):
+        bootstrap.ensure(api, "/credentials", "PrismaReaderRuntime", None, ready=True)
+    assert all(method == "GET" for method, *_ in api.calls)
 
 
 def test_agent_publish_waits_async_and_detail_active_without_deleting_prior_release():
