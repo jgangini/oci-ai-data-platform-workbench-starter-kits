@@ -49,7 +49,7 @@ def incident_query(version, locality="", category="", severity="", mode="", inci
     area = parse_bbox(bbox) or (None, None, None, None)
     return """SELECT i.incident_json FROM ADMIN.PRISMA_V_INCIDENTS i WHERE i.version=:version
         AND (:locality IS NULL OR i.locality=:locality) AND (:category IS NULL OR i.category=:category)
-        AND (:severity IS NULL OR i.severity=:severity) AND (:mode IS NULL OR i.mode=:mode)
+        AND (:severity IS NULL OR i.severity=:severity) AND (:source_mode IS NULL OR i.source_mode=:source_mode)
         AND (:incident_id IS NULL OR i.incident_id=:incident_id)
         AND (:west IS NULL OR (JSON_VALUE(i.incident_json,'$.lon' RETURNING NUMBER) BETWEEN :west AND :east
           AND JSON_VALUE(i.incident_json,'$.lat' RETURNING NUMBER) BETWEEN :south AND :north))
@@ -61,7 +61,7 @@ def incident_query(version, locality="", category="", severity="", mode="", inci
           WHERE e.platform=:platform))
         ORDER BY JSON_VALUE(i.incident_json,'$.created_at' RETURNING TIMESTAMP WITH TIME ZONE) DESC
         FETCH FIRST 100 ROWS ONLY""", dict(version=version, locality=locality or None, category=category or None,
-        severity=severity or None, mode=mode or None, incident_id=incident_id or None, platform=platform or None,
+        severity=severity or None, source_mode=mode or None, incident_id=incident_id or None, platform=platform or None,
         date_from=bounds[0], date_to=bounds[1], west=area[0], south=area[1], east=area[2], north=area[3])
 
 

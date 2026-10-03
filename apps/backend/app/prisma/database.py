@@ -68,12 +68,12 @@ VIEWS = (
        JSON_TABLE(p.payload, '$.incidents[*]' COLUMNS (
          incident_id VARCHAR2(200) PATH '$.id', locality VARCHAR2(100) PATH '$.locality',
          category VARCHAR2(100) PATH '$.category', severity VARCHAR2(20) PATH '$.severity',
-         mode VARCHAR2(20) PATH '$.mode', incident_json CLOB FORMAT JSON PATH '$')) j""",
+         source_mode VARCHAR2(20) PATH '$.mode', incident_json CLOB FORMAT JSON PATH '$')) j""",
     """CREATE OR REPLACE VIEW ADMIN.PRISMA_V_EVIDENCE AS
        SELECT p.version,j.* FROM ADMIN.PRISMA_PUBLICATIONS p,
        JSON_TABLE(p.payload, '$.evidence[*]' COLUMNS (
          evidence_id VARCHAR2(200) PATH '$.id', platform VARCHAR2(50) PATH '$.platform',
-         mode VARCHAR2(20) PATH '$.mode', evidence_json CLOB FORMAT JSON PATH '$')) j""",
+         source_mode VARCHAR2(20) PATH '$.mode', evidence_json CLOB FORMAT JSON PATH '$')) j""",
 )
 
 
