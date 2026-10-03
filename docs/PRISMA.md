@@ -73,6 +73,14 @@ only after its Autonomous copy and private JSON snapshot exist. Both carry one
 version and the same evidence IDs. The viewer rejects chat based on an outdated
 version and rejects references/actions absent from that publication.
 
+The continuous-correlation upgrade changes local publication versions to
+`local-v2-{revision}`, invalidating earlier versions without rewriting evidence.
+Continuous incident IDs also change when sources are grouped together. Old review
+records remain stored; new aggregates start pending and require a new human review,
+since merged incidents may have conflicting earlier decisions. Real incidents and
+bounded legacy replays retain their review IDs. The pre-upgrade OCI acceptance
+publication contained no incidents, so no reviews were affected there.
+
 Questions are forwarded over the authenticated VM bridge and signed by the
 existing AIDP operator. The private viewer's instance principal only reads the
 published Object Storage objects. No OCI key, X token or database password is

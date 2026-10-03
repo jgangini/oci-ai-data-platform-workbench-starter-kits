@@ -170,6 +170,32 @@ def test_admin_contract_and_review_persistence(tmp_path):
     assert new_store.snapshot()["incidents"][0]["review_status"] == "validated"
 
 
+def test_local_correlation_upgrade_invalidates_old_version_and_retains_old_review(tmp_path):
+    clock = Clock()
+    raw = simulation_events(0, NOW)[0]
+    raw["raw_metadata"].update(capture_run_id="capture-x", scenario_run_id="capture-x:0")
+    event = normalize_event(raw)
+    previous = {**event, "raw_metadata": {key: value for key, value in event["raw_metadata"].items() if key != "capture_run_id"}}
+    old_id = build_snapshot([previous], {}, "", "")["incidents"][0]["id"]
+    review = {"status": "validated", "note": "Existing decision"}
+    path = tmp_path / "state.db"
+    store = PrismaStore(path, clock)
+    store.persist_page("x", [raw], {})
+    with store.connection() as db:
+        publication = store._get(db, "publication", {})
+        db.execute("INSERT INTO reviews VALUES (?,?)", (old_id, json.dumps(review)))
+    restarted = PrismaStore(path, clock)
+    snapshot = restarted.snapshot()
+    assert snapshot["version"] == f"local-v2-{publication['revision']}"
+    assert snapshot["version"] != f"local-{publication['revision']}"
+    assert snapshot["incidents"][0]["id"] != old_id
+    assert snapshot["incidents"][0]["review_status"] == "pending"
+    assert restarted.snapshot() == snapshot
+    with restarted.connection() as db:
+        assert restarted._get(db, "publication", {}) == publication
+        assert json.loads(db.execute("SELECT payload FROM reviews WHERE id=?", (old_id,)).fetchone()[0]) == review
+
+
 def test_cloud_mode_delegates_without_local_processing(tmp_path):
     class Cloud:
         async def snapshot(self):

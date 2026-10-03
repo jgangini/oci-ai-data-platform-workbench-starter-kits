@@ -152,7 +152,9 @@ def build_snapshot(events: list[dict], reviews: dict, version: str, published_at
         if event["category"] == "por_clasificar":
             continue
         # ponytail: hourly locality buckets can split boundary events; production needs sliding spatial/time clustering.
-        scenario = event["raw_metadata"].get("scenario_run_id", "") if event["mode"] == "simulation" else ""
+        metadata = event["raw_metadata"]
+        # Continuous sources share locality/time correlation; bounded replays retain scenario isolation.
+        scenario = metadata.get("scenario_run_id", "") if event["mode"] == "simulation" and not metadata.get("capture_run_id") else ""
         key = "|".join((event["mode"], event["category"], event["locality"], event["created_at"][:13], scenario))
         incident_id = "incident-" + hashlib.sha256(key.encode()).hexdigest()[:16]
         groups.setdefault(incident_id, []).append(event)

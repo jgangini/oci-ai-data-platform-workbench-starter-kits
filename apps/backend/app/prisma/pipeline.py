@@ -119,6 +119,11 @@ def _consume_format(spark, lake, path, checkpoint, format_name):
         lake.put("bronze", events)  # MERGE by event ID makes replay after callback failure idempotent.
     reader = (spark.readStream.schema("id STRING, payload STRING").option("maxFilesPerTrigger", 5)
               .option("pathGlobFilter", "*.ndjson" if format_name == "json" else "*.csv").option("mode", "FAILFAST"))
+    if path.startswith("/Volumes"):
+        if not re.fullmatch(r"/Volumes/[A-Za-z_][A-Za-z0-9_]*/prisma_ingest/landing", path):
+            raise ValueError("Invalid PRISMA governed volume path")
+        # AIDP needs the same file: URI form for the mounted root and its enumerated leaves.
+        path = "file:" + path
     if format_name == "csv":
         reader = reader.options(header=True, enforceSchema=False, multiLine=True, quote='"', escape='"', encoding="UTF-8")
     stream = reader.format(format_name).load(path)
