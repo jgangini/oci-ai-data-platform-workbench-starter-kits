@@ -179,7 +179,7 @@ class PrismaStore:
             reviews = {row[0]: json.loads(row[1]) for row in db.execute("SELECT id,payload FROM reviews")}
             publication = self._get(db, "publication", {"revision": 0, "published_at": None})
         events = [item for item in events if not item.get("raw_metadata", {}).get("capture_run_id") or item["created_at"] >= utc_text(self.clock() - 86400)]
-        result = build_snapshot(events, reviews, f"local-{publication['revision']}", publication["published_at"])
+        result = build_snapshot(events, reviews, f"local-v2-{publication['revision']}", publication["published_at"])
         result.update(runtime="local_fixture", simulation=self.simulation_state())
         return result
 

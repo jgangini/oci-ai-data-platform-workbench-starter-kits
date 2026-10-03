@@ -46,3 +46,23 @@ def test_reposts_and_one_author_do_not_raise_corroboration_or_confirm_reality():
     assert incident['independent_source_count'] == 2 and incident['corroboration_score'] == 25
     assert incident['corroboration_status'] == 'multiple_sources'
     assert incident['review_status'] == 'pending' and incident['mode'] == 'simulation'
+
+
+def test_continuous_sources_correlate_without_counting_copies_and_replays_stay_isolated():
+    fixtures = {event['platform']: event for event in simulation_events(60)}
+    events = [normalize_event({**fixtures[platform], 'raw_metadata': {**fixtures[platform]['raw_metadata'],
+        'capture_run_id': platform + '-capture', 'scenario_run_id': platform + '-capture:0'}})
+        for platform in ('x', 'facebook', 'sensor')]
+    copied = build_snapshot(events[:2], {}, 'copies', 'now')
+    assert len(copied['incidents']) == 1
+    assert copied['incidents'][0]['independent_source_count'] == 1
+    combined = build_snapshot(events, {}, 'continuous', 'now')
+    assert len(combined['incidents']) == 1
+    incident = combined['incidents'][0]
+    assert incident['independent_source_count'] == 2 and incident['corroboration_score'] == 25
+    assert set(incident['evidence_ids']) == {event['id'] for event in events}
+    assert incident['mode'] == 'simulation' and incident['review_status'] == 'pending'
+    assert len({event['raw_metadata']['capture_run_id'] for event in combined['evidence']}) == 3
+    replays = [{**event, 'raw_metadata': {key: value for key, value in event['raw_metadata'].items()
+        if key != 'capture_run_id'}} for event in events]
+    assert len(build_snapshot(replays, {}, 'replays', 'now')['incidents']) == 3
