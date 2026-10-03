@@ -1390,3 +1390,36 @@ def test_aidp_alias_endpoint_uses_oci_region_key() -> None:
         post_apply.aidp_alias_endpoint("nxjjum1xu8a1iw51nzh", "us-chicago-1")
         == "nxjjum1xu8a1iw51nzhord"
     )
+
+
+@pytest.mark.parametrize("code,suffix", [(923, " (ORA-00923)"), (1745, " (ORA-01745)"),
+    (None, ""), ("923 private-value", ""), (True, ""), (0, ""), (100000, "")])
+def test_prisma_bootstrap_reports_only_bounded_numeric_oracle_code(monkeypatch, tmp_path, code, suffix):
+    class DatabaseError(Exception):
+        def __str__(self):
+            raise AssertionError("Database error text must never enter deployment output")
+    def fail(*_args, **_kwargs):
+        raise DatabaseError(*(() if code is None else (SimpleNamespace(code=code, message="private-value"),)))
+    key = tmp_path / "test.key"
+    key.write_text("test-only-key", encoding="utf-8")
+    monkeypatch.setenv("DEPLOY_STUDIO_OUTPUT", str(tmp_path / "result.json"))
+    monkeypatch.setenv("DEPLOY_STUDIO_OCI_CONFIG", "unused-test-config")
+    monkeypatch.setenv("DEPLOY_STUDIO_OCI_KEY", str(key))
+    context = {"region": "us-chicago-1", "deployment_id": "test", "terraform_outputs": {
+        "ai_data_platform_id": "platform", "autonomous_database_id": "database",
+        "autonomous_database_mode": "ATP", "prisma_viewer_enabled": True}}
+    secrets = {"inputs": {"autonomous_database_admin_password": "test-admin-only", "autonomous_database_wallet_password": "test-wallet-only"}}
+    monkeypatch.setattr(post_apply, "read_json_env", lambda name: context if name == "DEPLOY_STUDIO_CONTEXT" else secrets)
+    monkeypatch.setitem(sys.modules, "oci", SimpleNamespace(
+        object_storage=SimpleNamespace(ObjectStorageClient=lambda *_args, **_kwargs: object()),
+        database=SimpleNamespace(DatabaseClient=lambda *_args, **_kwargs: object())))
+    monkeypatch.setitem(sys.modules, "prisma_bootstrap", SimpleNamespace(bootstrap_prisma=fail))
+    for name, result in {"load_oci_config": {}, "build_signer": object(), "AidpApi": object(),
+        "reconcile": ({}, []), "resolve_workbench_url": "https://example.test", "_wait_for_autonomous_available": None,
+        "prepare_autonomous_wallet": b"test-wallet", "ensure_ai_features": True,
+        "render_runtime_oci_config": "test-config", "deliver_operator_credentials": False}.items():
+        monkeypatch.setattr(post_apply, name, lambda *_args, _result=result, **_kwargs: _result)
+    assert post_apply.main() == 1
+    result = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    assert result["events"] == [{"level": "error", "message": "PRISMA bootstrap failed: DatabaseError" + suffix}]
+    assert result["outputs"] == {} and result["artifacts"] == []

@@ -1655,6 +1655,9 @@ def main() -> int:
                     ("PRISMA", "Managed PRISMA", "Duplicate PRISMA", "Duplicate managed PRISMA", "Existing PRISMA")
                 ))
                 detail = str(exc) if safe else type(exc).__name__
+                code = getattr(exc.args[0], "code", None) if exc.args else None
+                if not safe and type(code) is int and 0 < code < 100000:
+                    detail += f" (ORA-{code:05d})"
                 raise ReconcileError("PRISMA bootstrap failed: " + detail) from None
             messages.append("PRISMA native job and published snapshot verified; versioned AIDP agent is ACTIVE")
         wait_for_application(str(outputs["application_url"]), verify_tls=outputs.get("public_ip_tls_enabled") is True)

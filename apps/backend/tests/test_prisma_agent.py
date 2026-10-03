@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from app.prisma.agent import incident_query
 from app.prisma.agent_gateway import invoke
+from app.prisma.database import VIEWS
 
 
 def test_incident_query_binds_filters_and_normalizes_period():
@@ -16,6 +17,19 @@ def test_incident_query_binds_filters_and_normalizes_period():
     assert values["locality"] not in sql
     assert "e.version=i.version" in sql and "e.evidence_id=ids.eid" in sql
     assert "FETCH FIRST 100 ROWS ONLY" in sql
+
+
+@pytest.mark.parametrize("mode,expected", [("", None), ("simulation", "simulation"), ("real' OR 1=1 --", "real' OR 1=1 --")])
+def test_mode_json_field_uses_nonreserved_oracle_column_and_bind(mode, expected):
+    sql, values = incident_query("publication-1", mode=mode)
+    assert "i.source_mode=:source_mode" in sql and ":source_mode IS NULL" in sql
+    assert values["source_mode"] == expected and "mode" not in values
+    assert ":mode" not in sql and "i.mode" not in sql
+    if mode:
+        assert mode not in sql
+    for view in VIEWS[1:]:
+        assert "source_mode VARCHAR2(20) PATH '$.mode'" in view
+        assert " mode VARCHAR2" not in view
 
 
 @pytest.mark.parametrize("period", [
