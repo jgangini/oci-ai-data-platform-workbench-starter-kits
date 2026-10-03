@@ -248,8 +248,8 @@ def test_release_workflow_reruns_only_mutate_drafts() -> None:
     )
     assert "group: release-${{ github.ref }}" in workflow
     assert "cancel-in-progress: false" in workflow
-    assert 'gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME"' in workflow
-    assert 'grep -q "HTTP 404" "$lookup_error"' in workflow
+    assert 'gh release view "$GITHUB_REF_NAME"' in workflow
+    assert 'grep -Fxq "release not found" "$lookup_error"' in workflow
     assert "--json isDraft,isImmutable,isPrerelease" in workflow
     assert 'echo "mode=create"' in workflow
     assert 'echo "mode=draft"' in workflow
@@ -279,6 +279,17 @@ def test_release_workflow_reruns_only_mutate_drafts() -> None:
         assert "if: steps.release.outputs.mode != 'immutable'" in guarded_step.split(
             "run:", 1
         )[0]
+
+
+def test_release_workflow_can_find_drafts_by_pending_tag() -> None:
+    workflow = (Path(__file__).parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    # REST releases/tags excludes drafts, so both retry lookup and pre-publish
+    # asset verification must use the CLI's draft-aware release lookup.
+    for name, fields in (("Inspect existing release", "isDraft,isImmutable,isPrerelease"),
+                         ("Verify uploaded draft assets", "assets")):
+        step = workflow.split(f"- name: {name}", 1)[1].split("\n      - ", 1)[0]
+        assert f'gh release view "$GITHUB_REF_NAME" --json {fields}' in step
+        assert "/releases/tags/" not in step
 
 
 def test_runtime_security_contracts() -> None:

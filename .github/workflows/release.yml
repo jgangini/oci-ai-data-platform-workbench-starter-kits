@@ -41,9 +41,9 @@ jobs:
         run: |
           set -euo pipefail
           lookup_error="$RUNNER_TEMP/release-lookup.err"
-          if state="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq '[.draft, .immutable, .prerelease] | @tsv' 2>"$lookup_error")"; then
+          if state="$(gh release view "$GITHUB_REF_NAME" --json isDraft,isImmutable,isPrerelease --jq '[.isDraft, .isImmutable, .isPrerelease] | @tsv' 2>"$lookup_error")"; then
             true
-          elif grep -q "HTTP 404" "$lookup_error"; then
+          elif grep -Fxq "release not found" "$lookup_error"; then
             echo "mode=create" >> "$GITHUB_OUTPUT"
             exit 0
           else
@@ -69,7 +69,7 @@ jobs:
           set -euo pipefail
           verify_dir="$RUNNER_TEMP/immutable-release"
           mkdir -p "$verify_dir"
-          asset_names="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq '[.assets[].name] | sort | join(",")')"
+          asset_names="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name] | sort | join(",")')"
           test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$verify_dir" \
@@ -250,7 +250,7 @@ jobs:
           set -euo pipefail
           verify_dir="$RUNNER_TEMP/uploaded-release"
           mkdir -p "$verify_dir"
-          asset_names="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq '[.assets[].name] | sort | join(",")')"
+          asset_names="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name] | sort | join(",")')"
           test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$verify_dir" \

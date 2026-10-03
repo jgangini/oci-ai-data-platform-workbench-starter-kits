@@ -68,7 +68,7 @@ def load_or_create_session_key(path_text: str) -> bytes:
 
 def issue_session(key: bytes, username: str, *, now: int | None = None, ttl: int = 28_800) -> str:
     payload = json.dumps(
-        {"sub": username, "exp": (now or int(time.time())) + ttl},
+        {"sub": username, "exp": (now or int(time.time())) + ttl, "sid": secrets.token_urlsafe(24)},
         separators=(",", ":"),
         sort_keys=True,
     ).encode()
