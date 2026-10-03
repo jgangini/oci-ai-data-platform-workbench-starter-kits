@@ -70,6 +70,8 @@ resource "oci_core_instance" "lab" {
   create_vnic_details {
     subnet_id        = oci_core_subnet.public.id
     assign_public_ip = true
+    private_ip       = var.enable_prisma_viewer ? local.prisma_admin_private_ip : null
+    nsg_ids          = var.enable_prisma_viewer ? [oci_core_network_security_group.prisma_proxy[0].id] : []
   }
 
   source_details {
@@ -112,6 +114,9 @@ resource "oci_core_instance" "lab" {
       lab_marker              = local.name_prefix
       source_repo_url         = var.source_repository_url
       source_commit_sha       = var.source_commit_sha
+      prisma_viewer_url       = var.enable_prisma_viewer ? "http://${oci_core_instance.prisma[0].private_ip}:8081" : "http://127.0.0.1:8081"
+      enable_prisma_viewer    = var.enable_prisma_viewer
+      prisma_admin_private_ip = local.prisma_admin_private_ip
     }))
   }
 

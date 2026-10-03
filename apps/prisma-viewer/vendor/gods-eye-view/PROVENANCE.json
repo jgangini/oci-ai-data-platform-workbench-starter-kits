@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/bilawalsidhu/gods-eye-view",
+  "commit": "b1a958242cfcd0a01cb68ea6035a1da037a58cfd",
+  "license": "MIT (source code only)",
+  "modifications": "None",
+  "files": {
+    "LICENSE": "b231bb38e2d4eab741643126087cbe9df2b58e2f2e5abf27ad613d05f52b01ca",
+    "src/app/viewer.js": "29c41d95ef114edb913e29c3d00e6c2f7051ad57d62d75d6cc6664ae9ba97df4",
+    "src/app/atmosphereCompat.js": "4682531175416e582d7992bffb6a32c7511e75042589068efa6bb50925be088b",
+    "src/voice/session.js": "c592146a308fbc08c8e0e3f104a41c4fc796e7da5dd5e93b37b36dc75e179e0c",
+    "src/maps/terrain.js": "ae101a44f1767253be6e3f855a792573879ce447146ad480fea627373b073705",
+    "src/maps/terrainRetry.js": "903581eb493ca02e6782fb173abda09828be9ed67be266a70b9bbf5dbe3c46d7"
+  }
+}

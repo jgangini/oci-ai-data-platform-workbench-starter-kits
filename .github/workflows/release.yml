@@ -70,11 +70,13 @@ jobs:
           verify_dir="$RUNNER_TEMP/immutable-release"
           mkdir -p "$verify_dir"
           asset_names="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq '[.assets[].name] | sort | join(",")')"
-          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET"
+          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$verify_dir" \
             --pattern "$RELEASE_IMAGE_ASSET" \
-            --pattern "$RELEASE_MANIFEST_ASSET"
+            --pattern "$RELEASE_MANIFEST_ASSET" \
+            --pattern prisma-release.json \
+            --pattern prisma-viewer-image-amd64.tar.gz
           gzip -t "$verify_dir/$RELEASE_IMAGE_ASSET"
           RELEASE_VERIFY_DIR="$verify_dir" python - <<'PY'
           import hashlib
@@ -104,6 +106,19 @@ jobs:
           }
           if json.loads(manifest_path.read_text(encoding="utf-8")) != expected:
               raise SystemExit("immutable release asset manifest mismatch")
+          image_path = root / "prisma-viewer-image-amd64.tar.gz"
+          digest = hashlib.sha256()
+          with image_path.open("rb") as stream:
+              for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                  digest.update(chunk)
+          expected["image"] = {
+              "asset_name": image_path.name,
+              "sha256": digest.hexdigest(),
+              "platform": "linux/amd64",
+              "image_tag": f'prisma-viewer:{os.environ["RELEASE_COMMIT_SHA"]}',
+          }
+          if json.loads((root / "prisma-release.json").read_text()) != expected:
+              raise SystemExit("immutable PRISMA release manifest mismatch")
           PY
         env:
           GH_TOKEN: ${{ github.token }}
@@ -179,6 +194,32 @@ jobs:
               encoding="utf-8",
           )
           PY
+      - name: Build frozen PRISMA viewer release assets
+        if: steps.release.outputs.mode != 'immutable'
+        run: |
+          set -euo pipefail
+          image_tag="prisma-viewer:$RELEASE_COMMIT_SHA"
+          docker build --platform linux/amd64 \
+            --file apps/prisma-viewer/Dockerfile --tag "$image_tag" .
+          test "$(docker image inspect "$image_tag" --format '{{.Os}}/{{.Architecture}}')" = "linux/amd64"
+          docker save "$image_tag" | gzip -n -9 > "$RELEASE_DIST/prisma-viewer-image-amd64.tar.gz"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RELEASE_DIST"])
+          manifest = json.loads((root / os.environ["RELEASE_MANIFEST_ASSET"]).read_text())
+          image = root / "prisma-viewer-image-amd64.tar.gz"
+          with image.open("rb") as stream:
+              digest = hashlib.file_digest(stream, "sha256").hexdigest()
+          manifest["image"] = {
+              "asset_name": image.name, "sha256": digest, "platform": "linux/amd64",
+              "image_tag": f'prisma-viewer:{os.environ["RELEASE_COMMIT_SHA"]}',
+          }
+          (root / "prisma-release.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+          PY
       - name: Create or reuse draft GitHub release
         if: steps.release.outputs.mode != 'immutable'
         run: |
@@ -198,6 +239,8 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             "$RELEASE_DIST/$RELEASE_IMAGE_ASSET" \
             "$RELEASE_DIST/$RELEASE_MANIFEST_ASSET" \
+            "$RELEASE_DIST/prisma-release.json" \
+            "$RELEASE_DIST/prisma-viewer-image-amd64.tar.gz" \
             --clobber
         env:
           GH_TOKEN: ${{ github.token }}
@@ -208,13 +251,17 @@ jobs:
           verify_dir="$RUNNER_TEMP/uploaded-release"
           mkdir -p "$verify_dir"
           asset_names="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq '[.assets[].name] | sort | join(",")')"
-          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET"
+          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$verify_dir" \
             --pattern "$RELEASE_IMAGE_ASSET" \
-            --pattern "$RELEASE_MANIFEST_ASSET"
+            --pattern "$RELEASE_MANIFEST_ASSET" \
+            --pattern prisma-release.json \
+            --pattern prisma-viewer-image-amd64.tar.gz
           cmp "$RELEASE_DIST/$RELEASE_IMAGE_ASSET" "$verify_dir/$RELEASE_IMAGE_ASSET"
           cmp "$RELEASE_DIST/$RELEASE_MANIFEST_ASSET" "$verify_dir/$RELEASE_MANIFEST_ASSET"
+          cmp "$RELEASE_DIST/prisma-release.json" "$verify_dir/prisma-release.json"
+          cmp "$RELEASE_DIST/prisma-viewer-image-amd64.tar.gz" "$verify_dir/prisma-viewer-image-amd64.tar.gz"
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Publish GitHub release

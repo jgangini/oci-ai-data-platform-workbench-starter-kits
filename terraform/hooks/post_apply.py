@@ -158,12 +158,12 @@ class AidpApi:
             ).encode("utf-8")
             payload_hash = hashlib.sha256(content).hexdigest()
             object_type = str(request_headers.get("type") or path.strip("/").split("/", 1)[0] or "root")
-            request_headers["opc-retry-token"] = str(
+            request_headers.setdefault("opc-retry-token", str(
                 uuid.uuid5(
                     uuid.NAMESPACE_URL,
                     f"{self.deployment_id}:{method.upper()}:{path}:{object_type}:{payload_hash}",
                 )
-            )
+            ))
         response = self._send(method, path, request_headers, payload, data, params)
         body: Any = None
         if response.content:
@@ -1632,6 +1632,25 @@ def main() -> int:
             messages.append("Registration VM consumed and deleted the encrypted bootstrap object")
         else:
             messages.append("Registration VM already has the validated Autonomous bootstrap v2 runtime")
+        if outputs.get("prisma_viewer_enabled") is True:
+            # Keep imports additive: existing one-VM labs do not load the PRISMA runtime.
+            from prisma_bootstrap import bootstrap_prisma
+            try:
+                reconciled.update(bootstrap_prisma(
+                    api, context, outputs, oci_config, signer, object_storage,
+                    wallet, wallet_password, admin_password, reconciled,
+                    deadline=_post_apply_deadline,
+                    wallet_dsn=_wallet_dsn, validate_wallet=_validate_wallet,
+                    generate_password=_generated_database_password, ensure_folder=ensure_workspace_folder,
+                ))
+            except Exception as exc:
+                # Database/SDK exceptions may contain secret-bearing request details.
+                safe = isinstance(exc, ReconcileError) or (type(exc) is RuntimeError and str(exc).startswith(
+                    ("PRISMA", "Managed PRISMA", "Duplicate PRISMA", "Duplicate managed PRISMA", "Existing PRISMA")
+                ))
+                detail = str(exc) if safe else type(exc).__name__
+                raise ReconcileError("PRISMA bootstrap failed: " + detail) from None
+            messages.append("PRISMA native job and published snapshot verified; versioned AIDP agent is ACTIVE")
         wait_for_application(str(outputs["application_url"]))
         messages.append("Registration application is healthy over HTTPS")
         reconciled["runtime_ready"] = True

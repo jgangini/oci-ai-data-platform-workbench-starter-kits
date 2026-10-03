@@ -86,6 +86,12 @@ variable "deployment_mode" {
   }
 }
 
+variable "enable_prisma_viewer" {
+  description = "Create a private PRISMA viewer VM behind the authenticated Starter Kits application."
+  type        = bool
+  default     = false
+}
+
 variable "registration_code_hash" {
   description = "PBKDF2 hash of the normalized registration code."
   type        = string

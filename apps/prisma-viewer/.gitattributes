@@ -1,0 +1,2 @@
+# Preserve upstream bytes so allowlist hashes survive Windows checkouts.
+vendor/gods-eye-view/** -text

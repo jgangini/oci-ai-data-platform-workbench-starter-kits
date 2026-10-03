@@ -65,6 +65,11 @@ override_data {
 run "resolved_compartment_contract" {
   command = plan
 
+  assert {
+    condition     = length(oci_core_instance.prisma) == 0 && length(oci_core_nat_gateway.prisma) == 0 && oci_core_subnet.public.cidr_block == var._oci_vcn.cidr_block
+    error_message = "Existing labs must keep their one-VM network when PRISMA is disabled."
+  }
+
   variables {
     tenancy_ocid            = "ocid1.tenancy.oc1..test"
     home_region             = "us-ashburn-1"
@@ -333,4 +338,58 @@ run "production_rejects_registration_code" {
   }
 
   expect_failures = [oci_core_instance.lab]
+}
+
+run "prisma_private_viewer" {
+  command = plan
+
+  override_resource {
+    target          = oci_core_network_security_group.prisma[0]
+    override_during = plan
+    values          = { id = "ocid1.networksecuritygroup.test.viewer" }
+  }
+
+  override_resource {
+    target          = oci_core_network_security_group.prisma_proxy[0]
+    override_during = plan
+    values          = { id = "ocid1.networksecuritygroup.test.admin" }
+  }
+
+  variables {
+    tenancy_ocid            = "ocid1.tenancy.oc1..test"
+    home_region             = "us-chicago-1"
+    operator_user_ocid      = "ocid1.user.oc1..operator"
+    compartment_ocid        = "ocid1.compartment.oc1..test"
+    objectstorage_namespace = "testnamespace"
+    deployment_suffix       = "test1234"
+    admin_password_hash     = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
+    enable_prisma_viewer    = true
+  }
+
+  assert {
+    condition     = length(oci_core_instance.prisma) == 1 && !oci_core_instance.prisma[0].create_vnic_details[0].assign_public_ip && oci_core_subnet.prisma[0].prohibit_public_ip_on_vnic
+    error_message = "PRISMA must create one private viewer with no public address."
+  }
+
+  assert {
+    condition     = oci_core_subnet.public.cidr_block == "10.10.0.0/25" && oci_core_subnet.prisma[0].cidr_block == "10.10.0.128/25" && oci_core_instance.lab.create_vnic_details[0].private_ip == "10.10.0.10"
+    error_message = "Both subnets must be disjoint and the admin bridge must use its reserved private address."
+  }
+
+  assert {
+    condition     = oci_core_network_security_group_security_rule.prisma[0].source == oci_core_network_security_group.prisma_proxy[0].id && oci_core_network_security_group_security_rule.prisma[0].tcp_options[0].destination_port_range[0].min == 8081 && oci_core_network_security_group_security_rule.prisma_admin[0].source == oci_core_network_security_group.prisma[0].id
+    error_message = "Only VM1 may reach the viewer; only VM2 may reach the private admin bridge."
+  }
+
+  assert {
+    condition     = length(oci_identity_policy.prisma[0].statements) == 1 && strcontains(oci_identity_policy.prisma[0].statements[0], "request.permission = 'OBJECT_READ'") && strcontains(oci_identity_policy.prisma[0].statements[0], "04_gold/prisma/*") && strcontains(oci_identity_policy.prisma[0].statements[0], ".control/prisma/agent.json")
+    error_message = "Viewer principal must only read published PRISMA objects."
+  }
+
+  assert {
+    condition     = strcontains(base64decode(oci_core_instance.prisma[0].metadata.user_data), "PRISMA_ADMIN_URL=http://10.10.0.10:8000") && output.prisma_viewer_enabled
+    error_message = "Both frozen containers must share the private authenticated bridge contract."
+  }
 }

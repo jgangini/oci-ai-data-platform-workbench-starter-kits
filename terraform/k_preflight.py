@@ -145,13 +145,14 @@ def _candidate_shapes(preferred: str) -> list[str]:
     return list(SUPPORTED_SHAPES[SUPPORTED_SHAPES.index(preferred) :])
 
 
-def _available_shape(report: Any, candidates: list[str]) -> str | None:
+def _available_shape(report: Any, candidates: list[str], required_count: int = 1) -> str | None:
     available = oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
     for shape in candidates:
         if any(
             str(item.instance_shape) == shape
             and item.availability_status == available
-            and (item.available_count is None or int(item.available_count) >= 1)
+            and ((item.available_count is None)
+                 or (item.available_count is not None and int(item.available_count) >= required_count))
             for item in report.shape_availabilities
         ):
             return shape
@@ -278,7 +279,8 @@ def select_inputs(
             ],
         )
         report = compute.create_compute_capacity_report(details).data
-        selected = _available_shape(report, candidates)
+        required_count = 2 if inputs.get("enable_prisma_viewer") is True else 1
+        selected = _available_shape(report, candidates, required_count)
         if selected:
             return {
                 "inputs": {
@@ -290,9 +292,9 @@ def select_inputs(
                 },
                 "events": [
                     {
-                        "name": "Immutable v2.2.0 source",
+                        "name": "Immutable release source",
                         "status": "passed",
-                        "message": "v2.2.0 source context and deployment source passed",
+                        "message": "Release context and deployment source passed",
                     },
                     {
                         "name": "Compartment availability",
@@ -305,7 +307,7 @@ def select_inputs(
                     {
                         "name": "Compute capacity preflight",
                         "status": "passed",
-                        "message": f"{selected} available in {availability_domain}",
+                        "message": f"{selected} is AVAILABLE in {availability_domain}; requesting {required_count} VMs; OCI may omit available_count and capacity is not reserved",
                     },
                     *(
                         [

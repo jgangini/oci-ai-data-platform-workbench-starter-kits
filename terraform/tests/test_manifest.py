@@ -257,7 +257,7 @@ def test_release_workflow_reruns_only_mutate_drafts() -> None:
     assert "Existing published release is mutable; refusing to edit or republish it." in workflow
     assert "if: steps.release.outputs.mode == 'immutable'" in workflow
     assert "immutable release asset manifest mismatch" in workflow
-    assert workflow.count('test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET"') == 2
+    assert workflow.count('test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz"') == 2
     immutable_start = workflow.index("- name: Verify existing immutable release assets")
     immutable_end = workflow.index("- uses: hashicorp/setup-terraform@v3")
     immutable_verification = workflow[immutable_start:immutable_end]
@@ -314,9 +314,9 @@ def test_runtime_security_contracts() -> None:
     assert "firewall-offline-cmd --zone=public --add-service=https" in cloud_init
     assert "firewall-cmd" not in cloud_init
     assert "download.docker.com/linux/centos/docker-ce.repo" in cloud_init
-    assert "public.ecr.aws/docker/library/node" in cloud_init
-    assert "public.ecr.aws/docker/library/python" in cloud_init
-    assert "retry 5 docker build" in cloud_init
+    assert 'retry 5 python3 "$SOURCE_DIR/scripts/load_release_image.py"' in cloud_init
+    assert "--component aidp-lab" in cloud_init
+    assert "docker build" not in cloud_init
     assert "tee -a /var/log/aidp-lab-bootstrap.log /dev/console" in cloud_init
     assert 'AIDP bootstrap failed with exit $status' in cloud_init
     assert 'if [ "$HEALTH_STATUS" = "200" ]; then' in cloud_init
@@ -411,7 +411,7 @@ def test_terraform_files_follow_select_ai_order() -> None:
         "j_outputs.tf",
     }
     assert expected.issubset({path.name for path in root.glob("*.tf")})
-    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefghiij")
+    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefgghiij")
     assert not {"main.tf", "network.tf", "compute.tf", "storage.tf", "identity.tf", "aidp.tf", "outputs.tf", "providers.tf"} & {
         path.name for path in root.glob("*.tf")
     }
