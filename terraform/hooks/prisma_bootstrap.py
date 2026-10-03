@@ -157,7 +157,7 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
 
 def runtime_archive():
     buffer = io.BytesIO()
-    names = ("__init__.py", "core.py", "x.py", "database.py", "runtime_secrets.py", "classification.py", "scheduling.py", "pipeline.py", "agent.py")
+    names = ("__init__.py", "core.py", "media.py", "area.py", "x.py", "database.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "landing.py", "pipeline.py", "agent.py")
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in names:
             info = zipfile.ZipInfo("prisma/" + name, date_time=(2026, 1, 1, 0, 0, 0))
@@ -330,7 +330,8 @@ def run_initial_job(api, workspace, job, revision):
 
     def status(value):
         state = value.get("state") or {}
-        return str(state.get("status") if isinstance(state, dict) else state).upper() or str(value.get("status") or "").upper()
+        result = state.get("status") if isinstance(state, dict) else state
+        return str(result or value.get("status") or "").upper()
 
     while True:
         pause(0)
@@ -375,6 +376,9 @@ def bootstrap_prisma(api, context, outputs, config, signer, storage, wallet, wal
     bundle = runtime_archive()
     runtime = {"namespace": outputs["objectstorage_namespace"], "bucket": outputs["medallion_bucket_names"]["gold"], "workbench_base": api.base,
         "region": context["region"], "model_id": outputs["agent_model_id"], "compartment_id": outputs["compartment_ocid"], "catalog": reconciled["catalog_name"]}
+    runtime.update(landing_bucket=outputs["medallion_bucket_names"]["landing"], landing_prefix="01_landing/prisma/raw/",
+        landing_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/landing",
+        checkpoint_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/checkpoints/bronze-v1")
     workspace = reconciled["workspace_key"]
     job = install_job(api, workspace, reconciled["shared_compute_key"], runtime, bundle, ensure_folder=ensure_folder)
     with tempfile.TemporaryDirectory(prefix="prisma-config-") as directory:
@@ -390,8 +394,11 @@ def bootstrap_prisma(api, context, outputs, config, signer, storage, wallet, wal
     agent_api = api.__class__(context["region"], outputs["ai_data_platform_id"], signer, context["deployment_id"],
                              api_version="20260430", resource_segment="aiDataPlatforms")
     agent = publish_agent(agent_api, workspace, bundle, context["region"])
+    # Materialize the otherwise empty external-volume prefix; Spark ignores this hidden non-event object.
+    storage.put_object(runtime["namespace"], runtime["landing_bucket"], runtime["landing_prefix"] + ".keep",
+                       b"", content_type="application/octet-stream")
     run_key = run_initial_job(api, workspace, job, hashlib.sha256(bundle).hexdigest())
     version = validate_publication(storage, runtime)
     storage.put_object(runtime["namespace"], runtime["bucket"], ".control/prisma/agent.json", json.dumps(agent).encode(), content_type="application/json")
     return {"prisma_job_ready": True, "prisma_agent_ready": True, "prisma_revision": agent["revision"],
-            "prisma_acceptance_run": run_key, "prisma_snapshot_version": version}
+            "prisma_acceptance_run": run_key, "prisma_snapshot_version": version, "external_volume_count": 1}

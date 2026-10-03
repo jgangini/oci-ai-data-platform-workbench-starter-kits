@@ -9,7 +9,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from .core import PLATFORMS, SOURCE_FIELDS, build_snapshot, default_source, normalize_event, simulation_events, utc_text
+from .core import PLATFORMS, SOURCE_FIELDS, build_snapshot, default_source, normalize_event, utc_text
+from . import capture, landing
 
 
 class PrismaStore:
@@ -124,19 +125,34 @@ class PrismaStore:
                 if ids:
                     self._revision(db)
             self._put(db, "simulation", state)
-        self.advance_simulation()
+        self.advance_simulation(force=True)
         return self.simulation_state()
 
-    def advance_simulation(self) -> None:
+    def advance_simulation(self, force=False) -> None:
         state = self.simulation_state()
         if state["status"] == "idle" or (state["status"] == "paused" and state["elapsed_seconds"] == 0):
             return
-        enabled = {source["platform"] for source in self.sources() if source["enabled"] and source["mode"] == "simulation"}
-        events = [{**event, "raw_metadata": {**event["raw_metadata"], "scenario_run_id": state.get("run_id")}}
-                  for event in simulation_events(state["elapsed_seconds"], state.get("anchor_at"))
-                  if event["platform"] not in PLATFORMS or event["platform"] in enabled]
+        for source in capture.sources(self.sources()):
+            with self.connection() as db:
+                name = source["platform"]
+                cursor = self._get(db, "synthetic:" + name, {})
+                result = capture.batch(source, state, cursor, self.clock(), force)
+                if result is None:
+                    continue
+                events, cursor = result
+                key = landing.write_file(self.path.parent / "prisma-landing", events)
+                self._events(db, events)  # Explicit local fixture sink; OCI sends these Landing files to Spark.
+                self._put(db, "synthetic:" + name, cursor)
+                summary = self._get(db, "capture_summary", {"landing_count": 0})
+                self._put(db, "capture_summary", {"status": "ready", "landing_count": summary["landing_count"] + bool(key),
+                    "last_landing_key": key or summary.get("last_landing_key"), "last_run_at": utc_text(self.clock())})
+                if name in PLATFORMS:
+                    self._put(db, "source:" + name, {**source, "status": "simulation", "last_received_count": len(events),
+                        "last_run_at": utc_text(self.clock()), "next_due": utc_text(cursor["next_due"]), "last_error": None})
+
+    def capture_summary(self):
         with self.connection() as db:
-            self._events(db, events)
+            return self._get(db, "capture_summary", {"landing_count": 0, "status": "idle"})
 
     def snapshot(self) -> dict:
         self.advance_simulation()

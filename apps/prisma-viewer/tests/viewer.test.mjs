@@ -2,21 +2,44 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
-import { allowedActions, bogotaToUtc, evidenceFor, filteredIncidents, modeLabel, safeSourceUrl, utcToBogota, validPeriod, validateSnapshot } from '../src/model.js';
+import { allowedActions, bogotaToUtc, evidenceFor, filteredIncidents, modeLabel, parseBbox, photosFor, safeSourceUrl, utcToBogota, validPeriod, validateSnapshot, withinBbox } from '../src/model.js';
 import { createPrismaSession } from '../src/chat.js';
+import { nasaDate, nasaUrl } from '../src/context.js';
+import { observeImagery } from '../src/imagery.js';
 
 const snapshot = { version: 'v1', incidents: [
   { id: 'sim-1', mode: 'simulation', locality: 'Suba', severity: 'high', category: 'flood', lat: 4.7, lon: -74.1, created_at: '2026-10-05T14:00:00Z', evidence_ids: ['e1'] },
   { id: 'real-1', mode: 'real', locality: 'Bosa', severity: 'medium', category: 'rain', lat: 4.6, lon: -74.1, created_at: '2026-10-05T14:05:00Z', evidence_ids: ['e2'] },
 ], evidence: [{ id: 'e1', platform: 'x', mode: 'simulation' }, { id: 'e2', platform: 'meteo', mode: 'real' }] };
 
+test('NASA imagery uses a named daily layer and explicit valid date', () => {
+  assert.equal(nasaDate(new Date('2026-10-03T12:00:00Z')), '2026-10-01');
+  assert.match(nasaUrl('2026-10-01'), /gibs\.earthdata\.nasa\.gov.*\/2026-10-01\/GoogleMapsCompatible_Level9\/\{z\}\/\{y\}\/\{x\}\.jpg$/);
+  assert.throws(() => nasaUrl('2026-02-30'));
+  assert.throws(() => nasaUrl('../other-layer'));
+});
+
+test('imagery recovery reports actual tiles and retains provider failures and throttling', async () => {
+  const states = [];
+  let result;
+  const provider = { requestImage: () => result };
+  observeImagery(provider, (state) => states.push(state));
+  assert.equal(provider.requestImage(), undefined);
+  result = Promise.reject(new Error('tile unavailable'));
+  await assert.rejects(provider.requestImage(), /tile unavailable/);
+  assert.deepEqual(states.at(-1), { loaded: 0, failed: 1 });
+  result = Promise.resolve('tile pixels');
+  assert.equal(await provider.requestImage(), 'tile pixels');
+  assert.deepEqual(states.at(-1), { loaded: 1, failed: 0 });
+});
+
 test('filters keep mode, platform and evidence ownership intact', () => {
   assert.deepEqual(filteredIncidents(snapshot, { mode: 'simulation', platform: 'x' }).map((item) => item.id), ['sim-1']);
   assert.equal(filteredIncidents(snapshot, { mode: 'real', platform: 'x' }).length, 0);
   assert.deepEqual(evidenceFor(snapshot, snapshot.incidents[1]), [snapshot.evidence[1]]);
-  assert.equal(modeLabel('simulation'), 'SIMULADO');
+  assert.equal(modeLabel('simulation'), 'SIMULATED');
   assert.equal(modeLabel('real'), 'REAL');
-  assert.equal(modeLabel(null), 'SIN CLASIFICAR');
+  assert.equal(modeLabel(null), 'UNCLASSIFIED');
 });
 
 test('Bogotá period is timezone-independent, inclusive and rejects reversed bounds', () => {
@@ -40,6 +63,46 @@ test('agent actions are restricted to known incidents and filter names', () => {
   const accepted = [{ type: 'focus_incident', incident_id: 'real-1' }, { type: 'filter_incidents', filters: { locality: 'Suba', mode: 'simulation' } }];
   assert.deepEqual(allowedActions([...accepted, { type: 'focus_incident', incident_id: 'missing' }, { type: 'run_script', code: 'alert(1)' }, { type: 'filter_incidents', filters: { url: 'https://example.com' } }], snapshot), accepted);
   assert.deepEqual(allowedActions([{ type: 'filter_incidents', filters: { locality: 'Unknown option' } }], snapshot), []);
+});
+
+test('area is inclusive, rejects invalid bounds and keeps the same incident evidence scope', () => {
+  const bbox = '-74.1,4.7,-74.0,4.8';
+  const selected = filteredIncidents(snapshot, { bbox });
+  assert.deepEqual(selected.map((item) => item.id), ['sim-1']);
+  assert.deepEqual(evidenceFor(snapshot, selected[0]).map((item) => item.id), ['e1']);
+  assert.equal(withinBbox({ lat: null, lon: null }, parseBbox(bbox)), false);
+  for (const value of ['1,2,3', '1,,3,4', 'nan,2,3,4', '-181,0,180,1', '0,-91,1,1', '3,2,1,4', '1,4,3,2', '170,-10,-170,10', '0x10,0,20,10', '1_0,0,20,10']) {
+    assert.throws(() => parseBbox(value));
+    assert.deepEqual(filteredIncidents(snapshot, { bbox: value }), []);
+    assert.deepEqual(allowedActions([{ type: 'filter_incidents', filters: { bbox: value } }], snapshot), []);
+  }
+  assert.equal(allowedActions([{ type: 'filter_incidents', filters: { bbox } }], snapshot).length, 1);
+});
+
+test('photos require real evidence, its validated incident and the original X media host', () => {
+  const photo = { type: 'photo', url: 'https://pbs.twimg.com/media/example.jpg', alt_text: 'Inundación' };
+  const evidence = { id: 'e1', platform: 'x', mode: 'real', media: [photo] };
+  const incident = { review_status: 'validated', evidence_ids: ['e1'] };
+  assert.deepEqual(photosFor(evidence, incident), [photo]);
+  for (const status of ['pending', 'rejected', undefined]) assert.deepEqual(photosFor(evidence, { ...incident, review_status: status }), []);
+  assert.deepEqual(photosFor({ ...evidence, mode: 'simulation' }, incident), []);
+  assert.deepEqual(photosFor(evidence, { ...incident, evidence_ids: ['other'] }), []);
+  assert.deepEqual(photosFor(evidence), []);
+  for (const url of ['javascript:alert(1)', 'http://pbs.twimg.com/media/x.jpg', 'https://pbs.twimg.com.evil.test/media/x.jpg', 'https://pbs.twimg.com:8443/media/x.jpg', 'https://user:secret@pbs.twimg.com/media/x.jpg', 'https://pbs.twimg.com/profile_images/x.jpg']) {
+    assert.deepEqual(photosFor({ ...evidence, media: [{ ...photo, url }] }, incident), []);
+  }
+  assert.deepEqual(photosFor({ ...evidence, media: [{ ...photo, type: 'video' }] }, incident), []);
+});
+
+test('platform logos retain the exact pinned Simple Icons CC0 bytes', async () => {
+  const root = new URL('../public/brand-icons/', import.meta.url);
+  const provenance = JSON.parse(await readFile(new URL('PROVENANCE.json', root), 'utf8'));
+  assert.equal(provenance.commit, 'd9ea58066506bc80da65d5516813636b22b58a06');
+  assert.equal(provenance.license, 'CC0-1.0');
+  for (const [path, hash] of Object.entries(provenance.files)) {
+    const name = path.split('/').at(-1);
+    assert.equal(createHash('sha256').update(await readFile(new URL(name, root))).digest('hex'), hash, name);
+  }
 });
 
 test('malformed snapshots cannot replace a valid publication', () => {

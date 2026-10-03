@@ -2,8 +2,27 @@ import base64
 import importlib.util
 import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+
+def test_manifest_packages_importable_prisma_hook_runtime(tmp_path) -> None:
+    root = Path(__file__).parents[2]
+    manifest = json.loads((root / "terraform/deploy-studio.json").read_text(encoding="utf-8"))
+    for relative in ["terraform/hooks", *manifest["post_apply"]["include_paths"]]:
+        source, target = root / relative, tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
+        else:
+            shutil.copyfile(source, target)
+    result = subprocess.run([sys.executable, "-I", "-c",
+        "import sys; sys.path.insert(0, 'terraform/hooks'); import prisma_bootstrap; "
+        "from app.aidp import AidpClient; assert prisma_bootstrap.runtime_archive()"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
 
 
 def test_deploy_studio_manifest_contract() -> None:
@@ -339,7 +358,7 @@ def test_runtime_security_contracts() -> None:
     assert "DNS.1 = $FQDN" in cloud_init
     assert "-addext" not in cloud_init
     assert "touch /var/local/userdata.done" in cloud_init
-    assert '"$TLS_DIR:/etc/aidp-lab/tls:ro,Z"' in cloud_init
+    assert '"$TLS_DIR:/etc/aidp-lab/tls:ro,z"' in cloud_init
     assert '"$STATE_DIR:/var/lib/aidp-lab:Z"' in cloud_init
     assert 'alias  = "home"' in providers
     assert "region = var.home_region" in providers

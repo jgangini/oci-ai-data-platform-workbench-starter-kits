@@ -3,8 +3,10 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './style.css';
 import { createApplicationViewer, installTrackpadPinchZoom } from '../vendor/gods-eye-view/src/app/viewer.js';
 import { createKeylessTerrain } from '../vendor/gods-eye-view/src/maps/terrain.js';
-import { allowedActions, bogotaToUtc, DATE_KEYS, evidenceFor, filteredIncidents, FILTER_KEYS, modeLabel, safeSourceUrl, utcToBogota, validPeriod, validateSnapshot } from './model.js';
+import { allowedActions, bogotaToUtc, DATE_KEYS, evidenceFor, filteredIncidents, FILTER_KEYS, modeLabel, parseBbox, photosFor, safeSourceUrl, utcToBogota, validPeriod, validateSnapshot } from './model.js';
 import { createPrismaSession } from './chat.js';
+import { loadContext, nasaDate, nasaUrl, renderNews } from './context.js';
+import { observeImagery } from './imagery.js';
 
 const $ = (id) => document.getElementById(id);
 const filtersForm = $('filters');
@@ -14,6 +16,7 @@ let viewer;
 let refreshing = false;
 let turnSnapshot;
 let terrainRequest = 0;
+let satelliteLayer;
 function filters() {
   return Object.fromEntries([...new FormData(filtersForm)].filter(([, value]) => value).map(([key, value]) => [key, DATE_KEYS.includes(key) ? bogotaToUtc(value) : value]));
 }
@@ -24,8 +27,27 @@ const text = (tag, value, className) => {
   return element;
 };
 const modeBadge = (mode) => text('span', modeLabel(mode), `badge ${mode === 'real' ? 'real' : 'simulation'}`);
-const date = (value) => value ? new Date(value).toLocaleString('es-CO', { timeZone: 'America/Bogota' }) : 'Sin fecha';
+const date = (value) => value ? new Date(value).toLocaleString('es-CO', { timeZone: 'America/Bogota' }) : 'No date';
 const severityColor = (value) => /critical|critica|crítica|alta|high|^4$|^5$/i.test(String(value)) ? '#fb786e' : '#efbe64';
+const platformNames = { x: 'X', facebook: 'Facebook', instagram: 'Instagram', tiktok: 'TikTok' };
+const categoryName = (value) => ({ inundacion: 'Flooding', incendio: 'Fire', movimiento_masa: 'Landslide', infraestructura: 'Infrastructure', lluvia: 'Rain' }[value] || value);
+const reviewName = (value) => ({ pending: 'Pending review', validated: 'Validated', rejected: 'Rejected' }[value] || value);
+
+function platformBadge(platform) {
+  const badge = text('span', '', 'platform');
+  if (platformNames[platform]) {
+    const logo = document.createElement('img');
+    logo.src = `${import.meta.env.BASE_URL}brand-icons/${platform}.svg`;
+    logo.alt = ''; logo.width = 16; logo.height = 16;
+    badge.append(logo);
+  }
+  badge.append(text('span', platformNames[platform] || platform));
+  return badge;
+}
+function clearFilters() {
+  filtersForm.reset();
+  filtersForm.elements.namedItem('bbox').value = '';
+}
 
 async function request(path, options = {}) {
   const response = await fetch(path, {
@@ -35,7 +57,7 @@ async function request(path, options = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(response.status === 401 ? 'La sesión expiró. Ingresa desde la administración.' : typeof data.detail === 'string' ? data.detail : `Servicio no disponible (${response.status}).`);
+    const error = new Error(response.status === 401 ? 'Your session expired. Sign in through administration.' : typeof data.detail === 'string' ? data.detail : `Service unavailable (${response.status}).`);
     error.status = response.status;
     throw error;
   }
@@ -58,19 +80,26 @@ function renderIncidents() {
   let activeFilters;
   try { activeFilters = filters(); }
   catch (error) { $('period-status').textContent = error.message; return; }
-  $('period-status').textContent = validPeriod(activeFilters) ? 'Período inclusivo por fecha de creación de la alerta.' : 'La fecha Desde no puede ser posterior a Hasta.';
+  $('period-status').textContent = validPeriod(activeFilters) ? 'Inclusive period by incident creation time.' : 'From cannot be later than To.';
+  $('area-status').textContent = activeFilters.bbox ? 'Fixed map area selected. Move the map and filter again to change it. Reports without coordinates are excluded.' : '';
+  $('clear-area').hidden = !activeFilters.bbox;
   const items = filteredIncidents(snapshot, activeFilters);
+  const evidenceIds = new Set(items.flatMap((item) => item.evidence_ids));
+  renderNews(snapshot.evidence.filter((item) => evidenceIds.has(item.id)));
   if (selectedId && !items.some((item) => item.id === selectedId)) { selectedId = undefined; renderDetail(); }
   $('count').textContent = String(items.length);
   $('incidents').replaceChildren();
-  if (!items.length) $('incidents').append(text('p', 'No hay alertas que coincidan con estos filtros.', 'empty'));
+  if (!items.length) $('incidents').append(text('p', 'No events match these filters.', 'empty'));
   for (const item of items) {
     const row = text('button', '', `incident ${item.id === selectedId ? 'selected' : ''}`);
     row.type = 'button';
     row.setAttribute('aria-pressed', String(item.id === selectedId));
     const header = text('span', '', 'incident-header');
-    header.append(modeBadge(item.mode), text('span', `${item.severity} · ${item.locality}`));
-    row.append(header, text('strong', item.title || item.category), text('small', `${item.category} · ${item.evidence_ids.length} evidencias · ${item.review_status}`));
+    header.append(text('span', `${item.severity} · ${item.locality}`));
+    row.append(text('strong', `${categoryName(item.category)} · ${item.locality}`), header, text('small', `${item.evidence_ids.length} evidence items · ${reviewName(item.review_status)}`));
+    const sources = text('span', '', 'platform-list');
+    for (const platform of new Set(evidenceFor(snapshot, item).map((record) => record.platform))) sources.append(platformBadge(platform));
+    row.append(sources);
     row.addEventListener('click', () => selectIncident(item.id));
     $('incidents').append(row);
   }
@@ -85,14 +114,28 @@ function renderIncidents() {
   }
 }
 
-function evidenceCard(item) {
+function appendPhotos(card, evidence, incident) {
+  for (const photo of photosFor(evidence, incident)) {
+    const figure = text('figure', '', 'evidence-photo');
+    const image = document.createElement('img');
+    image.src = photo.url;
+    image.alt = typeof photo.alt_text === 'string' && photo.alt_text ? photo.alt_text : 'Photo attached to the original publication';
+    image.loading = 'lazy'; image.referrerPolicy = 'no-referrer';
+    const caption = text('figcaption', 'Source photo · human review validated');
+    image.addEventListener('error', () => { image.remove(); caption.textContent = 'Image unavailable. Open the original source.'; }, { once: true });
+    figure.append(image, caption); card.append(figure);
+  }
+}
+
+function evidenceCard(item, incident) {
   const card = text('article', '', 'evidence');
   const header = text('div', '', 'evidence-header');
-  header.append(modeBadge(item.mode), text('strong', item.platform), text('small', item.id));
-  card.append(header, text('p', item.text), text('small', `${date(item.observed_at || item.created_at)} · ${item.location_method || 'Ubicación sin método informado'}`));
+  header.append(modeBadge(item.mode), platformBadge(item.platform), text('small', item.id));
+  card.append(header, text('p', item.text), text('small', `${date(item.observed_at || item.created_at)} · ${item.location_method || 'Location method unavailable'}`));
+  appendPhotos(card, item, incident);
   const url = safeSourceUrl(item.source_uri);
   if (url) {
-    const link = text('a', 'Abrir fuente ↗');
+    const link = text('a', 'Open source ↗');
     link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; card.append(link);
   }
   return card;
@@ -104,28 +147,30 @@ function renderDetail() {
   const previousNote = detail.dataset.incidentId === selectedId ? detail.querySelector('textarea')?.value : undefined;
   detail.dataset.incidentId = selectedId || '';
   detail.replaceChildren();
-  if (!item) { detail.append(text('p', 'Selecciona una señal en el mapa o en la lista para revisar su evidencia.')); return; }
-  detail.append(modeBadge(item.mode), text('h3', item.title || item.category), text('p', item.summary), text('p', `${item.locality} · Criticidad: ${item.severity} · Confianza: ${item.confidence} · ${item.review_status}`, 'metadata'));
-  if (!Number.isFinite(item.lat) || !Number.isFinite(item.lon)) detail.append(text('p', 'Ubicación sin resolver: esta alerta permanece en la lista, sin un punto inventado en el mapa.', 'metadata'));
-  else if (['text_locality_centroid', 'text_locality_anchor'].includes(item.location_method)) detail.append(text('p', 'Ubicación aproximada dentro de la localidad, inferida del texto. No representa una dirección exacta.', 'metadata'));
+  if (!item) { detail.append(text('p', 'Select an event on the map or list to inspect its evidence.')); return; }
+  detail.append(modeBadge(item.mode), text('h3', item.title || item.category), text('p', item.summary), text('p', `${item.locality} · Severity: ${item.severity} · Classification confidence: ${item.confidence} · ${item.review_status}`, 'metadata'));
+  if (Number.isFinite(item.corroboration_score) && item.corroboration_score >= 0 && item.corroboration_score <= 100) detail.append(text('p', `Corroboration index: ${Math.round(item.corroboration_score)}/100 · ${item.independent_source_count ?? 'Unknown number of'} independent sources. This is a source agreement rule, not a probability or confirmation.`, 'metadata'));
+  if (!Number.isFinite(item.lat) || !Number.isFinite(item.lon)) detail.append(text('p', 'Unresolved location: this event remains in the list without an invented map position.', 'metadata'));
+  else if (['text_locality_centroid', 'text_locality_anchor'].includes(item.location_method)) detail.append(text('p', 'Approximate location within the locality, inferred from text. It is not an exact address.', 'metadata'));
   const evidence = evidenceFor(snapshot, item);
-  detail.append(text('h4', `Evidencia vinculada (${evidence.length})`));
-  for (const record of evidence) detail.append(evidenceCard(record));
-  if (!evidence.length) detail.append(text('p', 'Sin evidencia vinculada. No validar sin contrastar la fuente.'));
+  detail.append(text('h4', `Linked evidence (${evidence.length})`));
+  for (const record of evidence) detail.append(evidenceCard(record, item));
+  if (!evidence.length) detail.append(text('p', 'No linked evidence. Check the source before validating.'));
+  if (snapshot.can_review === false) { detail.append(text('p', 'Read-only access · an administrator can validate this event.', 'metadata')); return; }
   const form = document.createElement('form');
   form.className = 'review';
-  const noteLabel = text('label', 'Nota de revisión');
+  const noteLabel = text('label', 'Review note');
   const note = document.createElement('textarea');
   note.maxLength = 1000; note.rows = 2; note.value = previousNote ?? item.review_note ?? ''; noteLabel.append(note);
   const status = text('p', '', 'metadata'); status.setAttribute('role', 'status');
   const actions = text('div', '', 'review-actions');
-  for (const [value, title] of [['validated', 'Validar'], ['rejected', 'Descartar'], ['pending', 'Pendiente']]) {
+  for (const [value, title] of [['validated', 'Validate'], ['rejected', 'Reject'], ['pending', 'Pending']]) {
     const button = text('button', title); button.type = 'button';
     button.addEventListener('click', async () => {
       actions.querySelectorAll('button').forEach((control) => { control.disabled = true; });
       try {
         await request(`/api/prisma/incidents/${encodeURIComponent(item.id)}/review`, { method: 'POST', body: JSON.stringify({ status: value, note: note.value }) });
-        status.textContent = 'Revisión guardada.';
+        status.textContent = 'Review saved.';
         await refresh();
       } catch (error) { status.textContent = error.message; }
       finally { actions.querySelectorAll('button').forEach((control) => { control.disabled = false; }); }
@@ -136,12 +181,12 @@ function renderDetail() {
 }
 
 function updateFilterOptions() {
-  for (const key of FILTER_KEYS.filter((value) => value !== 'mode' && !DATE_KEYS.includes(value))) {
+  for (const key of FILTER_KEYS.filter((value) => !['mode', 'bbox', ...DATE_KEYS].includes(value))) {
     const select = filtersForm.elements.namedItem(key);
     const selected = select.value;
     const source = key === 'platform' ? snapshot.evidence : snapshot.incidents;
     const values = [...new Set(source.map((item) => String(item[key] ?? '')).filter(Boolean))].sort();
-    select.replaceChildren(new Option('Todas', ''), ...values.map((value) => new Option(value, value)));
+    select.replaceChildren(new Option('All', ''), ...values.map((value) => new Option(key === 'category' ? categoryName(value) : value, value)));
     if (values.includes(selected)) select.value = selected;
   }
 }
@@ -153,13 +198,21 @@ async function refresh() {
     const next = validateSnapshot(await request('/api/prisma/snapshot'));
     const changed = next.version !== snapshot.version;
     snapshot = next;
-    $('runtime').textContent = snapshot.runtime === 'aidp' ? 'AIDP · Publicación activa' : 'DEMOSTRACIÓN · Motor local';
-    $('published').textContent = `Publicado ${date(snapshot.published_at)}`;
-    $('connection').textContent = `Actualización cada 10 s · ${snapshot.simulation?.status || 'Fuentes activas'} · Hora Bogotá`;
+    const adminLink = document.querySelector('.admin-link');
+    const portal = snapshot.can_admin === false ? '/local/prisma/workspace' : '/admin/prisma';
+    adminLink.href = portal;
+    adminLink.textContent = snapshot.can_admin === false ? 'Participant workspace ↗' : 'Manage sources ↗';
+    document.querySelector('.brand').href = portal;
+    const real = snapshot.incidents.filter((item) => item.mode === 'real').length;
+    const simulated = snapshot.incidents.filter((item) => item.mode === 'simulation').length;
+    $('mode-status').textContent = `REAL: ${real} events · SIMULATED: ${simulated} events · Human review required`;
+    $('runtime').textContent = snapshot.runtime === 'aidp' ? 'AIDP · Active publication' : 'DEMO · Local runtime';
+    $('published').textContent = `Published ${date(snapshot.published_at)}`;
+    $('connection').textContent = `Refresh every 10 s · ${snapshot.simulation?.status || 'Active sources'} · Bogotá time`;
     $('connection').classList.remove('error');
     if (changed) { updateFilterOptions(); renderIncidents(); renderDetail(); }
   } catch (error) {
-    $('connection').textContent = `${error.message} ${snapshot.version ? 'Se conserva la última publicación; puede estar desactualizada.' : ''}`;
+    $('connection').textContent = `${error.message} ${snapshot.version ? 'The last publication remains visible and may be outdated.' : ''}`;
     $('connection').classList.add('error');
   } finally { refreshing = false; }
 }
@@ -171,21 +224,21 @@ function renderReply(reply, question) {
   card.append(text('strong', question));
   const modes = [...new Set(cited.map((item) => item.mode))];
   for (const mode of modes) card.append(modeBadge(mode));
-  if (!modes.length) card.append(text('span', 'SIN EVIDENCIA', 'badge'));
-  card.append(text('small', `${reply.runtime === 'aidp' ? 'Agente AIDP' : 'Demostración local'} · ${date(reply.published_at)}`), text('p', reply.answer));
+  if (!modes.length) card.append(text('span', 'NO EVIDENCE', 'badge'));
+  card.append(text('small', `${reply.runtime === 'aidp' ? 'AIDP agent' : 'Local demo'} · ${date(reply.published_at)}`), text('p', reply.answer));
   if (cited.length) {
     const disclosure = document.createElement('details');
-    disclosure.append(text('summary', `Consultar ${cited.length} evidencias`));
+    disclosure.append(text('summary', `Inspect ${cited.length} evidence items`));
     for (const item of cited) disclosure.append(evidenceCard(item));
     card.append(disclosure);
   }
   for (const action of allowedActions(reply.actions, basis)) {
-    const button = text('button', action.type === 'focus_incident' ? 'Ver alerta en el mapa' : 'Aplicar filtros sugeridos');
+    const button = text('button', action.type === 'focus_incident' ? 'Focus event on map' : 'Apply suggested filters');
     button.type = 'button';
     button.addEventListener('click', () => {
-      if (snapshot.version !== reply.version) { $('chat-status').textContent = 'La publicación cambió. Repite la consulta antes de aplicar esta acción.'; return; }
+      if (snapshot.version !== reply.version) { $('chat-status').textContent = 'The publication changed. Ask again before applying this action.'; return; }
       if (action.type === 'focus_incident') {
-        if (!filteredIncidents(snapshot, filters()).some((item) => item.id === action.incident_id)) filtersForm.reset();
+        if (!filteredIncidents(snapshot, filters()).some((item) => item.id === action.incident_id)) clearFilters();
         renderIncidents(); selectIncident(action.incident_id);
       } else {
         for (const [key, value] of Object.entries(action.filters)) filtersForm.elements.namedItem(key).value = DATE_KEYS.includes(key) ? utcToBogota(value) : value;
@@ -201,30 +254,59 @@ function renderReply(reply, question) {
 const session = createPrismaSession({ request,
   context: () => ({ version: turnSnapshot.version, incident_id: selectedId, filters: filters() }),
   onReply: renderReply,
-  onBusy: (busy) => { $('send').disabled = busy; $('cancel').hidden = !busy; $('chat-status').textContent = busy ? 'Consultando…' : ''; },
+  onBusy: (busy) => { $('send').disabled = busy; $('cancel').hidden = !busy; $('chat-status').textContent = busy ? 'Asking agent…' : ''; },
   onError: (error) => {
-    const message = error.status === 409 ? 'La publicación cambió. Actualiza el contexto y vuelve a consultar; conservamos tu pregunta.' : error.message;
+    const message = error.status === 409 ? 'The publication changed. Refresh the context and ask again; your question was preserved.' : error.message;
     const card = text('p', message, 'error'); card.setAttribute('role', 'alert'); $('conversation').append(card);
     if (error.status === 409) void refresh();
   },
 });
 $('chat').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!snapshot.version) { $('chat-status').textContent = 'Espera una publicación válida antes de consultar.'; return; }
+  if (!snapshot.version) { $('chat-status').textContent = 'Wait for a valid publication before asking.'; return; }
   const question = $('question').value.trim();
   if (!question) return;
   try {
-    if (!filtersForm.reportValidity() || !validPeriod(filters())) { $('chat-status').textContent = 'Corrige el período antes de consultar.'; return; }
+    if (!filtersForm.reportValidity() || !validPeriod(filters())) { $('chat-status').textContent = 'Correct the period before asking.'; return; }
   } catch (error) { $('chat-status').textContent = error.message; return; }
   turnSnapshot = snapshot;
   await session.start();
   void session.sendText(question);
 });
-$('cancel').addEventListener('click', () => { session.stop(); $('chat-status').textContent = 'Consulta cancelada.'; });
+$('cancel').addEventListener('click', () => { session.stop(); $('chat-status').textContent = 'Request cancelled.'; });
 document.querySelectorAll('.examples button').forEach((button) => button.addEventListener('click', () => { $('question').value = button.textContent; $('question').focus(); }));
 filtersForm.addEventListener('change', renderIncidents);
-$('clear-filters').addEventListener('click', () => { filtersForm.reset(); renderIncidents(); });
+$('clear-filters').addEventListener('click', () => { clearFilters(); renderIncidents(); });
 $('home').addEventListener('click', home);
+$('clear-area').addEventListener('click', () => { filtersForm.elements.namedItem('bbox').value = ''; renderIncidents(); });
+$('satellite-date').value = nasaDate();
+$('satellite-date').max = new Date().toISOString().slice(0, 10);
+function updateSatellite() {
+  if (!viewer) return;
+  if (satelliteLayer) { viewer.imageryLayers.remove(satelliteLayer); satelliteLayer = undefined; }
+  if (!$('satellite').checked) { $('satellite-status').textContent = 'Daily imagery; not a live camera. Clouds can obscure the ground.'; return; }
+  try {
+    const day = $('satellite-date').value;
+    const provider = new Cesium.UrlTemplateImageryProvider({ url: nasaUrl(day), maximumLevel: 9, credit: 'NASA GIBS · MODIS Terra' });
+    provider.errorEvent.addEventListener(() => { $('satellite-status').textContent = `NASA imagery unavailable for ${day}. Choose another date.`; });
+    satelliteLayer = viewer.imageryLayers.addImageryProvider(provider);
+    satelliteLayer.alpha = 0.7;
+    $('satellite-status').textContent = `NASA MODIS · ${day} · daily observation, not live · clouds may obscure the ground`;
+  } catch (error) { $('satellite-status').textContent = error.message; }
+}
+$('satellite').addEventListener('change', updateSatellite);
+$('satellite-date').addEventListener('change', updateSatellite);
+$('filter-area').addEventListener('click', () => {
+  if (!viewer) return;
+  const view = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
+  if (!view) { $('area-status').textContent = 'Zoom towards Bogotá before selecting an area.'; return; }
+  const degrees = [view.west, view.south, view.east, view.north].map(Cesium.Math.toDegrees);
+  const bbox = degrees.map((value, index) => (index < 2 ? Math.floor(value * 1e6) : Math.ceil(value * 1e6)) / 1e6).join(',');
+  try { parseBbox(bbox); }
+  catch (error) { $('area-status').textContent = error.message; return; }
+  filtersForm.elements.namedItem('bbox').value = bbox;
+  renderIncidents();
+});
 
 try {
   Cesium.Ion.defaultAccessToken = '';
@@ -232,28 +314,42 @@ try {
   viewer.scene.globe.show = true;
   viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#183d47');
   const imagery = new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' });
-  imagery.errorEvent.addEventListener(() => { $('map-status').textContent = 'Cartografía temporalmente no disponible. La lista y las consultas siguen disponibles.'; });
+  observeImagery(imagery, ({ loaded, failed }) => {
+    $('map').dataset.tilesLoaded = String(loaded);
+    $('map').dataset.tilesFailed = String(failed);
+    $('map').dataset.cartography = loaded ? 'loaded' : 'unavailable';
+    $('map-status').textContent = loaded ? (failed ? 'Map available; some tiles failed to load.' : '') : 'Map tiles are unavailable. The event list and assistant remain available.';
+  });
   viewer.imageryLayers.addImageryProvider(imagery);
   const removePinch = installTrackpadPinchZoom(viewer);
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
   handler.setInputAction((click) => { const picked = viewer.scene.pick(click.position); if (picked?.id?.id) selectIncident(picked.id.id, false); }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-  home();
+  viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(-74.085, 4.66, 38000) });
+  const reportCamera = () => {
+    const position = viewer.camera.positionCartographic;
+    $('map').dataset.longitude = String(Cesium.Math.toDegrees(position.longitude));
+    $('map').dataset.latitude = String(Cesium.Math.toDegrees(position.latitude));
+  };
+  reportCamera(); viewer.camera.moveEnd.addEventListener(reportCamera);
   window.addEventListener('pagehide', () => { handler.destroy(); removePinch(); viewer.destroy(); }, { once: true });
 } catch (error) {
   viewer = undefined;
-  $('map-status').textContent = `El mapa 3D no está disponible en este navegador. Usa la lista y las evidencias. ${error.message}`;
+  $('map-status').textContent = `This browser cannot display the 3D map. Use the event list and evidence. ${error.message}`;
   $('terrain').disabled = true;
+  $('filter-area').disabled = true;
+  $('satellite').disabled = true;
 }
 $('terrain').addEventListener('change', async () => {
   if (!viewer) return;
   const generation = ++terrainRequest;
   if (!$('terrain').checked) { viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider(); $('map-status').textContent = ''; return; }
-  $('map-status').textContent = 'Cargando relieve Re:Earth / Mapterhorn…';
+  $('map-status').textContent = 'Loading Re:Earth / Mapterhorn terrain…';
   const { provider } = await createKeylessTerrain();
   if (generation !== terrainRequest || viewer.isDestroyed()) return;
   viewer.terrainProvider = provider;
-  $('map-status').textContent = provider instanceof Cesium.EllipsoidTerrainProvider ? 'Relieve no disponible; se mantiene el mapa plano.' : 'Relieve Re:Earth / Mapterhorn · CC BY 4.0';
+  $('map-status').textContent = provider instanceof Cesium.EllipsoidTerrainProvider ? 'Terrain no disponible; se mantiene el mapa plano.' : 'Terrain Re:Earth / Mapterhorn · CC BY 4.0';
 });
 void refresh();
+void loadContext(request);
 const polling = setInterval(() => { if (!document.hidden) void refresh(); }, 10000);
 window.addEventListener('pagehide', () => { clearInterval(polling); session.destroy(); }, { once: true });

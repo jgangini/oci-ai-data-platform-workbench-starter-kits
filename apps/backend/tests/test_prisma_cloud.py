@@ -41,6 +41,9 @@ class Runtime(CloudRuntime):
     def _credential(self, *_):
         raise AssertionError("Invalid changes must not write credentials")
 
+    def _produce(self, force=False):
+        return False
+
 
 def test_native_finite_run_is_queued_before_idle_schedule_is_paused():
     runtime = Runtime()
@@ -58,7 +61,7 @@ def test_native_finite_run_is_queued_before_idle_schedule_is_paused():
 
 
 def test_schedule_follows_active_work_and_stops_after_ten_minutes():
-    simulation = {"status": "running", "elapsed_seconds": 0, "started_at": 1000}
+    simulation = {"status": "running", "elapsed_seconds": 0, "started_at": 1000, "capture_complete": True}
     assert scheduling.needs_schedule({}, simulation, 1599)
     assert not scheduling.needs_schedule({}, simulation, 1600)
     sources = {"sources": {"x": {"enabled": True, "mode": "real"}}}
@@ -77,7 +80,7 @@ def test_scheduler_requires_etag_and_does_not_guess_conflicting_update():
 
 def test_tick_rechecks_fresh_control_state_before_pausing(monkeypatch):
     runtime = Runtime()
-    runtime.documents["simulation"] = {"status": "running", "started_at": 1000, "elapsed_seconds": 0}
+    runtime.documents["simulation"] = {"status": "running", "started_at": 1000, "elapsed_seconds": 0, "capture_complete": True}
     monkeypatch.setattr(scheduling, "read_document", lambda _connection, name: runtime._doc(name))
     scheduling.reconcile_after_tick(object(), runtime.client._request, 1600)
     assert runtime.client.calls[-1][2]["payload"]["schedule"]["pauseStatus"] == "PAUSED"

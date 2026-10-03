@@ -674,6 +674,8 @@ def assert_fresh_catalog(
     catalog_key: str,
     namespace: str,
     bucket: str,
+    *,
+    prisma_landing_bucket: str = "",
 ) -> tuple[int, int]:
     schemas = api.list_all("/schemas", params={"catalogKey": catalog_key})
     global_schemas = [
@@ -690,7 +692,7 @@ def assert_fresh_catalog(
         if not schema_key:
             raise ReconcileError("AIDP schema has no key while checking legacy external volumes")
         volumes.extend(
-            api.list_all(
+            {**item, "_listed_schema": schema.get("displayName")} for item in api.list_all(
                 "/volumes",
                 params={"catalogKey": catalog_key, "schemaKey": schema_key},
             )
@@ -700,7 +702,7 @@ def assert_fresh_catalog(
         details = volume
         if volume.get("key") and not volume.get("storageLocation"):
             response = api.request("GET", f"/volumes/{volume['key']}").body
-            details = response if isinstance(response, dict) else volume
+            details = {**response, "_listed_schema": volume.get("_listed_schema")} if isinstance(response, dict) else volume
         if str(details.get("volumeType") or "").upper() == "EXTERNAL":
             external.append(details)
     expected_locations = {
@@ -715,9 +717,12 @@ def assert_fresh_catalog(
         raise ReconcileError(
             f"Fresh-only bootstrap found legacy external volumes overlapping medallion paths: {names}; no resources were deleted"
         )
-    if external:
+    allowed = [item for item in external if prisma_landing_bucket
+               and item.get("_listed_schema") == "prisma_ingest" and item.get("displayName") == "landing"
+               and item.get("storageLocation") == f"oci://{prisma_landing_bucket}@{namespace}/01_landing/prisma/raw/"]
+    if len(allowed) > 1 or len(external) != len(allowed):
         raise ReconcileError(
-            f"Fresh-only bootstrap requires zero external volumes in {CATALOG_NAME}; no resources were deleted"
+            f"Fresh-only bootstrap found an unapproved external volume in {CATALOG_NAME}; no resources were deleted"
         )
     return len(global_schemas), len(external)
 
@@ -870,9 +875,10 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
     namespace = str(outputs["objectstorage_namespace"])
     bucket = str(outputs["bucket_name"])
     global_schema_count, external_volume_count = assert_fresh_catalog(
-        api, catalog_key, namespace, bucket
+        api, catalog_key, namespace, bucket,
+        prisma_landing_bucket=str(outputs["medallion_bucket_names"]["landing"]) if outputs.get("prisma_viewer_enabled") is True else "",
     )
-    events.append("Fresh-only catalog verified: zero existing schemas and zero external volumes")
+    events.append(f"Fresh-only catalog verified: zero legacy schemas; {external_volume_count} approved PRISMA external volumes")
     workspace_key = str(workspace["key"])
     shared_compute, compute_created = ensure_resource(
         api,
@@ -1038,14 +1044,14 @@ def aidp_alias_endpoint(alias_key: str, region: str) -> str:
     return alias_key if alias_key.endswith(region_key) else f"{alias_key}{region_key}"
 
 
-def wait_for_application(application_url: str, *, attempts: int = 60) -> None:
+def wait_for_application(application_url: str, *, attempts: int = 60, verify_tls: bool = False) -> None:
     if not application_url.startswith("https://"):
         raise ReconcileError("application_url must use HTTPS")
     health_url = f"{application_url.rstrip('/')}/api/health"
     session = requests.Session()
     for _ in range(attempts):
         try:
-            response = session.get(health_url, timeout=(5, 10), verify=False)
+            response = session.get(health_url, timeout=(5, 10), verify=verify_tls)
             if response.status_code == 200 and response.json().get("status") == "ok":
                 return
         except (requests.exceptions.RequestException, ValueError):
@@ -1651,7 +1657,7 @@ def main() -> int:
                 detail = str(exc) if safe else type(exc).__name__
                 raise ReconcileError("PRISMA bootstrap failed: " + detail) from None
             messages.append("PRISMA native job and published snapshot verified; versioned AIDP agent is ACTIVE")
-        wait_for_application(str(outputs["application_url"]))
+        wait_for_application(str(outputs["application_url"]), verify_tls=outputs.get("public_ip_tls_enabled") is True)
         messages.append("Registration application is healthy over HTTPS")
         reconciled["runtime_ready"] = True
         write_result(output_path, build_success_result(context, reconciled, messages, aidp_url))

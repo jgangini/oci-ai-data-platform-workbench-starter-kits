@@ -1,6 +1,10 @@
 output "application_url" {
-  description = "Self-signed HTTPS registration application."
+  description = "HTTPS registration application; public certificate when public_ip_tls_enabled is true."
   value       = "https://${data.oci_core_vnic.lab.public_ip_address}"
+}
+
+output "public_ip_tls_enabled" {
+  value = var.enable_public_ip_tls
 }
 
 output "admin_url" {
@@ -117,7 +121,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Fresh-only v2.2.0 contract: post-apply creates no external volumes."
+  description = "Base Terraform creates no external volumes; the PRISMA post-apply reports its validated Landing volume when enabled."
   value       = 0
 }
 

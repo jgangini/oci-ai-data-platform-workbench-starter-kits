@@ -19,11 +19,13 @@ from .aidp import (
     AidpProvisionPending,
     LocalAidpClient,
     UserMaterial,
+    participant_owner_key,
 )
 from .config import Settings, SettingsStore
 from .identity import IdentityClient, IdentityConflict, IdentityPending, IdentityRejected, LocalIdentityClient
 from .lab_packs import available_lab_ids, public_lab_catalog
 from .prisma.api import mount_prisma, run_local_prisma
+from .prisma.access import mount_access
 from .releases import (
     ApplicationReleaseManager,
     ReleaseUpdateConflict,
@@ -54,6 +56,7 @@ class UserRequest(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=5, max_length=254)
     lab_ids: list[str] = Field(min_length=1)
+    territorial_control: bool = False
 
     @field_validator("name")
     @classmethod
@@ -180,7 +183,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        prisma_task = asyncio.create_task(run_local_prisma(app)) if settings.local_development_mode else None
+        prisma_task = asyncio.create_task(run_local_prisma(app)) if settings.local_development_mode or settings.prisma_enabled else None
         try:
             yield
         finally:
@@ -222,9 +225,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def default_aidp_factory() -> AidpClient | LocalAidpClient:
         if app.state.aidp_client is None:
             app.state.aidp_client = LocalAidpClient(settings) if settings.local_development_mode else AidpClient(settings)
+            if isinstance(app.state.aidp_client, LocalAidpClient):
+                for user in default_factory().users.values():
+                    material = user.get("material", {})
+                    if material.get("participant_key"):
+                        app.state.aidp_client.users[participant_owner_key(user["ocid"])] = {
+                            lab["lab_id"]: UserMaterial(**lab, email=user["email"], participant_key=material["participant_key"], participant_code=material.get("participant_code"))
+                            for lab in material.get("labs", [])
+                        }
         return app.state.aidp_client
 
     app.state.aidp_factory = default_aidp_factory
+
+    async def refresh_local_material(identity, user_id, user):
+        if isinstance(identity, LocalIdentityClient):
+            assigned = await app.state.aidp_factory().list_user_labs([user["ocid"]])
+            materials = tuple(assigned.get(user["ocid"], []))
+            if materials:
+                await identity.record_material(user_id, _material_payload(materials, user["email"], ""))
 
     async def reset_health_client(component: str) -> None:
         attribute = f"{component}_client"
@@ -274,9 +292,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Administrator session required")
         return username
 
-    mount_prisma(app, require_admin)
+    require_viewer = mount_access(app, require_admin, cookie_name)
+    mount_prisma(app, require_admin, require_viewer)
 
-    async def provision_user(name: str, email: str, lab_ids: list[str]) -> JSONResponse:
+    async def provision_user(name: str, email: str, lab_ids: list[str], territorial_control: bool = False) -> JSONResponse:
+        if territorial_control and not settings.local_development_mode:
+            raise HTTPException(503, "Participant sign-in for Territorial Control is not configured on this deployment")
         try:
             identity = app.state.identity_factory()
             result = await identity.prepare_registration(name, email)
@@ -349,6 +370,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             result.email,
             app.state.settings_store.get_workbench_url(),
         )
+        if isinstance(identity, LocalIdentityClient):
+            if territorial_control:
+                await identity.grant_prisma(result.user_id, True)
+            await identity.record_material(result.user_id, content)
+            content["local_access"] = {"simulated": True, "login_url": "/local/prisma/login", "delivery": "Local welcome file; no email sent"}
         return JSONResponse(status_code=201 if result.status == "created" else 200, content=content)
 
     @app.get("/api/health")
@@ -401,6 +427,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "deployment_mode": settings.deployment_mode,
             "registration_code_pattern": "AAAA-0000",
             "labs": public_lab_catalog(),
+            "local_participant_access": settings.local_development_mode,
         }
 
     @app.post("/api/register")
@@ -431,7 +458,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Registration reconciliation is temporarily rate limited",
                 headers={"Retry-After": str(retry_after)},
             )
-        return await provision_user(payload.name, payload.email, payload.lab_ids)
+        return await provision_user(payload.name, payload.email, payload.lab_ids, payload.territorial_control)
 
     @app.post("/api/admin/login", status_code=204)
     async def admin_login(payload: LoginRequest, request: Request) -> Response:
@@ -694,7 +721,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_identity()
         if not settings.aidp_ready():
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
-        return await provision_user(payload.name, payload.email, payload.lab_ids)
+        return await provision_user(payload.name, payload.email, payload.lab_ids, payload.territorial_control)
 
     @app.post("/api/admin/users/{user_id}/labs")
     async def admin_add_lab(
@@ -743,6 +770,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.settings_store.get_workbench_url(),
         )
         content["message"] = "The lab was added successfully."
+        await refresh_local_material(identity, user_id, user)
         return JSONResponse(content=content)
 
     @app.post("/api/admin/users/{user_id}/labs/{lab_id}/redeploy")
@@ -776,6 +804,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             material, user["email"], app.state.settings_store.get_workbench_url()
         )
         content.update(operation_id=str(payload.operation_id), message="The lab was redeployed successfully.")
+        await refresh_local_material(identity, user_id, user)
         return JSONResponse(content=content)
 
     @app.delete("/api/admin/users/{user_id}/labs/{lab_id}")
@@ -805,6 +834,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
         except AidpProvisionError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        await refresh_local_material(identity, user_id, user)
         return JSONResponse(content={
             "status": "active", "operation_id": str(operation_id),
             "message": "The lab was removed successfully.",

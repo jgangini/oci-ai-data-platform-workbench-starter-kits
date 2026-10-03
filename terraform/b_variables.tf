@@ -92,6 +92,12 @@ variable "enable_prisma_viewer" {
   default     = false
 }
 
+variable "enable_public_ip_tls" {
+  description = "Obtain and automatically renew a publicly trusted Let's Encrypt certificate for the application IPv4 address."
+  type        = bool
+  default     = false
+}
+
 variable "registration_code_hash" {
   description = "PBKDF2 hash of the normalized registration code."
   type        = string

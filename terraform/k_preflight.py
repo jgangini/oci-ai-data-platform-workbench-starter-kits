@@ -279,7 +279,7 @@ def select_inputs(
             ],
         )
         report = compute.create_compute_capacity_report(details).data
-        required_count = 2 if inputs.get("enable_prisma_viewer") is True else 1
+        required_count = 2 if str(inputs.get("enable_prisma_viewer", False)).lower() == "true" else 1
         selected = _available_shape(report, candidates, required_count)
         if selected:
             return {

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .core import utc_text
+from .media import photos
 
 
 THIRD_PARTY = """Copyright (c) 2026 Joel Gangini Garcia
@@ -51,8 +52,9 @@ def fetch_page(client, token: str, query: str, checkpoint: dict, now: float, *, 
         raise XFailure("history_gap")
     cursor.setdefault("end_time", utc_text(now - 30))
     params = {"query": query, "max_results": page_size, "end_time": cursor["end_time"],
-              "sort_order": "recency", "post.fields": "created_at,text,lang,geo,entities",
-              "expansions": "author_id", "user.fields": "username,name"}
+              "sort_order": "recency", "post.fields": "created_at,text,lang,geo,entities,attachments",
+              "expansions": "author_id,attachments.media_keys", "user.fields": "username,name",
+              "media.fields": "media_key,type,url,alt_text"}
     if cursor.get("since_id"):
         params["since_id"] = cursor["since_id"]
     else:
@@ -73,7 +75,8 @@ def fetch_page(client, token: str, query: str, checkpoint: dict, now: float, *, 
         meta = payload.get("meta", {})
         if "meta" not in payload or not isinstance(posts, list) or not isinstance(meta, dict) or (payload.get("errors") and not posts):
             raise ValueError("Invalid page")
-        events = [_post_event(post, now) for post in posts]
+        media = {item["media_key"]: item for item in payload.get("includes", {}).get("media", [])}
+        events = [_post_event(post, now, media) for post in posts]
     except (ValueError, TypeError, AttributeError, KeyError) as exc:
         raise XFailure("invalid_response", now + 60) from exc
     if not cursor.get("pending_newest_id") and meta.get("newest_id"):
@@ -84,12 +87,13 @@ def fetch_page(client, token: str, query: str, checkpoint: dict, now: float, *, 
     return events, cursor
 
 
-def _post_event(post: dict, now: float) -> dict:
+def _post_event(post: dict, now: float, media=None) -> dict:
     source_id = str(post["id"])
     if not source_id.isdigit():
         raise ValueError("Invalid post id")
     return {"platform": "x", "source_id": source_id, "mode": "real", "text": post["text"],
             "created_at": post["created_at"], "observed_at": utc_text(now),
             "source_uri": f"https://x.com/i/web/status/{source_id}",
+            "media": photos("x", [(media or {}).get(key, {}) for key in post.get("attachments", {}).get("media_keys", [])]),
             "raw_metadata": {"author_id": post.get("author_id"), "lang": post.get("lang"),
                              "geo": post.get("geo"), "entities": post.get("entities"), "source_post": post}}

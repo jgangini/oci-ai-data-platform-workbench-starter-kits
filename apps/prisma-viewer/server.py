@@ -14,11 +14,12 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
+from prisma.area import parse_bbox, within_bbox
 
 app = FastAPI(title="PRISMA Bogotá", docs_url=None, redoc_url=None)
 MODE = os.getenv("PRISMA_MODE", "oci")
 STATIC = Path(os.getenv("PRISMA_STATIC_DIR", "/app/static"))
-FILTERS = {"locality", "platform", "category", "severity", "mode", "date_from", "date_to"}
+FILTERS = {"locality", "platform", "category", "severity", "mode", "date_from", "date_to", "bbox"}
 
 
 class ChatRequest(BaseModel):
@@ -114,6 +115,10 @@ def validate_filters(filters, status=422):
     if any(not isinstance(value, str) or len(value) > 100 for value in filters.values()):
         raise HTTPException(status, "Valor de filtro inválido")
     period_bounds(filters, status)
+    try:
+        parse_bbox(filters.get("bbox"))
+    except ValueError as exc:
+        raise HTTPException(status, str(exc)) from exc
 
 
 def validate_context(payload: ChatRequest, snapshot: dict) -> dict:
@@ -202,10 +207,12 @@ def selected_incidents(payload: ChatRequest, snapshot: dict) -> list:
     selected = snapshot.get("incidents", [])
     if payload.incident_id:
         selected = [item for item in selected if item["id"] == payload.incident_id]
-    attributes = {key: value for key, value in payload.filters.items() if value and key not in {"platform", "date_from", "date_to"}}
+    attributes = {key: value for key, value in payload.filters.items() if value and key not in {"platform", "date_from", "date_to", "bbox"}}
     selected = [item for item in selected if all(str(item.get(key, "")) == value for key, value in attributes.items())]
     selected = filter_platform(selected, snapshot.get("evidence", []), payload.filters.get("platform"))
     date_from, date_to = period_bounds(payload.filters)
+    area = parse_bbox(payload.filters.get("bbox"))
+    selected = [item for item in selected if within_bbox(item, area)]
     return [item for item in selected if within_period(item, date_from, date_to)]
 
 
@@ -242,7 +249,9 @@ def ready():
 
 @app.get("/api/prisma/snapshot")
 async def snapshot(request: Request):
-    return await snapshot_for(request)
+    data = await snapshot_for(request)
+    can_admin = not principal(request).startswith("local-prisma:")
+    return {**data, "can_review": can_admin, "can_admin": can_admin}
 
 
 @app.post("/api/prisma/chat")
@@ -265,6 +274,13 @@ async def review(incident_id: str, payload: ReviewRequest, request: Request):
     if not re.fullmatch(r"[A-Za-z0-9:_-]{1,200}", incident_id):
         raise HTTPException(422, "Identificador inválido")
     return await admin_request(request, "POST", f"/api/prisma/incidents/{incident_id}/review", payload.model_dump())
+
+
+@app.get("/api/prisma/context")
+async def context(request: Request):
+    principal(request)
+    from context_layers import context_layers
+    return await context_layers()
 
 
 @app.get("/{path:path}")

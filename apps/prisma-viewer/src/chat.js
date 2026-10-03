@@ -6,7 +6,7 @@ export function createPrismaSession({ request, context, onReply, onError, onBusy
   let pending;
   let sessionId;
   return createVoiceSession({
-    runner: async () => { throw new Error('Las acciones requieren confirmación en el tablero.'); },
+    runner: async () => { throw new Error('Confirm map actions in the dashboard.'); },
     createAdapter: ({ emit, signal }) => ({
       start() { emit({ type: 'state', state: 'ready' }); },
       stop() { pending?.abort(); pending = undefined; onBusy(false); },
@@ -25,7 +25,7 @@ export function createPrismaSession({ request, context, onReply, onError, onBusy
           });
           if (turn.signal.aborted || pending !== turn) return;
           if (typeof reply.answer !== 'string' || !reply.answer.trim() || reply.version !== selected.version) {
-            throw new Error('El agente no devolvió una respuesta válida para esta publicación.');
+            throw new Error('The agent did not return a valid answer for this publication.');
           }
           sessionId = reply.session_id;
           onReply(reply, question);

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import secrets
+import tempfile
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -11,6 +15,7 @@ import httpx
 from oci._vendor import requests
 
 from .config import Settings
+from .security import hash_secret, verify_secret
 
 
 SCIM_CONSISTENCY_ATTEMPTS = 5
@@ -394,12 +399,33 @@ class IdentityClient:
 
 
 class LocalIdentityClient:
-    """In-memory Identity Domains substitute for the local Docker profile only."""
+    """Local-only identities; optional private artifacts survive a Docker restart."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.users: dict[str, dict[str, Any]] = {}
         self.group_members: dict[str, set[str]] = {}
+        self.password_hashes: dict[str, str] = {}
+        directory = getattr(settings, "local_identity_artifact_dir", "")
+        if directory and not settings.local_development_mode:
+            raise ValueError("Local identity artifacts require LOCAL_DEVELOPMENT_MODE")
+        self.artifact_dir = Path(directory) if directory else None
+        if self.artifact_dir:
+            self.artifact_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            state_path = self.artifact_dir / "identity-state.json"
+            if state_path.exists():
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                self.users = state["users"]
+                self.password_hashes = state["password_hashes"]
+                self.group_members = {key: set(value) for key, value in state["group_members"].items()}
+
+    def _save(self) -> None:
+        if self.artifact_dir:
+            # ponytail: one backend process owns the local adapter; use a database before adding workers.
+            _write_private_json(self.artifact_dir / "identity-state.json", {
+                "users": self.users, "password_hashes": self.password_hashes,
+                "group_members": {key: sorted(value) for key, value in self.group_members.items()},
+            })
 
     async def close(self) -> None:
         return None
@@ -413,6 +439,7 @@ class LocalIdentityClient:
             if user["email"].casefold() == normalized_email:
                 was_developer = user["status"] == "active"
                 user["status"] = "pending"
+                self._save()
                 return RegistrationResult(
                     "reconciled",
                     user["id"],
@@ -422,6 +449,14 @@ class LocalIdentityClient:
                 )
         user_id = uuid4().hex
         user_ocid = f"ocid1.user.oc1..local{uuid4().hex}"
+        if self.artifact_dir:
+            password = secrets.token_urlsafe(24)
+            _write_private_json(self.artifact_dir / f"welcome-{user_id}.json", {
+                "mode": "SIMULADO", "username": email, "password": password,
+                "login_url": "/local/prisma/login", "aidp_url": "/local/prisma/workspace",
+                "message": "Acceso local de demostración. No se envió correo ni se creó una cuenta OCI.",
+            })
+            self.password_hashes[user_id] = hash_secret(password)
         self.users[user_id] = {
             "id": user_id,
             "ocid": user_ocid,
@@ -430,7 +465,9 @@ class LocalIdentityClient:
             "status": "pending",
             "active": True,
             "managed": True,
+            "prisma_access": False,
         }
+        self._save()
         return RegistrationResult("created", user_id, user_ocid, email)
 
     async def activate_registration(self, user_id: str) -> None:
@@ -438,6 +475,43 @@ class LocalIdentityClient:
         if not user:
             raise IdentityPending("Local lab user is not ready")
         user["status"] = "active"
+        self._save()
+
+    async def authenticate(self, email: str, password: str) -> str | None:
+        for user_id, user in self.users.items():
+            if (user["email"].casefold() == email.strip().casefold()
+                    and user.get("active") and user.get("status") == "active" and user.get("prisma_access")
+                    and verify_secret(password, self.password_hashes.get(user_id, ""))):
+                return user_id
+        return None
+
+    async def prisma_user(self, user_id: str) -> dict[str, Any] | None:
+        user = self.users.get(user_id)
+        if not user or not user.get("active") or user.get("status") != "active" or not user.get("prisma_access"):
+            return None
+        return {**user, "mode": "SIMULADO"}
+
+    async def grant_prisma(self, user_id: str, enabled: bool) -> None:
+        if type(enabled) is not bool:
+            raise ValueError("Territorial Control permission must be a boolean")
+        user = self.users.get(user_id)
+        if not user:
+            raise IdentityPending("Local lab user is not ready")
+        user["prisma_access"] = enabled
+        self._save()
+
+    async def record_material(self, user_id: str, material: dict[str, Any]) -> None:
+        user = self.users.get(user_id)
+        if not user:
+            raise IdentityPending("Local lab user is not ready")
+        public = {key: material[key] for key in ("participant_key", "participant_code", "labs") if key in material}
+        public.update(mode="SIMULADO", aidp_url="/local/prisma/workspace", login_url="/local/prisma/login")
+        user["material"] = public
+        self._save()
+        if self.artifact_dir:
+            path = self.artifact_dir / f"welcome-{user_id}.json"
+            welcome = json.loads(path.read_text(encoding="utf-8"))
+            _write_private_json(path, {**welcome, "material": public})
 
     async def list_lab_users(self) -> list[dict[str, Any]]:
         return sorted(self.users.values(), key=lambda item: item["email"].casefold())
@@ -464,7 +538,13 @@ class LocalIdentityClient:
         return await self.list_users_by_ocids(resolved_ocids)
 
     async def delete_lab_user(self, user_id: str) -> bool:
-        return self.users.pop(user_id, None) is not None
+        if self.users.pop(user_id, None) is None:
+            return False
+        self.password_hashes.pop(user_id, None)
+        self._save()
+        if self.artifact_dir:
+            (self.artifact_dir / f"welcome-{user_id}.json").unlink(missing_ok=True)
+        return True
 
     async def get_lab_user(self, user_id: str) -> dict[str, Any] | None:
         user = self.users.get(user_id)
@@ -475,6 +555,25 @@ class LocalIdentityClient:
 
 def _scim_literal(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
+
+
+def _write_private_json(path: Path, value: dict[str, Any]) -> None:
+    """Replace a private local artifact atomically; never leave a truncated identity store."""
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            temporary.chmod(0o600)
+            json.dump(value, stream, ensure_ascii=False, allow_nan=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        except BaseException:
+            stream.close()
+            temporary.unlink(missing_ok=True)
+            raise
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _user_has_email(user: dict[str, Any], email: str) -> bool:

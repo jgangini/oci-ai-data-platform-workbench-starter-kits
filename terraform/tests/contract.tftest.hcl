@@ -344,6 +344,12 @@ run "prisma_private_viewer" {
   command = plan
 
   override_resource {
+    target          = oci_core_instance.prisma[0]
+    override_during = plan
+    values          = { private_ip = "10.10.0.130" }
+  }
+
+  override_resource {
     target          = oci_core_network_security_group.prisma[0]
     override_during = plan
     values          = { id = "ocid1.networksecuritygroup.test.viewer" }
@@ -366,6 +372,7 @@ run "prisma_private_viewer" {
     registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
     source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
     enable_prisma_viewer    = true
+    enable_public_ip_tls    = true
   }
 
   assert {
@@ -391,5 +398,10 @@ run "prisma_private_viewer" {
   assert {
     condition     = strcontains(base64decode(oci_core_instance.prisma[0].metadata.user_data), "PRISMA_ADMIN_URL=http://10.10.0.10:8000") && output.prisma_viewer_enabled
     error_message = "Both frozen containers must share the private authenticated bridge contract."
+  }
+
+  assert {
+    condition     = output.prisma_viewer_private_url == "http://10.10.0.130:8081" && output.public_ip_tls_enabled
+    error_message = "The admin must use the actual private viewer address and issue verified public TLS only when opted in."
   }
 }

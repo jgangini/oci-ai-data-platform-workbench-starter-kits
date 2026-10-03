@@ -14,6 +14,7 @@ import httpx
 from .core import utc_text
 from .store import PrismaStore
 from .x import XFailure, fetch_page
+from .capture import search_terms
 
 
 class LocalCredentials:
@@ -60,7 +61,9 @@ class LocalPrismaRuntime:
         self.lock = asyncio.Lock()
 
     async def sources(self) -> dict:
-        return {"sources": self.store.sources(), "simulation": self.store.simulation_state(), "runtime": "local_fixture"}
+        snapshot = self.store.snapshot()
+        return {"sources": self.store.sources(), "simulation": self.store.simulation_state(), "runtime": "local_fixture",
+                "capture_summary": self.store.capture_summary(), "pipeline": {"status": "local_fixture", "version": snapshot["version"], "last_run_at": snapshot.get("published_at")}}
 
     async def update_source(self, platform: str, payload: dict) -> dict:
         async with self.lock:
@@ -72,6 +75,8 @@ class LocalPrismaRuntime:
                 raise ValueError("Only X has a real connector; other platforms are prepared for simulation")
             if candidate["mode"] == "real" and not candidate["query"].strip():
                 raise ValueError("Real X capture requires a query")
+            if candidate["mode"] == "simulation":
+                search_terms(candidate["query"])
             if token:
                 self.credentials.put(candidate["secret_ref"], token)
             values["credential_configured"] = self.credentials.exists(candidate["secret_ref"])
@@ -90,8 +95,8 @@ class LocalPrismaRuntime:
                 if retry > self.clock():
                     return {"status": "rate_limited", "message": "Esperando la ventana de cuota de X", "source": source}
             if source["mode"] == "simulation":
-                self.store.advance_simulation()
-                return {"status": "simulation", "message": "Fuente simulada; no se contactó la red", "source": source}
+                self.store.advance_simulation(force=not test)
+                return {"status": "simulation", "message": "Simulated source; the network was not contacted", "source": source}
             result = await asyncio.to_thread(self._poll, source, test)
             return {"status": result["status"], "message": "Prueba finalizada" if test else "Captura procesada", "source": result}
 
