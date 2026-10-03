@@ -208,15 +208,31 @@ def test_deployment_helpers_reject_duplicates_and_mismatched_endpoint_retention(
         bootstrap.deployment_endpoint({**detail, "sessionRetentionConfig": {"retentionPeriodInDays": 1}}, "us-chicago-1")
 
 
-def test_initial_job_requires_native_run_and_task_success_and_revision_token():
+@pytest.mark.parametrize("failed_state", ["FAILED", "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED", "BLOCKED"])
+@pytest.mark.parametrize("failed_resource", ["job", "task"])
+def test_initial_job_requires_native_run_and_task_success_and_revision_token(monkeypatch, failed_state, failed_resource):
     api = Api()
     assert bootstrap.run_initial_job(api, "ws", "job", "revision") == "run-one"
     method, path, payload, headers = api.calls[0]
     assert (method, path, payload) == ("POST", "/workspaces/ws/jobRuns", {"jobKey": "job", "parameters": []})
     assert len(headers["opc-retry-token"]) == 64
     assert api.calls[-1][1] == "/workspaces/ws/taskRuns"
-    api.run_state = "FAILED"
-    with pytest.raises(RuntimeError, match="no readiness claimed"):
+    request = api.request
+
+    def failed_response(method, path, **kwargs):
+        response = request(method, path, **kwargs)
+        if failed_resource == "job" and path.endswith("/jobRuns/run-one"):
+            response.body["state"]["status"] = failed_state
+        elif failed_resource == "task" and path.endswith("/taskRuns"):
+            response.body["items"][0]["state"]["status"] = failed_state
+        return response
+
+    def no_terminal_wait(seconds=5):
+        assert seconds == 0, "Terminal state must fail without polling"
+
+    monkeypatch.setattr(api, "request", failed_response)
+    monkeypatch.setattr(bootstrap, "pause", no_terminal_wait)
+    with pytest.raises(RuntimeError, match=f"initial {failed_resource} failed; no readiness claimed"):
         bootstrap.run_initial_job(api, "ws", "job", "next-revision")
 
 

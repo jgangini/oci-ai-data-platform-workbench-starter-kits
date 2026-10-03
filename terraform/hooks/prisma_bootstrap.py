@@ -345,9 +345,11 @@ def run_initial_job(api, workspace, job, revision):
             })
             if len(tasks) == 1 and tasks[0].get("taskKey") == "prisma_tick" and status(tasks[0]) in {"SUCCESS", "SUCCEEDED"}:
                 return key
-            if any(status(task) in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED"} for task in tasks):
+            if any(status(task) in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED",
+                "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED"} for task in tasks):
                 raise RuntimeError("PRISMA initial task failed; no readiness claimed")
-        elif state in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED"}:
+        elif state in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED",
+            "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED"}:
             raise RuntimeError("PRISMA initial job failed; no readiness claimed")
         pause(10)
 
