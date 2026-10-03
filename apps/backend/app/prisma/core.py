@@ -11,7 +11,8 @@ from .media import photos
 
 PLATFORMS = ("x", "facebook", "instagram", "tiktok")
 SOURCE_FIELDS = {"enabled", "mode", "query", "interval_minutes", "secret_ref", "credential_configured", "capture_running",
-                 "status", "last_run_at", "next_due", "last_error", "last_received_count"}
+                 "status", "last_run_at", "next_due", "last_error", "last_received_count", "capture_paused",
+                 "correlation_window_minutes", "report_thresholds", "config_version"}
 # Representative anchors, not incident coordinates or mathematical centroids. All six
 # verified inside SDP/IDECA locality polygons on 2026-10-02 (EPSG:4326 point intersects).
 # https://www.ideca.gov.co/recursos/mapas/localidad-bogota-dc
@@ -32,12 +33,15 @@ CATEGORIES = {
     "lluvia": ("lluvia", "llov", "aguacero"),
 }
 SEVERITIES = {"low": 0, "medium": 1, "high": 2}
+CATEGORY_NAMES = {"inundacion": "Flooding", "incendio": "Fire", "movimiento_masa": "Landslide",
+                  "infraestructura": "Infrastructure damage", "lluvia": "Heavy rain", "por_clasificar": "Unclassified report"}
 
 
 def default_source(platform: str) -> dict:
     query = "#bogota #inundacion\n#colombia #incendio\n#desastre"
     return {"platform": platform, "enabled": True, "capture_running": False, "mode": "simulation", "query": query,
             "interval_minutes": 5, "secret_ref": f"gods-eye-view-{platform}", "credential_configured": False,
+            "correlation_window_minutes": 30, "report_thresholds": {"low": 5, "medium": 10, "high": 20}, "config_version": 1,
             "status": "simulation", "last_run_at": None, "next_due": None, "last_error": None, "last_received_count": None}
 
 
@@ -112,6 +116,11 @@ def normalize_event(event: dict) -> dict:
     if timestamp.tzinfo is None:
         raise ValueError("Event timestamps require a timezone")
     created_at = timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    claims = []
+    for claim in event.get("claims", []):
+        claim_locality, claim_lat, claim_lon, claim_method = _event_location(
+            {**event, "locality": claim["locality"], "lat": None, "lon": None}, folded(claim.get("evidence_text", "")))
+        claims.append({**claim, "locality": claim_locality, "lat": claim_lat, "lon": claim_lon, "location_method": claim_method})
     return {
         "id": f"{platform}:{source_id}", "platform": platform, "source_id": source_id,
         "text": text, "created_at": created_at, "observed_at": event.get("observed_at", created_at),
@@ -121,6 +130,11 @@ def normalize_event(event: dict) -> dict:
         "classification_method": event.get("classification_method", "provided" if event.get("category") else "keyword_rules"),
         "confidence": float(event.get("confidence", 0.55)),
         "raw_metadata": event.get("raw_metadata", {}),
+        "username": str(event.get("username", ""))[:100], "display_name": str(event.get("display_name", ""))[:200],
+        "country": str(event.get("country", ""))[:100], "city": str(event.get("city", ""))[:100],
+        "attachments": event.get("attachments", [])[:8],
+        **{key: event[key] for key in ("ingested_at", "source_object", "source_hash", "source_hash_kind", "schema_version", "location_precision", "location_provenance", "model_version", "prompt_version") if key in event},
+        **({"claims": claims} if "claims" in event else {}),
         "media": photos(platform, event.get("media", [])),
         "content_hash": hashlib.sha256(" ".join(normalized.split()).encode()).hexdigest(),
     }
@@ -128,7 +142,11 @@ def normalize_event(event: dict) -> dict:
 
 def corroboration(evidence):
     sources, distinct = set(), []
+    contradictions = set()
     for event in evidence:
+        if (event.get("claim") or {}).get("relation") == "contradicts":
+            contradictions.add(event["id"])
+            continue
         source = (event["platform"], event["raw_metadata"].get("author_id") or "unknown")
         if source in sources:
             continue
@@ -141,12 +159,12 @@ def corroboration(evidence):
         # Missing author IDs never turn two posts on one platform into two witnesses.
         sources.add(source)
     count = len(sources)
-    return {"independent_source_count": count, "corroboration_score": min(100, max(0, count - 1) * 25),
-            "corroboration_status": "multiple_sources" if count >= 2 else "single_source",
+    return {"independent_source_count": count, "contradicting_report_count": len(contradictions), "corroboration_score": min(100, max(0, count - 1) * 25),
+            "corroboration_status": {0: "no_supporting_sources", 1: "single_source"}.get(count, "multiple_sources"),
             "corroboration_method": "independent_sources_text_similarity_v1"}
 
 
-def build_snapshot(events: list[dict], reviews: dict, version: str, published_at: str) -> dict:
+def legacy_groups(events):
     groups: dict[str, list[dict]] = {}
     for event in events:
         if event["category"] == "por_clasificar":
@@ -158,22 +176,49 @@ def build_snapshot(events: list[dict], reviews: dict, version: str, published_at
         key = "|".join((event["mode"], event["category"], event["locality"], event["created_at"][:13], scenario))
         incident_id = "incident-" + hashlib.sha256(key.encode()).hexdigest()[:16]
         groups.setdefault(incident_id, []).append(event)
-    incidents = []
+    return groups
+
+
+def incident_summary(first, evidence):
+    location = first["locality"] if first["locality"] != "Sin localizar" else "an unresolved location"
+    category = CATEGORY_NAMES.get(first["category"], "risk").lower()
+    count = len({item["id"] for item in evidence})
+    return (first.get("claim") or {}).get("summary_en") or f"{count} reports of {category} in {location}. Human review required."
+
+
+def build_snapshot(events: list[dict], reviews: dict, version: str, published_at: str, *, rules=None, previous=None, now=None) -> dict:
+    groups = legacy_groups(events)
+    if rules is not None:
+        from .correlation import group_events
+        groups = group_events(events, rules, previous)
+    incidents, event_posts = [], []
     for incident_id, evidence in sorted(groups.items()):
         first = min(evidence, key=lambda item: item["created_at"])
         review = reviews.get(incident_id, {})
         incidents.append({
-            "id": incident_id, "title": f"{first['category'].replace('_', ' ').capitalize()} · {first['locality']}",
-            "summary": first["text"], "created_at": first["created_at"],
+            "id": incident_id, "title": f"{CATEGORY_NAMES.get(first['category'], 'Report')} · {first['locality'] if first['locality'] != 'Sin localizar' else 'Location unresolved'}",
+            "summary": incident_summary(first, evidence),
+            "created_at": first["created_at"], "last_observed_at": max(item["created_at"] for item in evidence),
             "category": first["category"], "locality": first["locality"],
             "severity": max((item["severity"] for item in evidence), key=lambda item: SEVERITIES.get(item, 0)),
             "confidence": max(item["confidence"] for item in evidence),
             "lat": first["lat"], "lon": first["lon"], "location_method": first["location_method"],
-            "mode": first["mode"], "is_simulated": first["mode"] == "simulation", "evidence_ids": sorted(item["id"] for item in evidence),
+            "mode": first["mode"], "is_simulated": first["mode"] == "simulation", "evidence_ids": sorted({item["id"] for item in evidence}),
             "review_status": review.get("status", "pending"), "review_note": review.get("note", ""),
+            "reviewed_evidence_ids": review.get("evidence_ids", []),
             **corroboration(evidence),
         })
-    return {"version": version, "published_at": published_at, "incidents": incidents, "evidence": sorted(events, key=lambda item: (item["created_at"], item["id"]))}
+        from .correlation import activity, relations
+        event_posts.extend(relations(incident_id, evidence))
+        if rules is not None:
+            incidents[-1].update(activity(evidence, rules, now))
+            incidents[-1]["correlation_windows_minutes"] = {name: rules.get(name, {}).get("correlation_window_minutes", 30) for name in incidents[-1]["report_counts"]}
+        old = next((item for item in previous or [] if item["id"] == incident_id), {})
+        changed = any(old.get(key) != value for key, value in incidents[-1].items())
+        incidents[-1].update(revision=old.get("revision", 0) + int(changed),
+            updated_at=utc_text(now) if changed and now is not None else old.get("updated_at", published_at))
+    return {"version": version, "published_at": published_at, "incidents": incidents, "event_posts": event_posts,
+            "evidence": sorted(events, key=lambda item: (item["created_at"], item["id"]))}
 
 
 def simulation_events(elapsed_seconds: float, anchor_at: float | None = None) -> list[dict]:

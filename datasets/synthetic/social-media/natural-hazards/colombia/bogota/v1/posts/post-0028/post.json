@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0028",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0028",
+    "username": "sim_bogota_0028",
+    "display_name": "Fictional Bogotá Reporter 028"
+  },
+  "message": "Varias puertas en Bosa tienen agua acumulada al frente; los vecinos protegen los muebles cercanos. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 36,
+  "available_offset_seconds": 36,
+  "attachments": []
+}

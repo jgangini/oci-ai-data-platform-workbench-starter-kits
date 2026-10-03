@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0041",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0041",
+    "username": "sim_bogota_0041",
+    "display_name": "Fictional Bogotá Reporter 041"
+  },
+  "message": "La lluvia aflojó en Bosa pero el drenaje tarda en retirar el agua del sector observado. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 192,
+  "available_offset_seconds": 192,
+  "attachments": []
+}

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0027",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0027",
+    "username": "sim_bogota_0027",
+    "display_name": "Fictional Bogotá Reporter 027"
+  },
+  "message": "Una corriente poco profunda cruza una zona residencial de Bosa y lleva residuos vegetales. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 24,
+  "available_offset_seconds": 24,
+  "attachments": []
+}

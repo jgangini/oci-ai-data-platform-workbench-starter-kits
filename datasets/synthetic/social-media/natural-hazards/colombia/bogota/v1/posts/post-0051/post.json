@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0051",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0051",
+    "username": "sim_bogota_0051",
+    "display_name": "Fictional Bogotá Reporter 051"
+  },
+  "message": "Desde un sitio apartado en Chapinero se distinguen llamas bajas sobre material vegetal. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 24,
+  "available_offset_seconds": 24,
+  "attachments": []
+}

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0040",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0040",
+    "username": "sim_bogota_0040",
+    "display_name": "Fictional Bogotá Reporter 040"
+  },
+  "message": "En Bosa apareció una franja seca, aunque la mayor acumulación frente al local todavía permanece. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 180,
+  "available_offset_seconds": 180,
+  "attachments": []
+}

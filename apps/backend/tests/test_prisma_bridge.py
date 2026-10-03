@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+import httpx
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -25,6 +26,37 @@ SNAPSHOT = {"version": "v1", "published_at": "2026-10-05T14:00:00Z", "incidents"
     {"id": "incident-2", "mode": "real", "category": "inundacion", "locality": "Suba", "severity": "medium", "created_at": "2026-10-05T14:05:00Z", "evidence_ids": ["sensor:2"]},
 ], "evidence": [{"id": "x:1", "mode": "simulation", "platform": "x"}, {"id": "sensor:2", "mode": "real", "platform": "sensor"}]}
 ANSWER = {"answer": "Alerta simulada respaldada por x:1", "version": "v1", "evidence_ids": ["x:1"], "actions": [{"type": "focus_incident", "incident_id": "incident-1"}]}
+
+
+def test_oci_bridge_preserves_safe_provider_failure_without_forwarding_raw_fields(monkeypatch):
+    def respond(request):
+        assert request.headers["cookie"] == HEADERS["cookie"]
+        return httpx.Response(429, headers={"Retry-After": "60"}, json={"detail": {
+            "code": "oci_rate_limited", "message": "PRIVATE CONFIG /server/key.pem",
+            "provider_status": 429, "request_id": "safe/request-id", "private_key": "NEVER FORWARD"}})
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(bridge.httpx, "AsyncClient", lambda **kwargs: client_type(transport=httpx.MockTransport(respond), **kwargs))
+    with TestClient(bridge.app) as client:
+        response = client.post("/api/prisma/oci-chat", headers={**HEADERS, "x-gev-origin": "http://testserver", "origin": "http://testserver"}, json={"question": "hello"})
+    assert response.status_code == 429 and response.headers["Retry-After"] == "60"
+    assert response.json()["detail"] == {"code": "oci_rate_limited", "message": "OCI quota or rate limit reached; try again later",
+                                          "provider_status": 429, "request_id": "safe/request-id"}
+    assert "PRIVATE" not in response.text and "key.pem" not in response.text and "NEVER" not in response.text
+
+
+@pytest.mark.parametrize("supplied", [{"code": "unexpected", "message": "secret"}, ["secret"], "secret", None])
+def test_oci_bridge_unknown_errors_remain_generic(supplied):
+    failure = bridge.admin_failure(httpx.Response(503, json={"detail": supplied}), "/api/prisma/oci-provider")
+    assert failure.status_code == 503 and failure.detail == "The administration service could not complete the request"
+
+
+def test_oci_bridge_rejects_secret_shaped_metadata_and_preserves_other_error_contracts():
+    response = httpx.Response(503, headers={"Retry-After": "private-config"}, json={"detail": {
+        "code": "oci_not_configured", "message": "secret", "provider_status": "PRIVATE", "request_id": "-----BEGIN PRIVATE KEY-----\nsecret"}})
+    failure = bridge.admin_failure(response, "/api/prisma/oci-provider")
+    assert failure.detail == {"code": "oci_not_configured", "message": "OCI server credentials and compartment are not configured"}
+    assert not failure.headers
+    assert bridge.admin_failure(response, "/api/prisma/snapshot").detail == "The administration service could not complete the request"
 
 
 @pytest.fixture

@@ -1,0 +1,1230 @@
+{
+  "dataset_version": "bogota-v1",
+  "scope": "Evaluation only; never ship to a model, Landing, normal runtime or correlation code.",
+  "posts": [
+    {
+      "fixture_id": "post-0001",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0002",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0003",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0004",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0005",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0006",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0007",
+      "scenario_assertion": "false",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The scenario has a localized hazard, not destruction or impact across the entire locality. Later firsthand reports contradict this extent.",
+      "contradicted_by": [
+        "post-0102"
+      ]
+    },
+    {
+      "fixture_id": "post-0008",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0009",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0010",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0011",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0012",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0013",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0014",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0015",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0016",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0017",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0018",
+      "scenario_assertion": "false",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The scenario has a localized hazard, not destruction or impact across the entire locality. Later firsthand reports contradict this extent.",
+      "contradicted_by": [
+        "post-0102"
+      ]
+    },
+    {
+      "fixture_id": "post-0019",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0020",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0021",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0022",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0023",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": true,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0024",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": true,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0025",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0026",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0027",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0028",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0029",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0030",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0031",
+      "scenario_assertion": "false",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The scenario has a localized hazard, not destruction or impact across the entire locality. Later firsthand reports contradict this extent.",
+      "contradicted_by": [
+        "post-0108"
+      ]
+    },
+    {
+      "fixture_id": "post-0032",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0033",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0034",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0035",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0036",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0037",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0038",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0039",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0040",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0041",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0042",
+      "scenario_assertion": "false",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The scenario has a localized hazard, not destruction or impact across the entire locality. Later firsthand reports contradict this extent.",
+      "contradicted_by": [
+        "post-0108"
+      ]
+    },
+    {
+      "fixture_id": "post-0043",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0044",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0045",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0046",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0047",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": true,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0048",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": true,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0049",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0050",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0051",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0052",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0053",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0054",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0055",
+      "scenario_assertion": "false",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The scenario has a localized hazard, not destruction or impact across the entire locality. Later firsthand reports contradict this extent.",
+      "contradicted_by": [
+        "post-0114"
+      ]
+    },
+    {
+      "fixture_id": "post-0056",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0057",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0058",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0059",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0060",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0061",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0062",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0063",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0064",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0065",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0066",
+      "scenario_assertion": "false",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The scenario has a localized hazard, not destruction or impact across the entire locality. Later firsthand reports contradict this extent.",
+      "contradicted_by": [
+        "post-0114"
+      ]
+    },
+    {
+      "fixture_id": "post-0067",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0068",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0069",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0070",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0071",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": true,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0072",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": true,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0073",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0074",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0075",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0076",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0077",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0078",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0079",
+      "scenario_assertion": "false",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The scenario has a localized hazard, not destruction or impact across the entire locality. Later firsthand reports contradict this extent.",
+      "contradicted_by": [
+        "post-0120"
+      ]
+    },
+    {
+      "fixture_id": "post-0080",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0081",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0082",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0083",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0084",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0085",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0086",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0087",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0088",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0089",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0090",
+      "scenario_assertion": "false",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The scenario has a localized hazard, not destruction or impact across the entire locality. Later firsthand reports contradict this extent.",
+      "contradicted_by": [
+        "post-0120"
+      ]
+    },
+    {
+      "fixture_id": "post-0091",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0092",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0093",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0094",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0095",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": true,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0096",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": true,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0097",
+      "scenario_assertion": "true",
+      "expected_category": "lluvia",
+      "event": "suba-heavy-rain",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0098",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": null,
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0099",
+      "scenario_assertion": "not_applicable",
+      "expected_category": "por_clasificar",
+      "event": null,
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0100",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0025",
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0101",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0050",
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0102",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "contradicts",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0103",
+      "scenario_assertion": "true",
+      "expected_category": "lluvia",
+      "event": "suba-heavy-rain",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0104",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": null,
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0105",
+      "scenario_assertion": "not_applicable",
+      "expected_category": "por_clasificar",
+      "event": null,
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0106",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0049",
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0107",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0074",
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0108",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "contradicts",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0109",
+      "scenario_assertion": "true",
+      "expected_category": "lluvia",
+      "event": "suba-heavy-rain",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0110",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": null,
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0111",
+      "scenario_assertion": "not_applicable",
+      "expected_category": "por_clasificar",
+      "event": null,
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0112",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0073",
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0113",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0002",
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0114",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-vegetation-fire",
+      "evidence_role": "contradicts",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0115",
+      "scenario_assertion": "true",
+      "expected_category": "lluvia",
+      "event": "suba-heavy-rain",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0116",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": null,
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0117",
+      "scenario_assertion": "not_applicable",
+      "expected_category": "por_clasificar",
+      "event": null,
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0118",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-flood",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0001",
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0119",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "bosa-flood",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0026",
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    },
+    {
+      "fixture_id": "post-0120",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "ciudad-bolivar-landslide",
+      "evidence_role": "contradicts",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "A fictional scenario assertion; evaluate independently of the synthetic origin."
+    }
+  ]
+}

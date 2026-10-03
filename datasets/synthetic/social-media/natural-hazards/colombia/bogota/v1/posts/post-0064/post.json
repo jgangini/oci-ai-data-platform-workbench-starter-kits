@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0064",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0064",
+    "username": "sim_bogota_0064",
+    "display_name": "Fictional Bogotá Reporter 064"
+  },
+  "message": "El humo de Chapinero se dispersa más que antes, pero aún nace del mismo terreno con vegetación. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 180,
+  "available_offset_seconds": 180,
+  "attachments": []
+}

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0054",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0054",
+    "username": "sim_bogota_0054",
+    "display_name": "Fictional Bogotá Reporter 054"
+  },
+  "message": "La humareda aumenta por momentos en Chapinero; quienes miran permanecen lejos del borde de vegetación. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 60,
+  "available_offset_seconds": 60,
+  "attachments": []
+}

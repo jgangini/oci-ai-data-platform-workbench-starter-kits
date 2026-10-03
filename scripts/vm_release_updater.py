@@ -474,7 +474,10 @@ def _run_container(
         "-p",
         "127.0.0.1:18443:443" if candidate else "80:80",
     ]
-    if not candidate:
+    if candidate:
+        # A copied local state does not isolate the live Autonomous capture cursors.
+        arguments.extend(["-e", "PRISMA_VIEWER_ENABLED=false"])
+    else:
         arguments.extend(["-p", "443:443"])
         # Keep the optional viewer bridge private when replacing the admin container.
         environment_file = root / ".env"

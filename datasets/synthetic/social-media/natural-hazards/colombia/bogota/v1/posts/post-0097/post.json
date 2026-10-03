@@ -1,0 +1,34 @@
+{
+  "fixture_id": "post-0097",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0097",
+    "username": "sim_bogota_0097",
+    "display_name": "Fictional Bogotá Reporter 097"
+  },
+  "message": "Lluvia intensa en Suba: el aguacero reduce la visibilidad y golpea con fuerza los techos. · Bogotá #Bogota #Colombia #lluvia #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Suba",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.741,
+    "lon": -74.084
+  },
+  "published_offset_seconds": 36,
+  "available_offset_seconds": 36,
+  "attachments": [
+    {
+      "id": "post-0097-image-01",
+      "type": "image",
+      "mime_type": "image/svg+xml",
+      "dataset_path": "posts/post-0097/media/image-01.svg",
+      "sha256": "3a870e197d0d04bb1a8d52db35eb71cff7f3ea86704621213284b4491b7833ba",
+      "license": "CC0-1.0",
+      "origin": "synthetic_diagram",
+      "alt_text": "Synthetic, nonphotographic diagram for Suba; not evidence of a real event.",
+      "is_simulated": true
+    }
+  ]
+}

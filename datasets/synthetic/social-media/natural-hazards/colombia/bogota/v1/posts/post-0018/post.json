@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0018",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0018",
+    "username": "sim_bogota_0018",
+    "display_name": "Fictional Bogotá Reporter 018"
+  },
+  "message": "La inundación destruyó por completo la principal vía de Kennedy; ya no queda pavimento. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 204,
+  "available_offset_seconds": 204,
+  "attachments": []
+}

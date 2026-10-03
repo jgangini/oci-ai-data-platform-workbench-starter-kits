@@ -253,6 +253,24 @@ def test_job_uses_native_notebook_create_rename_export_and_preserves_live_schedu
     assert len([1 for method, path, _, _ in api.calls if method == "PUT" and "/jobs/" in path]) == 1
 
 
+def test_persistent_task_is_explicit_and_reverts_to_finite_without_changing_job_identity():
+    api, bundle = Api(), bootstrap.runtime_archive()
+    job = bootstrap.install_job(api, "ws", "compute", {}, bundle, ensure_folder=lambda *_: None)
+    detail = api.resources["/workspaces/ws/jobs/" + job]
+    assert detail["tasks"][0]["isStreaming"] is False and detail["timeoutSeconds"] == 600
+    same = bootstrap.install_job(api, "ws", "compute", {"streaming_mode": "persistent"}, bundle, ensure_folder=lambda *_: None)
+    assert same == job and detail["maxConcurrentRuns"] == 1 and detail["queue"] == {"isEnabled": False}
+    assert detail["tasks"][0]["isStreaming"] is True and detail["timeoutSeconds"] == 0
+    assert "maxRetries" not in detail["tasks"][0]
+    assert detail["schedule"]["pauseStatus"] == "PAUSED"
+    with pytest.raises(RuntimeError, match="finite job"):
+        bootstrap.run_initial_job(api, "ws", job, "persistent-bundle")
+    assert not any(call[0] == "POST" and call[1].endswith("/jobRuns") for call in api.calls)
+    bootstrap.install_job(api, "ws", "compute", {}, bundle, ensure_folder=lambda *_: None)
+    assert detail["tasks"][0]["isStreaming"] is False and detail["timeoutSeconds"] == 600
+    assert len([call for call in api.calls if call[0] == "POST" and call[1].endswith("/jobs")]) == 1
+
+
 @pytest.mark.parametrize("second_task,state", [("prisma_tick", "SUCCESS"), ("prisma_tick", "FAILED"), ("other_task", "SUCCESS")])
 def test_initial_job_accepts_successful_native_task_attempts_but_never_hides_failure(monkeypatch, second_task, state):
     api = Api()

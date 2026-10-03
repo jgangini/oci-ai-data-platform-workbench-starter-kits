@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0032",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0032",
+    "username": "sim_bogota_0032",
+    "display_name": "Fictional Bogotá Reporter 032"
+  },
+  "message": "La entrada de un pequeño local de Bosa está inundada y su personal mueve cajas al fondo. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 84,
+  "available_offset_seconds": 84,
+  "attachments": []
+}

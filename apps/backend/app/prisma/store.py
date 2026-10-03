@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sqlite3
 import time
@@ -22,7 +23,18 @@ class PrismaStore:
                 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS social_posts (
+                    capture_seq INTEGER PRIMARY KEY AUTOINCREMENT, post_key TEXT UNIQUE NOT NULL,
+                    platform TEXT NOT NULL, payload TEXT NOT NULL, analysis_status TEXT NOT NULL, ingested_at TEXT);
+                CREATE INDEX IF NOT EXISTS social_posts_platform_seq ON social_posts(platform,capture_seq);
             """)
+            if not self._get(db, "posts_index_migrated", False):
+                for row in db.execute("SELECT payload FROM events ORDER BY rowid").fetchall():
+                    self._post(db, json.loads(row[0]))
+                self._put(db, "posts_index_migrated", True)
+            if self._get(db, "event_registry", None) is None:
+                existing = [json.loads(row[0]) for row in db.execute("SELECT payload FROM events")]
+                self._put(db, "event_registry", build_snapshot(existing, {}, "", "")["incidents"])
         os.chmod(self.path, 0o600)
 
     @contextmanager
@@ -73,12 +85,14 @@ class PrismaStore:
             return source
         with self.connection() as db:
             controls = self._get(db, "capture_controls", {})
-            control = {"run_id": str(uuid4()), "anchor_at": self.clock()}
+            control = controls.get(platform) if source.get("capture_paused") else None
+            control = control or {"run_id": str(uuid4()), "anchor_at": self.clock(), "seed": 0}
             if not any(item.get("capture_running") and item["enabled"] and item["mode"] == "simulation" for item in self.sources()):
                 controls["institutional"] = control
             controls[platform] = control
             self._put(db, "capture_controls", controls)
             source["capture_running"] = True
+            source["capture_paused"] = False
             self._put(db, "source:" + platform, source)
         return source
 
@@ -90,10 +104,28 @@ class PrismaStore:
         changed = False
         for raw in events:
             event = normalize_event(raw)
+            self._post(db, event)
             result = db.execute("INSERT OR IGNORE INTO events VALUES (?,?)", (event["id"], json.dumps(event, ensure_ascii=False)))
             changed = changed or bool(result.rowcount)
         if changed:
             self._revision(db)
+
+    def _post(self, db, event):
+        db.execute("""INSERT INTO social_posts(post_key,platform,payload,analysis_status,ingested_at)
+            VALUES (?,?,?,'processed',?) ON CONFLICT(post_key) DO UPDATE SET payload=excluded.payload""",
+            (event["id"], event["platform"], json.dumps(event, ensure_ascii=False), utc_text(self.clock())))
+
+    def posts(self, platform, limit, before_seq=None, max_seq=None):
+        with self.connection() as db:
+            if max_seq is None:
+                max_seq = db.execute("SELECT COALESCE(MAX(capture_seq),0) FROM social_posts WHERE platform=?", (platform,)).fetchone()[0]
+            total = db.execute("SELECT COUNT(*) FROM social_posts WHERE platform=? AND capture_seq<=?", (platform, max_seq)).fetchone()[0]
+            rows = db.execute("""SELECT capture_seq,payload,analysis_status,ingested_at FROM social_posts
+                WHERE platform=? AND capture_seq<=? AND capture_seq<? ORDER BY capture_seq DESC LIMIT ?""",
+                (platform, max_seq, before_seq if before_seq is not None else max_seq + 1, limit + 1)).fetchall()
+        items = [{"capture_seq": row[0], "payload": json.loads(row[1]), "analysis_status": row[2], "ingested_at": row[3]} for row in rows[:limit]]
+        return {"items": items, "max_seq": max_seq, "total": total,
+                "next_seq": items[-1]["capture_seq"] if len(rows) > limit else None}
 
     def _revision(self, db):
         value = self._get(db, "publication", {"revision": 0})
@@ -178,18 +210,33 @@ class PrismaStore:
             events = [json.loads(row[0]) for row in db.execute("SELECT payload FROM events")]
             reviews = {row[0]: json.loads(row[1]) for row in db.execute("SELECT id,payload FROM reviews")}
             publication = self._get(db, "publication", {"revision": 0, "published_at": None})
+            registry = self._get(db, "event_registry", None)
         events = [item for item in events if not item.get("raw_metadata", {}).get("capture_run_id") or item["created_at"] >= utc_text(self.clock() - 86400)]
-        result = build_snapshot(events, reviews, f"local-v2-{publication['revision']}", publication["published_at"])
+        rules = {source["platform"]: source for source in self.sources()}
+        result = build_snapshot(events, reviews, f"local-v3-{publication['revision']}", publication["published_at"],
+                                rules=rules, previous=registry, now=self.clock())
+        digest = hashlib.sha256(json.dumps({name: result[name] for name in ("incidents", "evidence", "event_posts")}, sort_keys=True).encode()).hexdigest()[:16]
+        result["version"] += "-" + digest
+        with self.connection() as db:
+            saved = self._get(db, "snapshot_publication", {})
+            if saved.get("version") != result["version"]:
+                saved = {"version": result["version"], "published_at": utc_text(self.clock())}
+                self._put(db, "snapshot_publication", saved)
+            result["published_at"] = saved["published_at"]
+            if registry != result["incidents"]:
+                self._put(db, "event_registry", result["incidents"])
         result.update(runtime="local_fixture", simulation=self.simulation_state())
         return result
 
     def review(self, incident_id: str, status: str, note: str) -> dict:
         if status not in {"pending", "validated", "rejected"}:
             raise ValueError("Unsupported review status")
-        if not any(item["id"] == incident_id for item in self.snapshot()["incidents"]):
+        incident = next((item for item in self.snapshot()["incidents"] if item["id"] == incident_id), None)
+        if incident is None:
             raise KeyError(incident_id)
         with self.connection() as db:
             db.execute("INSERT INTO reviews VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
-                       (incident_id, json.dumps({"status": status, "note": note[:2000], "reviewed_at": utc_text(self.clock())})))
+                       (incident_id, json.dumps({"status": status, "note": note[:2000], "reviewed_at": utc_text(self.clock()),
+                                                "evidence_ids": incident["evidence_ids"]})))
             self._revision(db)
         return next(item for item in self.snapshot()["incidents"] if item["id"] == incident_id)

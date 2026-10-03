@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0059",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0059",
+    "username": "sim_bogota_0059",
+    "display_name": "Fictional Bogotá Reporter 059"
+  },
+  "message": "En Chapinero se escucha a personas avisando del incendio sin acercarse a la zona de vegetación. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 120,
+  "available_offset_seconds": 120,
+  "attachments": []
+}

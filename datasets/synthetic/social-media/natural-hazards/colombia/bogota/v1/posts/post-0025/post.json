@@ -1,0 +1,34 @@
+{
+  "fixture_id": "post-0025",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0025",
+    "username": "sim_bogota_0025",
+    "display_name": "Fictional Bogotá Reporter 025"
+  },
+  "message": "En Bosa empieza a entrar agua de lluvia en un patio bajo; reporto una inundación localizada. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 0,
+  "available_offset_seconds": 0,
+  "attachments": [
+    {
+      "id": "post-0025-image-01",
+      "type": "image",
+      "mime_type": "image/svg+xml",
+      "dataset_path": "posts/post-0025/media/image-01.svg",
+      "sha256": "c997c0ac40de31571b909fbe67846e2954c380516b903521f8d9cc458e5c038f",
+      "license": "CC0-1.0",
+      "origin": "synthetic_diagram",
+      "alt_text": "Synthetic, nonphotographic diagram for Bosa; not evidence of a real event.",
+      "is_simulated": true
+    }
+  ]
+}

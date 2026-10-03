@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0006",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0006",
+    "username": "sim_bogota_0006",
+    "display_name": "Fictional Bogotá Reporter 006"
+  },
+  "message": "Varias personas en Kennedy se organizan para alejar cajas del agua que entra al primer piso. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 60,
+  "available_offset_seconds": 60,
+  "attachments": []
+}

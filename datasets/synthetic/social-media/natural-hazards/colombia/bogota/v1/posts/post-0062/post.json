@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0062",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0062",
+    "username": "sim_bogota_0062",
+    "display_name": "Fictional Bogotá Reporter 062"
+  },
+  "message": "La franja de vegetación cercana al foco de Chapinero permanece oscura y el humo no ha cesado. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 156,
+  "available_offset_seconds": 156,
+  "attachments": []
+}

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0038",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0038",
+    "username": "sim_bogota_0038",
+    "display_name": "Fictional Bogotá Reporter 038"
+  },
+  "message": "Familias de Bosa mantienen a niños y mascotas lejos de los accesos que siguen anegados. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 156,
+  "available_offset_seconds": 156,
+  "attachments": []
+}

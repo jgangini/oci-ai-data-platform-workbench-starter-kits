@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
-import { allowedActions, bogotaToUtc, evidenceFor, filteredIncidents, modeLabel, parseBbox, photosFor, safeSourceUrl, utcToBogota, validPeriod, validateSnapshot, withinBbox } from '../src/model.js';
+import { allowedActions, bogotaToUtc, displayLocality, displaySeverity, evidenceFor, filteredIncidents, modeLabel, parseBbox, photosFor, reportActivity, safeSourceUrl, utcToBogota, validPeriod, validateSnapshot, withinBbox } from '../src/model.js';
 import { createPrismaSession } from '../src/chat.js';
 import { nasaDate, nasaUrl } from '../src/context.js';
 import { observeImagery } from '../src/imagery.js';
@@ -40,6 +40,18 @@ test('filters keep mode, platform and evidence ownership intact', () => {
   assert.equal(modeLabel('simulation'), 'SIMULATED');
   assert.equal(modeLabel('real'), 'REAL');
   assert.equal(modeLabel(null), 'UNCLASSIFIED');
+});
+
+test('English system labels preserve original Bogotá localities and filter values', async () => {
+  assert.equal(displayLocality('Sin localizar'), 'Location unresolved');
+  for (const locality of ['Kennedy', 'Ciudad Bolívar', 'Usaquén']) assert.equal(displayLocality(locality), locality);
+  assert.deepEqual(['low', 'medium', 'high'].map(displaySeverity), ['Low', 'Medium', 'High']);
+  const unresolved = { ...snapshot.incidents[0], locality: 'Sin localizar' };
+  assert.deepEqual(filteredIncidents({ ...snapshot, incidents: [unresolved] }, { locality: 'Sin localizar' }), [unresolved]);
+  assert.equal(unresolved.locality, 'Sin localizar');
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /Which alerts have the highest severity\?/);
+  assert.match(html, /What evidence supports the selected alert\?/);
 });
 
 test('Bogotá period is timezone-independent, inclusive and rejects reversed bounds', () => {
@@ -80,19 +92,33 @@ test('area is inclusive, rejects invalid bounds and keeps the same incident evid
   assert.equal(allowedActions([{ type: 'filter_incidents', filters: { bbox } }], snapshot).length, 1);
 });
 
-test('photos require real evidence, its validated incident and the original X media host', () => {
+test('photos require evidence included in human review and the original X media host', () => {
   const photo = { type: 'photo', url: 'https://pbs.twimg.com/media/example.jpg', alt_text: 'Inundación' };
   const evidence = { id: 'e1', platform: 'x', mode: 'real', media: [photo] };
-  const incident = { review_status: 'validated', evidence_ids: ['e1'] };
+  const incident = { review_status: 'validated', evidence_ids: ['e1'], reviewed_evidence_ids: ['e1'] };
   assert.deepEqual(photosFor(evidence, incident), [photo]);
   for (const status of ['pending', 'rejected', undefined]) assert.deepEqual(photosFor(evidence, { ...incident, review_status: status }), []);
   assert.deepEqual(photosFor({ ...evidence, mode: 'simulation' }, incident), []);
   assert.deepEqual(photosFor(evidence, { ...incident, evidence_ids: ['other'] }), []);
+  assert.deepEqual(photosFor(evidence, { ...incident, reviewed_evidence_ids: undefined }), []);
+  assert.deepEqual(photosFor({ ...evidence, id: 'e2' }, { ...incident, evidence_ids: ['e1', 'e2'] }), []);
+  assert.deepEqual(photosFor({ ...evidence, id: 'e2' }, { ...incident, evidence_ids: ['e1', 'e2'], reviewed_evidence_ids: ['e1', 'e2'] }), [photo]);
   assert.deepEqual(photosFor(evidence), []);
   for (const url of ['javascript:alert(1)', 'http://pbs.twimg.com/media/x.jpg', 'https://pbs.twimg.com.evil.test/media/x.jpg', 'https://pbs.twimg.com:8443/media/x.jpg', 'https://user:secret@pbs.twimg.com/media/x.jpg', 'https://pbs.twimg.com/profile_images/x.jpg']) {
     assert.deepEqual(photosFor({ ...evidence, media: [{ ...photo, url }] }, incident), []);
   }
   assert.deepEqual(photosFor({ ...evidence, media: [{ ...photo, type: 'video' }] }, incident), []);
+});
+
+test('report activity displays published network counts without deriving severity or confirmation', () => {
+  const incident = { severity: 'high', review_status: 'validated', report_activity: 'medium',
+    report_counts: { x: 10, facebook: 0, instagram: -1, tiktok: '20' },
+    report_activity_by_platform: { x: 'medium', facebook: 'below_threshold' } };
+  assert.deepEqual(reportActivity(incident), { level: 'Medium', networks: [
+    { platform: 'x', count: 10, level: 'Medium' }, { platform: 'facebook', count: 0, level: 'Below threshold' },
+  ] });
+  assert.deepEqual(reportActivity({ severity: 'high', review_status: 'validated' }), { level: 'Unavailable', networks: [] });
+  assert.deepEqual(reportActivity({ report_activity: 'confirmed', report_counts: [20] }), { level: 'Unavailable', networks: [] });
 });
 
 test('platform logos retain the exact pinned Simple Icons CC0 bytes', async () => {

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0108",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0108",
+    "username": "sim_bogota_0108",
+    "display_name": "Fictional Bogotá Reporter 108"
+  },
+  "message": "Recorrí un sector de Bosa: hay zonas secas y viviendas sin agua; no es cierto que toda la localidad esté sumergida. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 432,
+  "available_offset_seconds": 432,
+  "attachments": []
+}

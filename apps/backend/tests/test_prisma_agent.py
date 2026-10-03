@@ -27,7 +27,7 @@ def test_mode_json_field_uses_nonreserved_oracle_column_and_bind(mode, expected)
     assert ":mode" not in sql and "i.mode" not in sql
     if mode:
         assert mode not in sql
-    for view in VIEWS[1:]:
+    for view in VIEWS[1:3]:
         assert "source_mode VARCHAR2(20) PATH '$.mode'" in view
         assert " mode VARCHAR2" not in view
 

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0096",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0096",
+    "username": "sim_bogota_0096",
+    "display_name": "Fictional Bogotá Reporter 096"
+  },
+  "message": "El registro subió tarde por poca señal: en Ciudad Bolívar el sendero ya tenía barro antes de este mensaje. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 276,
+  "available_offset_seconds": 560,
+  "attachments": []
+}

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0052",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0052",
+    "username": "sim_bogota_0052",
+    "display_name": "Fictional Bogotá Reporter 052"
+  },
+  "message": "El humo del área de vegetación de Chapinero se desplaza hacia arriba, sin que yo vea viviendas afectadas. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 36,
+  "available_offset_seconds": 36,
+  "attachments": []
+}

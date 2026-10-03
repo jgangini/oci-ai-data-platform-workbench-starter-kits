@@ -1,0 +1,34 @@
+{
+  "fixture_id": "post-0049",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0049",
+    "username": "sim_bogota_0049",
+    "display_name": "Fictional Bogotá Reporter 049"
+  },
+  "message": "Veo humo y pequeñas llamas entre vegetación seca en Chapinero; parece un incendio localizado. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 0,
+  "available_offset_seconds": 0,
+  "attachments": [
+    {
+      "id": "post-0049-image-01",
+      "type": "image",
+      "mime_type": "image/svg+xml",
+      "dataset_path": "posts/post-0049/media/image-01.svg",
+      "sha256": "b923e4081039bd440a2f5dd828e5a46996ba3849338612d42480a2e5fc88197e",
+      "license": "CC0-1.0",
+      "origin": "synthetic_diagram",
+      "alt_text": "Synthetic, nonphotographic diagram for Chapinero; not evidence of a real event.",
+      "is_simulated": true
+    }
+  ]
+}

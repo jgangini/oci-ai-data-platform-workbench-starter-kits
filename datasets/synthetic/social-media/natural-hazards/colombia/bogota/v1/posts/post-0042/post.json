@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0042",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0042",
+    "username": "sim_bogota_0042",
+    "display_name": "Fictional Bogotá Reporter 042"
+  },
+  "message": "El agua derribó todos los puentes de Bosa y dejó a la localidad totalmente incomunicada. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 204,
+  "available_offset_seconds": 204,
+  "attachments": []
+}

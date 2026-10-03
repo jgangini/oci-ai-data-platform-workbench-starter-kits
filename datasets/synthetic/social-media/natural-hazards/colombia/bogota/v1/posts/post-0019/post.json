@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0019",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0019",
+    "username": "sim_bogota_0019",
+    "display_name": "Fictional Bogotá Reporter 019"
+  },
+  "message": "Observación nueva en Kennedy: se distingue otra vez parte del bordillo, pero aún hay agua acumulada. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 216,
+  "available_offset_seconds": 216,
+  "attachments": []
+}

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0104",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0104",
+    "username": "sim_bogota_0104",
+    "display_name": "Fictional Bogotá Reporter 104"
+  },
+  "message": "Recibí un aviso de tierra caída en una ladera de Bogotá; el mensaje no identifica la localidad. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": null,
+  "location": {
+    "precision": "unresolved",
+    "provenance": "synthetic_scenario",
+    "lat": null,
+    "lon": null
+  },
+  "published_offset_seconds": 130,
+  "available_offset_seconds": 130,
+  "attachments": []
+}

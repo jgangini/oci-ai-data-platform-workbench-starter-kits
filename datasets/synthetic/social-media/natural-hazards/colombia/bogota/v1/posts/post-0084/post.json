@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0084",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0084",
+    "username": "sim_bogota_0084",
+    "display_name": "Fictional Bogotá Reporter 084"
+  },
+  "message": "Hay huellas nuevas de escorrentía sobre una pendiente de Ciudad Bolívar y material acumulado abajo. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 132,
+  "available_offset_seconds": 132,
+  "attachments": []
+}

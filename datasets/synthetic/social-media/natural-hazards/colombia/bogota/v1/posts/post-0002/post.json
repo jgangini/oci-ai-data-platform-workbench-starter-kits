@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0002",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0002",
+    "username": "sim_bogota_0002",
+    "display_name": "Fictional Bogotá Reporter 002"
+  },
+  "message": "La corriente cubre el borde del andén en Kennedy y obliga a caminar por una zona seca. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 12,
+  "available_offset_seconds": 12,
+  "attachments": []
+}

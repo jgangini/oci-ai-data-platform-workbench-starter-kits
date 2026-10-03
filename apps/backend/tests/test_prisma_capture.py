@@ -70,6 +70,9 @@ class Producer(cloud.CloudRuntime):
             raise RuntimeError("Injected native trigger failure")
         self.wakes.append(request_id)
 
+    def _project_posts(self, events, now, key):
+        self.projected = (events, now, key)
+
 
 def test_failed_vm_upload_never_advances_cursor_and_retry_has_same_landing_key(monkeypatch):
     monkeypatch.setattr(cloud.time, "time", lambda: NOW)
@@ -86,6 +89,22 @@ def test_failed_vm_upload_never_advances_cursor_and_retry_has_same_landing_key(m
     assert all(key.endswith(".csv") for key in first)
     assert sum(len(landing.records(body)) for body in first.values()) == 1
     assert producer.docs["status_x"]["next_due"] and producer.docs["status_x"]["last_received_count"] == 1
+
+
+def test_failed_post_projection_keeps_durable_csv_and_retries_before_advancing(monkeypatch):
+    monkeypatch.setattr(cloud.time, "time", lambda: NOW)
+    producer = Producer()
+    def unavailable(*_):
+        raise RuntimeError("Injected post-index failure")
+    monkeypatch.setattr(producer, "_project_posts", unavailable)
+    with pytest.raises(RuntimeError, match="post-index"):
+        producer._produce()
+    durable = copy.deepcopy(producer.objects)
+    assert durable and "checkpoint_synthetic" not in producer.docs
+    monkeypatch.setattr(producer, "_project_posts", lambda *_: None)
+    producer._produce()
+    assert all(producer.objects[key] == value for key, value in durable.items())
+    assert producer.docs["checkpoint_synthetic"]["sources"]["x"]
 
 
 def test_completion_flushes_institutional_sources_and_retries_final_trigger(monkeypatch):
@@ -188,7 +207,7 @@ def test_cloud_run_starts_persistent_continuous_capture_and_disable_stops_upload
     asyncio.run(restarted.tick())
     events = [event for body in restarted.objects.values() for event in landing.records(body)]
     assert {"sensor", "sire", "linea123"} <= {event["platform"] for event in events}
-    rain = [event for event in events if event["platform"] == "x" and event["source_id"].endswith(":lluvia-1")]
+    rain = [event for event in events if event["platform"] == "x" and event["source_id"].endswith(":post-0001")]
     assert len(rain) == len({event["source_id"] for event in rain}) == 2
     assert rain[0]["created_at"] != rain[1]["created_at"]
 

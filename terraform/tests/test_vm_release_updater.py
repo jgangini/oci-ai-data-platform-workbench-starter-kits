@@ -219,6 +219,8 @@ def test_candidate_mount_and_runtime_hardening_are_explicit(
 ) -> None:
     observed: list[str] = []
     snapshot = tmp_path / "releases/candidate-state"
+    environment = tmp_path / ".env"
+    environment.write_text("PRISMA_VIEWER_ENABLED=true\n", encoding="utf-8")
     monkeypatch.setattr(
         updater,
         "_run",
@@ -241,6 +243,13 @@ def test_candidate_mount_and_runtime_hardening_are_explicit(
     assert "--cap-drop" in observed and "ALL" in observed
     assert "--read-only" in observed
     assert "/var/run/docker.sock" not in " ".join(observed)
+    assert observed[observed.index("-e") + 1] == "PRISMA_VIEWER_ENABLED=false"
+    assert observed.index("-e") > observed.index("--env-file")
+    observed.clear()
+    updater._run_container(tmp_path, updater.APP_NAME, "aidp-lab:" + "b" * 40, candidate=False)
+    assert "PRISMA_VIEWER_ENABLED=false" not in observed
+    assert observed[observed.index("--env-file") + 1] == str(environment)
+    assert environment.read_text() == "PRISMA_VIEWER_ENABLED=true\n"
 
 
 @pytest.mark.parametrize("status, expected", [("200", True), ("204", False), ("302", False)])

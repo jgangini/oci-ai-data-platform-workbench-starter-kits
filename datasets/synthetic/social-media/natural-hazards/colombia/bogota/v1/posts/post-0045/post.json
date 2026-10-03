@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0045",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0045",
+    "username": "sim_bogota_0045",
+    "display_name": "Fictional Bogotá Reporter 045"
+  },
+  "message": "Sigue el anegamiento en una calzada de Bosa; los reportes de mejoría no aplican a todo el sector. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Bosa",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.609,
+    "lon": -74.184
+  },
+  "published_offset_seconds": 240,
+  "available_offset_seconds": 240,
+  "attachments": []
+}

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0063",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0063",
+    "username": "sim_bogota_0063",
+    "display_name": "Fictional Bogotá Reporter 063"
+  },
+  "message": "Una ráfaga vuelve a avivar una llama visible en el pasto de Chapinero; sigo observando desde lejos. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 168,
+  "available_offset_seconds": 168,
+  "attachments": []
+}

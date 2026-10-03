@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.prisma import pipeline, x
+from app.prisma import pipeline, scheduling, x
 from app.prisma.landing import records, write_objects
 from app.prisma.core import default_source, normalize_event, simulation_events
 from app.prisma.classification import classify
@@ -36,8 +36,11 @@ class Lake:
         for record in records:
             self.data[layer].setdefault(record["id"], copy.deepcopy(record))
 
-    def pending(self):
-        return [value for key, value in self.data["bronze"].items() if key not in self.data["silver"]]
+    def pending(self, ids=None):
+        return [value for key, value in self.data["bronze"].items() if key not in self.data["silver"] and (not ids or key in ids)]
+
+    def pending_count(self):
+        return len(self.pending())
 
     def visible(self, run_id, _now):
         return [value for value in self.data["silver"].values()
@@ -54,6 +57,10 @@ class Objects:
             raise RuntimeError("Injected Object Storage failure")
         assert namespace == CONFIG["namespace"] and bucket == CONFIG["landing_bucket" if key.startswith("01_landing/") else "bucket"]
         self.data[key] = data
+
+    def get_object(self, namespace, bucket, key):
+        assert namespace == CONFIG["namespace"] and bucket == CONFIG["bucket"]
+        return SimpleNamespace(data=SimpleNamespace(content=self.data[key]))
 
 
 @pytest.fixture
@@ -78,6 +85,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(pipeline, "read_document", read)
     monkeypatch.setattr(pipeline, "mutate_document", mutate)
     monkeypatch.setattr(pipeline, "publish", publish)
+    monkeypatch.setattr(pipeline, "upsert_posts", lambda _db, records, status, **_: log.append("posts:" + status))
     objects = Objects(log)
     return log, docs, publications, Lake(log, objects), objects
 
@@ -131,6 +139,21 @@ def test_empty_bootstrap_runs_actual_publication_path_without_simulated_data(run
     assert len(lake.data["gold"]) == 1
 
 
+def test_rules_upgrade_seeds_stable_ids_from_published_pointer_and_preserves_review(runtime):
+    _, docs, _, lake, objects = runtime
+    event = normalize_event(simulation_events(0)[0])
+    old = pipeline.publish_snapshot(object(), objects, lake, CONFIG, [event], {}, {}, NOW)
+    incident_id = old["incidents"][0]["id"]
+    reviews = {incident_id: {"status": "validated", "note": "Human review"}}
+    # An interrupted attempt can leave runtime.publication newer than the durable pointer.
+    docs["runtime"]["publication"] = {"version": "gold-" + "a" * 32, "published_at": pipeline.utc_text(NOW)}
+    upgraded = pipeline.publish_snapshot(object(), objects, lake, CONFIG, [event], reviews, {}, NOW,
+                                         rules={"x": default_source("x")})
+    assert upgraded["incidents"][0]["id"] == incident_id
+    assert upgraded["incidents"][0]["review_status"] == "validated"
+    assert docs["event_registry"]["items"] == upgraded["incidents"]
+
+
 def test_failed_classification_retries_bronze_without_fabricating_success(runtime):
     _, docs, _, lake, objects = runtime
     docs["simulation"] = {"revision": 1, "run_id": "run-one", "status": "running", "started_at": NOW, "elapsed_seconds": 0}
@@ -139,17 +162,94 @@ def test_failed_classification_retries_bronze_without_fabricating_success(runtim
         "raw_metadata": {**raw["raw_metadata"], "scenario_run_id": "run-one"}}])
     def failure(_events):
         raise ValueError("untrusted-sensitive-error")
-    with pytest.raises(RuntimeError) as error:
-        pipeline.run(None, None, CONFIG, connection=object(), objects=objects, lake=lake,
-                     client=object(), classifier=failure, clock=lambda: NOW)
-    assert "untrusted-sensitive-error" not in str(error.value)
-    assert docs["status_pipeline"]["status"] == "error"
+    pipeline.run(None, None, CONFIG, connection=object(), objects=objects, lake=lake,
+                 client=object(), classifier=failure, clock=lambda: NOW)
+    assert "untrusted-sensitive-error" not in json.dumps(docs)
+    assert docs["status_pipeline"]["status"] == "pending"
     assert len(lake.data["bronze"]) == 1 and lake.data["silver"] == {}
-    assert "04_gold/prisma/current.json" not in objects.data
+    assert docs["checkpoint_enrichment"]["retry_at"] == NOW + 30
+    # Arrival of another CSV is consumed even while enrichment is backing off.
+    write_objects(objects, CONFIG, [{**raw, "source_id": "second-arrival"}])
+    pipeline.run(None, None, CONFIG, connection=object(), objects=objects, lake=lake,
+                 client=object(), classifier=failure, clock=lambda: NOW + 10)
+    assert len(lake.data["bronze"]) == 2 and docs["checkpoint_enrichment"]["attempts"] == 1
     snapshot = pipeline.run(None, None, CONFIG, connection=object(), objects=objects, lake=lake, client=object(),
-                            classifier=lambda events: [normalize_event(event) for event in events], clock=lambda: NOW)
-    assert len(snapshot["evidence"]) == len(lake.data["bronze"]) == len(lake.data["silver"]) == 1
+                            classifier=lambda events: [normalize_event(event) for event in events], clock=lambda: NOW + 31)
+    assert len(lake.data["bronze"]) == 2 and len(lake.data["silver"]) == 1
+    assert docs["status_pipeline"]["pending_count"] == 1
+    assert len(snapshot["evidence"]) == 1
     assert snapshot["evidence"][0]["source_id"].startswith("run-one:")
+
+
+def test_adb_projection_recovers_after_silver_merge_without_reclassifying(runtime, monkeypatch):
+    log, docs, _, lake, _objects = runtime
+    post = normalize_event(simulation_events(0)[0])
+    lake.put("bronze", [post])
+    projections = []
+    def project(_db, _records, status, **_):
+        projections.append(status)
+        if status == "processed" and projections.count("processed") == 1:
+            raise RuntimeError("Injected projection outage")
+    monkeypatch.setattr(pipeline, "upsert_posts", project)
+    with pytest.raises(RuntimeError, match="projection outage"):
+        pipeline.enrich_pending(object(), lake, lambda records: records, NOW)
+    assert post["id"] in lake.data["silver"]
+    assert docs["checkpoint_enrichment"]["prepared"][0]["id"] == post["id"]
+    result = pipeline.enrich_pending(object(), lake, lambda _: pytest.fail("Already classified"), NOW + 30)
+    assert result["pending_count"] == 0 and docs["checkpoint_enrichment"]["prepared"] == []
+    assert projections.count("processed") == 2
+
+
+def test_persistent_runtime_keeps_ingestion_running_during_llm_failure(runtime, monkeypatch):
+    _, docs, _, lake, objects = runtime
+    post = normalize_event(simulation_events(0)[0])
+    lake.put("bronze", [post])
+    query = SimpleNamespace(id="csv-query", isActive=True, recentProgress=[], lastProgress={}, exception=lambda: None)
+    stopped = []
+    query.stop = lambda: stopped.append(True)
+    monkeypatch.setattr(pipeline, "start_landing", lambda *_args, **_kwargs: [("csv", query)])
+    def next_batch(_seconds):
+        assert docs["status_pipeline"]["status"] == "pending" and query.isActive
+        lake.put("bronze", [{**post, "id": "x:second", "source_id": "second"}])
+        raise KeyboardInterrupt()
+    monkeypatch.setattr(pipeline.time, "sleep", next_batch)
+    def limited(_events):
+        raise RuntimeError("LLM unavailable")
+    with pytest.raises(KeyboardInterrupt):
+        pipeline.run_persistent(None, object(), objects, lake, CONFIG, None, limited, object(), lambda: NOW)
+    assert len(lake.data["bronze"]) == 2 and lake.data["silver"] == {} and stopped == [True]
+
+
+def test_enrichment_circuit_bounds_failures_and_configuration_revision_reopens_it(runtime):
+    _, docs, _, lake, _objects = runtime
+    lake.put("bronze", [normalize_event(simulation_events(0)[0])])
+    attempts = []
+    def failure(events):
+        attempts.append([item["id"] for item in events])
+        raise RuntimeError("Provider unavailable")
+    now = NOW
+    for _ in range(5):
+        result = pipeline.enrich_pending(object(), lake, failure, now, 1)
+        now = result["retry_at"] or now + 600
+    assert result["needs_attention"] and result["retry_at"] is None
+    assert docs["checkpoint_enrichment"]["attempts"] == 5
+    pipeline.enrich_pending(object(), lake, failure, now + 3600, 1)
+    assert len(attempts) == 5
+    result = pipeline.enrich_pending(object(), lake, lambda events: events, now + 3600, 2)
+    assert result["pending_count"] == 0 and not result["needs_attention"]
+    assert docs["checkpoint_enrichment"]["prepared"] == []
+
+
+@pytest.mark.parametrize("pending,attention,capturing,enabled", [(2, False, False, True), (2, True, False, False),
+                                                                (0, False, False, False), (2, True, True, True)])
+def test_paused_capture_drains_pending_work_until_the_enrichment_circuit_opens(monkeypatch, pending, attention, capturing, enabled):
+    documents = {"configuration": {"sources": {"x": {"enabled": True, "capture_running": capturing}}},
+        "simulation": {}, "runtime": {}, "status_pipeline": {"pending_count": pending, "needs_attention": attention}}
+    decisions = []
+    monkeypatch.setattr(scheduling, "read_document", lambda _db, name: documents[name])
+    monkeypatch.setattr(scheduling, "set_schedule", lambda _request, _runtime, value: decisions.append(value))
+    scheduling.reconcile_after_tick(object(), object(), NOW)
+    assert decisions == [enabled]
 
 
 def test_queued_manual_run_cannot_bypass_persisted_x_rate_limit(runtime):

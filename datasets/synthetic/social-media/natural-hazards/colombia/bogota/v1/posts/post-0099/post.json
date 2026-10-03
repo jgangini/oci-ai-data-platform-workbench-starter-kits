@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0099",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0099",
+    "username": "sim_bogota_0099",
+    "display_name": "Fictional Bogotá Reporter 099"
+  },
+  "message": "Agenda cultural de Bogotá: el taller comunitario número 1 prepara lecturas y música para el sábado. · Bogotá #Bogota #Colombia ",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": null,
+  "location": {
+    "precision": "unresolved",
+    "provenance": "synthetic_scenario",
+    "lat": null,
+    "lon": null
+  },
+  "published_offset_seconds": 140,
+  "available_offset_seconds": 140,
+  "attachments": []
+}

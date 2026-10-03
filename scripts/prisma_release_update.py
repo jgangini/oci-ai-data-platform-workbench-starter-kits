@@ -14,10 +14,14 @@ APP, CANDIDATE, PREVIOUS = "prisma-viewer", "prisma-viewer-candidate", "prisma-v
 
 
 def run_container(root: Path, name: str, image: str, candidate: bool) -> None:
+    # Native feed caches include provider rate budgets; updates and rollback keep them.
+    cache = root / "native-cache"
+    _run(["install", "-d", "-m", "0700", "-o", "65534", "-g", "65534", str(cache)])
     _run([
         "docker", "run", "-d", "--name", name, "--restart", "no" if candidate else "unless-stopped",
         "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
         "--security-opt", "no-new-privileges:true", "--cap-drop", "ALL",
+        "-v", f"{cache}:/app/.upstream/.gev-cache:rw,z",
         "--env-file", str(root / "runtime.env"), "-p",
         "127.0.0.1:18081:8081" if candidate else "8081:8081", image,
     ])

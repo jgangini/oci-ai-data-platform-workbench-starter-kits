@@ -4,6 +4,7 @@
 .venv
 node_modules
 **/node_modules/
+apps/prisma-viewer/.upstream/
 **/dist/
 dist
 *.tsbuildinfo

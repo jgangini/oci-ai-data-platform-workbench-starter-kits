@@ -1,7 +1,7 @@
 """Synthetic search input; its clock, filtering and cursors are shared by local and OCI VM producers."""
 import re
 
-from .core import folded, simulation_events
+from .core import PLATFORMS, folded, simulation_events
 
 
 def query_lines(value):
@@ -70,7 +70,7 @@ def matches(text, expression):
         if isinstance(value, list):
             return any(all(term(item) for item in branch) for branch in value)
         if value == "-is:retweet":
-            return True  # Synthetic source records are original posts, including explicit copied-content examples.
+            return not text.startswith("rt @")
         negative = value.startswith("-")
         word = folded(value.lstrip("-").strip('"').lstrip("#"))
         found = bool(re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text))
@@ -123,6 +123,8 @@ def inputs(configured, controls, legacy):
     continuous = any(item.get("capture_running", False) for item in active)
     for source in sources(active):
         institutional = source["platform"] not in {item["platform"] for item in configured}
+        if not institutional and source.get("capture_paused", False):
+            continue
         running = continuous if institutional else source.get("capture_running", False)
         control = controls.get("institutional" if institutional else source["platform"], {})
         if running and control.get("run_id"):
@@ -140,15 +142,42 @@ def continuous_batch(source, control, cursor, now, force=False):
         return None
     # ponytail: catch up at most one hour per VM tick, retaining the rest in the cursor instead of dropping records.
     end = min(elapsed, max(0, start) + 3600)
+    generation = continuous_generation(source, control, cursor)
     events = []
     for cycle in range(max(0, int(max(0, start) // 600) - 1), int(end // 600) + 1):
         cycle_start = cycle * 600
-        part = window_events(source, f"{control['run_id']}:{cycle}", control["anchor_at"] + cycle_start,
-                             start - cycle_start, min(600, end - cycle_start))
+        part = continuous_window(source, control, generation, cycle, start - cycle_start, min(600, end - cycle_start))
         for event in part:
             event["raw_metadata"]["capture_run_id"] = control["run_id"]
         events.extend(part)
-    return events, {"run_id": control["run_id"], "query": source["query"], "elapsed": end,
+    return events, {"run_id": control["run_id"], "query": source["query"], "elapsed": end, **generation,
         "interval_minutes": source["interval_minutes"],
-        "batch_key": {"platform": source["platform"], "run_id": control["run_id"], "query": source["query"], "from_seconds": start, "to_seconds": end},
+        "batch_key": {"platform": source["platform"], "run_id": control["run_id"], "query": source["query"], "from_seconds": start, "to_seconds": end, **generation},
         "next_due": now + (1 if end < elapsed else source["interval_minutes"] * 60)}
+
+
+def continuous_generation(source, control, cursor):
+    if source["platform"] not in PLATFORMS:
+        return {}
+    if cursor.get("run_id") == control["run_id"]:
+        # Existing unversioned checkpoints finish with their original generator; never replay them as a new corpus.
+        return {"dataset_version": cursor["dataset_version"], "dataset_seed": cursor.get("dataset_seed", 0)} if cursor.get("dataset_version") else {}
+    return {"dataset_version": control.get("dataset_version", "bogota-v1"), "dataset_seed": control.get("seed", 0)}
+
+
+def continuous_window(source, control, generation, cycle, start, end):
+    anchor = control["anchor_at"] + cycle * 600
+    if not generation.get("dataset_version"):
+        return window_events(source, f"{control['run_id']}:{cycle}", anchor, start, end)
+    # Corpus files live on the capture VM; importing query_lines in an AIDP X worker never loads them.
+    from .corpus import events
+    expressions = [(query, search_terms(query)) for query in query_lines(source["query"])]
+    result = []
+    for event in events(source["platform"], control["run_id"], cycle, anchor, start, end,
+                        seed=generation["dataset_seed"], version=generation["dataset_version"]):
+        searchable = event["text"] + " @" + event["username"]
+        matched = [query for query, expression in expressions if matches(searchable, expression)]
+        if matched:
+            event["raw_metadata"]["matched_queries"] = matched
+            result.append(event)
+    return result

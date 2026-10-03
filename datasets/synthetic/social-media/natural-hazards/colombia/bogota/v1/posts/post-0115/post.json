@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0115",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0115",
+    "username": "sim_bogota_0115",
+    "display_name": "Fictional Bogotá Reporter 115"
+  },
+  "message": "El aguacero en Suba hace difícil ver al otro lado de la vía; desde aquí no puedo medir la precipitación. · Bogotá #Bogota #Colombia #lluvia #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Suba",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.741,
+    "lon": -74.084
+  },
+  "published_offset_seconds": 108,
+  "available_offset_seconds": 108,
+  "attachments": []
+}

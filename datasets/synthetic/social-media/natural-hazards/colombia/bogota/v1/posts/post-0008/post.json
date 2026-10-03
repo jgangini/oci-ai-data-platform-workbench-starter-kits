@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0008",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0008",
+    "username": "sim_bogota_0008",
+    "display_name": "Fictional Bogotá Reporter 008"
+  },
+  "message": "Una tienda de Kennedy movió sus productos a estantes altos mientras entra agua por la puerta. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 84,
+  "available_offset_seconds": 84,
+  "attachments": []
+}

@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0067",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0067",
+    "username": "sim_bogota_0067",
+    "display_name": "Fictional Bogotá Reporter 067"
+  },
+  "message": "La columna de humo en Chapinero es menor; eso por sí solo no permite afirmar que el incendio terminó. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 216,
+  "available_offset_seconds": 216,
+  "attachments": []
+}

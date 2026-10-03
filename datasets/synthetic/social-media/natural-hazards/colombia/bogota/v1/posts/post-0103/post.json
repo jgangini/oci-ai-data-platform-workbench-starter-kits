@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0103",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-author-0103",
+    "username": "sim_bogota_0103",
+    "display_name": "Fictional Bogotá Reporter 103"
+  },
+  "message": "En Suba comienza una lluvia fuerte; las personas esperan bajo cubierta a que mejore la visibilidad. · Bogotá #Bogota #Colombia #lluvia #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Suba",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.741,
+    "lon": -74.084
+  },
+  "published_offset_seconds": 60,
+  "available_offset_seconds": 60,
+  "attachments": []
+}

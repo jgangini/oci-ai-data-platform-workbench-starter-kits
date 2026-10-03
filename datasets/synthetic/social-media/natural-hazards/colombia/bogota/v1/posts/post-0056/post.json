@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0056",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0056",
+    "username": "sim_bogota_0056",
+    "display_name": "Fictional Bogotá Reporter 056"
+  },
+  "message": "Una nube gris cubre parcialmente la vista del terreno con vegetación de Chapinero. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 84,
+  "available_offset_seconds": 84,
+  "attachments": []
+}

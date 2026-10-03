@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0058",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0058",
+    "username": "sim_bogota_0058",
+    "display_name": "Fictional Bogotá Reporter 058"
+  },
+  "message": "Desde otro ángulo de Chapinero observo humo blanco junto al punto donde antes se veían llamas. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 108,
+  "available_offset_seconds": 108,
+  "attachments": []
+}

@@ -3,7 +3,7 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './style.css';
 import { createApplicationViewer, installTrackpadPinchZoom } from '../vendor/gods-eye-view/src/app/viewer.js';
 import { createKeylessTerrain } from '../vendor/gods-eye-view/src/maps/terrain.js';
-import { allowedActions, bogotaToUtc, DATE_KEYS, evidenceFor, filteredIncidents, FILTER_KEYS, modeLabel, parseBbox, photosFor, safeSourceUrl, utcToBogota, validPeriod, validateSnapshot } from './model.js';
+import { allowedActions, bogotaToUtc, DATE_KEYS, displayLocality, displaySeverity, evidenceFor, filteredIncidents, FILTER_KEYS, modeLabel, parseBbox, photosFor, reportActivity, safeSourceUrl, utcToBogota, validPeriod, validateSnapshot } from './model.js';
 import { createPrismaSession } from './chat.js';
 import { loadContext, nasaDate, nasaUrl, renderNews } from './context.js';
 import { observeImagery } from './imagery.js';
@@ -95,8 +95,8 @@ function renderIncidents() {
     row.type = 'button';
     row.setAttribute('aria-pressed', String(item.id === selectedId));
     const header = text('span', '', 'incident-header');
-    header.append(text('span', `${item.severity} · ${item.locality}`));
-    row.append(text('strong', `${categoryName(item.category)} · ${item.locality}`), header, text('small', `${item.evidence_ids.length} evidence items · ${reviewName(item.review_status)}`));
+    header.append(text('span', `${displaySeverity(item.severity)} · ${displayLocality(item.locality)}`));
+    row.append(text('strong', `${categoryName(item.category)} · ${displayLocality(item.locality)}`), header, text('small', `${item.evidence_ids.length} evidence items · ${reviewName(item.review_status)}`));
     const sources = text('span', '', 'platform-list');
     for (const platform of new Set(evidenceFor(snapshot, item).map((record) => record.platform))) sources.append(platformBadge(platform));
     row.append(sources);
@@ -109,7 +109,7 @@ function renderIncidents() {
     if (!Number.isFinite(item.lat) || !Number.isFinite(item.lon)) continue;
     viewer.entities.add({ id: item.id, position: Cesium.Cartesian3.fromDegrees(item.lon, item.lat),
       point: { pixelSize: item.id === selectedId ? 17 : 11, color: Cesium.Color.fromCssColorString(severityColor(item.severity)), outlineColor: Cesium.Color.WHITE, outlineWidth: item.id === selectedId ? 3 : 1, heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY },
-      label: { text: `${categoryName(item.category)} · ${item.locality}`, font: '12px sans-serif', fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#10252de6'), pixelOffset: new Cesium.Cartesian2(0, -25), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 70000) },
+      label: { text: `${categoryName(item.category)} · ${displayLocality(item.locality)}`, font: '12px sans-serif', fillColor: Cesium.Color.WHITE, showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#10252de6'), pixelOffset: new Cesium.Cartesian2(0, -25), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 70000) },
     });
   }
 }
@@ -121,7 +121,7 @@ function appendPhotos(card, evidence, incident) {
     image.src = photo.url;
     image.alt = typeof photo.alt_text === 'string' && photo.alt_text ? photo.alt_text : 'Photo attached to the original publication';
     image.loading = 'lazy'; image.referrerPolicy = 'no-referrer';
-    const caption = text('figcaption', 'Source photo · human review validated');
+    const caption = text('figcaption', 'Source attachment · event reviewed; image claim not independently verified');
     image.addEventListener('error', () => { image.remove(); caption.textContent = 'Image unavailable. Open the original source.'; }, { once: true });
     figure.append(image, caption); card.append(figure);
   }
@@ -141,6 +141,21 @@ function evidenceCard(item, incident) {
   return card;
 }
 
+function renderReportActivity(detail, incident) {
+  const activity = reportActivity(incident);
+  const section = text('section', '', 'evidence');
+  section.setAttribute('aria-label', 'Report activity by network');
+  section.append(text('h4', `Report activity: ${activity.level}`));
+  for (const network of activity.networks) {
+    const row = text('p', '');
+    row.append(platformBadge(network.platform), text('span', ` · ${network.count} distinct reports · ${network.level}`));
+    section.append(row);
+  }
+  if (!activity.networks.length) section.append(text('p', 'Network counts are not available for this publication.'));
+  section.append(text('p', 'Counts use each network’s configured time window and activity thresholds. They do not measure severity, independent corroboration or human confirmation.', 'metadata'));
+  detail.append(section);
+}
+
 function renderDetail() {
   const detail = $('detail');
   const item = snapshot.incidents.find((incident) => incident.id === selectedId);
@@ -148,8 +163,9 @@ function renderDetail() {
   detail.dataset.incidentId = selectedId || '';
   detail.replaceChildren();
   if (!item) { detail.append(text('p', 'Select an event on the map or list to inspect its evidence.')); return; }
-  detail.append(modeBadge(item.mode), text('h3', item.title || item.category), text('p', item.summary), text('p', `${item.locality} · Severity: ${item.severity} · Classification confidence: ${item.confidence} · ${item.review_status}`, 'metadata'));
+  detail.append(modeBadge(item.mode), text('h3', item.title || categoryName(item.category)), text('p', item.summary), text('p', `${displayLocality(item.locality)} · Severity: ${displaySeverity(item.severity)} · Classification confidence: ${item.confidence} · ${reviewName(item.review_status)}`, 'metadata'));
   if (Number.isFinite(item.corroboration_score) && item.corroboration_score >= 0 && item.corroboration_score <= 100) detail.append(text('p', `Corroboration index: ${Math.round(item.corroboration_score)}/100 · ${item.independent_source_count ?? 'Unknown number of'} independent sources. This is a source agreement rule, not a probability or confirmation.`, 'metadata'));
+  renderReportActivity(detail, item);
   if (!Number.isFinite(item.lat) || !Number.isFinite(item.lon)) detail.append(text('p', 'Unresolved location: this event remains in the list without an invented map position.', 'metadata'));
   else if (['text_locality_centroid', 'text_locality_anchor'].includes(item.location_method)) detail.append(text('p', 'Approximate location within the locality, inferred from text. It is not an exact address.', 'metadata'));
   const evidence = evidenceFor(snapshot, item);
@@ -186,7 +202,8 @@ function updateFilterOptions() {
     const selected = select.value;
     const source = key === 'platform' ? snapshot.evidence : snapshot.incidents;
     const values = [...new Set(source.map((item) => String(item[key] ?? '')).filter(Boolean))].sort();
-    select.replaceChildren(new Option('All', ''), ...values.map((value) => new Option(key === 'category' ? categoryName(value) : value, value)));
+    const display = { category: categoryName, locality: displayLocality, severity: displaySeverity }[key] || ((value) => value);
+    select.replaceChildren(new Option('All', ''), ...values.map((value) => new Option(display(value), value)));
     if (values.includes(selected)) select.value = selected;
   }
 }

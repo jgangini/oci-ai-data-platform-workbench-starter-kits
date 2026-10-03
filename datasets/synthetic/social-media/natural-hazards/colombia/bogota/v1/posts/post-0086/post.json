@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0086",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0086",
+    "username": "sim_bogota_0086",
+    "display_name": "Fictional Bogotá Reporter 086"
+  },
+  "message": "Observo un pequeño desprendimiento adicional en la misma ladera de Ciudad Bolívar. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 156,
+  "available_offset_seconds": 156,
+  "attachments": []
+}

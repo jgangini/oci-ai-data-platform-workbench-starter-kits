@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0072",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-author-0072",
+    "username": "sim_bogota_0072",
+    "display_name": "Fictional Bogotá Reporter 072"
+  },
+  "message": "La publicación quedó pendiente de subir: vi humo sobre vegetación de Chapinero antes de que disminuyera. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 276,
+  "available_offset_seconds": 560,
+  "attachments": []
+}

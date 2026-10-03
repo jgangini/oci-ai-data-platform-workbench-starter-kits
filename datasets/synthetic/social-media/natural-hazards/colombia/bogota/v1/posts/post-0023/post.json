@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0023",
+  "platform": "x",
+  "author": {
+    "id": "fictional-author-0023",
+    "username": "sim_bogota_0023",
+    "display_name": "Fictional Bogotá Reporter 023"
+  },
+  "message": "Publico con retraso lo que vi en Kennedy: al comenzar la lluvia ya había agua en el acceso residencial. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 264,
+  "available_offset_seconds": 520,
+  "attachments": []
+}

@@ -1,0 +1,34 @@
+{
+  "fixture_id": "post-0073",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-author-0073",
+    "username": "sim_bogota_0073",
+    "display_name": "Fictional Bogotá Reporter 073"
+  },
+  "message": "En Ciudad Bolívar cayó tierra desde una ladera sobre un sendero; reporto un deslizamiento localizado. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 0,
+  "available_offset_seconds": 0,
+  "attachments": [
+    {
+      "id": "post-0073-image-01",
+      "type": "image",
+      "mime_type": "image/svg+xml",
+      "dataset_path": "posts/post-0073/media/image-01.svg",
+      "sha256": "a1ec31cfffead3181a08c580280b3442a897b411580aecd5d2904e256611a484",
+      "license": "CC0-1.0",
+      "origin": "synthetic_diagram",
+      "alt_text": "Synthetic, nonphotographic diagram for Ciudad Bolívar; not evidence of a real event.",
+      "is_simulated": true
+    }
+  ]
+}
