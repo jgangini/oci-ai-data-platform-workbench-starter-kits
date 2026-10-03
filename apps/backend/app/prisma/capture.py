@@ -4,6 +4,27 @@ import re
 from .core import folded, simulation_events
 
 
+def query_lines(value):
+    """Each nonempty line is an independent search; preserve its operators and spelling."""
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    if len(lines) > 10 or any(len(line) > 512 for line in lines):
+        raise ValueError("Use up to 10 searches, with at most 512 characters per line")
+    return list(dict.fromkeys(lines)) or [""]
+
+
+def validate_source(source):
+    """Apply the same connector/query boundary to local and cloud administration."""
+    queries = query_lines(source["query"])
+    if source["mode"] == "real":
+        if source["platform"] != "x":
+            raise ValueError("Only X supports real capture; other platforms support simulation")
+        if queries == [""]:
+            raise ValueError("Real X capture requires a query")
+    else:
+        for query in queries:
+            search_terms(query)
+
+
 def search_terms(query):
     """Small explicit grammar: implicit AND, OR, phrases, parentheses and -term; no API emulation."""
     tokens = re.findall(r'-?"[^"\n]+"|[()]|[^\s()]+', query)
@@ -18,28 +39,28 @@ def search_terms(query):
             position += 1
             if token.upper() == "OR":
                 if not terms:
-                    raise ValueError("Consulta sintética inválida: OR requiere términos")
+                    raise ValueError("Invalid synthetic query: OR requires terms")
                 alternatives.append(terms)
                 terms = []
             elif token.upper() == "AND":
                 if not terms or position >= len(tokens) or tokens[position].upper() in {"OR", "AND", ")"}:
-                    raise ValueError("Consulta sintética inválida: AND requiere términos")
+                    raise ValueError("Invalid synthetic query: AND requires terms")
             elif token == "(":
                 nested = group()
                 if nested == [[]] or position >= len(tokens) or tokens[position] != ")":
-                    raise ValueError("Consulta sintética inválida: cierre de paréntesis")
+                    raise ValueError("Invalid synthetic query: expected closing parenthesis")
                 position += 1
                 terms.append(nested)
             else:
                 if token == "-" or (":" in token and token != "-is:retweet"):
-                    raise ValueError("Sintético admite términos, frases, OR, paréntesis, -término y -is:retweet")
+                    raise ValueError("Synthetic searches support terms, phrases, OR, parentheses, -term and -is:retweet")
                 terms.append(token)
         if not terms and alternatives:
-            raise ValueError("Consulta sintética inválida: OR requiere términos")
+            raise ValueError("Invalid synthetic query: OR requires terms")
         return alternatives + [terms]
     expression = group()
     if position != len(tokens) or query.count('"') % 2:
-        raise ValueError("Consulta sintética inválida")
+        raise ValueError("Invalid synthetic query")
     return expression
 
 
@@ -68,20 +89,66 @@ def batch(source, state, cursor, now, force=False):
     if elapsed == 0 and state["status"] == "paused":
         return None
     final = elapsed >= 600 and start < 600
-    if same and not force and not final and now < cursor.get("next_due", 0):
+    if same and cursor.get("interval_minutes") == source["interval_minutes"] and not force and not final and now < cursor.get("next_due", 0):
         return None
-    expression = search_terms(source["query"])
-    events = []
-    for event in simulation_events(elapsed, state.get("anchor_at")):
+    events = window_events(source, state["run_id"], state.get("anchor_at"), start, elapsed)
+    return events, {"run_id": state["run_id"], "query": source["query"], "elapsed": elapsed,
+                    "interval_minutes": source["interval_minutes"],
+                    "batch_key": {"platform": source["platform"], "run_id": state["run_id"], "query": source["query"],
+                                  "from_seconds": start, "to_seconds": elapsed},
+                    "next_due": now + source["interval_minutes"] * 60}
+
+
+def window_events(source, run_id, anchor_at, start, end):
+    """Search one scenario window independently of its replay/continuous scheduling policy."""
+    expressions = [(query, search_terms(query)) for query in query_lines(source["query"])]
+    events = {}
+    for event in simulation_events(end, anchor_at):
         if event["platform"] != source["platform"] or event["raw_metadata"]["offset_seconds"] <= start:
             continue
-        if matches(event["text"], expression):
-            events.append({**event, "source_id": f"{state['run_id']}:{event['source_id']}",
-                "raw_metadata": {**event["raw_metadata"], "scenario_run_id": state["run_id"], "producer": "vm_search"}})
-    return events, {"run_id": state["run_id"], "query": source["query"], "elapsed": elapsed,
-                    "next_due": now + source["interval_minutes"] * 60}
+        matched = [query for query, expression in expressions if matches(event["text"], expression)]
+        if matched:
+            events[event["source_id"]] = {**event, "source_id": f"{run_id}:{event['source_id']}",
+                "raw_metadata": {**event["raw_metadata"], "matched_queries": matched, "scenario_run_id": run_id, "producer": "vm_search"}}
+    return list(events.values())
 
 
 def sources(configured):
     return [source for source in configured if source["enabled"] and source["mode"] == "simulation"] + [
         {"platform": name, "query": "", "interval_minutes": 1} for name in ("sensor", "sire", "linea123")]
+
+
+def inputs(configured, controls, legacy):
+    active = [item for item in configured if item["enabled"] and item["mode"] == "simulation"]
+    continuous = any(item.get("capture_running", False) for item in active)
+    for source in sources(active):
+        institutional = source["platform"] not in {item["platform"] for item in configured}
+        running = continuous if institutional else source.get("capture_running", False)
+        control = controls.get("institutional" if institutional else source["platform"], {})
+        if running and control.get("run_id"):
+            yield source, control, True
+        elif legacy.get("run_id") and legacy["status"] != "idle":
+            yield source, legacy, False
+
+
+def continuous_batch(source, control, cursor, now, force=False):
+    """Repeat the scenario with unique cycle IDs; a saved cursor never skips an overdue window."""
+    same = cursor.get("run_id") == control["run_id"] and cursor.get("query") == source["query"]
+    start = cursor.get("elapsed", -1) if same else -1
+    elapsed = max(0, now - control["anchor_at"])
+    if same and not force and (elapsed <= start or (cursor.get("interval_minutes") == source["interval_minutes"] and now < cursor.get("next_due", 0))):
+        return None
+    # ponytail: catch up at most one hour per VM tick, retaining the rest in the cursor instead of dropping records.
+    end = min(elapsed, max(0, start) + 3600)
+    events = []
+    for cycle in range(max(0, int(max(0, start) // 600) - 1), int(end // 600) + 1):
+        cycle_start = cycle * 600
+        part = window_events(source, f"{control['run_id']}:{cycle}", control["anchor_at"] + cycle_start,
+                             start - cycle_start, min(600, end - cycle_start))
+        for event in part:
+            event["raw_metadata"]["capture_run_id"] = control["run_id"]
+        events.extend(part)
+    return events, {"run_id": control["run_id"], "query": source["query"], "elapsed": end,
+        "interval_minutes": source["interval_minutes"],
+        "batch_key": {"platform": source["platform"], "run_id": control["run_id"], "query": source["query"], "from_seconds": start, "to_seconds": end},
+        "next_due": now + (1 if end < elapsed else source["interval_minutes"] * 60)}

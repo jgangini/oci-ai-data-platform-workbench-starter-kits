@@ -2,9 +2,11 @@ import { createVoiceSession } from '../vendor/gods-eye-view/src/voice/session.js
 
 // GodEye owns session lifetime; this adapter speaks the PRISMA JSON contract.
 // ponytail: final-response JSON only; add streaming when AIDP's wire contract is verified.
-export function createPrismaSession({ request, context, onReply, onError, onBusy }) {
+export function createPrismaSession({ request, context, onReply, onError, onBusy, onSubmitted = () => {} }) {
   let pending;
   let sessionId;
+  let submitted = 0;
+  onSubmitted(submitted);
   return createVoiceSession({
     runner: async () => { throw new Error('Confirm map actions in the dashboard.'); },
     createAdapter: ({ emit, signal }) => ({
@@ -12,10 +14,12 @@ export function createPrismaSession({ request, context, onReply, onError, onBusy
       stop() { pending?.abort(); pending = undefined; onBusy(false); },
       sendMapEvent() {},
       async sendText(question) {
+        if (typeof question !== 'string' || !question.trim()) return;
         pending?.abort();
         const turn = new AbortController();
         pending = turn;
         const selected = context();
+        onSubmitted(++submitted);
         onBusy(true);
         try {
           const reply = await request('/api/prisma/chat', {

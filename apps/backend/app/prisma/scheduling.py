@@ -15,7 +15,7 @@ def needs_schedule(configuration, simulation, now=None):
         elapsed += max(0, now - float(simulation.get("started_at", now)))
         if elapsed < 600 or not simulation.get("capture_complete", False) or simulation.get("final_job_pending"):
             return True
-    return any(source.get("enabled") and source.get("mode") == "real" for source in configuration.get("sources", {}).values())
+    return any(source.get("enabled") and source.get("capture_running") for source in configuration.get("sources", {}).values())
 
 
 def job_path(runtime):

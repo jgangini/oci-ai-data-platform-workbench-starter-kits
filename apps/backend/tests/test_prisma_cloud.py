@@ -64,10 +64,24 @@ def test_schedule_follows_active_work_and_stops_after_ten_minutes():
     simulation = {"status": "running", "elapsed_seconds": 0, "started_at": 1000, "capture_complete": True}
     assert scheduling.needs_schedule({}, simulation, 1599)
     assert not scheduling.needs_schedule({}, simulation, 1600)
-    sources = {"sources": {"x": {"enabled": True, "mode": "real"}}}
+    sources = {"sources": {"x": {"enabled": True, "mode": "real", "capture_running": True}}}
     assert scheduling.needs_schedule(sources, simulation, 1600)
     sources["sources"]["x"]["enabled"] = False
     assert not scheduling.needs_schedule(sources, {"status": "paused"}, 1200)
+
+
+@pytest.mark.parametrize("mode", ["real", "simulation"])
+def test_continuous_schedule_survives_tomorrow_until_source_is_stopped(mode):
+    source = {**default_source("x"), "mode": mode, "capture_running": True, "interval_minutes": 5}
+    configuration = {"sources": {"x": source}}
+    assert scheduling.needs_schedule(configuration, {"status": "completed"}, 1000 + 86400)
+    assert scheduling.needs_schedule(configuration, {"status": "idle"}, 1000 + 7 * 86400)
+    source["enabled"] = False
+    assert not scheduling.needs_schedule(configuration, {}, 1000 + 86400)
+    source.update(enabled=True, capture_running=False)
+    assert not scheduling.needs_schedule(configuration, {}, 1000 + 86400)
+    del source["capture_running"]
+    assert not scheduling.needs_schedule(configuration, {}, 1000 + 86400)
 
 
 def test_scheduler_requires_etag_and_does_not_guess_conflicting_update():
@@ -94,6 +108,15 @@ def test_real_platform_rejected_before_storing_credential(platform):
     assert error.value.status_code == 422 and "configuration" not in runtime.documents
 
 
+def test_invalid_synthetic_query_remains_a_validation_error_through_cloud_io():
+    import asyncio
+    runtime = Runtime()
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(runtime.update_source("x", {"query": "Bogota OR"}))
+    assert error.value.status_code == 422 and "Invalid synthetic query" in error.value.detail
+    assert "configuration" not in runtime.documents
+
+
 def test_stale_source_status_cannot_replace_current_configuration():
     runtime = Runtime()
     runtime.documents["configuration"] = {"revision": 2, "sources": {"x": {
@@ -103,6 +126,19 @@ def test_stale_source_status_cannot_replace_current_configuration():
     source = runtime._sources()["sources"][0]
     assert source["enabled"] is False and source["mode"] == "simulation" and source["query"] == "Bogotá"
     assert source["status"] == "disabled" and source["next_due"] is None
+
+
+def test_disabling_source_cancels_its_pending_run_without_erasing_cursor():
+    runtime = Runtime()
+    runtime.documents["configuration"] = {"sources": {"x": {**default_source("x"), "mode": "real", "capture_running": True}}}
+    runtime.documents["status_x"] = {"requested_action": "run", "request_id": "pending", "last_received_count": 7}
+    runtime.documents["checkpoint_x"] = {"cursor": {"since_id": "30"}}
+    assert runtime._update("x", {"enabled": False})["capture_running"] is False
+    runtime._update("x", {"enabled": True})
+    assert runtime.documents["status_x"]["requested_action"] is None
+    assert runtime.documents["status_x"]["last_received_count"] == 7
+    assert runtime.documents["checkpoint_x"]["cursor"]["since_id"] == "30"
+    assert not scheduling.needs_schedule(runtime.documents["configuration"], {})
 
 
 def test_pause_keeps_pending_request_and_queues_finite_publication():

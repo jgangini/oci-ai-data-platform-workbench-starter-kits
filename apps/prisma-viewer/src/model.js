@@ -93,9 +93,8 @@ export function allowedActions(actions, snapshot) {
     if (action?.type === 'focus_incident') return snapshot.incidents.some((item) => item.id === action.incident_id);
     if (action?.type !== 'filter_incidents' || !action.filters || typeof action.filters !== 'object') return false;
     return !Array.isArray(action.filters) && validPeriod(action.filters) && validArea(action.filters.bbox) && Object.entries(action.filters).every(([key, value]) => {
-      if (!FILTER_KEYS.includes(key) || typeof value !== 'string' || value.length > 100) return false;
+      if (key === 'mode' || !FILTER_KEYS.includes(key) || typeof value !== 'string' || value.length > 100) return false;
       if (!value || DATE_KEYS.includes(key) || key === 'bbox') return true;
-      if (key === 'mode') return ['real', 'simulation'].includes(value);
       const records = key === 'platform' ? snapshot.evidence : snapshot.incidents;
       return records.some((item) => String(item[key]) === value);
     });

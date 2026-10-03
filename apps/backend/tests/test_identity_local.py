@@ -16,7 +16,7 @@ def test_local_user_credentials_material_and_permission_survive_restart(tmp_path
         welcome_path = tmp_path / f"welcome-{registered.user_id}.json"
         welcome = json.loads(welcome_path.read_text(encoding="utf-8"))
         password = welcome["password"]
-        assert welcome["mode"] == "SIMULADO" and welcome["login_url"] == "/local/prisma/login"
+        assert welcome["mode"] == "SIMULADO" and welcome["login_url"] == "/local/gods-eye-view/login"
         assert password not in (tmp_path / "identity-state.json").read_text(encoding="utf-8")
         assert await identity.authenticate(welcome["username"], password) is None
         await identity.activate_registration(registered.user_id)
@@ -32,7 +32,7 @@ def test_local_user_credentials_material_and_permission_survive_restart(tmp_path
         assert await restarted.authenticate(welcome["username"], "wrong-password") is None
         public = await restarted.prisma_user(registered.user_id)
         assert public["material"]["labs"] == [{"lab_id": "banking"}]
-        assert public["material"]["aidp_url"] == "/local/prisma/workspace"
+        assert public["material"]["aidp_url"] == "/local/gods-eye-view/workspace"
         assert "password" not in json.dumps(await restarted.list_lab_users())
         assert "password" not in json.dumps(await restarted.list_users_by_ocids({registered.user_ocid}))
         assert json.loads(welcome_path.read_text(encoding="utf-8"))["password"] == password

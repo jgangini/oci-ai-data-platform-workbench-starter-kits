@@ -170,9 +170,10 @@ test("settings keep only Workbench and application details in accessible tabs", 
   const workbenchOcid = workbenchSource.indexOf("AI Data Platform Workbench OCID");
   assert.ok(serviceEndpoint < workbenchUrl && workbenchUrl < workbenchOcid);
   assert.doesNotMatch(workbenchSource, /Shared compute/);
-  assert.match(applicationSource, /<ApplicationAccessSettings/);
-  assert.match(source, /function ApplicationAccessSettings[\s\S]*<SettingsRegistrationCodeField/);
-  assert.match(source, /function ApplicationAccessSettings[\s\S]*>\s*Save Settings\s*</);
+  assert.match(workbenchSource, /<RegistrationAccessSettings/);
+  assert.doesNotMatch(applicationSource, /<RegistrationAccessSettings/);
+  assert.match(source, /function RegistrationAccessSettings[\s\S]*<SettingsRegistrationCodeField/);
+  assert.match(source, /function RegistrationAccessSettings[\s\S]*>\s*Save registration code\s*</);
   assert.doesNotMatch(source, /AI Data Governance Gateway|governance_gateway|JDBC|\bOKE\b/);
   assert.match(styles, /\.settings-tab\[aria-selected="true"\]/);
   assert.match(styles, /\.settings-panel\[hidden\] \{ display: none; \}/);

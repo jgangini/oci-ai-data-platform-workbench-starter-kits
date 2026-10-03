@@ -11,7 +11,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from ..autonomous import AutonomousGovernanceClient
-from .core import PLATFORMS, utc_text, default_source, simulation_state
+from .core import PLATFORMS, utc_text, default_source, simulation_state, source_migration
 from . import capture, landing
 from .database import read_document, mutate_document
 from .scheduling import needs_schedule, set_schedule, submit_run
@@ -44,6 +44,17 @@ class CloudRuntime:
 
     def _sources(self):
         configuration = self._doc("configuration")
+        def migrate(document):
+            sources = dict(document.get("sources", {}))
+            for platform in PLATFORMS:
+                if platform in sources:
+                    changes = source_migration(platform, sources[platform])
+                    if "query" in changes:
+                        changes["query_version"] = str(uuid4())
+                    sources[platform] = {**sources[platform], **changes}
+            return {**document, "sources": sources}
+        if any(source_migration(platform, source) for platform, source in configuration.get("sources", {}).items() if platform in PLATFORMS):
+            configuration = self._change("configuration", migrate)
         sources = []
         for platform in PLATFORMS:
             source = {**default_source(platform), **configuration.get("sources", {}).get(platform, {})}
@@ -63,12 +74,12 @@ class CloudRuntime:
 
     def _credential(self, platform, token):
         client = self.aidp_factory()
-        name = "PrismaSource_" + platform
+        name = default_source(platform)["secret_ref"]
         existing = [item for item in client._list("/credentials", params={"displayName": name}, phase="control")
                     if (item.get("displayName") or item.get("name")) == name]
         if len(existing) > 1:
             raise HTTPException(409, "Duplicate source credentials exist")
-        payload = {"displayName": name, "type": "SECRET_TOKEN", "credentialDescription": "PRISMA API source credential",
+        payload = {"displayName": name, "type": "SECRET_TOKEN", "credentialDescription": "God's Eye View API source credential",
                    "credentialDetails": {"credentialType": "SECRET_TOKEN", "secretTokenPair": [{"secretKey": "bearer_token", "secretValue": token}]}}
         if existing:
             key = str(existing[0].get("key") or existing[0].get("id"))
@@ -82,14 +93,15 @@ class CloudRuntime:
             raise HTTPException(404, "Plataforma desconocida")
         fields = {name: value for name, value in payload.items() if name in {"enabled", "mode", "query", "interval_minutes"}}
         old = {**default_source(platform), **self._doc("configuration").get("sources", {}).get(platform, {})}
+        fields = {**source_migration(platform, old), **fields}
         candidate = {**old, **fields}
-        if candidate["mode"] == "real" and platform != "x":
-            raise HTTPException(422, "Only X supports real capture; other platforms support simulation")
-        if candidate["mode"] == "real" and not candidate["query"].strip():
-            raise HTTPException(422, "La captura real de X requiere una consulta")
-        if candidate["mode"] == "simulation":
-            capture.search_terms(candidate["query"])
-        if payload.get("secret_ref", old["secret_ref"]) not in {old["secret_ref"], "PrismaSource_" + platform}:
+        if not candidate["enabled"] or candidate["mode"] != old["mode"]:
+            fields["capture_running"] = False
+        try:
+            capture.validate_source(candidate)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if payload.get("secret_ref", old["secret_ref"]) not in {old["secret_ref"], default_source(platform)["secret_ref"]}:
             raise HTTPException(422, "AIDP administra la referencia de credencial de esta fuente")
         token = payload.get("bearer_token")
         if token:
@@ -104,6 +116,9 @@ class CloudRuntime:
             sources[platform] = {**old, **fields}
             return {**document, "sources": sources}
         document = self._change("configuration", change)
+        if fields.get("capture_running") is False:
+            self._change("status_" + platform, lambda doc: {**doc, "requested_action": None,
+                "next_due": None, "last_error": None, "status": "disabled" if not candidate["enabled"] else "ready"})
         return document["sources"][platform]
 
     async def update_source(self, platform, payload):
@@ -126,17 +141,34 @@ class CloudRuntime:
             raise HTTPException(409, "Enable the source before running it")
         if source["mode"] == "real" and (platform != "x" or not source["credential_configured"]):
             raise HTTPException(409, "Real capture requires a validated connector and credential")
+        if action == "run":
+            source = self._start_capture(source)
         if source["mode"] == "simulation":
-            capture.search_terms(source["query"])
+            for query in capture.query_lines(source["query"]):
+                capture.search_terms(query)
             if action == "run":
-                self._produce(force=True)
+                self._produce(force=True, platform=platform)
                 self._wake(str(uuid4()))
+            source = next(item for item in self._sources()["sources"] if item["platform"] == platform)
             return {"status": "simulation", "message": "Synthetic query validated on the VM producer", "source": source}
         request_id = str(uuid4())
         self._change("status_" + platform, lambda doc: {**doc, "status": "queued", "requested_action": action,
             "request_id": request_id, "next_due": utc_text(time.time()), "last_error": None})
         self._wake(request_id)
         return {"status": "queued", "message": "Request queued as a finite AIDP run", "source": {**source, "status": "queued"}}
+
+    def _start_capture(self, source):
+        with self.capture_lock:
+            if source.get("capture_running"):
+                return source
+            configured = self._doc("configuration").get("sources", {})
+            institutional = not any(item.get("capture_running") and item.get("enabled") and item.get("mode") == "simulation" for item in configured.values())
+            control = {"run_id": str(uuid4()), "anchor_at": time.time()}
+            self._change("checkpoint_controls", lambda doc: {**doc, source["platform"]: control,
+                **({"institutional": control} if institutional else {})})
+            self._change("configuration", lambda doc: {**doc, "sources": {**doc.get("sources", {}),
+                source["platform"]: {**source, "capture_running": True}}})
+            return {**source, "capture_running": True}
 
     async def test_source(self, platform):
         return await self._io(self._request_source, platform, "test")
@@ -162,26 +194,24 @@ class CloudRuntime:
         self._wake(str(uuid4()))
         return self._simulation_state()
 
-    def _produce(self, force=False):
+    def _produce(self, force=False, platform=None):
         with self.capture_lock:
             now, control = time.time(), self._doc("simulation")
             state = simulation_state(control, now)
-            if not state.get("run_id") or state["status"] == "idle":
-                return False
-            if state["capture_complete"] and not force:
-                return control.get("final_job_pending", False)
             config = self._doc("configuration")
             sources = [{**default_source(name), **config.get("sources", {}).get(name, {})} for name in PLATFORMS]
             runtime, client = self._doc("runtime"), self.aidp_factory()
-            for source in capture.sources(sources):
+            for source, source_control, continuous in capture.inputs(sources, self._doc("checkpoint_controls"), state):
                 name = source["platform"]
+                if (platform and name in PLATFORMS and name != platform) or (not continuous and state["capture_complete"] and not force):
+                    continue
                 saved = self._doc("checkpoint_synthetic").get("sources", {}).get(name, {})
-                result = capture.batch(source, state, saved, now, force)
+                result = (capture.continuous_batch if continuous else capture.batch)(source, source_control, saved, now, force)
                 if result is None:
                     continue
                 events, cursor = result
                 try:
-                    key = landing.write_objects(client.object_storage, runtime, events)
+                    key = landing.write_objects(client.object_storage, runtime, events, cursor["batch_key"])
                     self._change("checkpoint_synthetic", lambda doc: {**doc, "sources": {**doc.get("sources", {}), name: cursor}})
                     self._change("status_synthetic", lambda doc: {**doc, "status": "ready", "last_error": None,
                         "last_run_at": utc_text(now), "landing_count": doc.get("landing_count", 0) + bool(key),

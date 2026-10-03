@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
+import time
 
+from .capture import query_lines
 from .core import utc_text
 from .media import photos
 
@@ -97,3 +100,60 @@ def _post_event(post: dict, now: float, media=None) -> dict:
             "media": photos("x", [(media or {}).get(key, {}) for key in post.get("attachments", {}).get("media_keys", [])]),
             "raw_metadata": {"author_id": post.get("author_id"), "lang": post.get("lang"),
                              "geo": post.get("geo"), "entities": post.get("entities"), "source_post": post}}
+
+
+def query_checkpoint(source, saved):
+    queries = [(hashlib.sha256(query.encode()).hexdigest(), query) for query in query_lines(source["query"])]
+    existing = saved.get("queries", {})
+    state = {"query_version": source.get("query_version"), "queries": {
+        key: existing.get(key, {"query": query, "cursor": {}}) for key, query in queries},
+        "resume_query": saved.get("resume_query"), "retry_at": 0}
+    if not existing and len(queries) == 1 and saved.get("query_version") == source.get("query_version"):
+        legacy = saved.get("cursor", saved if any(key in saved for key in ("since_id", "next_token", "end_time")) else {})
+        state["queries"][queries[0][0]]["cursor"] = legacy
+    start = next((index for index, (key, _) in enumerate(queries) if key == state["resume_query"]), 0)
+    return queries[start:] + queries[:start], state
+
+
+def poll_queries(client, token, source, saved, now, on_page, on_checkpoint, *, test=False, clock=time.monotonic):
+    """At most two pages per search and 60 seconds between calls; each search owns its durable cursor."""
+    if saved.get("retry_at", 0) > now:
+        raise XFailure("rate_limited", saved["retry_at"])
+    if test:
+        # Connection tests use the same reads but cannot write Landing or advance any source cursor.
+        on_page = lambda *_: None
+        on_checkpoint = lambda *_: None
+    queries, state = query_checkpoint(source, {} if test else saved)
+    deadline, received, backlog = clock() + 60, set(), False
+    for key, query in queries:
+        state["resume_query"] = key
+        for _ in range(1 if test else 2):
+            if clock() >= deadline:
+                on_checkpoint(state)
+                return _poll_status("backlog", source, now, received, test, "capture_deadline")
+            try:
+                events, cursor = fetch_page(client, token, query, state["queries"][key]["cursor"], now, page_size=10 if test else 50)
+            except XFailure as exc:
+                state["retry_at"] = exc.retry_at or 0
+                state["queries"][key].update(last_error=exc.code, retry_at=exc.retry_at)
+                on_checkpoint(state)
+                raise  # In particular, a 429 stops the remaining searches rather than hammering one shared quota.
+            state["queries"][key] = {"query": query, "cursor": cursor, "last_error": None, "retry_at": 0}
+            for event in events:
+                event["raw_metadata"] = {**event.get("raw_metadata", {}), "search_query": query}
+                received.add(f"{event['platform']}:{event['source_id']}")
+            on_page(events, state)
+            if not cursor.get("next_token"):
+                break
+        backlog = backlog or bool(cursor.get("next_token"))
+    state["resume_query"] = None
+    on_checkpoint(state)
+    return _poll_status("backlog" if backlog else "ready", source, now, received, test)
+
+
+def _poll_status(status, source, now, received, test, error=None):
+    if test and error is None:
+        status = "tested"
+    return {"status": status, "last_error": error,
+            "next_due": utc_text(now + (60 if status == "backlog" else source["interval_minutes"] * 60)),
+            **({"last_received_count": len(received)} if not test else {})}

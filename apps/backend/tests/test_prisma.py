@@ -62,7 +62,7 @@ def test_x_failed_second_page_resumes_after_restart_without_losing_watermark(tmp
     result = asyncio.run(runtime.run_source("x"))
     assert result["status"] == "rate_limited"
     assert result["source"]["last_received_count"] is None
-    assert runtime.store.checkpoint("x")["pending_newest_id"] == "30"
+    assert next(iter(runtime.store.checkpoint("x")["queries"].values()))["cursor"]["pending_newest_id"] == "30"
     assert len(runtime.store.snapshot()["evidence"]) == 2
     asyncio.run(runtime.run_source("x"))
     assert len(first.calls) == 2  # Even manual Run respects the rate-limit window.
@@ -72,7 +72,7 @@ def test_x_failed_second_page_resumes_after_restart_without_losing_watermark(tmp
     captured = asyncio.run(restarted.run_source("x"))
     assert captured["status"] == "ready" and captured["source"]["last_received_count"] == 2
     assert second.calls[0][1]["params"]["next_token"] == "page2"
-    assert restarted.store.checkpoint("x")["since_id"] == "30"
+    assert next(iter(restarted.store.checkpoint("x")["queries"].values()))["cursor"]["since_id"] == "30"
     assert len(restarted.store.snapshot()["evidence"]) == 3
     assert b"private-value" not in (tmp_path / "prisma.sqlite3").read_bytes()
     assert "private-value" not in json.dumps(asyncio.run(restarted.sources()))
@@ -125,7 +125,7 @@ def test_simulation_restart_pause_resume_replay_and_real_evidence_survives(tmp_p
     assert finished["simulation"]["run_id"] == paused["simulation"]["run_id"]
     assert all(item["raw_metadata"]["scenario_run_id"] == finished["simulation"]["run_id"] for item in finished["evidence"])
     assert min(item["created_at"] for item in finished["evidence"]) == "2026-10-05T14:05:00Z"
-    real = {**simulation_events(0)[0], "source_id": "99", "mode": "real"}
+    real = {**simulation_events(0)[0], "source_id": "99", "mode": "real", "is_simulated": False}
     restarted.persist_page("x", [real], {"since_id": "99"})
     restarted.control_simulation("replay")
     assert len(restarted.snapshot()["evidence"]) == 2

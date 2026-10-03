@@ -7,7 +7,8 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from .capture import query_lines
 
 
 Platform = Literal["x", "facebook", "instagram", "tiktok"]
@@ -17,10 +18,15 @@ class SourceUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool | None = None
     mode: Literal["simulation", "real"] | None = None
-    query: str | None = Field(default=None, max_length=512)
+    query: str | None = Field(default=None, max_length=5129)
     interval_minutes: int | None = Field(default=None, ge=1, le=1440, strict=True)
     secret_ref: str | None = Field(default=None, pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     bearer_token: SecretStr | None = Field(default=None, exclude=True)
+
+    @field_validator("query")
+    @classmethod
+    def independent_queries(cls, value):
+        return "\n".join(query_lines(value)) if value is not None else None
 
 
 class SimulationAction(BaseModel):

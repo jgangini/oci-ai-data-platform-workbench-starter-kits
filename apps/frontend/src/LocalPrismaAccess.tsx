@@ -9,13 +9,13 @@ export function LocalPrismaAccess({ api, workspace = false }: { api: Api; worksp
   const [error, setError] = useState('');
   const [data, setData] = useState<Workspace | null>(null);
   useEffect(() => {
-    if (workspace) void api<Workspace>('/api/local/prisma/workspace').then(setData).catch(() => window.location.assign('/local/prisma/login'));
+    if (workspace) void api<Workspace>('/api/local/prisma/workspace').then(setData).catch(() => window.location.assign('/local/gods-eye-view/login'));
   }, [workspace]);
   async function submit(event: FormEvent) {
     event.preventDefault(); setError('');
     try {
       await api('/api/local/prisma/login', { method: 'POST', body: JSON.stringify({ username, password }) });
-      window.location.assign('/local/prisma/workspace');
+      window.location.assign('/local/gods-eye-view/workspace');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Sign in failed'); }
     finally { setPassword(''); }
   }

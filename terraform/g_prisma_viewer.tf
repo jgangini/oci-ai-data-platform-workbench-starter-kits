@@ -195,7 +195,7 @@ output "prisma_viewer_enabled" {
 }
 
 output "prisma_viewer_url" {
-  value = var.enable_prisma_viewer ? "https://${data.oci_core_vnic.lab.public_ip_address}/prisma/" : null
+  value = var.enable_prisma_viewer ? "https://${data.oci_core_vnic.lab.public_ip_address}/gods-eye-view/" : null
 }
 
 output "prisma_viewer_private_url" {

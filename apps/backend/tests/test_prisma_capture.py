@@ -1,12 +1,11 @@
 import asyncio
 import copy
-import json
 import threading
 from types import SimpleNamespace
 
 import pytest
 
-from app.prisma import capture, cloud, landing, pipeline, scheduling
+from app.prisma import capture, cloud, database, landing, pipeline, scheduling
 from app.prisma.core import default_source
 
 
@@ -32,7 +31,8 @@ def test_synthetic_window_is_incremental_and_flush_ignores_next_due():
     state = {"status": "running", "run_id": "run1", "anchor_at": NOW, "elapsed_seconds": 0}
     source = default_source("x")
     events, cursor = capture.batch(source, state, {}, NOW)
-    assert len(events) == 2 and events[0]["source_id"] == events[1]["source_id"]
+    assert len(events) == 1 and events[0]["source_id"] == "run1:lluvia-1"
+    assert events[0]["raw_metadata"]["matched_queries"] == ["#bogota #inundacion", "#desastre"]
     assert capture.batch(source, state, cursor, NOW + 60) is None
     state["elapsed_seconds"] = 420
     events, cursor = capture.batch(source, state, cursor, NOW + 420)
@@ -51,6 +51,7 @@ class Producer(cloud.CloudRuntime):
         self.aidp_factory = lambda: SimpleNamespace(object_storage=self)
 
     def _doc(self, name):
+        assert database.DOCUMENT_NAME.fullmatch(name), "Exercise the real ADB document name boundary"
         return copy.deepcopy(self.docs.get(name, {"revision": 0}))
 
     def _change(self, name, change):
@@ -81,8 +82,10 @@ def test_failed_vm_upload_never_advances_cursor_and_retry_has_same_landing_key(m
     producer._produce()
     first = copy.deepcopy(producer.objects)
     producer._produce()
-    assert producer.objects == first and producer.docs["status_synthetic"]["landing_count"] == 1
-    assert producer.docs["status_x"]["next_due"] and producer.docs["status_x"]["last_received_count"] == 2
+    assert producer.objects == first and producer.docs["status_synthetic"]["landing_count"] == 7
+    assert all(key.endswith(".csv") for key in first)
+    assert sum(len(landing.records(body)) for body in first.values()) == 1
+    assert producer.docs["status_x"]["next_due"] and producer.docs["status_x"]["last_received_count"] == 1
 
 
 def test_completion_flushes_institutional_sources_and_retries_final_trigger(monkeypatch):
@@ -93,7 +96,7 @@ def test_completion_flushes_institutional_sources_and_retries_final_trigger(monk
         asyncio.run(producer.tick())
     assert producer.docs["simulation"]["capture_complete"] and producer.docs["simulation"]["final_job_pending"]
     assert scheduling.needs_schedule({}, producer.docs["simulation"], NOW + 600)
-    records = [json.loads(json.loads(line)["payload"]) for body in producer.objects.values() for line in body.splitlines()]
+    records = [record for body in producer.objects.values() for record in landing.records(body)]
     assert {"sensor", "sire", "linea123"} <= {item["platform"] for item in records}
     producer.fail_wake = False
     asyncio.run(producer.tick())
@@ -130,3 +133,35 @@ def test_file_and_oci_landing_use_identical_immutable_bytes(tmp_path):
     key = landing.write_objects(producer, CONFIG, events)
     name = landing.write_file(tmp_path, events)
     assert producer.objects[key] == (tmp_path / name).read_bytes()
+
+
+def test_cloud_run_starts_persistent_continuous_capture_and_disable_stops_uploads(monkeypatch):
+    clock = [NOW]
+    monkeypatch.setattr(cloud.time, "time", lambda: clock[0])
+    producer = Producer()
+    producer.docs["simulation"] = {"status": "idle"}
+    response = producer._request_source("x", "run")
+    assert response["source"]["capture_running"] is True
+    assert producer.docs["checkpoint_controls"]["x"]["run_id"]
+    first = [event for body in producer.objects.values() for event in landing.records(body)]
+    assert len(first) == 1 and "Kennedy" in first[0]["text"]
+    assert producer.docs["status_x"]["last_received_count"] == 1
+    assert scheduling.needs_schedule(producer.docs["configuration"], producer.docs["simulation"], NOW + 86400)
+
+    restarted = Producer()
+    restarted.docs, restarted.objects = copy.deepcopy(producer.docs), copy.deepcopy(producer.objects)
+    clock[0] += 600
+    asyncio.run(restarted.tick())
+    events = [event for body in restarted.objects.values() for event in landing.records(body)]
+    assert {"sensor", "sire", "linea123"} <= {event["platform"] for event in events}
+    rain = [event for event in events if event["platform"] == "x" and event["source_id"].endswith(":lluvia-1")]
+    assert len(rain) == len({event["source_id"] for event in rain}) == 2
+    assert rain[0]["created_at"] != rain[1]["created_at"]
+
+    stopped = restarted._update("x", {"enabled": False})
+    assert stopped["capture_running"] is False
+    before_stop = copy.deepcopy(restarted.objects)
+    clock[0] += 86400
+    asyncio.run(restarted.tick())
+    assert restarted.objects == before_stop
+    assert not scheduling.needs_schedule(restarted.docs["configuration"], restarted.docs["simulation"], clock[0])

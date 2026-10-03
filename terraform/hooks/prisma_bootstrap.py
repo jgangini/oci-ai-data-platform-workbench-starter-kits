@@ -135,17 +135,17 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
             for user, name, reader in (("PRISMA_WRITER", "PrismaWriterRuntime", False), ("PRISMA_READER", "PrismaReaderRuntime", True)):
                 if named(api, "/credentials", name):
                     continue
-                password = generate_password()
+                generated_password = generate_password()
                 cursor.execute("SELECT COUNT(*) FROM ALL_USERS WHERE USERNAME=:name", name=user)
                 verb = "ALTER" if cursor.fetchone()[0] else "CREATE"
-                cursor.execute(f'{verb} USER {user} IDENTIFIED BY "{password}"')
+                cursor.execute(f'{verb} USER {user} IDENTIFIED BY "{generated_password}"')
                 cursor.execute(f"GRANT CREATE SESSION TO {user}")
                 if reader:
                     for view in ("PRISMA_V_SNAPSHOTS", "PRISMA_V_INCIDENTS", "PRISMA_V_EVIDENCE"):
                         cursor.execute(f"GRANT SELECT ON ADMIN.{view} TO {user}")
                 else:
                     cursor.execute(f"GRANT EXECUTE ON ADMIN.PRISMA_CONTROL TO {user}")
-                values = {"db_user": user, "db_password": password, "dsn": dsn,
+                values = {"db_user": user, "db_password": generated_password, "dsn": dsn,
                     "wallet": base64.b64encode(wallet).decode(), "wallet_password": wallet_password,
                     "region": config["region"], "compartment_id": outputs["compartment_ocid"], "model_id": outputs["agent_model_id"]}
                 if not reader:

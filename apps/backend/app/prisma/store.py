@@ -48,7 +48,7 @@ class PrismaStore:
         if platform not in PLATFORMS:
             raise ValueError("Unsupported platform")
         with self.connection() as db:
-            return self._get(db, f"source:{platform}", default_source(platform))
+            return {**default_source(platform), **self._get(db, f"source:{platform}", {})}
 
     def sources(self) -> list[dict]:
         return [self.source(platform) for platform in PLATFORMS]
@@ -61,11 +61,26 @@ class PrismaStore:
         source.update(values)
         with self.connection() as db:
             self._put(db, f"source:{platform}", source)
-            if changed_query:
+            if changed_query and not self._get(db, f"cursor:{platform}", {}).get("queries"):
                 self._put(db, f"cursor:{platform}", {})
         return source
 
     record_source = update_source
+
+    def start_capture(self, platform):
+        source = self.source(platform)
+        if source.get("capture_running"):
+            return source
+        with self.connection() as db:
+            controls = self._get(db, "capture_controls", {})
+            control = {"run_id": str(uuid4()), "anchor_at": self.clock()}
+            if not any(item.get("capture_running") and item["enabled"] and item["mode"] == "simulation" for item in self.sources()):
+                controls["institutional"] = control
+            controls[platform] = control
+            self._put(db, "capture_controls", controls)
+            source["capture_running"] = True
+            self._put(db, "source:" + platform, source)
+        return source
 
     def checkpoint(self, platform: str) -> dict:
         with self.connection() as db:
@@ -128,20 +143,23 @@ class PrismaStore:
         self.advance_simulation(force=True)
         return self.simulation_state()
 
-    def advance_simulation(self, force=False) -> None:
+    def advance_simulation(self, force=False, platform=None) -> None:
         state = self.simulation_state()
-        if state["status"] == "idle" or (state["status"] == "paused" and state["elapsed_seconds"] == 0):
-            return
-        for source in capture.sources(self.sources()):
+        with self.connection() as db:
+            controls = self._get(db, "capture_controls", {})
+        for source, control, continuous in capture.inputs(self.sources(), controls, state):
             with self.connection() as db:
                 name = source["platform"]
+                if platform and name in PLATFORMS and name != platform:
+                    continue
                 cursor = self._get(db, "synthetic:" + name, {})
-                result = capture.batch(source, state, cursor, self.clock(), force)
+                result = (capture.continuous_batch if continuous else capture.batch)(source, control, cursor, self.clock(), force)
                 if result is None:
                     continue
                 events, cursor = result
-                key = landing.write_file(self.path.parent / "prisma-landing", events)
-                self._events(db, events)  # Explicit local fixture sink; OCI sends these Landing files to Spark.
+                directory = self.path.parent / "prisma-landing"
+                key = landing.write_file(directory, events, cursor["batch_key"])
+                self._events(db, landing.records((directory / key).read_bytes()))  # Local fixture uses the identical CSV envelope; OCI uses Spark.
                 self._put(db, "synthetic:" + name, cursor)
                 summary = self._get(db, "capture_summary", {"landing_count": 0})
                 self._put(db, "capture_summary", {"status": "ready", "landing_count": summary["landing_count"] + bool(key),
@@ -160,6 +178,7 @@ class PrismaStore:
             events = [json.loads(row[0]) for row in db.execute("SELECT payload FROM events")]
             reviews = {row[0]: json.loads(row[1]) for row in db.execute("SELECT id,payload FROM reviews")}
             publication = self._get(db, "publication", {"revision": 0, "published_at": None})
+        events = [item for item in events if not item.get("raw_metadata", {}).get("capture_run_id") or item["created_at"] >= utc_text(self.clock() - 86400)]
         result = build_snapshot(events, reviews, f"local-{publication['revision']}", publication["published_at"])
         result.update(runtime="local_fixture", simulation=self.simulation_state())
         return result

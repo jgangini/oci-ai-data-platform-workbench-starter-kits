@@ -9,9 +9,9 @@ from datetime import datetime
 
 from .core import PLATFORMS, build_snapshot, default_source, simulation_state, utc_text
 from .database import mutate_document, publish, read_document
-from .landing import write_objects
+from .landing import decode_record, write_objects
 from .runtime_secrets import database_connection, runtime_auth
-from .x import XFailure, fetch_page
+from .x import XFailure, poll_queries
 
 
 def encoded(value) -> bytes:
@@ -56,8 +56,10 @@ class DeltaLake:
         frame = self.spark.table(self.tables["silver"])
         mode = F.get_json_object("payload", "$.mode")
         scenario = F.get_json_object("payload", "$.raw_metadata.scenario_run_id")
+        continuous = F.get_json_object("payload", "$.raw_metadata.capture_run_id")
         created_at = F.get_json_object("payload", "$.created_at")
         frame = frame.where(((mode == "simulation") & (scenario == (run_id or ""))) |
+                            ((mode == "simulation") & continuous.isNotNull() & (created_at >= utc_text(now - 86400))) |
                             ((mode == "real") & (created_at >= utc_text(now - 86400))))
         # ponytail: a bounded demo snapshot; production should page evidence through the serving API.
         rows = frame.orderBy("id").limit(5001).collect()
@@ -72,7 +74,7 @@ def _put_object(objects, config, key, document):
 
 def ingest_page(connection, objects, lake, config, platform, events, checkpoint=None):
     """A source cursor advances after immutable Landing; the separate stream checkpoint owns Bronze delivery."""
-    write_objects(objects, config, events)
+    write_objects(objects, config, events, {"platform": platform, "checkpoint": checkpoint})
     if checkpoint is not None:
         mutate_document(connection, "checkpoint_" + platform, lambda current: {**current, **checkpoint})
 
@@ -96,24 +98,31 @@ def ensure_volumes(spark, config):
 
 
 def consume_landing(spark, lake, path, checkpoint):
-    """Spark 3.5 file stream. Production supplies verified /Volumes paths; local checks use temp directories."""
+    """Preserve the legacy JSON checkpoint and independently drain CSV into the same idempotent Bronze sink."""
     if path.startswith("oci:") or checkpoint.startswith("oci:"):
         raise ValueError("AIDP streaming requires governed volume paths, not oci://")
+    streams = [_consume_format(spark, lake, path, checkpoint, "json"),
+               _consume_format(spark, lake, path, checkpoint + "-csv", "csv")]
+    return {"query_id": streams[-1]["query_id"], "streams": streams,
+            "microbatches": sum(item["microbatches"] for item in streams),
+            "last_input_rows": sum(item["last_input_rows"] for item in streams)}
+
+
+def _consume_format(spark, lake, path, checkpoint, format_name):
     def commit(frame, _batch_id):
         rows = frame.limit(5001).collect()
         if len(rows) > 5000:
             raise RuntimeError("PRISMA microbatch exceeds its 5000-record bound")
-        events = []
-        for row in rows:
-            event = json.loads(row.payload)
-            if row.id != f"{event['platform']}:{event['source_id']}" or event.get("mode") not in {"real", "simulation"}:
-                raise ValueError("Invalid PRISMA Landing envelope")
-            events.append({**event, "id": row.id})
+        events = [decode_record(row.id, row.payload) for row in rows]
         lake.put("bronze", events)  # MERGE by event ID makes replay after callback failure idempotent.
-    stream = spark.readStream.schema("id STRING, payload STRING").option("maxFilesPerTrigger", 5).json(path)
+    reader = (spark.readStream.schema("id STRING, payload STRING").option("maxFilesPerTrigger", 5)
+              .option("pathGlobFilter", "*.ndjson" if format_name == "json" else "*.csv").option("mode", "FAILFAST"))
+    if format_name == "csv":
+        reader = reader.options(header=True, enforceSchema=False, multiLine=True, quote='"', escape='"', encoding="UTF-8")
+    stream = reader.format(format_name).load(path)
     query = stream.writeStream.foreachBatch(commit).option("checkpointLocation", checkpoint).trigger(availableNow=True).start()
     query.awaitTermination()
-    return {"query_id": str(query.id), "microbatches": len(query.recentProgress),
+    return {"format": format_name, "query_id": str(query.id), "microbatches": len(query.recentProgress),
             "last_input_rows": (query.lastProgress or {}).get("numInputRows", 0)}
 
 
@@ -148,30 +157,21 @@ def _source_token(secret_get, source):
 def _poll_x(connection, objects, lake, config, source, status, secret_get, now, client):
     platform = source["platform"]
     saved = read_document(connection, "checkpoint_" + platform)
+    test = status.get("requested_action") == "test"
     if saved.get("retry_at", 0) > now:
         raise XFailure("rate_limited", saved["retry_at"])
-    cursor = saved.get("cursor", {}) if saved.get("query_version") == source.get("query_version") else {}
-    test = status.get("requested_action") == "test"
     token = _source_token(secret_get, source)
-    received = 0
-    for _ in range(1 if test else 2):
-        events, cursor = fetch_page(client, token, source["query"], {} if test else cursor, now, page_size=10 if test else 50)
-        received += len(events)
-        if not test:
-            ingest_page(connection, objects, lake, config, platform, events,
-                        {"query_version": source.get("query_version"), "cursor": cursor, "retry_at": 0})
-        if not cursor.get("next_token"):
-            break
-    backlog = bool(cursor.get("next_token")) and not test
-    return {"status": "tested" if test else ("backlog" if backlog else "ready"),
-            "last_error": None, "next_due": utc_text(now + (60 if backlog else source["interval_minutes"] * 60)),
-            **({"last_received_count": received} if not test else {})}
+    def on_page(events, checkpoint):
+        ingest_page(connection, objects, lake, config, platform, events, checkpoint)
+    def on_checkpoint(checkpoint):
+        mutate_document(connection, "checkpoint_" + platform, lambda current: {**current, **checkpoint})
+    return poll_queries(client, token, source, saved, now, on_page, on_checkpoint, test=test)
 
 
 def poll_source(connection, objects, lake, config, source, status, secret_get, now, client):
     import httpx
     revision = config.get("configuration_revision", 0)
-    if not source["enabled"] or not _due(status, revision, now):
+    if not source["enabled"] or not (source.get("capture_running", False) or status.get("requested_action")) or not _due(status, revision, now):
         return
     values = {"status": "simulation", "last_error": None, "next_due": utc_text(now + source["interval_minutes"] * 60)}
     try:
