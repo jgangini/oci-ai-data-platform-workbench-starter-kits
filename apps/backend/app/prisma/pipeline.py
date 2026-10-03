@@ -80,6 +80,7 @@ def ingest_page(connection, objects, lake, config, platform, events, checkpoint=
 
 
 def ensure_volumes(spark, config):
+    """Verify bootstrap-provisioned volumes before any streaming or table writes."""
     catalog = config.get("catalog", "oci_medallion")
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", catalog):
         raise ValueError("Invalid PRISMA catalog")
@@ -87,13 +88,14 @@ def ensure_volumes(spark, config):
     uri = f"oci://{config['landing_bucket']}@{config['namespace']}/{config['landing_prefix']}"
     if "'" in uri or config["landing_volume_path"] != f"/Volumes/{catalog}/prisma_ingest/landing" or config["checkpoint_volume_path"] != f"/Volumes/{catalog}/prisma_ingest/checkpoints/bronze-v1":
         raise ValueError("Invalid PRISMA governed streaming path")
-    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
     for name, kind in (("landing", "EXTERNAL"), ("checkpoints", "MANAGED")):
-        declaration = "EXTERNAL " if kind == "EXTERNAL" else ""
-        location = f" LOCATION '{uri}'" if kind == "EXTERNAL" else ""
-        spark.sql(f"CREATE {declaration}VOLUME IF NOT EXISTS {schema}.{name}{location}")
-        details = {str(row[0]).strip().lower().replace("_", " "): str(row[1]).strip() for row in spark.sql(f"DESCRIBE VOLUME {schema}.{name}").collect()}
-        if details.get("volume type", "").upper() != kind or (kind == "EXTERNAL" and details.get("location", "").rstrip("/") != uri.rstrip("/")):
+        rows = spark.sql(f"DESCRIBE VOLUME {schema}.{name}").collect()
+        if len(rows) != 1:
+            raise RuntimeError("PRISMA volume description must contain exactly one row")
+        details = rows[0].asDict()
+        if any(details.get(field) != value for field, value in {"name": name, "catalog": catalog, "database": "prisma_ingest"}.items()):
+            raise RuntimeError("PRISMA volume identity does not match the deployment")
+        if str(details.get("volumeType", "")).upper() != kind or (kind == "EXTERNAL" and str(details.get("storageLocation", "")).rstrip("/") != uri.rstrip("/")):
             raise RuntimeError("PRISMA volume type or storage location does not match the deployment")
 
 

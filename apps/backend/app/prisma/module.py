@@ -9,18 +9,10 @@ import httpx
 from fastapi import HTTPException
 
 from .agent_gateway import checked_endpoint
-from .scheduling import job_path, submit_run
+from .scheduling import RUN_FAILED, RUN_SUCCESS, TASK_RUN_QUERY, job_path, run_state, submit_run, task_outcome
 
 PACKAGE = {"package_id": "territorial_control", "display_name": "Territorial Control · God’s Eye View",
            "bundled_version": "1.0.0", "kind": "module", "scope": "global", "status": "available"}
-SUCCESS = {"SUCCESS", "SUCCEEDED"}
-FAILED = {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED"}
-
-
-def run_state(document):
-    state = document.get("state") or {}
-    value = state.get("status") if isinstance(state, dict) else state
-    return str(value or document.get("status") or "").upper()
 
 
 class TerritorialModule:
@@ -85,16 +77,17 @@ class TerritorialModule:
         base = "/workspaces/" + quote(runtime["workspace_key"], safe="")
         result = client._request("GET", base + "/jobRuns/" + quote(state["run_key"], safe=""))
         status = run_state(result)
-        if status in FAILED:
+        if status in RUN_FAILED:
             return self._write({**state, "status": "failed", "enabled": False,
                                 "message": "Native Territorial Control activation failed; inspect the AIDP job run before retrying."})
-        if status in SUCCESS:
-            tasks = client._list(base + "/taskRuns", params={"jobRunKey": state["run_key"]})
-            if len(tasks) == 1 and tasks[0].get("taskKey") == "prisma_tick" and run_state(tasks[0]) in SUCCESS:
+        if status in RUN_SUCCESS:
+            tasks = client._list(base + "/taskRuns", params={"jobRunKey": state["run_key"], **TASK_RUN_QUERY})
+            outcome = task_outcome(tasks)
+            if outcome == "SUCCESS":
                 snapshot = self.runtime._snapshot()
                 return self._write({**state, "status": "ready", "enabled": True, "snapshot_version": snapshot["version"],
                                     "message": "Native workflow, publication, agent and private viewer verified. Configure sources to start capture."})
-            if any(run_state(task) in FAILED for task in tasks):
+            if outcome == "FAILED":
                 return self._write({**state, "status": "failed", "enabled": False, "message": "The native Territorial Control task failed."})
         return state
 

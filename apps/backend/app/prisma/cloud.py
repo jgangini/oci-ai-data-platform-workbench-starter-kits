@@ -123,18 +123,30 @@ class CloudRuntime:
         return document["sources"][platform]
 
     async def update_source(self, platform, payload):
-        result = await self._io(self._update, platform, payload)
-        await self._io(self._wake, str(uuid4()))
-        return result
+        def save():
+            with self.capture_lock:
+                previous = self._doc("configuration").get("sources", {}).get(platform, {})
+                result = self._update(platform, payload)
+                stopped = previous.get("enabled", True) and previous.get("capture_running") and not result.get("capture_running")
+                # ponytail: a failed drain retains CSVs; the next explicit Run retries ingestion, not an idle Save.
+                self._wake(str(uuid4()), only_if_active=not stopped)
+                return result
+        return await self._io(save)
 
-    def _wake(self, request_id):
+    def _wake(self, request_id, only_if_active=False):
         runtime = self._doc("runtime")
         client = self.aidp_factory()
-        # Persisted requests survive a busy job; queue this finite run before changing the recurring schedule.
-        submit_run(client._request, runtime, request_id)
-        set_schedule(client._request, runtime, needs_schedule(self._doc("configuration"), self._doc("simulation")))
+        active = needs_schedule(self._doc("configuration"), self._doc("simulation"))
+        set_schedule(client._request, runtime, active)
+        # Explicit Run/Test and publication controls still enqueue a finite run while the schedule is paused.
+        if active or not only_if_active:
+            submit_run(client._request, runtime, request_id)
 
     def _request_source(self, platform, action):
+        with self.capture_lock:
+            return self._request_source_locked(platform, action)
+
+    def _request_source_locked(self, platform, action):
         if platform not in PLATFORMS:
             raise HTTPException(404, "Unknown platform")
         source = next(item for item in self._sources()["sources"] if item["platform"] == platform)

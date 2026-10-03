@@ -679,6 +679,10 @@ def test_post_retry_token_uses_canonical_payload_hash() -> None:
     assert observed[0] == observed[1]
     assert observed[0] != observed[2]
     assert observed[2] != observed[3]
+    for folder in ("/Workspace/medallon/prisma", "/Workspace/medallon/prisma/dependencies_test", "/Workspace/medallon/prisma/dependencies_test"):
+        api.request("POST", "/workspaces/ws/objects", data=b"", headers={"type": "FOLDER", "path": folder})
+    assert observed[4] != observed[5]
+    assert observed[5] == observed[6]
 
 
 def test_stopped_shared_compute_is_reusable_after_auto_termination() -> None:

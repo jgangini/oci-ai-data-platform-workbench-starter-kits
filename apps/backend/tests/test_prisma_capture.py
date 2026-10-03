@@ -112,18 +112,52 @@ def test_volume_contract_is_verified_before_stream_or_table_creation():
             self.calls.append(statement)
             if statement.startswith("DESCRIBE VOLUME"):
                 external = statement.endswith(".landing")
-                return SimpleNamespace(collect=lambda: [("Volume type", "EXTERNAL" if external else "MANAGED"),
-                    ("Location", "oci://wrong@ns/raw" if self.wrong else "oci://landing@ns/01_landing/prisma/raw/")])
+                row = {"name": "landing" if external else "checkpoints", "catalog": "oci_medallion", "database": "prisma_ingest",
+                    "volumeType": "External" if external else "Managed",
+                    "storageLocation": "oci://wrong@ns/raw" if self.wrong else "oci://landing@ns/01_landing/prisma/raw/"}
+                return SimpleNamespace(collect=lambda: [SimpleNamespace(asDict=lambda: row)])
             return SimpleNamespace()
     spark = Spark()
     pipeline.ensure_volumes(spark, CONFIG)
     assert sum(item.startswith("DESCRIBE VOLUME") for item in spark.calls) == 2
+    assert not any(item.startswith("CREATE") for item in spark.calls)
     spark.wrong = True
     with pytest.raises(RuntimeError, match="volume type or storage"):
         pipeline.DeltaLake(spark, CONFIG)
     assert not any(item.startswith("CREATE TABLE") for item in spark.calls)
     with pytest.raises(ValueError, match="governed volume"):
         pipeline.consume_landing(None, None, "oci://landing@ns/raw", "/Volumes/checkpoints")
+
+
+@pytest.mark.parametrize("name,kind", [("landing", "MANAGED"), ("checkpoints", "EXTERNAL"), ("landing", None)])
+def test_volume_validation_rejects_missing_or_wrong_type_before_any_write(name, kind):
+    class Spark:
+        def sql(self, statement):
+            assert statement.startswith("DESCRIBE VOLUME "), "Pipeline must not provision or write before volume validation"
+            target = statement.endswith("." + name)
+            if target and kind is None:
+                raise RuntimeError("Required volume does not exist")
+            external = statement.endswith(".landing")
+            row = {"name": "landing" if external else "checkpoints", "catalog": "oci_medallion", "database": "prisma_ingest",
+                "volumeType": kind if target else ("External" if external else "Managed"),
+                "storageLocation": "oci://landing@ns/01_landing/prisma/raw/"}
+            return SimpleNamespace(collect=lambda: [SimpleNamespace(asDict=lambda: row)])
+    with pytest.raises(RuntimeError, match="volume"):
+        pipeline.DeltaLake(Spark(), CONFIG)
+
+
+@pytest.mark.parametrize("mismatch", [0, 2, {"name": "other"}, {"catalog": "foreign"}, {"database": "other"}])
+def test_native_volume_description_requires_one_row_and_matching_identity(mismatch):
+    def describe(statement):
+        assert statement.startswith("DESCRIBE VOLUME "), "No write is allowed before validation"
+        row = {"name": "landing", "catalog": "oci_medallion", "database": "prisma_ingest", "volumeType": "External",
+            "storageLocation": "oci://landing@ns/01_landing/prisma/raw/"}
+        if isinstance(mismatch, dict):
+            row.update(mismatch)
+        count = mismatch if isinstance(mismatch, int) else 1
+        return SimpleNamespace(collect=lambda: [SimpleNamespace(asDict=lambda: row)] * count)
+    with pytest.raises(RuntimeError, match="volume description|volume identity"):
+        pipeline.DeltaLake(SimpleNamespace(sql=describe), CONFIG)
 
 
 def test_file_and_oci_landing_use_identical_immutable_bytes(tmp_path):
