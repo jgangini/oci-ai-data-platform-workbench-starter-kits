@@ -44,13 +44,12 @@ export function PrismaProviderParameters({ api, provider, revision, active, onSa
   return <form className="prisma-source" aria-label={provider.label} onSubmit={(event: FormEvent) => { event.preventDefault(); if (dirty && !busy) setConfirm(true); }}>
     <div className="prisma-source-heading"><h3>{provider.label}</h3><div className="prisma-source-badges">
       <span className={`prisma-mode ${provider.configured ? 'real' : ''}`}>{provider.configured ? 'Configured' : 'Not configured'}</span></div></div>
-    {providerHelp[provider.id] && <p className="prisma-provider-description">{providerHelp[provider.id].description}</p>}
+    <p className="prisma-provider-description">{providerHelp[provider.id]?.description} Blank fields keep their current values. Test checks entered values without saving them.</p>
     <fieldset disabled={!!busy}><div className="prisma-fields">{provider.fields.map(field => <label key={field.id}>{field.label}<input type={field.secret ? 'password' : 'text'} autoComplete="new-password" spellCheck={false} maxLength={512}
       value={values[field.id] || ''} placeholder={field.configured ? 'Configured · leave blank to keep current' : 'Not configured'} onChange={event => { setValues(previous => ({ ...previous, [field.id]: event.target.value })); setError(''); setMessage(''); }} /></label>)}</div>
       {providerHelp[provider.id] && <div className="prisma-parameter-fields-help"><a className="prisma-key-help" href={providerHelp[provider.id].url} target="_blank" rel="noopener noreferrer" aria-label={`Get key information for ${provider.label}`}>GET KEY ↗</a></div>}
       <div className="prisma-source-actions"><button type="submit" disabled={!dirty}>{busy === 'save' ? 'Saving…' : 'Save'}</button><button type="button" className="secondary" disabled={!dirty && !provider.configured} onClick={() => void action('test')}>{busy === 'test' ? 'Testing…' : 'Test'}</button>
         {dirty && <button type="button" className="secondary" onClick={() => setValues({})}>Discard changes</button>}</div>
-      <small>Blank fields keep their current values. Test checks entered values without saving them.</small>
     </fieldset>
     {message && <p role="status" className="prisma-success">{message}</p>}{error && <p role="alert" className="prisma-error">{error}</p>}
     {confirm && <ParameterConfirmation title={provider.label} changes={provider.fields.filter(field => field.id in replacement).map(field => `${field.label}: replace value`)} onCancel={() => setConfirm(false)} onConfirm={() => void action('save')} />}
