@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0065",
-    "username": "sim_bogota_0065",
-    "display_name": "Fictional Bogotá Reporter 065"
+    "username": "luc_lozano",
+    "display_name": "Lucía Lozano"
   },
-  "message": "En Chapinero ya no veo una llama alta; quedan varios puntos humeantes difíciles de distinguir. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Ya no veo esa llama alta en Chapinero. Quedan varios puntos echando humo y desde aquí cuesta distinguirlos bien. No tengo cómo saber qué pasa detrás. #Bogota #Colombia #incendio",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 192,
   "available_offset_seconds": 192,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0065-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0065.webp",
+      "sha256": "6dd94fb0dcd59ef3a06ccf5beeaeb5f77a366e96b36cdc4aa43177fd1fc0e0fd",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: varios puntos de humo entre vegetación de Chapinero, sin llamas visibles y con vista parcial; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0036",
-    "username": "sim_bogota_0036",
-    "display_name": "Fictional Bogotá Reporter 036"
+    "username": "mat_arevalo",
+    "display_name": "Mateo Arévalo"
   },
-  "message": "Un tramo de Bosa tiene barro mezclado con agua; no se distingue el borde de la calzada. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Ojo al salir de la cuadra hacia la vía en Bosa: hay barro mezclado con agua y no se distingue dónde termina la calzada. No se confíen con ese borde. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 132,
   "available_offset_seconds": 132,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0036-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0036.webp",
+      "sha256": "f14b2ff3309394cd5b7a0a5608d12fb155bcb01acb04d62940c70c5ca330501e",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of muddy water obscuring a road edge at a fictional Bosa block entrance.",
+      "is_simulated": true
+    }
+  ]
 }

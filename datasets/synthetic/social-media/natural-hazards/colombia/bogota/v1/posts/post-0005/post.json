@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0005",
-    "username": "sim_bogota_0005",
-    "display_name": "Fictional Bogotá Reporter 005"
+    "username": "luc_rojas",
+    "display_name": "Lucía Rojas"
   },
-  "message": "Desde mi ventana en Kennedy observo un tramo anegado y vehículos detenidos antes de cruzar. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Desde mi ventana en Kennedy se ve un tramo de la vía lleno de agua. Los carros se quedaron antes del cruce, nadie se está metiendo por ahí en este momento. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 48,
   "available_offset_seconds": 48,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0005-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0005.webp",
+      "sha256": "8b8e222d1298fbfe391e6cddbdcdaedaa4b49b21cc368ce53e1df7e6d7f6c66a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0005: A wide landscape amateur smartphone photograph taken from a second-floor apartment window in Kennedy, Bogotá, Colombia. A sliver of the dark window frame at right, looking steeply down a flooded residential intersection. Several ordinary compact cars wait on the dry approach before the standing brown rainwater, no vehicles driving through it. Close-packed unplastered brick houses, pale blue house front, power wires. Overcast rainy afternoon. Clearly elevated perspective, not a street-level photo.",
+      "is_simulated": true
+    }
+  ]
 }

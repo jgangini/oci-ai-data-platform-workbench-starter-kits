@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0080",
-    "username": "sim_bogota_0080",
-    "display_name": "Fictional Bogotá Reporter 080"
+    "username": "fel_cuellar",
+    "display_name": "Felipe Cuéllar"
   },
-  "message": "En Ciudad Bolívar continúa cayendo material fino de la pendiente mientras escurre agua por la superficie. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Todavía baja agüita por la pendiente y con ella se desprende tierra fina, acá en Ciudad Bolívar. No ha parado del todo. Por favor no se metan al borde del sendero a mirar. #Bogota #deslizamiento #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 84,
   "available_offset_seconds": 84,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0080-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0080.webp",
+      "sha256": "ce77d3bcecfc0778872f7899c918bcc13425dba471933e084c611e046acf364f",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A thin runoff trickle carrying fine silt down a wet slope. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

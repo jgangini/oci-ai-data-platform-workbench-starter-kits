@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0011",
-    "username": "sim_bogota_0011",
-    "display_name": "Fictional Bogotá Reporter 011"
+    "username": "jul_rojas",
+    "display_name": "Juliana Rojas"
   },
-  "message": "En Kennedy una familia sale de su entrada inundada por un corredor que todavía permanece seco. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Acabo de ver a una familia salir por un corredor seco porque su entrada en Kennedy está inundada. Menos mal conservan ese paso; qué preocupación para los que están con niños. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -22,12 +22,12 @@
     {
       "id": "post-0011-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0011/media/image-01.svg",
-      "sha256": "4f0a8580fcc75432cf88b4e5d3e5359e196278a1c754484be28315a27da32370",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0011.webp",
+      "sha256": "ca4a459e6035578ad854eee86c8dbee3b7ce9cc344b9c5324d571b4954bea604",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Kennedy; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated photo of a dry raised residential corridor beside a waterlogged lower entrance in Kennedy; fictional scene.",
       "is_simulated": true
     }
   ]

@@ -6,7 +6,8 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import LOCAL_COOKIE_NAME, create_app
-from app.prisma.core import build_snapshot, normalize_event, simulation_events
+from app.prisma.core import build_snapshot, default_source, legacy_groups, normalize_event, simulation_events
+from app.prisma import landing
 from app.prisma.local import LocalPrismaRuntime
 from app.prisma.store import PrismaStore
 from app.prisma.x import XFailure, fetch_page
@@ -14,6 +15,33 @@ from app.security import issue_session
 
 
 NOW = 1791209100.0
+
+
+@pytest.mark.parametrize("mode", ["Synthetic", "simulation"])
+def test_synthetic_writes_are_canonical_and_keep_incident_identity_and_review(tmp_path, mode):
+    raw = {**simulation_events(0, NOW)[0], "mode": mode}
+    event = normalize_event(raw)
+    assert event["mode"] == "Synthetic" and event["is_simulated"] is True
+    key = landing.write_file(tmp_path, [raw])
+    assert landing.records((tmp_path / key).read_bytes())[0]["mode"] == "Synthetic"
+    assert b'simulation' not in (tmp_path / key).read_bytes()
+    store = PrismaStore(tmp_path / "prisma.sqlite", clock=lambda: NOW)
+    store.persist_page("x", [raw], {})
+    with store.connection() as db:
+        for table in ("events", "social_posts"):
+            assert json.loads(db.execute(f"SELECT payload FROM {table}").fetchone()[0])["mode"] == "Synthetic"
+    legacy = {**event, "mode": "simulation"}
+    for rules in (None, {"x": default_source("x")}):
+        old = build_snapshot([legacy], {}, "old", "now", rules=rules)
+        identifier = old["incidents"][0]["id"]
+        if rules is None:
+            assert identifier == next(iter(legacy_groups([legacy])))
+        reviewed = build_snapshot([event], {identifier: {"status": "validated", "note": "Retain review"}},
+                                  "new", "now", rules=rules, previous=old["incidents"])
+        incident = reviewed["incidents"][0]
+        assert incident["id"] == identifier and incident["review_status"] == "validated"
+        assert incident["review_note"] == "Retain review" and incident["mode"] == "Synthetic"
+        assert reviewed["evidence"][0]["mode"] == "Synthetic" and legacy["mode"] == "simulation"
 
 
 class Clock:
@@ -49,6 +77,56 @@ class Client:
 
 def post(identifier):
     return {"id": identifier, "text": "Inundación en Kennedy", "created_at": "2026-10-05T14:00:00Z"}
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_manual_run_activates_legacy_disabled_source_and_persists_after_restart(tmp_path, running):
+    runtime = LocalPrismaRuntime(tmp_path, clock=lambda: NOW)
+    runtime.store.update_source("x", {"enabled": False, "capture_running": running})
+    result = asyncio.run(runtime.run_source("x"))
+    assert result["source"]["enabled"] and result["source"]["capture_running"]
+    restarted = LocalPrismaRuntime(tmp_path, clock=lambda: NOW)
+    assert restarted.store.source("x")["enabled"] and restarted.store.source("x")["capture_running"]
+    assert restarted.store.posts("x", 20)["total"] > 0
+    assert asyncio.run(restarted.pause_source("x"))["source"]["capture_state"] == "paused"
+    count = restarted.store.posts("x", 20)["total"]
+    asyncio.run(restarted.tick())
+    assert restarted.store.posts("x", 20)["total"] == count
+
+
+@pytest.mark.parametrize("mode", ["Synthetic", "real"])
+def test_disabled_connection_test_preserves_capture_and_source_cursor(tmp_path, mode):
+    client = Client([Response({"data": [post("30")], "meta": {"newest_id": "30"}})])
+    runtime = LocalPrismaRuntime(tmp_path, clock=lambda: NOW, client_factory=lambda: client)
+    asyncio.run(runtime.update_source("x", {"enabled": False, "mode": mode, "query": "#Bogota", "bearer_token": "test-credential"}))
+    runtime.store.persist_page("x", [], {"since_id": "20"})
+    result = asyncio.run(runtime.test_source("x"))
+    assert result["status"] == ("tested" if mode == "real" else "simulation")
+    assert not result["source"]["enabled"] and not result["source"]["capture_running"]
+    assert runtime.store.checkpoint("x") == {"since_id": "20"}
+    assert runtime.store.posts("x", 20)["total"] == 0 and not (tmp_path / "prisma-landing").exists()
+    with runtime.store.connection() as db:
+        assert runtime.store._get(db, "capture_controls", None) is None
+    assert len(client.calls) == (1 if mode == "real" else 0)
+
+
+def test_missing_real_credential_does_not_activate_disabled_source(tmp_path):
+    runtime = LocalPrismaRuntime(tmp_path, clock=lambda: NOW, client_factory=lambda: pytest.fail("No HTTP client without credential"))
+    asyncio.run(runtime.update_source("x", {"enabled": False, "mode": "real"}))
+    result = asyncio.run(runtime.run_source("x"))
+    assert result["status"] == result["source"]["last_error"] == "credential_required"
+    assert not result["source"]["enabled"] and not result["source"]["capture_running"]
+    with runtime.store.connection() as db:
+        assert runtime.store._get(db, "capture_controls", None) is None
+    assert runtime.store.checkpoint("x") == {} and not (tmp_path / "prisma-landing").exists()
+
+
+def test_scheduled_call_cannot_reactivate_legacy_disabled_source(tmp_path, monkeypatch):
+    runtime = LocalPrismaRuntime(tmp_path, clock=lambda: NOW)
+    runtime.store.update_source("x", {"mode": "real", "enabled": False, "capture_running": True})
+    monkeypatch.setattr(runtime, "_poll", lambda *_: pytest.fail("Disabled scheduled source cannot poll"))
+    result = asyncio.run(runtime._capture("x", False, scheduled=True))
+    assert result["status"] == "paused" and not runtime.store.source("x")["enabled"]
 
 
 def test_x_failed_second_page_resumes_after_restart_without_losing_watermark(tmp_path):
@@ -131,7 +209,7 @@ def test_simulation_restart_pause_resume_replay_and_real_evidence_survives(tmp_p
     assert len(restarted.snapshot()["evidence"]) == 2
     clock.now += 600
     replayed = restarted.snapshot()
-    replay_ids = {item["id"] for item in replayed["evidence"] if item["mode"] == "simulation"}
+    replay_ids = {item["id"] for item in replayed["evidence"] if item["mode"] == "Synthetic"}
     assert {item.rsplit(":", 1)[-1] for item in replay_ids} == {item.rsplit(":", 1)[-1] for item in expected_ids}
     assert not replay_ids.intersection(expected_ids)
     assert len(replayed["evidence"]) == 13
@@ -163,10 +241,29 @@ def test_admin_contract_and_review_persistence(tmp_path):
         client.post("/api/admin/prisma/simulation", json={"action": "start"}).raise_for_status()
         snapshot = client.get("/api/prisma/snapshot").json()
         incident = snapshot["incidents"][0]
-        review = client.post(f"/api/prisma/incidents/{incident['id']}/review", json={"status": "validated", "note": "Revisado"})
-        assert review.status_code == 200
-        assert review.json()["review_status"] == "validated"
+        endpoint = f"/api/prisma/incidents/{incident['id']}/review"
+        assert client.post(endpoint, json={"status": "validated", "note": "Stale evidence", "expected_evidence_ids": []}).status_code == 409
+        assert not PrismaStore(tmp_path / "prisma.sqlite3").snapshot()["incidents"][0]["review_note"]
+        for status, note in [("validated", "Revisado"), ("rejected", "Descartado"), ("pending", "Por revisar")]:
+            review = client.post(endpoint, json={"status": status, "note": note, "expected_evidence_ids": incident["evidence_ids"]})
+            assert review.status_code == 200
+            assert (review.json()["review_status"], review.json()["review_note"]) == (status, note)
+            current = client.get("/api/prisma/snapshot").json()
+            saved = next(item for item in current["incidents"] if item["id"] == incident["id"])
+            assert (saved["review_status"], saved["review_note"]) == (status, note)
+            assert saved["reviewed_evidence_ids"] == incident["evidence_ids"]
+            assert current["version"] != snapshot["version"]
+            reopened = PrismaStore(tmp_path / "prisma.sqlite3").snapshot()
+            saved = next(item for item in reopened["incidents"] if item["id"] == incident["id"])
+            assert (saved["review_status"], saved["review_note"]) == (status, note)
+            snapshot = current
+        assert client.post(endpoint, json={"status": "validated", "note": "n" * 1000}).status_code == 200
+        assert client.post(endpoint, json={"status": "rejected", "note": "n" * 1001}).status_code == 422
     new_store = PrismaStore(tmp_path / "prisma.sqlite3")
+    assert new_store.snapshot()["incidents"][0]["review_status"] == "validated"
+    assert new_store.snapshot()["incidents"][0]["review_note"] == "n" * 1000
+    with pytest.raises(ValueError, match="1000"):
+        new_store.review(incident["id"], "rejected", "n" * 1001)
     assert new_store.snapshot()["incidents"][0]["review_status"] == "validated"
 
 
@@ -194,6 +291,38 @@ def test_local_correlation_upgrade_invalidates_old_version_and_retains_old_revie
     with restarted.connection() as db:
         assert restarted._get(db, "publication", {}) == publication
         assert json.loads(db.execute("SELECT payload FROM reviews WHERE id=?", (old_id,)).fetchone()[0]) == review
+
+
+def test_event_coordinates_save_lock_unvalidate_and_restart_preserve_evidence(tmp_path):
+    settings = Settings(local_development_mode=True, cookie_secure=False,
+                        aidp_settings_file=str(tmp_path / "settings.json"), session_secret_file=str(tmp_path / "session.key"))
+    app = create_app(settings)
+    with TestClient(app) as client:
+        client.cookies.set(LOCAL_COOKIE_NAME, issue_session(app.state.session_key, "admin"))
+        client.post("/api/admin/prisma/simulation", json={"action": "start"}).raise_for_status()
+        original = client.get("/api/prisma/snapshot").json()
+        incident = original["incidents"][0]
+        endpoint = f"/api/prisma/incidents/{incident['id']}/review"
+        review = {"status": "validated", "note": "Located by human review", "expected_evidence_ids": incident["evidence_ids"],
+                  "lat": 4.63, "lon": -74.15}
+        assert client.post(endpoint, json={**review, "expected_evidence_ids": []}).status_code == 409
+        saved = client.post(endpoint, json=review)
+        assert saved.status_code == 200
+        assert (saved.json()["lat"], saved.json()["lon"], saved.json()["location_method"]) == (4.63, -74.15, "human_review")
+        for status in ("validated", "rejected", "pending"):
+            assert client.post(endpoint, json={**review, "status": status, "lat": 4.64}).status_code == 409
+        # A separate save releases the lock; keeping the same coordinates does not move the marker.
+        assert client.post(endpoint, json={**review, "status": "pending"}).status_code == 200
+        moved = client.post(endpoint, json={**review, "status": "rejected", "lat": 4.64})
+        assert moved.status_code == 200 and moved.json()["lat"] == 4.64
+        assert client.post(endpoint, json={"status": "pending", "note": "Retain position"}).status_code == 200
+        current = client.get("/api/prisma/snapshot").json()
+        assert current["evidence"] == original["evidence"]
+        assert current["version"] != original["version"]
+    reopened = PrismaStore(tmp_path / "prisma.sqlite3").snapshot()
+    saved = next(item for item in reopened["incidents"] if item["id"] == incident["id"])
+    assert (saved["lat"], saved["lon"], saved["review_status"]) == (4.64, -74.15, "pending")
+    assert reopened["evidence"] == original["evidence"]
 
 
 def test_cloud_mode_delegates_without_local_processing(tmp_path):

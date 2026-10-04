@@ -169,6 +169,11 @@ test("settings keep only Workbench and application details in accessible tabs", 
   const workbenchUrl = workbenchSource.indexOf("AI Data Platform Workbench URL");
   const workbenchOcid = workbenchSource.indexOf("AI Data Platform Workbench OCID");
   assert.ok(serviceEndpoint < workbenchUrl && workbenchUrl < workbenchOcid);
+  for (const field of ['aidpServiceEndpoint', 'aidpUrl', 'aidpPlatformId']) {
+    assert.match(workbenchSource, new RegExp(`value=\\{${field}\\}\\s+readOnly`));
+  }
+  assert.doesNotMatch(workbenchSource, /Save Settings/);
+  assert.doesNotMatch(source, /saveSettings\("workbench"\)|aidp_url: aidpUrl/);
   assert.doesNotMatch(workbenchSource, /Shared compute/);
   assert.match(workbenchSource, /<RegistrationAccessSettings/);
   assert.doesNotMatch(applicationSource, /<RegistrationAccessSettings/);
@@ -204,15 +209,19 @@ test("application settings report releases and request only the fixed VM update 
   assert.doesNotMatch(source, /docker\.sock|docker run/);
 });
 
-test("production administrators manage one global governance module outside participant labs", () => {
+test("administrators manage one shared governance module from Settings outside participant labs", () => {
   assert.match(source, /is_aidp_admin: boolean/);
   assert.match(source, /operation_type\?: ModuleOperationKind \| null/);
   assert.match(source, /\/api\/admin\/modules/);
-  assert.match(source, /production && user\.is_aidp_admin && governanceModule/);
+  assert.match(source, /user\.is_aidp_admin && governanceModule/);
   assert.match(source, /function GovernanceModuleModal/);
-  assert.match(source, /Global production module/);
+  assert.match(source, /window\.location\.assign\("\/admin\/users\?module=ai_data_governance_vsc_extension"\)/);
+  assert.match(source, /Deploy \/ Redeploy/);
+  assert.match(source, /users\.filter\(user => user\.is_aidp_admin\)/);
+  assert.doesNotMatch(source, /production && user\.is_aidp_admin/);
+  assert.match(source, /Shared global module/);
   assert.match(source, /type="checkbox"[\s\S]*checked=\{module\.installed \|\| selected\}/);
-  assert.match(source, /AI Data Governance for VSC Extension|module\.display_name/);
+  assert.match(source, /AI Data Governance|module\.display_name/);
   assert.match(source, /\/modules\/\$\{encodeURIComponent\(governanceModule\.module_id\)\}/);
   assert.match(source, /kind === "redeploy" \? `\$\{moduleBase\}\/redeploy` : moduleBase/);
   assert.match(source, /method: "DELETE"/);
@@ -227,6 +236,8 @@ test("production administrators manage one global governance module outside part
   assert.match(source, /Redeploy/);
   assert.match(source, /Delete global governance module\?/);
   assert.match(source, /four Delta tables and only their prefixes in oci_artifacts/);
+  assert.match(source, /shared OCI credentials are retained/);
+  assert.doesNotMatch(source, /dedicated AI Compute, credential, notebook/);
   assert.doesNotMatch(source, /lab_id: "agent"/);
   assert.match(source, /function participantLabCatalog/);
   assert.match(source, /\["agent", "ai_data_governance_vsc_extension"\]\.includes\(lab_id\)/);
@@ -237,7 +248,7 @@ test("unmanaged AIDP administrators retain module access without participant con
   assert.match(source, /user\.managed === false \? \(/);
   assert.match(source, /<strong>AIDP administrator<\/strong>/);
   assert.match(source, /<small>Platform administration only<\/small>/);
-  assert.match(source, /production && user\.is_aidp_admin && governanceModule/);
+  assert.match(source, /user\.is_aidp_admin && governanceModule/);
   assert.match(source, /user\.managed !== false && \([\s\S]*Manage starter kits for/);
 });
 

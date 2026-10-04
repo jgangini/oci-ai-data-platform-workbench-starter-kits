@@ -119,9 +119,9 @@ function appendPhotos(card, evidence, incident) {
     const figure = text('figure', '', 'evidence-photo');
     const image = document.createElement('img');
     image.src = photo.url;
-    image.alt = typeof photo.alt_text === 'string' && photo.alt_text ? photo.alt_text : 'Photo attached to the original publication';
+    image.alt = typeof photo.alt_text === 'string' && photo.alt_text ? photo.alt_text : photo.origin === 'ai_generated' ? 'AI-generated Synthetic image' : 'Photo attached to the original publication';
     image.loading = 'lazy'; image.referrerPolicy = 'no-referrer';
-    const caption = text('figcaption', 'Source attachment · event reviewed; image claim not independently verified');
+    const caption = text('figcaption', photo.origin === 'ai_generated' ? 'AI-generated Synthetic image' : 'Publication attachment · image claim not independently verified');
     image.addEventListener('error', () => { image.remove(); caption.textContent = 'Image unavailable. Open the original source.'; }, { once: true });
     figure.append(image, caption); card.append(figure);
   }
@@ -185,7 +185,7 @@ function renderDetail() {
     button.addEventListener('click', async () => {
       actions.querySelectorAll('button').forEach((control) => { control.disabled = true; });
       try {
-        await request(`/api/prisma/incidents/${encodeURIComponent(item.id)}/review`, { method: 'POST', body: JSON.stringify({ status: value, note: note.value }) });
+        await request(`/api/prisma/incidents/${encodeURIComponent(item.id)}/review`, { method: 'POST', body: JSON.stringify({ status: value, note: note.value, expected_evidence_ids: item.evidence_ids }) });
         status.textContent = 'Review saved.';
         await refresh();
       } catch (error) { status.textContent = error.message; }

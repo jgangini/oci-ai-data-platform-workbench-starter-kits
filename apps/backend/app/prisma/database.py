@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import re
 
+from .core import canonical_mode
+
 DOCUMENT_NAME = re.compile(r"(?:configuration|simulation|reviews|runtime|event_registry|status_[a-z]+|checkpoint_[a-z]+)")
 
 TABLES = (
@@ -16,6 +18,7 @@ TABLES = (
        payload CLOB NOT NULL CHECK (payload IS JSON),
        CONSTRAINT PRISMA_POST_STATUS CHECK (analysis_status IN ('captured','ingested','processed')))""",
     "CREATE INDEX ADMIN.PRISMA_POST_PLATFORM_SEQ ON ADMIN.PRISMA_SOCIAL_POSTS(platform,capture_seq)",
+    "ALTER TABLE ADMIN.PRISMA_SOCIAL_POSTS ADD captured_at VARCHAR2(50)",
 )
 
 PACKAGE_SPEC = """CREATE OR REPLACE PACKAGE ADMIN.PRISMA_CONTROL AUTHID DEFINER AS
@@ -24,9 +27,76 @@ PACKAGE_SPEC = """CREATE OR REPLACE PACKAGE ADMIN.PRISMA_CONTROL AUTHID DEFINER 
   PROCEDURE PUBLISH(p_version VARCHAR2, p_document CLOB);
   PROCEDURE UPSERT_POSTS(p_document CLOB, p_status VARCHAR2);
   FUNCTION LIST_POSTS(p_platform VARCHAR2, p_limit NUMBER, p_before NUMBER, p_max NUMBER) RETURN CLOB;
+  FUNCTION RESET_VERSION RETURN NUMBER;
+  FUNCTION SENSOR_RESET_VERSION RETURN NUMBER;
+  FUNCTION PURGE_SYNTHETIC_POSTS(p_operation_id VARCHAR2) RETURN NUMBER;
+  FUNCTION LIST_PUBLICATIONS(p_after VARCHAR2) RETURN CLOB;
+  PROCEDURE REPLACE_SYNTHETIC_PUBLICATION(p_operation_id VARCHAR2, p_old VARCHAR2, p_new VARCHAR2);
+  PROCEDURE REPLACE_SENSOR_PUBLICATION(p_operation_id VARCHAR2, p_sensor_type VARCHAR2, p_old VARCHAR2, p_new VARCHAR2);
 END PRISMA_CONTROL;"""
 
 PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
+  FUNCTION RESET_VERSION RETURN NUMBER IS BEGIN RETURN 2; END;
+  FUNCTION SENSOR_RESET_VERSION RETURN NUMBER IS BEGIN RETURN 1; END;
+  PROCEDURE require_reset(p_operation_id VARCHAR2) IS v_count NUMBER;
+  BEGIN
+    SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_CONTROL_DOCS WHERE name='checkpoint_reset'
+      AND JSON_VALUE(payload,'$.operation_id')=p_operation_id
+      AND JSON_VALUE(payload,'$.sensor_type') IS NULL
+      AND JSON_VALUE(payload,'$.status')='pending'
+      AND JSON_VALUE(payload,'$.ready')='true';
+    IF v_count!=1 THEN RAISE_APPLICATION_ERROR(-20002,'Synthetic reset is not active'); END IF;
+  END;
+  FUNCTION PURGE_SYNTHETIC_POSTS(p_operation_id VARCHAR2) RETURN NUMBER IS v_count NUMBER;
+  BEGIN
+    require_reset(p_operation_id);
+    DELETE FROM ADMIN.PRISMA_SOCIAL_POSTS WHERE JSON_VALUE(payload,'$.mode') IN ('Synthetic','simulation');
+    v_count:=SQL%ROWCOUNT;
+    RETURN v_count;
+  END;
+  FUNCTION LIST_PUBLICATIONS(p_after VARCHAR2) RETURN CLOB IS v_result CLOB;
+  BEGIN
+    SELECT COALESCE(JSON_ARRAYAGG(payload FORMAT JSON RETURNING CLOB),TO_CLOB('[]')) INTO v_result
+    FROM (SELECT payload FROM ADMIN.PRISMA_PUBLICATIONS WHERE p_after IS NULL OR version>p_after
+      ORDER BY version FETCH FIRST 1 ROWS ONLY);
+    RETURN v_result;
+  END;
+  PROCEDURE REPLACE_SYNTHETIC_PUBLICATION(p_operation_id VARCHAR2, p_old VARCHAR2, p_new VARCHAR2)
+  IS v_count NUMBER;
+  BEGIN
+    require_reset(p_operation_id);
+    SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_PUBLICATIONS WHERE version=p_new AND version!=p_old
+      AND NOT JSON_EXISTS(payload,'$.evidence[*]?(@.mode == "Synthetic" || @.mode == "simulation")')
+      AND NOT JSON_EXISTS(payload,'$.incidents[*]?(@.mode == "Synthetic" || @.mode == "simulation")');
+    IF v_count!=1 THEN RAISE_APPLICATION_ERROR(-20002,'Clean replacement publication is missing'); END IF;
+    DELETE FROM ADMIN.PRISMA_PUBLICATIONS WHERE version=p_old AND (
+      JSON_EXISTS(payload,'$.evidence[*]?(@.mode == "Synthetic" || @.mode == "simulation")') OR
+      JSON_EXISTS(payload,'$.incidents[*]?(@.mode == "Synthetic" || @.mode == "simulation")'));
+  END;
+  PROCEDURE REPLACE_SENSOR_PUBLICATION(p_operation_id VARCHAR2, p_sensor_type VARCHAR2, p_old VARCHAR2, p_new VARCHAR2)
+  IS v_count NUMBER;
+  BEGIN
+    IF p_sensor_type IS NULL OR p_sensor_type NOT IN ('river_level','rainfall','temperature','soil_moisture','wind_speed')
+    THEN RAISE_APPLICATION_ERROR(-20002,'Invalid sensor reset type'); END IF;
+    SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_CONTROL_DOCS WHERE name='checkpoint_reset'
+      AND JSON_VALUE(payload,'$.operation_id')=p_operation_id
+      AND JSON_VALUE(payload,'$.sensor_type')=p_sensor_type
+      AND JSON_VALUE(payload,'$.status')='pending'
+      AND JSON_VALUE(payload,'$.ready')='true';
+    IF v_count!=1 THEN RAISE_APPLICATION_ERROR(-20002,'Sensor reset is not active'); END IF;
+    SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_PUBLICATIONS p,
+      JSON_TABLE(p.payload,'$.sensors[*]' COLUMNS (
+        sensor_type VARCHAR2(30) PATH '$.sensor_type', sensor_json CLOB FORMAT JSON PATH '$')) s
+      WHERE p.version=p_old AND s.sensor_type=p_sensor_type
+      AND NOT JSON_EXISTS(s.sensor_json,'$?((@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true)' ERROR ON ERROR);
+    IF v_count!=0 THEN RAISE_APPLICATION_ERROR(-20002,'Sensor reset requires simulated readings'); END IF;
+    SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_PUBLICATIONS WHERE version=p_new AND version!=p_old
+      AND NOT JSON_EXISTS(payload,'$.sensors[*]?(@.sensor_type == $kind)' PASSING p_sensor_type AS "kind" ERROR ON ERROR);
+    IF v_count!=1 THEN RAISE_APPLICATION_ERROR(-20002,'Clean sensor replacement publication is missing'); END IF;
+    DELETE FROM ADMIN.PRISMA_PUBLICATIONS WHERE version=p_old
+      AND JSON_EXISTS(payload,'$.sensors[*]?(@.sensor_type == $kind && (@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true)'
+        PASSING p_sensor_type AS "kind" ERROR ON ERROR);
+  END;
   PROCEDURE valid_name(p_name VARCHAR2) IS BEGIN
     IF p_name IS NULL OR LENGTH(p_name) > 100 OR NOT REGEXP_LIKE(p_name, '^(configuration|simulation|reviews|runtime|event_registry|status_[a-z]+|checkpoint_[a-z]+)$')
     THEN RAISE_APPLICATION_ERROR(-20002, 'Invalid PRISMA document'); END IF;
@@ -63,29 +133,46 @@ PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
         post_key VARCHAR2(200) PATH '$.id' ERROR ON ERROR,
         platform VARCHAR2(50) PATH '$.platform' ERROR ON ERROR,
         published_at VARCHAR2(50) PATH '$.created_at' ERROR ON ERROR,
+        captured_at VARCHAR2(50) PATH '$.captured_at' NULL ON ERROR,
         payload CLOB FORMAT JSON PATH '$' ERROR ON ERROR)) j
     ) source ON (target.post_key=source.post_key)
-    WHEN MATCHED THEN UPDATE SET target.payload=source.payload, target.analysis_status=p_status
+    WHEN MATCHED THEN UPDATE SET target.payload=source.payload, target.analysis_status=p_status,
+      target.captured_at=COALESCE(target.captured_at,
+        CASE WHEN target.analysis_status='captured' THEN JSON_VALUE(target.payload,'$.ingested_at') END,source.captured_at)
       WHERE CASE p_status WHEN 'processed' THEN 3 WHEN 'ingested' THEN 2 ELSE 1 END >
             CASE target.analysis_status WHEN 'processed' THEN 3 WHEN 'ingested' THEN 2 ELSE 1 END
-    WHEN NOT MATCHED THEN INSERT(post_key,platform,published_at,analysis_status,payload)
-      VALUES(source.post_key,source.platform,source.published_at,p_status,source.payload);
+    WHEN NOT MATCHED THEN INSERT(post_key,platform,published_at,analysis_status,payload,captured_at)
+      VALUES(source.post_key,source.platform,source.published_at,p_status,source.payload,source.captured_at);
+    -- A VM capture may arrive after ingestion; fill its timestamp without replacing enriched content or status.
+    MERGE INTO ADMIN.PRISMA_SOCIAL_POSTS target USING (
+      SELECT j.* FROM JSON_TABLE(p_document, '$[*]' COLUMNS (
+        post_key VARCHAR2(200) PATH '$.id' ERROR ON ERROR,
+        captured_at VARCHAR2(50) PATH '$.captured_at' NULL ON ERROR)) j
+    ) source ON (target.post_key=source.post_key)
+    WHEN MATCHED THEN UPDATE SET target.captured_at=COALESCE(
+      CASE WHEN target.analysis_status='captured' THEN JSON_VALUE(target.payload,'$.ingested_at') END,source.captured_at)
+      WHERE target.captured_at IS NULL AND source.captured_at IS NOT NULL;
   END;
   FUNCTION LIST_POSTS(p_platform VARCHAR2, p_limit NUMBER, p_before NUMBER, p_max NUMBER) RETURN CLOB
   IS v_max NUMBER; v_total NUMBER; v_items CLOB; v_result CLOB; v_fetch NUMBER;
   BEGIN
-    IF p_platform IS NULL OR LENGTH(p_platform)>50 OR p_limit IS NULL OR p_limit<1 OR p_limit>100
+    IF (p_platform IS NOT NULL AND p_platform NOT IN ('x','facebook','instagram','tiktok'))
+       OR p_limit IS NULL OR p_limit<1 OR p_limit>100
        OR p_limit!=TRUNC(p_limit) OR (p_before IS NOT NULL AND (p_before<1 OR p_before!=TRUNC(p_before)))
        OR (p_max IS NOT NULL AND (p_max<0 OR p_max!=TRUNC(p_max)))
     THEN RAISE_APPLICATION_ERROR(-20002, 'Invalid post pagination'); END IF;
     v_fetch := p_limit + 1;
-    SELECT COALESCE(p_max,MAX(capture_seq),0) INTO v_max FROM ADMIN.PRISMA_SOCIAL_POSTS WHERE platform=p_platform;
-    SELECT COUNT(*) INTO v_total FROM ADMIN.PRISMA_SOCIAL_POSTS WHERE platform=p_platform AND capture_seq<=v_max;
+    SELECT COALESCE(p_max,MAX(capture_seq),0) INTO v_max FROM ADMIN.PRISMA_SOCIAL_POSTS
+      WHERE platform IN ('x','facebook','instagram','tiktok') AND (p_platform IS NULL OR platform=p_platform);
+    SELECT COUNT(*) INTO v_total FROM ADMIN.PRISMA_SOCIAL_POSTS
+      WHERE platform IN ('x','facebook','instagram','tiktok') AND (p_platform IS NULL OR platform=p_platform) AND capture_seq<=v_max;
     SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT('payload' VALUE payload FORMAT JSON,
-      'capture_seq' VALUE capture_seq,'analysis_status' VALUE analysis_status RETURNING CLOB)
+      'capture_seq' VALUE capture_seq,'analysis_status' VALUE analysis_status,
+      'captured_at' VALUE COALESCE(captured_at,CASE WHEN analysis_status='captured' THEN JSON_VALUE(payload,'$.ingested_at') END) RETURNING CLOB)
       ORDER BY capture_seq DESC RETURNING CLOB),TO_CLOB('[]')) INTO v_items FROM (
-        SELECT payload,capture_seq,analysis_status FROM ADMIN.PRISMA_SOCIAL_POSTS
-        WHERE platform=p_platform AND capture_seq<=v_max AND (p_before IS NULL OR capture_seq<p_before)
+        SELECT payload,capture_seq,analysis_status,captured_at FROM ADMIN.PRISMA_SOCIAL_POSTS
+        WHERE platform IN ('x','facebook','instagram','tiktok') AND (p_platform IS NULL OR platform=p_platform)
+        AND capture_seq<=v_max AND (p_before IS NULL OR capture_seq<p_before)
         ORDER BY capture_seq DESC FETCH FIRST v_fetch ROWS ONLY);
     SELECT JSON_OBJECT('items' VALUE v_items FORMAT JSON,'max_seq' VALUE v_max,
       'total' VALUE v_total RETURNING CLOB) INTO v_result FROM DUAL;
@@ -121,7 +208,18 @@ VIEWS = (
          evidence_id VARCHAR2(200) PATH '$.id', platform VARCHAR2(50) PATH '$.platform',
          source_mode VARCHAR2(20) PATH '$.mode', evidence_json CLOB FORMAT JSON PATH '$')) j""",
     """CREATE OR REPLACE VIEW ADMIN.PRISMA_V_SOCIAL_POSTS AS
-       SELECT capture_seq,post_key,platform,published_at,analysis_status,payload FROM ADMIN.PRISMA_SOCIAL_POSTS""",
+       SELECT capture_seq,post_key,platform,published_at,analysis_status,payload,captured_at FROM ADMIN.PRISMA_SOCIAL_POSTS""",
+    """CREATE OR REPLACE VIEW ADMIN.PRISMA_V_SENSOR_EVENTS AS
+       SELECT p.version,j.* FROM ADMIN.PRISMA_PUBLICATIONS p,
+       JSON_TABLE(p.payload, '$.sensors[*]' COLUMNS (
+         sensor_event_id VARCHAR2(100) PATH '$.id', sensor_id VARCHAR2(100) PATH '$.sensor_id',
+         sensor_type VARCHAR2(30) PATH '$.sensor_type', observed_at VARCHAR2(40) PATH '$.observed_at',
+         lat NUMBER PATH '$.lat', lon NUMBER PATH '$.lon', locality VARCHAR2(100) PATH '$.locality',
+         municipality VARCHAR2(100) PATH '$.municipality', department VARCHAR2(100) PATH '$.department',
+         country VARCHAR2(100) PATH '$.country', metric VARCHAR2(30) PATH '$.metric',
+         value NUMBER PATH '$.value', unit VARCHAR2(20) PATH '$.unit', status VARCHAR2(20) PATH '$.status',
+         source_mode VARCHAR2(20) PATH '$.mode', is_simulated VARCHAR2(5) PATH '$.is_simulated',
+         sensor_json CLOB FORMAT JSON PATH '$')) j""",
 )
 
 
@@ -131,7 +229,7 @@ def install_schema(connection):
         try:
             cursor.execute(statement)
         except Exception as exc:
-            if getattr(exc.args[0], "code", None) != 955:
+            if getattr(exc.args[0], "code", None) != (1430 if statement.startswith("ALTER TABLE") else 955):
                 raise
     for statement in (PACKAGE_SPEC, PACKAGE_BODY, *VIEWS):
         cursor.execute(statement)
@@ -188,21 +286,66 @@ def publish(connection, snapshot: dict):
     connection.commit()
 
 
+def purge_synthetic_posts(connection, operation_id):
+    result = connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.PURGE_SYNTHETIC_POSTS", int, [operation_id])
+    connection.commit()
+    return result
+
+
+def reset_version(connection):
+    return connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.RESET_VERSION", int, [])
+
+
+def sensor_reset_version(connection):
+    return connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.SENSOR_RESET_VERSION", int, [])
+
+
+def publications(connection):
+    import oracledb
+    after = None
+    while True:
+        result = connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.LIST_PUBLICATIONS", oracledb.DB_TYPE_CLOB, [after])
+        page = json.loads(result.read() if hasattr(result, "read") else result)
+        if not page:
+            return
+        snapshot = page[0]
+        if after is not None and snapshot["version"] <= after:
+            raise ValueError("Publication history did not advance")
+        after = snapshot["version"]
+        yield snapshot
+
+
+def replace_synthetic_publication(connection, operation_id, old, new):
+    connection.cursor().callproc("ADMIN.PRISMA_CONTROL.REPLACE_SYNTHETIC_PUBLICATION", [operation_id, old, new])
+    connection.commit()
+
+
+def replace_sensor_publication(connection, operation_id, sensor_type, old, new):
+    from .sensors import SENSOR_TYPES
+    if not isinstance(sensor_type, str) or sensor_type not in SENSOR_TYPES:
+        raise ValueError("Invalid sensor reset type")
+    connection.cursor().callproc("ADMIN.PRISMA_CONTROL.REPLACE_SENSOR_PUBLICATION", [operation_id, sensor_type, old, new])
+    connection.commit()
+
+
 def upsert_posts(connection, records, analysis_status, ingested_at=None, batch_key=None):
     """Project durable capture/ingestion/analysis progress without replacing a later state."""
     if analysis_status not in {"captured", "ingested", "processed"}:
         raise ValueError("Invalid post analysis status")
     documents = {}
     for record in records:
+        if record.get("mode") == "simulation":
+            record = {**record, "mode": canonical_mode(record["mode"])}
         key = f"{record['platform']}:{record['source_id']}"
         if (len(key) > 200 or not record["source_id"] or not isinstance(record.get("created_at"), str)
                 or not re.fullmatch(r"[a-z][a-z0-9_]{0,49}", record["platform"])):
             raise ValueError("Invalid post projection identity")
         document = {**record, "id": key}
-        if ingested_at is not None:
-            document["ingested_at"] = ingested_at
-        if batch_key is not None:
-            document["batch_key"] = batch_key
+        captured_at = record.get("captured_at") or (ingested_at if analysis_status == "captured" else None)
+        if captured_at is None and record.get("mode") == "real":
+            captured_at = record.get("observed_at")
+        document.update({name: value for name, value in (("captured_at", captured_at), ("ingested_at", ingested_at), ("batch_key", batch_key))
+                         if value is not None})
         documents[key] = document
     if not documents:
         return
@@ -221,7 +364,7 @@ def upsert_posts(connection, records, analysis_status, ingested_at=None, batch_k
 def query_posts(connection, platform, limit, before_seq=None, max_seq=None):
     """Stable insertion-order page; the first page fixes the capture sequence ceiling."""
     import oracledb
-    if (not isinstance(platform, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,49}", platform)
+    if (platform is not None and platform not in ("x", "facebook", "instagram", "tiktok")
             or type(limit) is not int or not 1 <= limit <= 100
             or any(value is not None and (type(value) is not int or value < minimum)
                    for value, minimum in ((before_seq, 1), (max_seq, 0)))):
@@ -229,6 +372,7 @@ def query_posts(connection, platform, limit, before_seq=None, max_seq=None):
     result = connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.LIST_POSTS", oracledb.DB_TYPE_CLOB,
                                           [platform, limit, before_seq, max_seq])
     document = json.loads(result.read() if hasattr(result, "read") else result)
-    items = [{**item["payload"], "capture_seq": item["capture_seq"], "analysis_status": item["analysis_status"]}
+    items = [{**item["payload"], "capture_seq": item["capture_seq"], "analysis_status": item["analysis_status"],
+              "captured_at": item.get("captured_at") or item["payload"].get("captured_at")}
              for item in document["items"][:limit]]
     return {**document, "items": items, "next_seq": items[-1]["capture_seq"] if len(document["items"]) > limit else None}

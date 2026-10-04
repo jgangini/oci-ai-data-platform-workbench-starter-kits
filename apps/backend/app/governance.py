@@ -9,7 +9,7 @@ from typing import Any
 
 
 GOVERNANCE_MODULE_ID = "ai_data_governance_vsc_extension"
-GOVERNANCE_DISPLAY_NAME = "AI Data Governance for VSC Extension"
+GOVERNANCE_DISPLAY_NAME = "AI Data Governance"
 GOVERNANCE_CREDENTIAL_NAME = "AidpDataGovernanceExtension"
 GOVERNANCE_AGENT_NAME = "ai_data_governance_vsc_extension"
 GOVERNANCE_AGENT_COMPUTE_NAME = "aidp_data_governance_agent_compute"
@@ -168,6 +168,7 @@ answer as Evidence, Explanation, Governance implication, and Recommendation or l
 
 
 _AGENT_TEMPLATE = r'''\
+import hashlib
 """Read-only global AIDP Master Catalog governance Agent."""
 
 import json
@@ -178,8 +179,7 @@ from urllib.parse import quote
 import aidputils
 import oci
 import requests
-from aidputils.agents.toolkit.agent_helper import init_oci_llm, pre_invoke_setup
-from aidputils.agents.toolkit.configs import OCIAIConf
+from aidputils.agents.toolkit.agent_helper import GenAIChatInvoker, GenerativeAiInferenceV2Client, pre_invoke_setup
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -415,12 +415,18 @@ def _credential_signer():
     try:
         values = {
             key: aidputils.secrets.get(name=CONFIG["credential_name"], key=key)
-            for key in ("tenancy", "user", "fingerprint", "region", "private_key")
+            for key in ("tenancy", "user", "fingerprint", "region")
         }
         if any(not isinstance(value, str) or not value for value in values.values()):
             raise ValueError("incomplete credential")
         if values["region"] != CONFIG["region"]:
             raise ValueError("credential region mismatch")
+        identity = hashlib.sha256(json.dumps([values[key] for key in ("tenancy", "user", "fingerprint")], separators=(",", ":")).encode()).hexdigest()
+        if CONFIG.get("identity_sha256") and identity != CONFIG["identity_sha256"]:
+            raise ValueError("credential identity mismatch")
+        values["private_key"] = aidputils.secrets.get(name=CONFIG["credential_name"], key="private_key")
+        if not isinstance(values["private_key"], str) or not values["private_key"]:
+            raise ValueError("incomplete credential")
         return oci.signer.Signer(
             tenancy=values["tenancy"],
             user=values["user"],
@@ -512,14 +518,16 @@ class DataGovernanceAgent:
 
     def setup(self):
         try:
-            self.llm = init_oci_llm(OCIAIConf(
-                model_provider="generic",
+            endpoint = f"https://inference.generativeai.{CONFIG['region']}.oci.oraclecloud.com"
+            client = GenerativeAiInferenceV2Client(endpoint=endpoint, signer=_credential_signer())
+            self.llm = GenAIChatInvoker(
+                provider="generic", auth_type="API_KEY", client=client, is_stream=True,
                 compartment_id=CONFIG["compartment_id"],
-                endpoint=f"https://inference.generativeai.{CONFIG['region']}.oci.oraclecloud.com",
+                service_endpoint=endpoint,
                 model_id=CONFIG["model_id"],
-                model_args={},
+                model_kwargs={},
                 guardrails_config={"name": "Data governance", "description": "Read-only Master Catalog", "policies": []},
-            ))
+            )
         except Exception as exc:
             self.setup_error = _safe_error("setup", exc)
             logger.exception("Governance Agent setup failed")
@@ -545,7 +553,8 @@ class DataGovernanceAgent:
 '''
 
 
-def agent_source(*, model_id: str, region: str, compartment_id: str, platform_id: str) -> bytes:
+def agent_source(*, model_id: str, region: str, compartment_id: str, platform_id: str,
+                 credential_name: str = GOVERNANCE_CREDENTIAL_NAME, identity_sha256: str = "") -> bytes:
     """Render the global two-tool Agent without user tokens or gateway dependencies."""
     if not all((model_id, region, compartment_id, platform_id)):
         raise ValueError("The Agent runtime contract is incomplete")
@@ -555,7 +564,8 @@ def agent_source(*, model_id: str, region: str, compartment_id: str, platform_id
             "region": region,
             "compartment_id": compartment_id,
             "platform_id": platform_id,
-            "credential_name": GOVERNANCE_CREDENTIAL_NAME,
+            "credential_name": credential_name,
+            "identity_sha256": identity_sha256,
         },
         sort_keys=True,
     )
@@ -574,7 +584,8 @@ import uuid
 from datetime import datetime, timezone
 from urllib.parse import quote
 
-import aidputils
+if "aidputils" not in globals():
+    import aidputils
 import oci
 import requests
 from delta.tables import DeltaTable
@@ -660,10 +671,16 @@ SHOULD_DISABLE = CONFIG["desired_enabled"] is False or (
 def _credential_signer():
     values = {
         key: aidputils.secrets.get(name=CONFIG["credential_name"], key=key)
-        for key in ("tenancy", "user", "fingerprint", "region", "private_key")
+        for key in ("tenancy", "user", "fingerprint", "region")
     }
     if any(not value for value in values.values()) or values["region"] != CONFIG["region"]:
         raise RuntimeError("The governance OCI credential is invalid")
+    identity = hashlib.sha256(json.dumps([values[key] for key in ("tenancy", "user", "fingerprint")], separators=(",", ":")).encode()).hexdigest()
+    if CONFIG.get("identity_sha256") and identity != CONFIG["identity_sha256"]:
+        raise RuntimeError("The governance OCI credential identity does not match")
+    values["private_key"] = aidputils.secrets.get(name=CONFIG["credential_name"], key="private_key")
+    if not isinstance(values["private_key"], str) or not values["private_key"]:
+        raise RuntimeError("The governance OCI credential is incomplete")
     return oci.signer.Signer(
         tenancy=values["tenancy"], user=values["user"], fingerprint=values["fingerprint"],
         private_key_file_location=None, private_key_content=values["private_key"],
@@ -1029,6 +1046,8 @@ def governance_sync_notebook(
     bootstrap_snapshot: bool = False,
     workspace_key: str = "",
     job_key: str = "",
+    credential_name: str = GOVERNANCE_CREDENTIAL_NAME,
+    identity_sha256: str = "",
 ) -> dict[str, Any]:
     """Return the protected Spark notebook used by the single continuous workflow."""
     if not all((namespace, platform_id, region)):
@@ -1036,7 +1055,8 @@ def governance_sync_notebook(
     config = json.dumps(
         {
             "module_id": GOVERNANCE_MODULE_ID,
-            "credential_name": GOVERNANCE_CREDENTIAL_NAME,
+            "credential_name": credential_name,
+            "identity_sha256": identity_sha256,
             "namespace": namespace,
             "platform_id": platform_id,
             "region": region,

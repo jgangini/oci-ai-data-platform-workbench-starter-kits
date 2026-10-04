@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0034",
-    "username": "sim_bogota_0034",
-    "display_name": "Fictional Bogotá Reporter 034"
+    "username": "nic_arevalo",
+    "display_name": "Nicolás Arévalo"
   },
-  "message": "En Bosa los peatones evitan un cruce cubierto de agua y buscan una ruta alternativa. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Iba por el cruce de Bosa y tocó buscar otra ruta, está cubierto de agua. Los demás peatones también se están devolviendo por un paso alterno. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 108,
   "available_offset_seconds": 108,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0034-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0034.webp",
+      "sha256": "1a45f41e8cb2a7a92eaf71780f3b8631c81de16729d536067d667ade41d48986",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of pedestrians using a drier alternate path around a flooded fictional Bosa crossing.",
+      "is_simulated": true
+    }
+  ]
 }

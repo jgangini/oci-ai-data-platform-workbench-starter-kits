@@ -14,6 +14,6 @@
     "telco_lineage": "Test end-to-end data lineage for prepaid, postpaid and home services, from Landing through Gold with entity and column relationships.",
     "retail": "Transform customers, products, orders and order items into sales and customer analytics.",
     "healthcare": "Prepare patients, providers, appointments and encounters for operational healthcare analysis.",
-    "ai_data_governance_vsc_extension": "Install one production-wide governance Agent and native metadata synchronization contract for the future VSC extension."
+    "ai_data_governance_vsc_extension": "Deploy one shared AI Data Governance Agent and native Master Catalog metadata synchronization for all AIDP developers."
   }
 }

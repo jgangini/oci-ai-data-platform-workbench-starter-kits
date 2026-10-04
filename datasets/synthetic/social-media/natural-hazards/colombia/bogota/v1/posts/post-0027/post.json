@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0027",
-    "username": "sim_bogota_0027",
-    "display_name": "Fictional Bogotá Reporter 027"
+    "username": "val_arevalo",
+    "display_name": "Valentina Arévalo"
   },
-  "message": "Una corriente poco profunda cruza una zona residencial de Bosa y lleva residuos vegetales. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Por esta calle residencial de Bosa pasa una corriente poco profunda con hojas y restos de plantas. Les comparto lo que veo desde aquí; no es una medición de toda la zona. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 24,
   "available_offset_seconds": 24,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0027-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0027.webp",
+      "sha256": "e8b2c1e9b2f3df318b4ee0f4e0792a94bb1c1087268c2042ae9c6f61b05723df",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of shallow runoff carrying leaves along a fictional residential street in Bosa.",
+      "is_simulated": true
+    }
+  ]
 }

@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0073",
-    "username": "sim_bogota_0073",
-    "display_name": "Fictional Bogotá Reporter 073"
+    "username": "mar_cuellar",
+    "display_name": "Mariana Cuéllar"
   },
-  "message": "En Ciudad Bolívar cayó tierra desde una ladera sobre un sendero; reporto un deslizamiento localizado. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Vecinos de Ciudad Bolívar: acaba de caer tierra de la ladera sobre un pedazo del sendero que baja al barrio. Veo el deslizamiento en ese punto; no estoy hablando de toda la localidad. Cuidado quienes suelen pasar por ahí. #Bogota #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -22,12 +22,12 @@
     {
       "id": "post-0073-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0073/media/image-01.svg",
-      "sha256": "a1ec31cfffead3181a08c580280b3442a897b411580aecd5d2904e256611a484",
+      "mime_type": "image/webp",
+      "dataset_path": "media/landslide-ciudad-bolivar.webp",
+      "sha256": "f5e1f00b437f256bf7480d2e81985a7953a47944ee64972ada9dc4c6922e636d",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Ciudad Bolívar; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of wet earth and stones from a small landslide beside a hillside path in Ciudad Bolívar; a fictional scenario, not documentation of a real incident.",
       "is_simulated": true
     }
   ]

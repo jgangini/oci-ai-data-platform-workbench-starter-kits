@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0083",
-    "username": "sim_bogota_0083",
-    "display_name": "Fictional Bogotá Reporter 083"
+    "username": "jul_cuellar",
+    "display_name": "Juliana Cuéllar"
   },
-  "message": "Vecinos de Ciudad Bolívar mantienen distancia de un borde donde el terreno parece haber cedido. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Los vecinos estamos dejando distancia del borde en Ciudad Bolívar; parece que el terreno cedió ahí. Qué susto. Comparto para quienes vienen por el sendero del barrio. Bogotá #desastre #deslizamiento",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 120,
   "available_offset_seconds": 120,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0083-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0083.webp",
+      "sha256": "7132946c604d818664ca1cca4b915a3b56828bbe709b7935b76b351a6222c750",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A shallow uneven verge and neighbors standing away from the path edge. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

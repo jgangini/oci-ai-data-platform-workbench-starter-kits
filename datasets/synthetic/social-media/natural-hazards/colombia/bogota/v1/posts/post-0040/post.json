@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0040",
-    "username": "sim_bogota_0040",
-    "display_name": "Fictional Bogotá Reporter 040"
+    "username": "san_quintero",
+    "display_name": "Santiago Quintero"
   },
-  "message": "En Bosa apareció una franja seca, aunque la mayor acumulación frente al local todavía permanece. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Ya apareció una franjita seca en Bosa. Es un alivio verla, aunque frente al local sigue la acumulación más grande. Falta para que esto vuelva a la normalidad. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 180,
   "available_offset_seconds": 180,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0040-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/flood-bosa-receding.webp",
+      "sha256": "846627987a9ad814895539fa98b54ea2c65326106c2045f03812ffe3dc6110bd",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of receding floodwater and muddy residential entrances in Bosa; a fictional scenario, not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

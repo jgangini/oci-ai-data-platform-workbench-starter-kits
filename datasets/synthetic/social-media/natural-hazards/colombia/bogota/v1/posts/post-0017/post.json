@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0017",
-    "username": "sim_bogota_0017",
-    "display_name": "Fictional Bogotá Reporter 017"
+    "username": "luc_salcedo",
+    "display_name": "Lucía Salcedo"
   },
-  "message": "La lluvia bajó de intensidad en Kennedy, aunque las entradas de algunas casas siguen anegadas. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Por fin aflojó un poco la lluvia en Kennedy 🙏 Pero las entradas de algunas casas siguen con agua; que llueva menos no significa que la inundación se haya ido. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 192,
   "available_offset_seconds": 192,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0017-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/flood-kennedy-receding.webp",
+      "sha256": "d2ea3aa58812d999f7795738a6eb2484ec54e9fff4963d25363b8c0de6a156bf",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of receding floodwater and an emerging curb in Kennedy; a fictional scenario, not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

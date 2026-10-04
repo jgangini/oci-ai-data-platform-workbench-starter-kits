@@ -25,7 +25,7 @@ COPY apps/prisma-viewer/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY --from=viewer-build /app/.upstream ./.upstream
 COPY --from=viewer-build /app/native ./native
-COPY apps/prisma-viewer/server.py apps/prisma-viewer/context_layers.py ./
+COPY apps/prisma-viewer/server.py apps/prisma-viewer/context_layers.py apps/prisma-viewer/provider_probes.py ./
 COPY apps/backend/app/prisma/area.py ./prisma/area.py
 COPY apps/backend/app/prisma/native_proxy.py ./prisma/native_proxy.py
 RUN mkdir -p /app/.upstream/.gev-cache && chown 65534:65534 /app/.upstream/.gev-cache \

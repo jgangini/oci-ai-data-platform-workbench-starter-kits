@@ -1,6 +1,8 @@
 """Shared capture configuration validation; report activity is separate from severity."""
 from fastapi import HTTPException
 
+from .core import canonical_mode
+
 
 def validate_rules(source):
     window = source.get("correlation_window_minutes", 30)
@@ -20,6 +22,7 @@ def check_revision(current, expected):
 
 def source_view(source):
     result = dict(source)
+    result["mode"] = canonical_mode(source["mode"])
     if source.get("last_error"):
         state = "error"
     elif not source.get("enabled") or not source.get("capture_running"):

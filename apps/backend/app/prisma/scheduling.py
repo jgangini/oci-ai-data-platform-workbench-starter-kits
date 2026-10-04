@@ -34,7 +34,7 @@ def needs_schedule(configuration, simulation, now=None):
         elapsed += max(0, now - float(simulation.get("started_at", now)))
         if elapsed < 600 or not simulation.get("capture_complete", False) or simulation.get("final_job_pending"):
             return True
-    return any(source.get("enabled") and source.get("capture_running") for source in configuration.get("sources", {}).values())
+    return bool(configuration.get("sensors", {}).get("capture_running")) or any(source.get("enabled") and source.get("capture_running") for source in configuration.get("sources", {}).values())
 
 
 def job_path(runtime):
@@ -49,6 +49,11 @@ def set_schedule(request, runtime, enabled):
     etag = headers.get("etag") or headers.get("ETag")
     persistent = any(task.get("isStreaming") for task in job.get("tasks", []))
     payload = {key: job[key] for key in JOB_FIELDS if key in job}
+    payload["tasks"] = [dict(task) for task in job.get("tasks", [])]
+    # Native GET returns zero for an unlimited timeout, but PUT rejects explicit values below 60.
+    for item in [payload, *payload["tasks"]]:
+        if item.get("timeoutSeconds") in (None, 0):
+            item.pop("timeoutSeconds", None)
     payload.update(maxConcurrentRuns=1, queue={"isEnabled": False},
         schedule={"quartzCronExpression": "0 * * * * ?", "timezoneId": "UTC", "pauseStatus": "UNPAUSED" if enabled and not persistent else "PAUSED"})
     if persistent and payload.get("continuous"):
@@ -93,6 +98,22 @@ def submit_run(request, runtime, request_id, *, persistent=False):
     return request("POST", f"/workspaces/{quote(runtime['workspace_key'], safe='')}/jobRuns",
         payload={"jobKey": runtime["job_key"], "parameters": [], "queue": {"isEnabled": not persistent}},
         phase="content", retry_scope="prisma-run:" + request_id)
+
+
+def keep_streams_running(request, runtime, request_id):
+    """One run per independent stream, including idle sources; failures resume their checkpoints."""
+    if runtime.get("streaming_mode") != "persistent":
+        return
+    errors = []
+    for field in ("job_key", "sensor_job_key"):
+        if not runtime.get(field):
+            raise RuntimeError("Independent streaming workflows are not configured")
+        try:
+            submit_run(request, {**runtime, "job_key": runtime[field]}, request_id + "-" + field, persistent=True)
+        except Exception as exc:
+            errors.append(exc)
+    if errors:
+        raise errors[0]
 
 
 def workbench_request(base, region, signed):

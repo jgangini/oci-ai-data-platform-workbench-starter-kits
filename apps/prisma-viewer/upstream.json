@@ -14,6 +14,24 @@
   ],
   "patches": [
     {
+      "path": "src/data/localGeojsonCore.js",
+      "sha256": "161dad48c19b01cc5859f673f975f78740b40963fd52cd2aba9bef8091115c9e",
+      "replacements": [
+        {
+          "before": "function refreshLocalTerrainFloor(viewer, record) {",
+          "after": "export function refreshLocalTerrainFloor(viewer, record) {"
+        },
+        {
+          "before": "function setLocalGroundHeight(record, height) {",
+          "after": "export function setLocalGroundHeight(record, height) {"
+        },
+        {
+          "before": "function updateLocalStemGeometry(viewer, record, now, knownDistance = null) {",
+          "after": "export function updateLocalStemGeometry(viewer, record, now, knownDistance = null) {"
+        }
+      ]
+    },
+    {
       "path": "src/main.js",
       "sha256": "3eaccb0e89704d8177d3cc8bdfc90c7d33c62fdffe5dc5496b76b3062ea77794",
       "replacements": [

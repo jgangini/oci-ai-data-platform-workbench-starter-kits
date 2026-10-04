@@ -6,16 +6,16 @@ import json
 import time
 import threading
 from urllib.parse import quote
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 
 from ..autonomous import AutonomousGovernanceClient
-from .core import PLATFORMS, utc_text, default_source, simulation_state, source_migration, aidp_credential_name
-from . import capture, landing
+from .core import SYNTHETIC_MODES, canonical_mode, PLATFORMS, utc_text, default_source, simulation_state, source_migration, aidp_credential_name, validate_review, review_location
+from . import capture, landing, sensor_capture, sensors, sensor_reset
 from .database import read_document, mutate_document, upsert_posts, query_posts
 from .source_rules import check_revision, source_view, validate_rules
-from .scheduling import needs_schedule, set_schedule, submit_run
+from .scheduling import needs_schedule, set_schedule, submit_run, keep_streams_running
 
 
 class CloudRuntime:
@@ -68,7 +68,8 @@ class CloudRuntime:
                 source.update(status="ready", last_error=None, next_due=None)
             sources.append(source_view(source))
         return {"sources": sources, "simulation": self._simulation_state(), "runtime": "aidp",
-                "pipeline": self._doc("status_pipeline"), "capture_summary": self._doc("status_synthetic")}
+                "pipeline": self._doc("status_pipeline"), "capture_summary": self._doc("status_synthetic"),
+                "synthetic_reset": self._social_reset_status()}
 
     async def sources(self):
         return await self._io(self._sources)
@@ -97,6 +98,9 @@ class CloudRuntime:
         old = {**default_source(platform), **self._doc("configuration").get("sources", {}).get(platform, {})}
         check_revision(old, payload.get("expected_revision"))
         fields = {**source_migration(platform, old), **fields}
+        old["mode"] = canonical_mode(old["mode"])
+        if "mode" in fields:
+            fields["mode"] = canonical_mode(fields["mode"])
         candidate = {**old, **fields}
         if not candidate["enabled"] or candidate["mode"] != old["mode"]:
             fields.update(capture_running=False, capture_paused=False)
@@ -129,6 +133,7 @@ class CloudRuntime:
     async def update_source(self, platform, payload):
         def save():
             with self.capture_lock:
+                self._guard_reset()
                 previous = self._doc("configuration").get("sources", {}).get(platform, {})
                 result = self._update(platform, payload)
                 stopped = previous.get("enabled", True) and previous.get("capture_running") and not result.get("capture_running")
@@ -140,6 +145,9 @@ class CloudRuntime:
     def _wake(self, request_id, only_if_active=False):
         runtime = self._doc("runtime")
         client = self.aidp_factory()
+        if runtime.get("streaming_mode") == "persistent":
+            keep_streams_running(client._request, runtime, request_id)
+            return
         pipeline = self._doc("status_pipeline")
         active = needs_schedule(self._doc("configuration"), self._doc("simulation")) or (pipeline.get("pending_count", 0) > 0 and not pipeline.get("needs_attention"))
         persistent = set_schedule(client._request, runtime, active)
@@ -152,18 +160,17 @@ class CloudRuntime:
             return self._request_source_locked(platform, action)
 
     def _request_source_locked(self, platform, action):
+        self._guard_reset()
         if platform not in PLATFORMS:
             raise HTTPException(404, "Unknown platform")
         source = next(item for item in self._sources()["sources"] if item["platform"] == platform)
-        if not source["enabled"]:
-            raise HTTPException(409, "Enable the source before running it")
         if source["mode"] == "real" and (platform != "x" or not source["credential_configured"]):
             raise HTTPException(409, "Real capture requires a validated connector and credential")
         if action == "run":
             self._change("checkpoint_enrichment", lambda doc: {**doc, "attempts": 0, "retry_at": 0,
                 "last_error": None, "circuit_open": False})
             source = self._start_capture(source)
-        if source["mode"] == "simulation":
+        if source["mode"] in SYNTHETIC_MODES:
             for query in capture.query_lines(source["query"]):
                 capture.search_terms(query)
             if action == "run":
@@ -179,17 +186,17 @@ class CloudRuntime:
 
     def _start_capture(self, source):
         with self.capture_lock:
-            if source.get("capture_running"):
+            if source["enabled"] and source.get("capture_running"):
                 return source
             configured = self._doc("configuration").get("sources", {})
-            institutional = not any(item.get("capture_running") and item.get("enabled") and item.get("mode") == "simulation" for item in configured.values())
+            institutional = not any(item.get("capture_running") and item.get("enabled") and item.get("mode") in SYNTHETIC_MODES for item in configured.values())
             control = self._doc("checkpoint_controls").get(source["platform"]) if source.get("capture_paused") else None
             control = control or {"run_id": str(uuid4()), "anchor_at": time.time(), "seed": 0}
             self._change("checkpoint_controls", lambda doc: {**doc, source["platform"]: control,
                 **({"institutional": control} if institutional else {})})
             self._change("configuration", lambda doc: {**doc, "sources": {**doc.get("sources", {}),
-                source["platform"]: {**doc.get("sources", {}).get(source["platform"], source), "capture_running": True, "capture_paused": False}}})
-            return {**source, "capture_running": True, "capture_paused": False}
+                source["platform"]: {**doc.get("sources", {}).get(source["platform"], source), "enabled": True, "capture_running": True, "capture_paused": False}}})
+            return {**source, "enabled": True, "capture_running": True, "capture_paused": False}
 
     async def test_source(self, platform):
         return await self._io(self._request_source, platform, "test")
@@ -200,6 +207,7 @@ class CloudRuntime:
     async def pause_source(self, platform):
         def pause():
             with self.capture_lock:
+                self._guard_reset()
                 self._change("configuration", lambda doc: {**doc, "sources": {**doc.get("sources", {}),
                     platform: {**default_source(platform), **doc.get("sources", {}).get(platform, {}),
                                "capture_running": False, "capture_paused": True}}})
@@ -216,10 +224,87 @@ class CloudRuntime:
                 return query_posts(connection, platform, limit, before_seq, max_seq)
         return await self._io(read)
 
+    def _guard_reset(self):
+        if self._social_reset_status().get("status") in {"pending", "error"}:
+            raise HTTPException(409, "Finish or retry the Synthetic reset before changing sources or reviews")
+
+    async def synthetic_reset_status(self):
+        return await self._io(self._social_reset_status)
+
+    def _social_reset_status(self):
+        state = self._doc("checkpoint_reset")
+        return {} if state.get("sensor_type") else state
+
+    def _prepare_reset(self):
+        def stop(document):
+            sources = dict(document.get("sources", {}))
+            for platform in PLATFORMS:
+                source = {**default_source(platform), **sources.get(platform, {})}
+                if source["mode"] in SYNTHETIC_MODES:
+                    sources[platform] = {**source, "mode": "Synthetic", "capture_running": False, "capture_paused": False,
+                                         "config_version": source.get("config_version", 1) + 1}
+            return {**document, "sources": sources}
+        configuration = self._change("configuration", stop)
+        for platform, source in configuration["sources"].items():
+            if source["mode"] in SYNTHETIC_MODES:
+                self._change("status_" + platform, lambda doc: {**doc, "status": "paused", "requested_action": None,
+                    "last_error": None, "next_due": None, "last_run_at": None, "last_received_count": None})
+        self._change("simulation", lambda doc: {**doc, "status": "paused", "elapsed_seconds": 0,
+            "started_at": None, "anchor_at": time.time(), "run_id": str(uuid4()), "capture_complete": True,
+            "final_job_pending": False})
+
+    def _reset_command(self, operation_id):
+        current = self._doc("checkpoint_reset")
+        from .synthetic_reset import check_scope
+        check_scope(current, operation_id)
+        if operation_id in current.get("completed_ids", []):
+            return {"operation_id": operation_id, "status": "completed", "stage": "completed"}
+        if current.get("operation_id") == operation_id and current.get("status") == "completed":
+            return current
+        if current.get("status") in {"pending", "error"} and current.get("operation_id") != operation_id:
+            raise HTTPException(409, "A Synthetic reset is already pending; retry that operation")
+        if self._doc("runtime").get("synthetic_reset_version") != 2:
+            raise HTTPException(501, "Update the AIDP workflow before resetting Synthetic data")
+        if current.get("operation_id") != operation_id:
+            current = self._change("checkpoint_reset", lambda doc: {"operation_id": operation_id,
+                "status": "pending", "stage": "preparing", "ready": False, "counts": {}, "completed_ids": doc.get("completed_ids", []),
+                "operation_scopes": doc.get("operation_scopes", {})})
+        return current
+
+    def _reset_synthetic(self, operation_id):
+        operation_id = str(UUID(operation_id))
+        # ponytail: one VM producer owns this lock; multiple replicas require a durable writer lease before scaling.
+        with self.capture_lock:
+            current = self._reset_command(operation_id)
+            if current["status"] == "completed":
+                return current
+            try:
+                if not current.get("ready"):
+                    self._prepare_reset()
+                    self._change("checkpoint_reset", lambda doc: {**doc, "ready": True, "status": "pending", "stage": "waiting_for_aidp", "error": None})
+                elif current.get("status") == "error":
+                    self._change("checkpoint_reset", lambda doc: {**doc, "status": "pending", "error": None}
+                        if doc.get("status") == "error" else doc)
+                self._wake(operation_id)
+            except Exception:
+                # A timed-out submission may already be running; retain its identity and never claim deletion succeeded.
+                self._change("checkpoint_reset", lambda doc: {**doc, "status": "error",
+                    "error": "Synthetic reset could not be scheduled. Retry this operation."}
+                    if doc.get("operation_id") == operation_id and doc.get("status") != "completed" else doc)
+            return self._doc("checkpoint_reset")
+
+    async def reset_synthetic(self, operation_id):
+        return await self._io(self._reset_synthetic, operation_id)
+
     def _simulation_state(self):
         return simulation_state(self._doc("simulation"), time.time())
 
     def _simulation(self, action):
+        with self.capture_lock:
+            self._guard_reset()
+            return self._simulation_locked(action)
+
+    def _simulation_locked(self, action):
         if action not in {"start", "pause", "resume", "reset", "replay"}:
             raise HTTPException(422, "Invalid simulation action")
         state = self._simulation_state()
@@ -240,6 +325,8 @@ class CloudRuntime:
 
     def _produce(self, force=False, platform=None):
         with self.capture_lock:
+            if self._social_reset_status().get("status") in {"pending", "error"}:
+                return False
             now, control = time.time(), self._doc("simulation")
             state = simulation_state(control, now)
             config = self._doc("configuration")
@@ -279,11 +366,80 @@ class CloudRuntime:
             return completed or control.get("final_job_pending", False)
 
     async def tick(self):
-        if await self._io(self._produce):
+        def keep_alive():
+            runtime = self._doc("runtime")
+            if runtime.get("streaming_mode") == "persistent":
+                keep_streams_running(self.aidp_factory()._request, runtime, "keepalive-" + str(int(time.time() // 60)))
+        def sensor_tick():
+            with self.capture_lock:
+                return sensor_capture.cloud_tick(self)
+        results = await asyncio.gather(self._io(keep_alive), self._io(sensor_tick), self._io(self._produce), return_exceptions=True)
+        if results[2] is True:
             run_id = (await self._io(self._doc, "simulation")).get("run_id")
             await self._io(self._wake, str(run_id) + "-final")
             await self._io(self._change, "simulation", lambda doc: {**doc, "final_job_pending": False}
                            if doc.get("run_id") == run_id else doc)
+        for result in results:
+            if isinstance(result, Exception):
+                raise result
+
+    async def sensors(self):
+        config = await self._io(sensor_capture.cloud_configuration, self)
+        config = sensor_reset.annotated(config, await self._io(self._doc, "checkpoint_reset"))
+        return {"config": config, "configs": config["configs"], "runtime": "aidp"}
+
+    async def update_sensors(self, values, sensor_type=None):
+        def save():
+            with self.capture_lock:
+                try:
+                    sensor_reset.guard(self._doc("checkpoint_reset"), sensor_type)
+                    return sensor_capture.cloud_save(self, values, sensor_type)
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from exc
+        return {"config": await self._io(save), "runtime": "aidp"}
+
+    async def control_sensors(self, running, sensor_type=None):
+        def control():
+            with self.capture_lock:
+                sensor_reset.guard(self._doc("checkpoint_reset"), sensor_type)
+                if running and not self._doc("runtime").get("sensor_job_key"):
+                    raise HTTPException(409, "Install the independent Sensors streaming workflow before starting capture")
+                try:
+                    return sensor_capture.cloud_control(self, running, sensor_type)
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from exc
+        return {"config": await self._io(control), "message": "Simulated sensor capture started" if running else "Sensor capture paused"}
+
+    async def sensor_reset_status(self, sensor_type):
+        return sensor_reset.state_for(await self._io(self._doc, "checkpoint_reset"), sensor_type)
+
+    async def reset_sensors(self, sensor_type, operation_id):
+        def reset():
+            with self.capture_lock:
+                return sensor_reset.cloud(self, sensor_type, operation_id)
+        return await self._io(reset)
+
+    async def sensor_location(self, sensor_id, values):
+        def save():
+            with self.capture_lock:
+                self._guard_reset()
+                sensor = next((row for row in self._snapshot().get("sensors", []) if row["sensor_id"] == sensor_id), None)
+                if sensor is None:
+                    raise HTTPException(404, "Unknown sensor")
+                def change(doc):
+                    try:
+                        locations = sensors.update_location(sensor, doc.get("sensor_locations", {}), values, time.time())
+                    except ValueError as exc:
+                        raise HTTPException(422, str(exc)) from exc
+                    return {**doc, "sensor_locations": locations}
+                saved = self._change("reviews", change)["sensor_locations"][sensor_id]
+                result = {"sensor_id": sensor_id, **saved, "location_saved": True, "location_pending_publication": True}
+                try:
+                    self._wake(str(uuid4()))
+                except Exception:
+                    result["publication_error"] = "Sensor location saved, but publication could not be started. Try again."
+                return result
+        return await self._io(save)
 
     async def simulation(self, action):
         return await self._io(self._simulation, action)
@@ -306,18 +462,40 @@ class CloudRuntime:
     async def snapshot(self):
         return await self._io(self._snapshot)
 
-    def _review(self, incident_id, status, note):
+    def _review(self, incident_id, status, note, expected_evidence_ids=None, lat=None, lon=None):
+        with self.capture_lock:
+            self._guard_reset()
+            return self._review_locked(incident_id, status, note, expected_evidence_ids, lat, lon)
+
+    def _review_locked(self, incident_id, status, note, expected_evidence_ids=None, lat=None, lon=None):
         snapshot = self._snapshot()
         incident = next((item for item in snapshot.get("incidents", []) if item["id"] == incident_id), None)
         if incident is None:
             raise HTTPException(404, "Unknown incident")
-        self._change("reviews", lambda doc: {**doc, "items": {**doc.get("items", {}),
-            incident_id: {"status": status, "note": note, "updated_at": utc_text(time.time()), "evidence_ids": incident["evidence_ids"]}}})
-        self._wake(str(uuid4()))
-        return {**incident, "review_status": status, "review_pending_publication": True}
+        if expected_evidence_ids is not None and set(expected_evidence_ids) != set(incident["evidence_ids"]):
+            raise HTTPException(409, "The event evidence changed. Review the current evidence before saving again.")
+        def change(doc):
+            previous = doc.get("items", {}).get(incident_id, {})
+            try:
+                position = review_location(incident, previous, lat, lon)
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            return {**doc, "items": {**doc.get("items", {}), incident_id: {**previous, **position,
+                "status": status, "note": note, "updated_at": utc_text(time.time()), "evidence_ids": incident["evidence_ids"]}}}
+        saved = self._change("reviews", change)["items"][incident_id]
+        result = {**incident, **review_location(incident, saved), "review_status": status, "review_note": note,
+                  "reviewed_evidence_ids": incident["evidence_ids"], "review_saved": True, "review_pending_publication": True}
+        try:
+            self._wake(str(uuid4()))
+        except Exception:
+            result["publication_error"] = "Review saved, but publication could not be started. Try again."
+        return result
 
-    async def review(self, incident_id, status, note):
-        return await self._io(self._review, incident_id, status, note)
+    async def review(self, incident_id, status, note, expected_evidence_ids=None, lat=None, lon=None):
+        validate_review(status, note, lat, lon)
+        if expected_evidence_ids is None and lat is None:
+            return await self._io(self._review, incident_id, status, note)
+        return await self._io(self._review, incident_id, status, note, expected_evidence_ids, lat, lon)
 
     def _chat(self, payload, cookie, key):
         from .agent_gateway import invoke

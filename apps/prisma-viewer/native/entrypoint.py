@@ -5,6 +5,9 @@ import subprocess
 import sys
 import time
 
+from cryptography.exceptions import InvalidTag
+from provider_runtime import environment, file_signature, stored
+
 
 def supervise(commands):
     children = []
@@ -16,9 +19,37 @@ def supervise(commands):
 
     old_handlers = {number: signal.signal(number, stop) for number in (signal.SIGTERM, signal.SIGINT)}
     try:
-        for command in commands:
-            children.append(subprocess.Popen(command))
+        signature = file_signature()
+        failed_signature = None
+        storage_unavailable = False
+        for index, command in enumerate(commands):
+            children.append(subprocess.Popen(command, env=environment(stored()) if index == 0 else None))
         while not stopping:
+            try:
+                changed = file_signature()
+                storage_unavailable = False
+            except OSError:
+                if not storage_unavailable:
+                    print('Provider settings storage is unavailable; keeping the active worker', file=sys.stderr)
+                storage_unavailable = True
+                changed = signature
+            if changed != signature:
+                try:
+                    updated = environment(stored())
+                except (OSError, ValueError, TypeError, InvalidTag):
+                    if changed != failed_signature:
+                        print('Provider settings reload failed; keeping the active worker', file=sys.stderr)
+                    failed_signature = changed
+                else:
+                    children[0].terminate()
+                    try:
+                        children[0].wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        children[0].kill()
+                        children[0].wait()
+                    children[0] = subprocess.Popen(commands[0], env=updated)
+                    signature = changed
+                    failed_signature = None
             if any(child.poll() is not None for child in children):
                 return 1  # Either process exiting, even cleanly, leaves an incomplete viewer.
             time.sleep(0.2)

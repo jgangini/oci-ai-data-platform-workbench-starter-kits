@@ -176,7 +176,7 @@ class FakeAidp:
             raise AidpProvisionPending("workspace is not visible yet", "workspace")
         return [self.module or {
             "module_id": "ai_data_governance_vsc_extension",
-            "display_name": "AI Data Governance for VSC Extension",
+            "display_name": "AI Data Governance",
             "status": "not_installed",
             "installed": False,
             "operation_id": None,
@@ -198,7 +198,7 @@ class FakeAidp:
             raise AidpProvisionPending("workspace is not visible yet", "workspace")
         if self.mode == "module-concurrent-pending":
             self.module = {
-                "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance for VSC Extension",
+                "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance",
                 "status": "installing", "installed": True,
                 "operation_id": "a635d4ba-6d8c-48df-9340-4c0c1266ca66",
                 "operation_type": "install", "phase": "control", "enabled": False,
@@ -206,13 +206,13 @@ class FakeAidp:
             raise AidpProvisionPending("the singleton install is already running", "control")
         if self.mode == "module-pending":
             self.module = {
-                "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance for VSC Extension",
+                "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance",
                 "status": "installing", "installed": True, "operation_id": operation_id,
                 "operation_type": "install", "phase": "sync", "enabled": False,
             }
             raise AidpProvisionPending("first snapshot running", "sync")
         self.module = {
-            "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance for VSC Extension",
+            "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance",
             "status": "active", "installed": True, "operation_id": operation_id,
             "operation_type": "install", "phase": "active", "enabled": True,
         }
@@ -243,7 +243,7 @@ class FakeAidp:
             self.verified_governance_operations.append("delete")
         self.module = None
         return {
-            "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance for VSC Extension",
+            "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance",
             "status": "not_installed", "installed": False, "operation_id": operation_id,
             "operation_type": "delete", "phase": "complete", "enabled": False,
         }
@@ -375,6 +375,24 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     assert response.json()["aidp_platform_id"] == "ocid1.aidataplatform.oc1..test"
     assert response.json()["deployment_mode"] == "laboratory"
     assert response.json()["operator_username"] == "joel.ganggini@oracle.com"
+
+
+def test_admin_time_zone_is_validated_persisted_and_shared(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    assert client.put("/api/admin/settings", json={"time_zone": "UTC"}).status_code == 401
+    login(client)
+    initial = client.get("/api/admin/settings").json()
+    assert initial["time_zone"] == "America/Bogota"
+    assert {"UTC", "America/Bogota", "America/Lima", "Europe/Madrid"} <= set(initial["time_zones"])
+    for zone in ("UTC", "Europe/Madrid", "Asia/Kathmandu"):
+        response = client.put("/api/admin/settings", json={"time_zone": zone})
+        assert response.status_code == 200
+        assert response.json()["time_zone"] == zone
+        assert SettingsStore(client.app.state.settings).get_admin_settings()["time_zone"] == zone
+        assert response.json()["registration_code_configured"] == initial["registration_code_configured"]
+    for zone in ("Not/AZone", "../America/Bogota", "+25:00", ""):
+        assert client.put("/api/admin/settings", json={"time_zone": zone}).status_code == 422
+    assert client.get("/api/admin/settings").json()["time_zone"] == "Asia/Kathmandu"
 
 
 def test_application_release_and_update_are_admin_only_and_idempotent(tmp_path: Path) -> None:
@@ -542,14 +560,16 @@ def test_admin_lists_labs_and_can_add_redeploy_and_remove_one(tmp_path: Path) ->
     assert protected.status_code == 409
 
 
-def test_governance_module_api_is_production_only_and_requires_admin_session(tmp_path: Path) -> None:
+@pytest.mark.parametrize("deployment_mode", ["laboratory", "production"])
+def test_governance_module_api_requires_admin_session_in_both_modes(tmp_path: Path, deployment_mode: str) -> None:
     path = "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension"
-    laboratory = make_client(tmp_path)
+    laboratory = make_client(tmp_path, deployment_mode=deployment_mode)
     assert laboratory.get("/api/admin/modules").status_code == 401
     assert laboratory.post(path).status_code == 401
     login(laboratory)
-    assert laboratory.get("/api/admin/modules").json() == {"modules": []}
-    assert laboratory.post(path).status_code == 404
+    assert laboratory.get("/api/admin/modules").json()["modules"][0]["module_id"] == "ai_data_governance_vsc_extension"
+    assert laboratory.post(path).status_code == 200
+    assert laboratory.app.state.test_aidp.verified_governance_operations == ["install"]
 
 
 def test_governance_module_lifecycle_uses_global_operation_contract(tmp_path: Path) -> None:
@@ -559,7 +579,7 @@ def test_governance_module_lifecycle_uses_global_operation_contract(tmp_path: Pa
     assert modules.status_code == 200
     assert modules.json()["modules"][0] == {
         "module_id": "ai_data_governance_vsc_extension",
-        "display_name": "AI Data Governance for VSC Extension",
+        "display_name": "AI Data Governance",
         "status": "not_installed",
         "installed": False,
         "operation_id": None,
@@ -580,17 +600,19 @@ def test_governance_module_lifecycle_uses_global_operation_contract(tmp_path: Pa
     deleted = client.delete(f"{path}?operation_id={operation_id}")
     assert deleted.status_code == 200
     assert deleted.json()["status"] == "not_installed"
+    assert deleted.json()["message"] == "AI Data Governance was removed. Shared OCI credentials are retained."
 
 
-def test_governance_module_rejects_non_platform_admin_and_lists_unmanaged_admin(tmp_path: Path) -> None:
+@pytest.mark.parametrize("deployment_mode", ["laboratory", "production"])
+def test_governance_module_rejects_non_platform_admin_and_lists_unmanaged_admin(tmp_path: Path, deployment_mode: str) -> None:
     path = "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension"
-    denied = make_client(tmp_path / "denied", mode="not-admin", deployment_mode="production")
+    denied = make_client(tmp_path / "denied", mode="not-admin", deployment_mode=deployment_mode)
     login(denied)
     users = denied.get("/api/admin/users").json()["users"]
     assert users[0]["is_aidp_admin"] is False
     assert denied.post(path).status_code == 403
 
-    unmanaged = make_client(tmp_path / "unmanaged", mode="unmanaged-admin", deployment_mode="production")
+    unmanaged = make_client(tmp_path / "unmanaged", mode="unmanaged-admin", deployment_mode=deployment_mode)
     login(unmanaged)
     users = unmanaged.get("/api/admin/users").json()["users"]
     assert users == [{

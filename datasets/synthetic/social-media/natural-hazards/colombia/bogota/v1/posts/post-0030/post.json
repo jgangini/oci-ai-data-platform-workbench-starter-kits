@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0030",
-    "username": "sim_bogota_0030",
-    "display_name": "Fictional Bogotá Reporter 030"
+    "username": "and_arevalo",
+    "display_name": "Andrés Arévalo"
   },
-  "message": "Al mirar desde un lugar elevado de Bosa se observa la calzada anegada alrededor de varios vehículos. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Desde arriba se ve mejor: en este tramo de Bosa la calzada está anegada alrededor de varios carros. No alcanzo a saber qué profundidad tiene el agua. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 60,
   "available_offset_seconds": 60,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0030-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0030.webp",
+      "sha256": "1a60910d4dc01fcd440ca3ee3c1d003fca463adcb71c9d9cf49185183e6dea58",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated elevated phone photograph of shallow floodwater around parked cars on a fictional Bosa residential road.",
+      "is_simulated": true
+    }
+  ]
 }

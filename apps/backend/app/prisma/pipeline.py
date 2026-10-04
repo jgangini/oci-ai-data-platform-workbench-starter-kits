@@ -8,11 +8,12 @@ import time
 from datetime import datetime
 from threading import RLock
 
-from .core import PLATFORMS, build_snapshot, default_source, simulation_state, utc_text, aidp_credential_name
-from .database import mutate_document, publish, read_document, upsert_posts
-from .landing import decode_record, write_objects
+from .core import SYNTHETIC_MODES, canonical_mode, PLATFORMS, build_snapshot, default_source, simulation_state, utc_text, aidp_credential_name
+from .database import mutate_document, publish, read_document, upsert_posts, reset_version, sensor_reset_version
+from .landing import decode_record, write_objects, ensure_volumes, stream_progress
 from .runtime_secrets import database_connection, runtime_auth
 from .x import XFailure, poll_queries
+from .sensor_pipeline import SensorLake
 
 
 def encoded(value) -> bytes:
@@ -36,7 +37,11 @@ class DeltaLake:
             spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema}")
             spark.sql(f"CREATE TABLE IF NOT EXISTS {table} (id STRING, payload STRING) USING DELTA LOCATION '{uri}'")
             self.tables[layer] = table
+        self.tables["current"] = f"{catalog}.oci_silver.prisma_current"
+        uri = f"oci://{config['bucket']}@{config['namespace']}/03_silver/prisma/current"
+        spark.sql(f"CREATE TABLE IF NOT EXISTS {self.tables['current']} (id STRING, payload STRING) USING DELTA LOCATION '{uri}'")
         install_post_views(spark, catalog, self.tables)
+        self.sensors = SensorLake(spark, config, self.ingest_lock)
 
     def consume(self, config):
         return consume_landing(self.spark, self, config["landing_volume_path"], config["checkpoint_volume_path"])
@@ -45,10 +50,22 @@ class DeltaLake:
         if not records:
             return
         from delta.tables import DeltaTable
+        records = [{**item, "mode": canonical_mode(item["mode"])} if "mode" in item else item for item in records]
         rows = list({item["id"]: (item["id"], encoded(item).decode()) for item in records}.values())
         frame = self.spark.createDataFrame(rows, "id STRING, payload STRING")
         (DeltaTable.forName(self.spark, self.tables[layer]).alias("target")
          .merge(frame.alias("source"), "target.id = source.id").whenNotMatchedInsertAll().execute())
+
+    def stage_snapshot(self, snapshot):
+        """One publisher owns this Silver state; Gold always reads its durable, exact version."""
+        from delta.tables import DeltaTable
+        frame = self.spark.createDataFrame([("current", encoded(snapshot).decode())], "id STRING, payload STRING")
+        (DeltaTable.forName(self.spark, self.tables["current"]).alias("target")
+         .merge(frame.alias("source"), "target.id = source.id").whenMatchedUpdateAll().whenNotMatchedInsertAll().execute())
+        rows = self.spark.table(self.tables["current"]).where("id = 'current'").select("payload").take(2)
+        if len(rows) != 1 or json.loads(rows[0].payload) != snapshot:
+            raise RuntimeError("Silver publication state did not round-trip")
+        return json.loads(rows[0].payload)
 
     def pending(self, ids=None):
         frame = self.spark.table(self.tables["bronze"]).join(self.spark.table(self.tables["silver"]).select("id"), "id", "left_anti")
@@ -59,6 +76,38 @@ class DeltaLake:
 
     def pending_count(self):
         return self.spark.table(self.tables["bronze"]).join(self.spark.table(self.tables["silver"]).select("id"), "id", "left_anti").count()
+
+    def _synthetic(self, layer):
+        from pyspark.sql import functions as F
+        return self.spark.table(self.tables[layer]).where(F.get_json_object("payload", "$.mode").isin(*SYNTHETIC_MODES))
+
+    def synthetic_ids(self):
+        for layer in ("bronze", "silver"):
+            for row in self._synthetic(layer).select("id").toLocalIterator():
+                yield row.id
+
+    def delete_synthetic(self):
+        from delta.tables import DeltaTable
+        from pyspark.sql import functions as F
+        counts = {}
+        for layer in ("bronze", "silver"):
+            counts[layer] = self._synthetic(layer).count()
+            DeltaTable.forName(self.spark, self.tables[layer]).delete(F.get_json_object("payload", "$.mode").isin(*SYNTHETIC_MODES))
+        return counts
+
+    def publications(self):
+        for row in self.spark.table(self.tables["gold"]).toLocalIterator():
+            snapshot = json.loads(row.payload)
+            if snapshot.get("version") != row.id:
+                raise ValueError("Gold publication identity mismatch")
+            yield snapshot
+
+    def delete_publication(self, version):
+        from delta.tables import DeltaTable
+        from pyspark.sql import functions as F
+        if not re.fullmatch(r"gold-[a-f0-9]{32}", version):
+            raise ValueError("Invalid Gold publication identity")
+        DeltaTable.forName(self.spark, self.tables["gold"]).delete(F.col("id") == version)
 
     def backfill_posts(self, connection):
         if read_document(connection, "runtime").get("post_index_revision") == 1:
@@ -80,8 +129,8 @@ class DeltaLake:
         scenario = F.get_json_object("payload", "$.raw_metadata.scenario_run_id")
         continuous = F.get_json_object("payload", "$.raw_metadata.capture_run_id")
         created_at = F.get_json_object("payload", "$.created_at")
-        frame = frame.where(((mode == "simulation") & (scenario == (run_id or ""))) |
-                            ((mode == "simulation") & continuous.isNotNull() & (created_at >= utc_text(now - 86400))) |
+        frame = frame.where((mode.isin(*SYNTHETIC_MODES) & (scenario == (run_id or ""))) |
+                            (mode.isin(*SYNTHETIC_MODES) & continuous.isNotNull() & (created_at >= utc_text(now - 86400))) |
                             ((mode == "real") & (created_at >= utc_text(now - 86400))))
         # ponytail: a bounded demo snapshot; production should page evidence through the serving API.
         rows = frame.orderBy("id").limit(5001).collect()
@@ -156,7 +205,7 @@ def install_post_views(spark, catalog, tables):
         'processed' AS analysis_status,payload
       FROM {tables['silver']}""")
     event_schema = ('ARRAY<STRUCT<id:STRING,title:STRING,summary:STRING,revision:BIGINT,updated_at:STRING,category:STRING,locality:STRING,mode:STRING,'
-        'severity:STRING,review_status:STRING,created_at:STRING,last_observed_at:STRING,'
+        'severity:STRING,review_status:STRING,review_note:STRING,reviewed_evidence_ids:ARRAY<STRING>,created_at:STRING,last_observed_at:STRING,'
         'lat:DOUBLE,lon:DOUBLE,location_method:STRING,corroboration_score:DOUBLE,corroboration_status:STRING,'
         'report_activity:STRING,report_counts:MAP<STRING,BIGINT>,rule_versions:MAP<STRING,BIGINT>,'
         'correlation_windows_minutes:MAP<STRING,BIGINT>>>')
@@ -167,6 +216,13 @@ def install_post_views(spark, catalog, tables):
     spark.sql(f"""CREATE OR REPLACE VIEW {catalog}.oci_gold.event_posts AS
       SELECT p.id AS publication_version,relation.* FROM {tables['gold']} p
       LATERAL VIEW explode(from_json(get_json_object(payload,'$.event_posts'),'{relation_schema}')) records AS relation""")
+    spark.sql(f"""CREATE OR REPLACE VIEW {catalog}.oci_silver.events AS
+      SELECT get_json_object(p.payload,'$.version') AS publication_version,event.id AS event_id,event.*
+      FROM {tables['current']} p
+      LATERAL VIEW explode(from_json(get_json_object(payload,'$.incidents'),'{event_schema}')) records AS event""")
+    spark.sql(f"""CREATE OR REPLACE VIEW {catalog}.oci_silver.event_posts AS
+      SELECT get_json_object(p.payload,'$.version') AS publication_version,relation.* FROM {tables['current']} p
+      LATERAL VIEW explode(from_json(get_json_object(payload,'$.event_posts'),'{relation_schema}')) records AS relation""")
 
 
 def ingest_page(connection, objects, lake, config, platform, events, checkpoint=None):
@@ -175,26 +231,6 @@ def ingest_page(connection, objects, lake, config, platform, events, checkpoint=
     upsert_posts(connection, events, "captured", batch_key=key)
     if checkpoint is not None:
         mutate_document(connection, "checkpoint_" + platform, lambda current: {**current, **checkpoint})
-
-
-def ensure_volumes(spark, config):
-    """Verify bootstrap-provisioned volumes before any streaming or table writes."""
-    catalog = config.get("catalog", "oci_medallion")
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", catalog):
-        raise ValueError("Invalid PRISMA catalog")
-    schema = catalog + ".prisma_ingest"
-    uri = f"oci://{config['landing_bucket']}@{config['namespace']}/{config['landing_prefix']}"
-    if "'" in uri or config["landing_volume_path"] != f"/Volumes/{catalog}/prisma_ingest/landing" or config["checkpoint_volume_path"] != f"/Volumes/{catalog}/prisma_ingest/checkpoints/bronze-v1":
-        raise ValueError("Invalid PRISMA governed streaming path")
-    for name, kind in (("landing", "EXTERNAL"), ("checkpoints", "MANAGED")):
-        rows = spark.sql(f"DESCRIBE VOLUME {schema}.{name}").collect()
-        if len(rows) != 1:
-            raise RuntimeError("PRISMA volume description must contain exactly one row")
-        details = rows[0].asDict()
-        if any(details.get(field) != value for field, value in {"name": name, "catalog": catalog, "database": "prisma_ingest"}.items()):
-            raise RuntimeError("PRISMA volume identity does not match the deployment")
-        if str(details.get("volumeType", "")).upper() != kind or (kind == "EXTERNAL" and str(details.get("storageLocation", "")).rstrip("/") != uri.rstrip("/")):
-            raise RuntimeError("PRISMA volume type or storage location does not match the deployment")
 
 
 def start_landing(spark, lake, path, checkpoint, *, persistent=False):
@@ -211,14 +247,6 @@ def start_landing(spark, lake, path, checkpoint, *, persistent=False):
         for _, query in streams:
             query.stop()
         raise
-
-
-def stream_progress(queries):
-    streams = [{"format": name, "query_id": str(query.id), "microbatches": len(query.recentProgress),
-                "last_input_rows": (query.lastProgress or {}).get("numInputRows", 0)} for name, query in queries]
-    return {"query_id": streams[-1]["query_id"], "streams": streams,
-            "microbatches": sum(item["microbatches"] for item in streams),
-            "last_input_rows": sum(item["last_input_rows"] for item in streams)}
 
 
 def consume_landing(spark, lake, path, checkpoint):
@@ -312,7 +340,7 @@ def _poll_x(connection, objects, lake, config, source, status, secret_get, now, 
 def poll_source(connection, objects, lake, config, source, status, secret_get, now, client):
     import httpx
     revision = config.get("configuration_revision", 0)
-    if not source["enabled"] or not (source.get("capture_running", False) or status.get("requested_action")) or not _due(status, revision, now):
+    if (not source["enabled"] and status.get("requested_action") != "test") or not (source.get("capture_running", False) or status.get("requested_action")) or not _due(status, revision, now):
         return
     values = {"status": "simulation", "last_error": None, "next_due": utc_text(now + source["interval_minutes"] * 60)}
     try:
@@ -350,6 +378,9 @@ def publish_snapshot(connection, objects, lake, config, events, reviews, simulat
                     raise ValueError("Previous publication version does not match its pointer")
                 previous = published["incidents"]
     snapshot = build_snapshot(events, reviews, "", "", rules=rules, previous=previous, now=now)
+    if getattr(lake, "sensors", None) is not None:
+        from .sensors import apply_locations
+        snapshot["sensors"] = apply_locations(lake.sensors.latest(now), read_document(connection, "reviews").get("sensor_locations", {}))
     if rules is not None and hasattr(lake, "apply_activity"):
         lake.apply_activity(snapshot, rules, now)
     snapshot.update(runtime="aidp", simulation=simulation)
@@ -361,6 +392,7 @@ def publish_snapshot(connection, objects, lake, config, events, reviews, simulat
         pending = {"version": version, "published_at": utc_text(now)}
         mutate_document(connection, "runtime", lambda current: {**current, "publication": pending})
     snapshot.update(version=version, published_at=pending["published_at"])
+    snapshot = lake.stage_snapshot(snapshot)
     lake.put("gold", [{"id": version, **snapshot}])
     publish(connection, snapshot)
     key = f"04_gold/prisma/snapshots/{version}.json"
@@ -429,14 +461,58 @@ def _tick(connection, objects, lake, config, secret_get, now, classifier, client
                                 rules={source["platform"]: source for source in sources})
     mutate_document(connection, "status_pipeline", lambda current: {**current, **enrichment,
         "status": "needs_attention" if enrichment["needs_attention"] else "pending" if enrichment["pending_count"] else "ready", "last_run_at": utc_text(now),
+        "pipeline_revision": config.get("pipeline_revision"),
+        "sensor_reset_version": 1,
         "configuration_revision": config["configuration_revision"], "version": snapshot["version"], "stream": progress})
     return snapshot
+
+
+def process_reset(connection, objects, lake, config, now):
+    command = read_document(connection, "checkpoint_reset")
+    if command.get("status") == "error":
+        raise RuntimeError("Synthetic reset is blocked; explicitly retry the same operation")
+    if command.get("status") != "pending" or command.get("ready") is not True:
+        return None
+    if command.get("sensor_type"):
+        if (command.get("sensor_drained_operation_id") != command.get("operation_id") or
+                command.get("sensor_drained_revision") != config.get("pipeline_revision")):
+            return None
+        from .sensor_reset import execute
+    else:
+        from .synthetic_reset import execute
+    snapshot = execute(connection, objects, lake, config, now, command, publish_snapshot)
+    mutate_document(connection, "status_pipeline", lambda doc: {**doc, "status": "ready",
+        "version": snapshot["version"], "last_run_at": utc_text(now), "pending_count": lake.pending_count(), "last_error": None})
+    return snapshot
+
+
+def stop_streams(queries):
+    for _, query in queries:
+        query.stop()
+    for _, query in queries:
+        query.awaitTermination()
 
 
 def run_persistent(spark, connection, objects, lake, config, secret_get, classifier, client, clock):
     queries = start_landing(spark, lake, config["landing_volume_path"], config["checkpoint_volume_path"], persistent=True)
     try:
         while True:
+            sensor_status = read_document(connection, "status_sensorstream")
+            if (sensor_status.get("sensor_layers_version") != 2 or
+                    sensor_status.get("pipeline_revision") != config.get("pipeline_revision")):
+                time.sleep(10)
+                continue
+            command = read_document(connection, "checkpoint_reset")
+            if command.get("sensor_type") and command.get("status") == "pending" and (
+                    not command.get("ready") or command.get("sensor_drained_operation_id") != command.get("operation_id") or
+                    command.get("sensor_drained_revision") != config.get("pipeline_revision")):
+                time.sleep(10)
+                continue
+            if command.get("status") in {"pending", "error"} and command.get("ready") is True:
+                stop_streams(queries)
+                queries = []
+                process_reset(connection, objects, lake, config, clock())
+                queries = start_landing(spark, lake, config["landing_volume_path"], config["checkpoint_volume_path"], persistent=True)
             for _, query in queries:
                 if query.exception() or not query.isActive:
                     raise RuntimeError("The persistent Landing stream stopped")
@@ -455,17 +531,27 @@ def run(spark, secret_get, config, *, clock=time.time, classifier=None, connecti
     from .classification import classify
     with ExitStack() as stack:
         connection = connection or stack.enter_context(database_connection(secret_get, "PrismaWriterRuntime"))
-        sdk_config, signed = runtime_auth(secret_get, config["region"]) if objects is None or classifier is None else ({}, None)
+        sdk_config, signed = runtime_auth(secret_get, config["region"], config.get("oci_credential_name", "PrismaWriterRuntime"),
+            config.get("oci_identity_sha256", "")) if objects is None or classifier is None else ({}, None)
         objects = objects or oci.object_storage.ObjectStorageClient(sdk_config, signer=signed)
         client = client or stack.enter_context(httpx.Client())
         lake = lake or DeltaLake(spark, config)
-        if hasattr(lake, "backfill_posts"):
-            lake.backfill_posts(connection)
+        if reset_version(connection) != 2:
+            raise RuntimeError("Synthetic reset database contract is not installed")
+        if sensor_reset_version(connection) != 1:
+            raise RuntimeError("Sensor reset database contract is not installed")
+        if read_document(connection, "runtime").get("synthetic_reset_version") != 2:
+            mutate_document(connection, "runtime", lambda doc: {**doc, "synthetic_reset_version": 2})
         def on_ingested(events, batch_key):
             # Streaming callbacks run on other threads; never share the enrichment connection.
             with database_connection(secret_get, "PrismaWriterRuntime") as ingestion_connection:
                 upsert_posts(ingestion_connection, events, "ingested", ingested_at=utc_text(clock()), batch_key=batch_key)
         lake.on_ingested = on_ingested
+        reset_snapshot = process_reset(connection, objects, lake, config, clock())
+        if reset_snapshot is not None and config.get("streaming_mode", "finite") != "persistent":
+            return reset_snapshot
+        if hasattr(lake, "backfill_posts"):
+            lake.backfill_posts(connection)
         if classifier is None:
             inference = oci.generative_ai_inference.GenerativeAiInferenceClient(sdk_config, signer=signed,
                 retry_strategy=oci.retry.NoneRetryStrategy(), timeout=(10, 30))
@@ -477,7 +563,8 @@ def run(spark, secret_get, config, *, clock=time.time, classifier=None, connecti
             if config.get("workbench_base"):
                 from .scheduling import reconcile_after_tick, workbench_request
                 from .runtime_secrets import signer
-                request = workbench_request(config["workbench_base"], config["region"], signed or signer(secret_get))
+                request = workbench_request(config["workbench_base"], config["region"], signed or signer(secret_get,
+                    config.get("oci_credential_name", "PrismaWriterRuntime"), config.get("oci_identity_sha256", "")))
                 reconcile_after_tick(connection, request, clock())
             return snapshot
         except Exception as exc:

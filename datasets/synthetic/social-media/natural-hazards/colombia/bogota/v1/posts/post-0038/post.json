@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0038",
-    "username": "sim_bogota_0038",
-    "display_name": "Fictional Bogotá Reporter 038"
+    "username": "cam_quintero",
+    "display_name": "Camilo Quintero"
   },
-  "message": "Familias de Bosa mantienen a niños y mascotas lejos de los accesos que siguen anegados. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Mi hijo quiere salir a mirar el agua y yo con el corazón en la mano. En Bosa varias familias estamos manteniendo a los niños y a las mascotas lejos de las entradas que siguen inundadas. A los vecinos: estén pendientes de los pequeños, por favor ❤️ #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 156,
   "available_offset_seconds": 156,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0038-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0038.webp",
+      "sha256": "4661bb66715598a4b10326c89e7a2995e95c3bd965c95487062c099847c8da2c",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of a household barrier separating a dry living area from a flooded exterior entrance in fictional Bosa.",
+      "is_simulated": true
+    }
+  ]
 }

@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0082",
-    "username": "sim_bogota_0082",
-    "display_name": "Fictional Bogotá Reporter 082"
+    "username": "nic_cuellar",
+    "display_name": "Nicolás Cuéllar"
   },
-  "message": "Desde una zona estable de Ciudad Bolívar se observa suelo desprendido junto a vegetación inclinada. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Desde un sitio firme se alcanza a ver la tierra desprendida junto a unas plantas inclinadas en Ciudad Bolívar. Preferí quedarme de este lado del camino. #deslizamiento #Bogota #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 108,
   "available_offset_seconds": 108,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0082-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0082.webp",
+      "sha256": "364f0d1bad8172dbc5a91cab85b5ea2f04379f3c433b02bc8e94ee73a2a6944a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Detached soil and leaning plants seen from the opposite side of a path. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

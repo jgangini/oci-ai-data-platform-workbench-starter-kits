@@ -63,14 +63,43 @@ def claim(category="inundacion", locality="Kennedy", **changes):
 
 
 class ClaimsModel:
-    def __init__(self, labels):
+    def __init__(self, labels, response_text=None):
         self.labels, self.requests = labels, []
+        self.response_text = response_text
 
     def chat(self, request):
         self.requests.append(request)
-        text = json.dumps({"items": self.labels})
+        text = json.dumps({"items": self.labels}) if self.response_text is None else self.response_text
         return SimpleNamespace(data=SimpleNamespace(chat_response=SimpleNamespace(choices=[
             SimpleNamespace(message=SimpleNamespace(content=[SimpleNamespace(text=text)]))])))
+
+
+@pytest.mark.parametrize("template,trim,accepted", [
+    ("<json>", 0, True), ("```json\n<json>\n```", 0, True),
+    (" \n```JSON \r\n<json>\r\n```\n", 0, True), ("```\n<json>\n```", 0, True),
+    ("Here is the result:\n```json\n<json>\n```", 0, False),
+    ("```json\n<json>\n```\nExplanation", 0, False), ("```json\n<json>", 0, False),
+    ("```yaml\n<json>\n```", 0, False), ("```json\n<json>\n```", 1, False),
+    ("```json\n<json>\n```\n```json\n<json>\n```", 0, False), ("<json><json>", 0, False),
+])
+def test_classifier_accepts_only_plain_json_or_one_complete_json_fence(template, trim, accepted):
+    event = normalize_event({"platform": "x", "source_id": "fenced", "mode": "simulation",
+        "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"})
+    label = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium",
+             "confidence": 0.7, "claims": [claim()]}
+    payload = json.dumps({"items": [label]})
+    client = ClaimsModel([label], template.replace("<json>", payload[:-trim] if trim else payload))
+    if not accepted:
+        with pytest.raises(json.JSONDecodeError):
+            classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
+        return
+    result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
+    assert result["id"] == event["id"] and result["mode"] == "Synthetic"
+    assert result["claims"][0]["evidence_text"] == event["text"]
+    label["claims"][0]["evidence_text"] = "Invented quotation"
+    client.response_text = template.replace("<json>", json.dumps({"items": [label]}))
+    with pytest.raises(ValueError, match="quote the original"):
+        classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
 
 
 def test_multiple_grounded_claims_preserve_one_post_and_ignore_model_provenance_overrides():
@@ -84,7 +113,7 @@ def test_multiple_grounded_claims_preserve_one_post_and_ignore_model_provenance_
     client = ClaimsModel([labels])
     results = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
     assert len(results) == 1 and results[0]["id"] == event["id"] and len(results[0]["claims"]) == 2
-    assert results[0]["mode"] == "simulation" and results[0]["model_version"] == "model"
+    assert results[0]["mode"] == "Synthetic" and results[0]["model_version"] == "model"
     assert results[0]["prompt_version"] == PROMPT_VERSION
     assert {item["relation"] for item in results[0]["claims"]} == {"supports", "contradicts"}
     assert [(item["lat"], item["lon"]) for item in results[0]["claims"]] == [LOCALITIES["Kennedy"], LOCALITIES["Bosa"]]

@@ -1,6 +1,6 @@
-# AI Data Governance for VSC Extension
+# AI Data Governance
 
-This production-only module installs one global governance Agent and the native AIDP resources that a future VS Code extension will discover. It does not deploy OKE, OCI API Gateway, Vault, KMS, an OAuth client, a JDBC identity, or a separate policy-enforcement gateway.
+This shared module installs one global governance Agent and native Master Catalog metadata synchronization. It is available to administrators in both laboratory and production deployments. Its internal module ID remains `ai_data_governance_vsc_extension` to preserve existing installations. It does not deploy OKE, OCI API Gateway, Vault, KMS, an OAuth client, a JDBC identity, or a separate policy-enforcement gateway.
 
 ## Runtime boundaries
 
@@ -12,6 +12,10 @@ This production-only module installs one global governance Agent and the native 
 | Future VS Code extension | Discover the fixed bucket and update configuration or access mappings as an administrator | Outside this repository |
 
 Autonomous AI Database remains mandatory for Agent memory. Governance metadata and access mappings are separate Delta state and are never used as an Agent-memory fallback.
+
+Governance and PRISMA use the same OCI credential selection: reuse `AidpDataGovernanceExtension` when it exists, otherwise reuse `PrismaWriterRuntime`. An existing credential must be unique, active and of type `SECRET_TOKEN`; an invalid preferred credential stops deployment instead of falling back. Governance creates a credential only when both names are absent, and never overwrites an existing one. Runtime code checks the configured tenancy/user/fingerprint identity hash before reading the private key. PRISMA's database reader and writer remain separate and retain their database privileges.
+
+Model selection is independent of credential reuse. Deploy Studio supplies the selected regional Chat model as `agent_model_id`; the registration application receives it as `AGENT_MODEL_ID`. Reusing an OCI identity does not choose a model, rotate a key or copy another agent's model configuration. A new deployment must receive the intended model's actual ID from the regional catalog. A successful PRISMA agent test does not certify a Governance deployment or its catalog synchronization.
 
 ## Fixed storage contract
 
@@ -52,20 +56,20 @@ The continuous job is intentional because normal AIDP schedules have a minimum f
 
 ## Lifecycle
 
-Installation is available only in production and only when the selected OCI user belongs to `AI_DATA_PLATFORM_ADMIN`. The first administrator starts the singleton operation; concurrent requests reuse the same operation and cannot create duplicates. The VM reconciles these phases:
+Open **Settings → Application → AI Data Governance → Deploy / Redeploy** and select an existing `AI_DATA_PLATFORM_ADMIN` account. The action opens the existing module dialog, including operation status, retry, redeploy and deletion. Installation requires both an application administrator session and verified membership of the selected OCI user in `AI_DATA_PLATFORM_ADMIN`, in either deployment mode. The first administrator starts the singleton operation; concurrent requests reuse the same operation and cannot create duplicates. Participant registration never installs this module or grants administrator access. The VM reconciles these phases:
 
-1. Validate production mode, fixed storage, administrator role, and singleton state.
+1. Validate deployment settings, fixed storage, administrator role, and singleton state.
 2. Create the four tables with `enabled=0`.
-3. Reconcile the dedicated OCI credential, protected notebook, continuous workflow, and first snapshot.
+3. Reuse the validated OCI credential without overwriting it (create it only when absent), then reconcile the protected notebook, continuous workflow, and first snapshot.
 4. Reconcile dedicated AI Compute, the global Agent, and its deployment.
 5. Apply exact role permissions.
 6. Set `enabled=1` only after synchronization and deployment succeed.
 
-Redeploy repairs code, workflow, Agent, compute, and permissions while preserving all table data and the previous `enabled` value. Delete first disables and pauses the workflow, then removes the deployment, Agent, dedicated AI Compute, credential, notebook, workflow, all four tables, and only their exact Object Storage prefixes. It keeps the bucket, schema, shared Spark compute, Autonomous database, and other starter kits; the global manifest is removed last.
+Redeploy repairs code, workflow, Agent, compute, and permissions while preserving all table data and the previous `enabled` value. Delete first disables and pauses the workflow, then removes the deployment, Agent, dedicated AI Compute, notebook, workflow, all four tables, and only their exact Object Storage prefixes. It keeps shared OCI credentials, the bucket, schema, shared Spark compute, Autonomous database, and other starter kits; the global manifest is removed last. Removing Governance never rotates or deletes a credential reused by another application.
 
 ## Acceptance gates
 
-- The module is absent from public config, participant registration, user creation, and laboratory mode.
+- The module remains separate from public participant kit selection and user creation; its administrative lifecycle is available in both deployment modes.
 - Admin APIs return `401` without a session and reject non-platform-admin targets with `403`.
 - Concurrent lifecycle calls are idempotent and interrupted phases can resume from the protected manifest.
 - `AIDP_DEVELOPER=USE` and `AI_DATA_PLATFORM_ADMIN=ADMIN`; participants cannot edit Agent source.

@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0015",
-    "username": "sim_bogota_0015",
-    "display_name": "Fictional Bogotá Reporter 015"
+    "username": "val_salcedo",
+    "display_name": "Valentina Salcedo"
   },
-  "message": "Una alcantarilla visible en Kennedy permanece rodeada de residuos y no absorbe la escorrentía. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "La alcantarilla que tengo a la vista en Kennedy está rodeada de residuos y no recibe el agua que baja por la calle. ¿Nos ayudan a revisar este punto? Así es muy difícil. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 168,
   "available_offset_seconds": 168,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0015-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0015.webp",
+      "sha256": "f1480b61975a9a7f762b9750c27a050d5b05572cf811abe94d501fa9d8e315be",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0015: Downward smartphone photo of a ROUND iron manhole cover near a curb in Kennedy, Bogotá; wet leaves, crumpled anonymous plastic wrapping and small twigs collect around it while rainwater bypasses the clogged opening. Broken asphalt and red-painted low curb, wet beige wall corner at edge. Natural imperfect focus, ordinary morning-grey daylight, no people, no readable marks, no rectangular drain grate.",
+      "is_simulated": true
+    }
+  ]
 }

@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0012",
-    "username": "sim_bogota_0012",
-    "display_name": "Fictional Bogotá Reporter 012"
+    "username": "mat_rojas",
+    "display_name": "Mateo Rojas"
   },
-  "message": "El agua arrastra hojas y envases pequeños por una vía de Kennedy; nadie debería probar a cruzarla. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Pilas, vecinos de Kennedy: por esta vía el agua va arrastrando hojas y envases pequeños. No intenten atravesar la corriente solo porque parece bajita. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 132,
   "available_offset_seconds": 132,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0012-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0012.webp",
+      "sha256": "0e2e1fe0190f150fd2be7e8ca4a306262e3eb22fbcb8dfa32b35f79e0387c31a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0012: Very low angled phone photograph along flowing shallow brown rainwater in a Kennedy, Bogotá residential gutter, wet leaves and two small empty translucent plastic bottles carried past an uneven reddish-brick corner. Longer street is softly blurred in the background; foreground texture and moving small debris are the subject. No drain or people in frame, ordinary localized street flood, cloudy daylight.",
+      "is_simulated": true
+    }
+  ]
 }

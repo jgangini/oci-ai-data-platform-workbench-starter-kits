@@ -19,9 +19,9 @@ def assistant_texts(value, assistant=False):
     if not isinstance(value, dict):
         return []
     role, kind = str(value.get("role", "")).lower(), str(value.get("type", "")).lower()
-    if role in {"user", "human", "tool"} or kind in {"trace", "reasoning", "tool_call", "function_call"} or kind.startswith("input_"):
+    if role in {"user", "human", "tool", "system", "function"} or kind in {"user", "human", "tool", "system", "function", "trace", "reasoning", "tool_call", "function_call"} or kind.startswith("input_"):
         return []
-    assistant = assistant or role in {"assistant", "ai"}
+    assistant = assistant or role in {"assistant", "ai"} or kind == "ai"
     texts = [value[key] for key in ("output_text", "answer", "text")
              if assistant and isinstance(value.get(key), str)]
     for key in ("output", "content", "message", "messages", "response", "result"):
@@ -57,8 +57,11 @@ def query_content(payload, snapshot):
     incidents = {item["id"] for item in snapshot.get("incidents", [])}
     if payload.get("incident_id") and payload["incident_id"] not in incidents:
         raise HTTPException(422, "Unknown incident")
+    if payload.get("sensor_id") and payload["sensor_id"] not in {item["sensor_id"] for item in snapshot.get("sensors", [])}:
+        raise HTTPException(422, "Unknown sensor")
     return json.dumps({"question": question, "context": {"version": snapshot["version"],
-        "published_at": snapshot.get("published_at"), "incident_id": payload.get("incident_id"), "filters": filters}}, ensure_ascii=False)
+        "published_at": snapshot.get("published_at"), "incident_id": payload.get("incident_id"),
+        "sensor_id": payload.get("sensor_id"), "filters": filters}}, ensure_ascii=False)
 
 
 def scoped_session(payload, cookie, key):
@@ -93,10 +96,15 @@ def invoke(client, endpoint, payload, cookie, key, snapshot):
     texts = assistant_texts(body)
     if not texts:
         raise HTTPException(502, "The agent did not return a response")
-    result = json.loads(texts[-1])
+    fenced = re.fullmatch(r"(?:\.[ \t]*\r?\n)?```(?:json)?[ \t]*\r?\n(.*?)\r?\n```", texts[-1].strip(), flags=re.DOTALL | re.IGNORECASE)
+    result = json.loads(fenced[1] if fenced else texts[-1])
     evidence = {item["id"] for item in snapshot.get("evidence", [])}
     if (not isinstance(result, dict) or result.get("version") != snapshot["version"]
         or not isinstance(result.get("evidence_ids"), list)
         or any(not isinstance(ref, str) or ref not in evidence for ref in result["evidence_ids"])):
         raise HTTPException(502, "The response does not match the evidence")
+    sensor_refs = result.get("sensor_evidence_ids", [])
+    sensor_ids = {item["id"] for item in snapshot.get("sensors", [])}
+    if not isinstance(sensor_refs, list) or any(not isinstance(ref, str) or ref not in sensor_ids for ref in sensor_refs):
+        raise HTTPException(502, "The response does not match the sensor evidence")
     return result

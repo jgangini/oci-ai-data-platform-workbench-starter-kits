@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0054",
-    "username": "sim_bogota_0054",
-    "display_name": "Fictional Bogotá Reporter 054"
+    "username": "and_pineda",
+    "display_name": "Andrés Pineda"
   },
-  "message": "La humareda aumenta por momentos en Chapinero; quienes miran permanecen lejos del borde de vegetación. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "La humareda en Chapinero se pone más espesa por ratos. Los que estamos mirando seguimos retirados del borde, mejor dejar ese espacio libre. Comparto por si alguien va subiendo por el camino. #Bogota #Colombia #incendio",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 60,
   "available_offset_seconds": 60,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0054-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0054.webp",
+      "sha256": "2ef6ddb660e25a0019a64835dcb9b4d65843453240d07c0a8168892e0dec36a8",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: una humareda espesa sobre vegetación de Chapinero, observada desde un descansillo retirado; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

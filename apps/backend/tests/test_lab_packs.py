@@ -29,7 +29,8 @@ def test_catalog_separates_five_participant_labs_from_global_governance_module()
     assert packs[-1].pack_version == "3.0.0"
     assert packs[-1].kind == "governance_extension"
     assert packs[-1].scope == "global"
-    assert packs[-1].installation_modes == ("production",)
+    assert packs[-1].installation_modes == ("laboratory", "production")
+    assert packs[-1].display_name == "AI Data Governance"
     assert not packs[-1].datasets and not packs[-1].notebooks
     assert module_catalog() == (packs[-1],)
     module = load_lab_pack("ai_data_governance_vsc_extension")

@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0075",
-    "username": "sim_bogota_0075",
-    "display_name": "Fictional Bogotá Reporter 075"
+    "username": "val_cuellar",
+    "display_name": "Valentina Cuéllar"
   },
-  "message": "Un tramo de sendero de Ciudad Bolívar quedó parcialmente cubierto por material de la ladera. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Me encontré parte del sendero cubierta con tierra que bajó de la ladera en Ciudad Bolívar. No está tapado todo el camino, pero ese tramo sí quedó afectado. #deslizamiento en Bogotá #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 24,
   "available_offset_seconds": 24,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0075-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0075.webp",
+      "sha256": "c9c1b1419dbcaf0dab87027e9c6c3b9b7eddd793defa8939864e67abe65cafde",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A short section of hillside path partly covered with loose soil. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

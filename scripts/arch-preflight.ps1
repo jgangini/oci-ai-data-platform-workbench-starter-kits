@@ -10,7 +10,13 @@ try {
     }
     if (Get-Command sentrux -ErrorAction SilentlyContinue) {
         sentrux gate --save .
-        sentrux check .
+        if ($LASTEXITCODE -ne 0) { throw "Sentrux baseline could not be saved." }
+        if (Test-Path ".\.sentrux\rules.toml") {
+            sentrux check .
+            if ($LASTEXITCODE -ne 0) { throw "Sentrux rules check failed." }
+        } else {
+            Write-Host "Sentrux custom rules: not configured."
+        }
     }
     Write-Host "Architecture preflight complete."
 }

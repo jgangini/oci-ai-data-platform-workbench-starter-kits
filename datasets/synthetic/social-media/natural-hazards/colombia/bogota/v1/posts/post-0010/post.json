@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0010",
-    "username": "sim_bogota_0010",
-    "display_name": "Fictional Bogotá Reporter 010"
+    "username": "nic_rojas",
+    "display_name": "Nicolás Rojas"
   },
-  "message": "Un recorrido a pie por Kennedy muestra agua estancada junto a una parada de transporte. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Iba a coger el bus y me encontré el agua estancada junto al paradero, en la cuadra que sale a la avenida, aquí en Kennedy. Pilas los que vienen por ese lado. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 108,
   "available_offset_seconds": 108,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0010-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0010.webp",
+      "sha256": "31b0998742e7620b2c5b01a3b8c2967249894c8332e71a016800de4214b5477a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0010: Amateur landscape smartphone photograph from beneath the roof of a small bus-stop shelter in Kennedy, Bogotá. Still shallow brown water gathered beside the shelter at the end of a residential block leading toward a wider avenue, distant blue city bus on the dry avenue. Bench in near right foreground, wet concrete, rainsoft focus in distance; no readable signage or transport logos. Safe waiting spot.",
+      "is_simulated": true
+    }
+  ]
 }

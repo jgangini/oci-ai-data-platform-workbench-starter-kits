@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0006",
-    "username": "sim_bogota_0006",
-    "display_name": "Fictional Bogotá Reporter 006"
+    "username": "and_rojas",
+    "display_name": "Andrés Rojas"
   },
-  "message": "Varias personas en Kennedy se organizan para alejar cajas del agua que entra al primer piso. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Entre varias personas están moviendo las cajas para que no se mojen; ya está entrando agua al primer piso en este punto de Kennedy. Da impotencia ver la carrera por salvar las cosas. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 60,
   "available_offset_seconds": 60,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0006-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0006.webp",
+      "sha256": "81baf696846ea0617976a2b361fd18e26888f15520ac65bc4242252c4c60de50",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0006: View from inside a small first-floor home in Kennedy, Bogotá, Colombia: three neighbors in plain sweaters move cardboard boxes from wet tiled floor onto a dining table, a thin sheet of brown rainwater entering under an open front door. Low uneven phone framing showing a chair and doorway. Red tile flooring, cream walls, modest lived-in home, faces not prominent. Localized minor flood, calm purposeful help.",
+      "is_simulated": true
+    }
+  ]
 }

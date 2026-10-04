@@ -2,6 +2,7 @@ import ast
 import hashlib
 import json
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,16 +14,17 @@ from app.governance import (
 )
 
 
-def rendered_agent() -> str:
+def rendered_agent(**kwargs) -> str:
     return agent_source(
         model_id="ocid1.generativeaimodel.oc1.us-chicago-1.example",
         region="us-chicago-1",
         compartment_id="ocid1.compartment.oc1..example",
         platform_id="ocid1.aidataplatform.oc1..example",
+        **kwargs,
     ).decode("utf-8")
 
 
-def rendered_sync(*, desired_enabled=None, bootstrap_snapshot=False) -> str:
+def rendered_sync(*, desired_enabled=None, bootstrap_snapshot=False, **kwargs) -> str:
     notebook = governance_sync_notebook(
         namespace="namespace",
         platform_id="ocid1.aidataplatform.oc1..example",
@@ -31,6 +33,7 @@ def rendered_sync(*, desired_enabled=None, bootstrap_snapshot=False) -> str:
         bootstrap_snapshot=bootstrap_snapshot,
         workspace_key="workspace-key",
         job_key="job-key",
+        **kwargs,
     )
     return "".join(notebook["cells"][0]["source"])
 
@@ -80,6 +83,95 @@ def test_agent_is_global_two_tool_read_only_and_uses_official_aidp_api() -> None
         "Authorization",
     ):
         assert forbidden not in source
+
+
+@pytest.mark.parametrize("render", [rendered_agent, rendered_sync])
+@pytest.mark.parametrize("drift", [None, "tenancy", "user", "fingerprint", "region"])
+def test_generated_signer_checks_selected_identity_before_reading_private_key(render, drift) -> None:
+    public = {"tenancy": "fixture-tenancy", "user": "fixture-user", "fingerprint": "fixture-fingerprint",
+              "region": "us-chicago-1"}
+    digest = hashlib.sha256(json.dumps(
+        [public[key] for key in ("tenancy", "user", "fingerprint")], separators=(",", ":")
+    ).encode()).hexdigest()
+    source = render(credential_name="PrismaWriterRuntime", identity_sha256=digest)
+    assert '"credential_name": "PrismaWriterRuntime"' in source
+    assert f'"identity_sha256": "{digest}"' in source
+    values = {**public, "private_key": "fixture-not-a-private-key"}
+    if drift:
+        values[drift] = "different-fixture-identity"
+    reads, signatures = [], []
+
+    def secret_get(*, name, key):
+        reads.append((name, key))
+        return values[key]
+
+    def signer(**kwargs):
+        signatures.append(kwargs)
+        return "fixture-signer"
+
+    namespace = {
+        "CONFIG": {"credential_name": "PrismaWriterRuntime", "identity_sha256": digest,
+                   "region": public["region"]},
+        "aidputils": SimpleNamespace(secrets=SimpleNamespace(get=secret_get)),
+        "oci": SimpleNamespace(signer=SimpleNamespace(Signer=signer)),
+    }
+    # Exercise the generated imports too: a missing hashlib import must fail this check.
+    imports = [node for node in ast.parse(source).body if isinstance(node, ast.Import)
+               and all(alias.name in {"hashlib", "json"} for alias in node.names)]
+    exec(compile(ast.Module(body=imports, type_ignores=[]), "generated.py", "exec"), namespace)
+    create_signer = _function(source, "_credential_signer", namespace)
+    if drift:
+        with pytest.raises(RuntimeError, match="credential"):
+            create_signer()
+        assert not signatures
+        assert all(key != "private_key" for _, key in reads)
+    else:
+        assert create_signer() == "fixture-signer"
+        assert signatures == [{"tenancy": public["tenancy"], "user": public["user"],
+                               "fingerprint": public["fingerprint"], "private_key_file_location": None,
+                               "private_key_content": values["private_key"]}]
+        assert reads[-1] == ("PrismaWriterRuntime", "private_key")
+    assert {name for name, _ in reads} == {"PrismaWriterRuntime"}
+
+
+def test_generated_agent_setup_supplies_owned_client_and_keeps_configured_model() -> None:
+    source = rendered_agent()
+    clients, models = [], []
+    signer = object()
+
+    def make_client(**kwargs):
+        clients.append(kwargs)
+        return "owned-v2-client"
+
+    def make_model(**kwargs):
+        models.append(kwargs)
+        return "configured-model"
+
+    namespace = {
+        "CONFIG": {"region": "us-chicago-1", "compartment_id": "fixture-compartment",
+                   "model_id": "fixture-configured-model"},
+        "_credential_signer": lambda: signer,
+        "GenerativeAiInferenceV2Client": make_client,
+        "GenAIChatInvoker": make_model,
+        "_safe_error": lambda _stage, exc: {"type": type(exc).__name__},
+        "logger": SimpleNamespace(exception=lambda *_args: None),
+    }
+    node = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef)
+                and node.name == "DataGovernanceAgent")
+    exec(compile(ast.Module(body=[node], type_ignores=[]), "generated.py", "exec"), namespace)
+    agent = namespace["DataGovernanceAgent"]()
+    agent.setup()
+    assert agent.setup_error is None
+    assert agent.llm == "configured-model"
+    endpoint = "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com"
+    assert clients == [{"endpoint": endpoint, "signer": signer}]
+    assert len(models) == 1
+    assert models[0]["client"] == "owned-v2-client"
+    assert models[0]["model_id"] == "fixture-configured-model"
+    assert models[0]["compartment_id"] == "fixture-compartment"
+    assert models[0]["auth_type"] == "API_KEY"
+    assert models[0]["service_endpoint"] == endpoint
+    assert "init_oci_llm" not in source
 
 
 def test_generated_agent_pagination_fails_closed_on_repeated_token() -> None:

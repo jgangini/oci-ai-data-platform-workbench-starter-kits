@@ -118,12 +118,16 @@ def test_both_reverse_proxies_authenticate_and_overwrite_viewer_identity():
         assert "location = /_prisma_session" in proxy and "internal;" in proxy
         assert "http://127.0.0.1:8000/api/prisma/session" in proxy
         blocks = [block for block in proxy.split("location ") if "proxy_pass http://127.0.0.1:8081" in block]
-        assert len(blocks) == 3
+        assert len(blocks) == 4
         for block in blocks:
             assert "auth_request /_prisma_session;" in block
             assert "proxy_set_header X-PRISMA-User $prisma_user;" in block
             assert 'proxy_set_header X-GEV-Origin "$scheme://$http_host";' in block
         assert "$http_x_prisma_user" not in proxy
+        audio = next(block for block in blocks if "= /api/prisma/oci-voice/turn" in block)
+        assert "client_max_body_size 3m;" in audio
+        ordinary = next(block for block in blocks if block.startswith("/api/prisma/"))
+        assert "client_max_body_size 1m;" in ordinary
 
 
 @pytest.mark.parametrize("candidate_ready", [False, True])
@@ -176,7 +180,9 @@ def test_viewer_candidate_and_active_share_persistent_nonroot_cache(monkeypatch,
 
 
 @pytest.mark.parametrize("spawn_fails", [False, True])
-def test_native_supervisor_stops_sibling_when_runtime_exits_or_cannot_start(monkeypatch, spawn_fails):
+def test_native_supervisor_stops_sibling_when_runtime_exits_or_cannot_start(monkeypatch, tmp_path, spawn_fails):
+    monkeypatch.syspath_prepend(str(ROOT / "apps/prisma-viewer/native"))
+    monkeypatch.setenv("GEV_PROVIDER_SETTINGS_DIR", str(tmp_path / "provider-settings"))
     spec = importlib.util.spec_from_file_location("native_entrypoint", ROOT / "apps/prisma-viewer/native/entrypoint.py")
     supervisor = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(supervisor)
@@ -185,10 +191,12 @@ def test_native_supervisor_stops_sibling_when_runtime_exits_or_cannot_start(monk
     stopped = []
     calls = []
 
-    def spawn(command):
+    def spawn(command, *, env):
         calls.append(command)
         if len(calls) == 1:
+            assert env["GEV_PROVIDER_REVISION"] == "environment"
             return child
+        assert env is None
         if spawn_fails:
             raise OSError("runtime unavailable")
         return SimpleNamespace(poll=lambda: 0, wait=lambda **_: None)

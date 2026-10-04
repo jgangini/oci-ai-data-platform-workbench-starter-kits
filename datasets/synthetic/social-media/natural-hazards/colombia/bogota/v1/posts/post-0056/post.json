@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0056",
-    "username": "sim_bogota_0056",
-    "display_name": "Fictional Bogotá Reporter 056"
+    "username": "fel_pineda",
+    "display_name": "Felipe Pineda"
   },
-  "message": "Una nube gris cubre parcialmente la vista del terreno con vegetación de Chapinero. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "#Bogota | Ahora una nube gris me tapa parte de la vista hacia la vegetación de Chapinero. Desde esta esquina ya cuesta ver qué hay detrás del humo. #incendio #Colombia",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 84,
   "available_offset_seconds": 84,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0056-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0056.webp",
+      "sha256": "39a2ac509dee61927c1e1ef24431e9bf7475e4b283ec143bcd6fe794af995670",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: una nube gris oculta parcialmente la vegetación de Chapinero vista desde una esquina; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

@@ -8,9 +8,9 @@ import { nasaDate, nasaUrl } from '../src/context.js';
 import { observeImagery } from '../src/imagery.js';
 
 const snapshot = { version: 'v1', incidents: [
-  { id: 'sim-1', mode: 'simulation', locality: 'Suba', severity: 'high', category: 'flood', lat: 4.7, lon: -74.1, created_at: '2026-10-05T14:00:00Z', evidence_ids: ['e1'] },
+  { id: 'sim-1', mode: 'Synthetic', locality: 'Suba', severity: 'high', category: 'flood', lat: 4.7, lon: -74.1, created_at: '2026-10-05T14:00:00Z', evidence_ids: ['e1'] },
   { id: 'real-1', mode: 'real', locality: 'Bosa', severity: 'medium', category: 'rain', lat: 4.6, lon: -74.1, created_at: '2026-10-05T14:05:00Z', evidence_ids: ['e2'] },
-], evidence: [{ id: 'e1', platform: 'x', mode: 'simulation' }, { id: 'e2', platform: 'meteo', mode: 'real' }] };
+], evidence: [{ id: 'e1', platform: 'x', mode: 'Synthetic' }, { id: 'e2', platform: 'meteo', mode: 'real' }] };
 
 test('NASA imagery uses a named daily layer and explicit valid date', () => {
   assert.equal(nasaDate(new Date('2026-10-03T12:00:00Z')), '2026-10-01');
@@ -34,12 +34,31 @@ test('imagery recovery reports actual tiles and retains provider failures and th
 });
 
 test('filters keep mode, platform and evidence ownership intact', () => {
-  assert.deepEqual(filteredIncidents(snapshot, { mode: 'simulation', platform: 'x' }).map((item) => item.id), ['sim-1']);
+  for (const mode of ['Synthetic', 'simulation']) {
+    const published = { ...snapshot, incidents: [{ ...snapshot.incidents[0], mode }, snapshot.incidents[1]] };
+    for (const filter of ['Synthetic', 'simulation']) assert.deepEqual(filteredIncidents(published, { mode: filter, platform: 'x' }).map((item) => item.id), ['sim-1']);
+    assert.equal(modeLabel(mode), 'Synthetic');
+    assert.equal(published.incidents[0].mode, mode, 'Reading a publication does not mutate its provenance');
+  }
   assert.equal(filteredIncidents(snapshot, { mode: 'real', platform: 'x' }).length, 0);
   assert.deepEqual(evidenceFor(snapshot, snapshot.incidents[1]), [snapshot.evidence[1]]);
-  assert.equal(modeLabel('simulation'), 'SIMULATED');
   assert.equal(modeLabel('real'), 'REAL');
   assert.equal(modeLabel(null), 'UNCLASSIFIED');
+});
+
+test('each captured publication remains navigable while duplicate IDs appear once', () => {
+  const original = { id: 'first', platform: 'x', mode: 'Synthetic', text: 'Lluvia en Bogotá', created_at: '2026-10-03T10:00:00Z' };
+  const latest = { ...original, id: 'last', mode: 'simulation', text: 'Lluvia  en Bogota\u0301\n', created_at: '2026-10-03T10:10:00Z', username: 'latest_author' };
+  const records = [latest, original, { ...original, id: 'other-network', platform: 'facebook' },
+    { ...original, id: 'real-post', mode: 'real' }, { ...original, id: 'different-text', text: 'Ya no llueve en Suba' },
+    { ...original, id: original.text, text: '' }, { ...original, id: 'empty-two', text: '' }];
+  const before = structuredClone(records), incident = { evidence_ids: records.map((item) => item.id) };
+  const evidence = evidenceFor({ evidence: [...records, original, { ...original, id: 'not-linked' }] }, incident);
+  assert.equal(evidence.length, 7, 'A repeated row ID is returned once and unrelated evidence is excluded');
+  assert.equal(evidence[0].id, 'last');
+  assert.equal(evidence[1].id, 'first', 'Matching wording does not hide a distinct captured publication');
+  assert.deepEqual(records, before, 'Display must not rewrite source evidence');
+  assert.deepEqual(incident.evidence_ids, records.map((item) => item.id));
 });
 
 test('English system labels preserve original Bogotá localities and filter values', async () => {
@@ -64,6 +83,10 @@ test('Bogotá period is timezone-independent, inclusive and rejects reversed bou
   assert.equal(validPeriod({ date_from: '2026-10-05T14:05:00Z', date_to: exact.date_to }), false);
   assert.equal(validPeriod({ date_from: '2026-02-30T14:00:00Z' }), false);
   assert.equal(allowedActions([{ type: 'filter_incidents', filters: { date_from: 'not-a-date' } }], snapshot).length, 0);
+  const ongoing = { ...snapshot, incidents: [{ ...snapshot.incidents[0], created_at: '2026-09-01T00:00:00Z', evidence_ids: ['old', 'recent', 'future'] }],
+    evidence: [{ id: 'old', created_at: '2026-09-01T00:00:00Z' }, { id: 'recent', created_at: exact.date_from }, { id: 'future', created_at: '2026-10-06T00:00:00Z' }] };
+  assert.equal(filteredIncidents(ongoing, exact).length, 1, 'An old incident with a publication in the requested range remains visible');
+  assert.equal(filteredIncidents({ ...ongoing, evidence: [ongoing.evidence[0], ongoing.evidence[2]] }, exact).length, 0, 'Both period bounds apply to the same publication');
 });
 
 test('evidence links reject executable, relative, credential-bearing and unencrypted URLs', () => {
@@ -75,7 +98,7 @@ test('agent actions are restricted to known incidents and filter names', () => {
   const accepted = [{ type: 'focus_incident', incident_id: 'real-1' }, { type: 'filter_incidents', filters: { locality: 'Suba' } }];
   assert.deepEqual(allowedActions([...accepted, { type: 'focus_incident', incident_id: 'missing' }, { type: 'run_script', code: 'alert(1)' }, { type: 'filter_incidents', filters: { url: 'https://example.com' } }], snapshot), accepted);
   assert.deepEqual(allowedActions([{ type: 'filter_incidents', filters: { locality: 'Unknown option' } }], snapshot), []);
-  for (const mode of ['', 'real', 'simulation']) assert.deepEqual(allowedActions([{ type: 'filter_incidents', filters: { mode } }], snapshot), [], 'The agent cannot apply an invisible origin filter');
+  for (const mode of ['', 'real', 'Synthetic', 'simulation']) assert.deepEqual(allowedActions([{ type: 'filter_incidents', filters: { mode } }], snapshot), [], 'The agent cannot apply an invisible origin filter');
 });
 
 test('area is inclusive, rejects invalid bounds and keeps the same incident evidence scope', () => {
@@ -92,22 +115,56 @@ test('area is inclusive, rejects invalid bounds and keeps the same incident evid
   assert.equal(allowedActions([{ type: 'filter_incidents', filters: { bbox } }], snapshot).length, 1);
 });
 
-test('photos require evidence included in human review and the original X media host', () => {
+test('attached X photos remain available during review and require incident membership and the original media host', () => {
   const photo = { type: 'photo', url: 'https://pbs.twimg.com/media/example.jpg', alt_text: 'Inundación' };
   const evidence = { id: 'e1', platform: 'x', mode: 'real', media: [photo] };
   const incident = { review_status: 'validated', evidence_ids: ['e1'], reviewed_evidence_ids: ['e1'] };
   assert.deepEqual(photosFor(evidence, incident), [photo]);
-  for (const status of ['pending', 'rejected', undefined]) assert.deepEqual(photosFor(evidence, { ...incident, review_status: status }), []);
-  assert.deepEqual(photosFor({ ...evidence, mode: 'simulation' }, incident), []);
+  for (const status of ['pending', 'rejected', undefined]) assert.deepEqual(photosFor(evidence, { ...incident, review_status: status }), [photo]);
   assert.deepEqual(photosFor(evidence, { ...incident, evidence_ids: ['other'] }), []);
-  assert.deepEqual(photosFor(evidence, { ...incident, reviewed_evidence_ids: undefined }), []);
-  assert.deepEqual(photosFor({ ...evidence, id: 'e2' }, { ...incident, evidence_ids: ['e1', 'e2'] }), []);
+  assert.deepEqual(photosFor(evidence, { ...incident, reviewed_evidence_ids: undefined }), [photo]);
+  assert.deepEqual(photosFor({ ...evidence, id: 'e2' }, { ...incident, evidence_ids: ['e1', 'e2'] }), [photo]);
   assert.deepEqual(photosFor({ ...evidence, id: 'e2' }, { ...incident, evidence_ids: ['e1', 'e2'], reviewed_evidence_ids: ['e1', 'e2'] }), [photo]);
   assert.deepEqual(photosFor(evidence), []);
-  for (const url of ['javascript:alert(1)', 'http://pbs.twimg.com/media/x.jpg', 'https://pbs.twimg.com.evil.test/media/x.jpg', 'https://pbs.twimg.com:8443/media/x.jpg', 'https://user:secret@pbs.twimg.com/media/x.jpg', 'https://pbs.twimg.com/profile_images/x.jpg']) {
+  for (const url of ['javascript:alert(1)', 'http://pbs.twimg.com/media/x.jpg', 'https://pbs.twimg.com.evil.test/media/x.jpg', 'https://pbs.twimg.com:8443/media/x.jpg', 'https://user:secret@pbs.twimg.com/media/x.jpg', 'https://pbs.twimg.com/profile_images/x.jpg', 'https://pbs.twimg.com/media/x.jpg#fragment']) {
     assert.deepEqual(photosFor({ ...evidence, media: [{ ...photo, url }] }, incident), []);
   }
   assert.deepEqual(photosFor({ ...evidence, media: [{ ...photo, type: 'video' }] }, incident), []);
+});
+
+test('bundled image attachments use the authenticated allowlisted endpoint without changing provenance', () => {
+  const attachment = { type: 'image', mime_type: 'image/svg+xml', dataset_path: 'posts/post-0001/media/image-01.svg',
+    sha256: 'a'.repeat(64), alt_text: 'Synthetic illustration, not a photograph', is_simulated: true };
+  const evidence = { id: 'e1', platform: 'facebook', mode: 'Synthetic', attachments: [attachment, attachment] };
+  const incident = { evidence_ids: ['e1'], review_status: 'pending' };
+  for (const mode of ['Synthetic', 'simulation']) assert.deepEqual(photosFor({ ...evidence, mode }, incident), [{ ...attachment, url: '/api/gods-eye-view/media/post-0001/image-01.svg' }]);
+  assert.equal(evidence.mode, 'Synthetic'); assert.equal(attachment.is_simulated, true); assert.equal('url' in attachment, false);
+  assert.deepEqual(photosFor({ ...evidence, mode: 'real' }, incident), []);
+  for (const change of [{ dataset_path: '../secret.pem' }, { dataset_path: 'posts/post-0001/media/../../secret.svg' },
+    { dataset_path: '//evil.test/image-01.svg' }, { sha256: 'bad' }, { type: 'video' }, { mime_type: 'text/html' }]) {
+    assert.deepEqual(photosFor({ ...evidence, attachments: [{ ...attachment, ...change }] }, incident), []);
+  }
+  assert.deepEqual(photosFor(evidence, { evidence_ids: ['other'] }), []);
+});
+
+test('AI-generated raster attachments retain provenance and use only authenticated fixture image URLs', () => {
+  const attachment = { id: 'post-0001-image-01', type: 'image', mime_type: 'image/png', dataset_path: 'media/kennedy-flood.png',
+    origin: 'ai_generated', sha256: 'b'.repeat(64), alt_text: 'AI-generated Synthetic scene of flooding in Bogotá', is_simulated: true };
+  const evidence = { id: 'captured-1', platform: 'instagram', mode: 'Synthetic', attachments: [attachment, attachment] };
+  const incident = { evidence_ids: [evidence.id] };
+  for (const [extension, mime_type] of Object.entries({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' })) {
+    const image = { ...attachment, dataset_path: `media/kennedy-flood.${extension}`, mime_type };
+    for (const mode of ['Synthetic', 'simulation']) assert.deepEqual(photosFor({ ...evidence, mode, attachments: [image, image] }, incident),
+      [{ ...image, url: `/api/gods-eye-view/media/post-0001/image-01.${extension}` }]);
+  }
+  for (const changes of [{ id: '../post-0001-image-01' }, { id: 'post-0001' }, { origin: 'photograph' }, { origin: undefined },
+    { mime_type: 'image/jpeg' }, { dataset_path: 'media/../../secret.png' }, { dataset_path: 'media/scene.svg' },
+    { dataset_path: '//evil.test/scene.png' }, { dataset_path: 'media/scene.png?file=secret' }, { sha256: 'bad' }, { type: 'video' }]) {
+    assert.deepEqual(photosFor({ ...evidence, attachments: [{ ...attachment, ...changes }] }, incident), []);
+  }
+  assert.deepEqual(photosFor({ ...evidence, mode: 'real' }, incident), []);
+  assert.deepEqual(photosFor(evidence, { evidence_ids: ['another-post'] }), []);
+  assert.equal(attachment.origin, 'ai_generated'); assert.equal(attachment.is_simulated, true); assert.equal('url' in attachment, false);
 });
 
 test('report activity displays published network counts without deriving severity or confirmation', () => {
@@ -115,10 +172,26 @@ test('report activity displays published network counts without deriving severit
     report_counts: { x: 10, facebook: 0, instagram: -1, tiktok: '20' },
     report_activity_by_platform: { x: 'medium', facebook: 'below_threshold' } };
   assert.deepEqual(reportActivity(incident), { level: 'Medium', networks: [
-    { platform: 'x', count: 10, level: 'Medium' }, { platform: 'facebook', count: 0, level: 'Below threshold' },
+    { platform: 'x', count: 10, level: 'Medium', total: 0, windowMinutes: null, latestAt: null },
+    { platform: 'facebook', count: 0, level: 'Below threshold', total: 0, windowMinutes: null, latestAt: null },
   ] });
   assert.deepEqual(reportActivity({ severity: 'high', review_status: 'validated' }), { level: 'Unavailable', networks: [] });
   assert.deepEqual(reportActivity({ report_activity: 'confirmed', report_counts: [20] }), { level: 'Unavailable', networks: [] });
+});
+
+test('historical evidence counts do not replace zero recent distinct reports or invented window values', () => {
+  const evidence = Array.from({ length: 30 }, (_, index) => ({ id: `e${index}`, platform: index < 20 ? 'x' : 'facebook',
+    created_at: '2026-10-03T10:00:00Z', content_hash: 'same-contents' }));
+  const incident = { evidence_ids: evidence.map((item) => item.id), report_counts: { x: 0, facebook: 0 },
+    report_activity: 'below_threshold', report_activity_by_platform: { x: 'below_threshold', facebook: 'below_threshold' },
+    correlation_windows_minutes: { x: 30 } };
+  const result = reportActivity(incident, [...evidence, evidence[0], { id: 'not-linked', platform: 'x' }]);
+  assert.equal(result.level, 'Below threshold');
+  assert.deepEqual(result.networks, [
+    { platform: 'x', count: 0, total: 20, windowMinutes: 30, latestAt: '2026-10-03T10:00:00Z', level: 'Below threshold' },
+    { platform: 'facebook', count: 0, total: 10, windowMinutes: null, latestAt: '2026-10-03T10:00:00Z', level: 'Below threshold' },
+  ]);
+  assert.equal(reportActivity({ evidence_ids: ['e0'] }, evidence).networks[0].count, null);
 });
 
 test('platform logos retain the exact pinned Simple Icons CC0 bytes', async () => {
@@ -146,7 +219,7 @@ test('GodEye text adapter sends context and ignores canceled late responses', as
   const replies = [];
   const errors = [];
   const session = createPrismaSession({
-    context: () => ({ version: 'v1', incident_id: 'sim-1', filters: { mode: 'simulation' } }),
+    context: () => ({ version: 'v1', incident_id: 'sim-1', filters: { mode: 'Synthetic' } }),
     request: (path, options) => { captured = { path, ...options }; return new Promise((done) => { resolve = done; }); },
     onReply: (reply) => replies.push(reply), onError: (error) => errors.push(error), onBusy: () => {},
   });

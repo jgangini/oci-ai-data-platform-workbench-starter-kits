@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0062",
-    "username": "sim_bogota_0062",
-    "display_name": "Fictional Bogotá Reporter 062"
+    "username": "cam_lozano",
+    "display_name": "Camilo Lozano"
   },
-  "message": "La franja de vegetación cercana al foco de Chapinero permanece oscura y el humo no ha cesado. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "El pasto junto al foco está oscuro y todavía humea, acá en Chapinero. ¿Nos pueden orientar las autoridades sobre ese tramo? El humo no ha parado. #Colombia #Bogota #incendio",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 156,
   "available_offset_seconds": 156,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0062-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0062.webp",
+      "sha256": "e7845d429e65983f92fe145c207ca00af592f4bb0b20949781c319201ffbda5c",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: pasto ennegrecido que todavía humea en Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

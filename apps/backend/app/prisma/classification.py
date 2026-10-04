@@ -1,6 +1,7 @@
 """OCI GenAI enrichment with a closed output contract; evidence is untrusted input."""
 import json
 import math
+import re
 
 from .core import CATEGORIES, LOCALITIES, SEVERITIES, normalize_event
 
@@ -74,7 +75,8 @@ def classify(events, config, signed=None, client=None):
         response = client.chat(model.ChatDetails(compartment_id=config["compartment_id"],
             serving_mode=model.OnDemandServingMode(model_id=config["model_id"]), chat_request=request))
         text = "".join(part.text for part in response.data.chat_response.choices[0].message.content if getattr(part, "text", None))
-        items = json.loads(text)["items"]
+        fenced = re.fullmatch(r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```", text.strip(), flags=re.DOTALL | re.IGNORECASE)
+        items = json.loads(fenced[1] if fenced else text)["items"]
         mapped = {item["id"]: item for item in items}
         if len(items) != len(batch) or set(mapped) != {item["id"] for item in batch}:
             raise ValueError("Classifier returned incomplete evidence")

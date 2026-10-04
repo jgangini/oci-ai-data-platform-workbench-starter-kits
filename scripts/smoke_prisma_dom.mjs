@@ -46,7 +46,7 @@ try {
   assert.ok(sourceResponse.ok());
   const state = await sourceResponse.json();
   assert.equal(state.runtime, 'local_fixture', 'Mutating smoke requires the explicit local fixture runtime');
-  assert.ok(state.sources.every((source) => source.mode === 'simulation'), 'All tested sources must be simulated');
+  assert.ok(state.sources.every((source) => source.mode === 'Synthetic'), 'All tested sources must use Synthetic mode');
   fixtureVerified = true;
   if (state.sources.find(source => source.platform === 'x').capture_running) {
     assert.ok((await context.request.post(`${base.origin}/api/admin/prisma/sources/x/pause`)).ok());

@@ -11,12 +11,13 @@ from tempfile import NamedTemporaryFile
 
 import httpx
 
-from .core import default_source, source_migration, utc_text
+from .core import SYNTHETIC_MODES, canonical_mode, default_source, source_migration, utc_text
 from .store import PrismaStore
 from .x import XFailure, poll_queries
 from . import landing
 from .capture import validate_source
 from .source_rules import check_revision, source_view, validate_rules
+from . import sensor_capture, sensor_reset
 
 
 class LocalCredentials:
@@ -70,18 +71,24 @@ class LocalPrismaRuntime:
         self.lock = asyncio.Lock()
 
     async def sources(self) -> dict:
-        snapshot = self.store.snapshot()
-        return {"sources": [source_view(source) for source in self.store.sources()], "simulation": self.store.simulation_state(), "runtime": "local_fixture",
-                "capture_summary": self.store.capture_summary(), "pipeline": {"status": "local_fixture", "version": snapshot["version"], "last_run_at": snapshot.get("published_at")}}
+        async with self.lock:
+            snapshot = self.store.snapshot()
+            return {"sources": [source_view(source) for source in self.store.sources()], "simulation": self.store.simulation_state(), "runtime": "local_fixture",
+                    "synthetic_reset": self.store.synthetic_reset_status(), "capture_summary": self.store.capture_summary(),
+                    "pipeline": {"status": "local_fixture", "version": snapshot["version"], "last_run_at": snapshot.get("published_at")}}
 
     async def update_source(self, platform: str, payload: dict) -> dict:
         async with self.lock:
             values = dict(payload)
+            if "mode" in values:
+                values["mode"] = canonical_mode(values["mode"])
             token = values.pop("bearer_token", None)
             expected = values.pop("expected_revision", None)
             current = self.store.source(platform)
             check_revision(current, expected)
             candidate = {**current, **values}
+            if current["mode"] in SYNTHETIC_MODES or candidate["mode"] in SYNTHETIC_MODES:
+                self.store.ensure_synthetic_capture()
             validate_source(candidate)
             validate_rules(candidate)
             if token:
@@ -100,19 +107,24 @@ class LocalPrismaRuntime:
     async def _capture(self, platform: str, test: bool, scheduled=False) -> dict:
         async with self.lock:
             source = self.store.source(platform)
+            if source["mode"] in SYNTHETIC_MODES:
+                self.store.ensure_synthetic_capture()
             if scheduled:
                 due = datetime.fromisoformat(source["next_due"].replace("Z", "+00:00")).timestamp() if source["next_due"] else 0
-                if not source.get("capture_running") or due > self.clock():
-                    return {"status": "paused" if not source.get("capture_running") else "scheduled", "source": source_view(source)}
-            if not source["enabled"]:
-                return {"status": "disabled", "message": "Enable the source before running it", "source": source_view(source)}
+                running = source["enabled"] and source.get("capture_running")
+                if not running or due > self.clock():
+                    return {"status": "scheduled" if running else "paused", "source": source_view(source)}
             if not test and not scheduled:
+                if source["mode"] == "real" and not self.credentials.exists(source["secret_ref"]):
+                    source = self.store.record_source(platform, {"status": "credential_required", "last_error": "credential_required",
+                        "last_run_at": utc_text(self.clock()), "next_due": None})
+                    return {"status": "credential_required", "message": "Real capture requires a credential", "source": source_view(source)}
                 source = self.store.start_capture(platform)
             if source["status"] == "rate_limited" and source["next_due"]:
                 retry = datetime.fromisoformat(source["next_due"].replace("Z", "+00:00")).timestamp()
                 if retry > self.clock():
                     return {"status": "rate_limited", "message": "Waiting for the X quota window", "source": source_view(source)}
-            if source["mode"] == "simulation":
+            if source["mode"] in SYNTHETIC_MODES:
                 if not test:
                     self.store.advance_simulation(force=True, platform=platform)
                 return {"status": "simulation", "message": "Synthetic query validated" if test else "Continuous capture started", "source": source_view(self.store.source(platform))}
@@ -156,17 +168,30 @@ class LocalPrismaRuntime:
         return self.store.posts(platform, limit, before_seq, max_seq)
 
     async def simulation(self, action: str) -> dict:
-        return self.store.control_simulation(action)
+        async with self.lock:
+            return self.store.control_simulation(action)
+
+    async def reset_synthetic(self, operation_id: str) -> dict:
+        async with self.lock:
+            return self.store.reset_synthetic(operation_id)
+
+    async def synthetic_reset_status(self) -> dict:
+        return self.store.synthetic_reset_status()
 
     async def snapshot(self) -> dict:
-        return self.store.snapshot()
+        async with self.lock:
+            return self.store.snapshot()
 
-    async def review(self, incident_id: str, status: str, note: str) -> dict:
-        return self.store.review(incident_id, status, note)
+    async def review(self, incident_id: str, status: str, note: str, expected_evidence_ids=None, lat=None, lon=None) -> dict:
+        async with self.lock:
+            return self.store.review(incident_id, status, note, expected_evidence_ids, lat, lon)
 
     async def tick(self) -> None:
-        self.store.advance_simulation()
-        for source in self.store.sources():
+        async with self.lock:
+            self.store.advance_simulation()
+            sensor_capture.local_tick(self.store)
+            sources = self.store.sources()
+        for source in sources:
             if not source["enabled"] or not source.get("capture_running", False) or source["mode"] != "real":
                 continue
             if source["last_error"] and not source["next_due"]:
@@ -174,3 +199,34 @@ class LocalPrismaRuntime:
             due = datetime.fromisoformat(source["next_due"].replace("Z", "+00:00")).timestamp() if source["next_due"] else 0
             if due <= self.clock():
                 await self._capture(source["platform"], False, scheduled=True)
+
+    async def sensors(self):
+        config = sensor_capture.local_configuration(self.store)
+        with self.store.connection() as db:
+            config = sensor_reset.annotated(config, self.store._get(db, "synthetic_reset", {}))
+        return {"config": config, "configs": config["configs"], "runtime": "local_fixture"}
+
+    async def update_sensors(self, values, sensor_type=None):
+        async with self.lock:
+            with self.store.connection() as db:
+                sensor_reset.guard(self.store._get(db, "synthetic_reset", {}), sensor_type)
+            return {"config": sensor_capture.local_save(self.store, values, sensor_type), "runtime": "local_fixture"}
+
+    async def control_sensors(self, running, sensor_type=None):
+        async with self.lock:
+            with self.store.connection() as db:
+                sensor_reset.guard(self.store._get(db, "synthetic_reset", {}), sensor_type)
+            config = sensor_capture.local_control(self.store, running, sensor_type)
+            return {"config": config, "message": "Simulated sensor capture started" if running else "Sensor capture paused"}
+
+    async def sensor_reset_status(self, sensor_type):
+        with self.store.connection() as db:
+            return sensor_reset.state_for(self.store._get(db, "synthetic_reset", {}), sensor_type)
+
+    async def reset_sensors(self, sensor_type, operation_id):
+        async with self.lock:
+            return sensor_reset.local(self.store, sensor_type, operation_id)
+
+    async def sensor_location(self, sensor_id, values):
+        async with self.lock:
+            return sensor_capture.local_location(self.store, sensor_id, values)

@@ -8,6 +8,36 @@ import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from .core import SYNTHETIC_MODES, canonical_mode
+
+
+def ensure_volumes(spark, config):
+    """Verify bootstrap-provisioned volumes before any streaming or table writes."""
+    catalog = config.get("catalog", "oci_medallion")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", catalog):
+        raise ValueError("Invalid PRISMA catalog")
+    schema = catalog + ".prisma_ingest"
+    uri = f"oci://{config['landing_bucket']}@{config['namespace']}/{config['landing_prefix']}"
+    if "'" in uri or config["landing_volume_path"] != f"/Volumes/{catalog}/prisma_ingest/landing" or config["checkpoint_volume_path"] != f"/Volumes/{catalog}/prisma_ingest/checkpoints/bronze-v1":
+        raise ValueError("Invalid PRISMA governed streaming path")
+    for name, kind in (("landing", "EXTERNAL"), ("checkpoints", "MANAGED")):
+        rows = spark.sql(f"DESCRIBE VOLUME {schema}.{name}").collect()
+        if len(rows) != 1:
+            raise RuntimeError("PRISMA volume description must contain exactly one row")
+        details = rows[0].asDict()
+        if any(details.get(field) != value for field, value in {"name": name, "catalog": catalog, "database": "prisma_ingest"}.items()):
+            raise RuntimeError("PRISMA volume identity does not match the deployment")
+        if str(details.get("volumeType", "")).upper() != kind or (kind == "EXTERNAL" and str(details.get("storageLocation", "")).rstrip("/") != uri.rstrip("/")):
+            raise RuntimeError("PRISMA volume type or storage location does not match the deployment")
+
+
+def stream_progress(queries):
+    streams = [{"format": name, "query_id": str(query.id), "microbatches": len(query.recentProgress),
+                "last_input_rows": (query.lastProgress or {}).get("numInputRows", 0)} for name, query in queries]
+    return {"query_id": streams[-1]["query_id"], "streams": streams,
+            "microbatches": sum(item["microbatches"] for item in streams),
+            "last_input_rows": sum(item["last_input_rows"] for item in streams)}
+
 
 def page(events, batch_key=None):
     output = io.StringIO(newline="")
@@ -27,13 +57,13 @@ def page(events, batch_key=None):
 
 def decode_record(event_id, payload):
     event = json.loads(payload)
-    if (not isinstance(event, dict) or event.get("mode") not in {"real", "simulation"}
+    if (not isinstance(event, dict) or event.get("mode") not in ("real", *SYNTHETIC_MODES)
             or event_id != f"{event.get('platform')}:{event.get('source_id')}"):
         raise ValueError("Invalid PRISMA Landing envelope")
-    simulated = event["mode"] == "simulation"
+    simulated = event["mode"] in SYNTHETIC_MODES
     if "is_simulated" in event and (type(event["is_simulated"]) is not bool or event["is_simulated"] != simulated):
         raise ValueError("PRISMA simulation provenance conflicts with its mode")
-    return {**event, "id": event_id, "is_simulated": simulated}
+    return {**event, "id": event_id, "mode": canonical_mode(event["mode"]), "is_simulated": simulated}
 
 
 def records(body, suffix=".csv"):

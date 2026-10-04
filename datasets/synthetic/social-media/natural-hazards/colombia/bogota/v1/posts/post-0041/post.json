@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0041",
-    "username": "sim_bogota_0041",
-    "display_name": "Fictional Bogotá Reporter 041"
+    "username": "luc_quintero",
+    "display_name": "Lucía Quintero"
   },
-  "message": "La lluvia aflojó en Bosa pero el drenaje tarda en retirar el agua del sector observado. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Aflojó la lluvia en Bosa. El drenaje sigue sacando el agua muy despacio. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 192,
   "available_offset_seconds": 192,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0041-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0041.webp",
+      "sha256": "d2d0619e1f171d32b7d0ef42f73d5dc2ba08f0aef4d626ea869a4f39be6c5e26",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of slow drainage after rainfall eases at a fictional Bosa street corner.",
+      "is_simulated": true
+    }
+  ]
 }

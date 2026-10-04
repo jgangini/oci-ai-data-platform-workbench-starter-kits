@@ -1,6 +1,7 @@
 """Opt-in real Spark 3.5 / Delta 3.2 check; neither AIDP nor Oracle connectivity is emulated here."""
 import json
 import os
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
@@ -9,6 +10,24 @@ import pytest
 from app.prisma import capture, landing
 from app.prisma.core import build_snapshot, default_source, normalize_event, utc_text
 from app.prisma.pipeline import DeltaLake, consume_landing, install_post_views, start_landing
+
+
+def test_delta_writes_canonical_mode_and_deletes_both_synthetic_spellings(monkeypatch):
+    delta, functions, spark = MagicMock(), MagicMock(), MagicMock()
+    monkeypatch.setitem(sys.modules, "delta.tables", SimpleNamespace(DeltaTable=delta))
+    monkeypatch.setitem(sys.modules, "pyspark.sql", SimpleNamespace(functions=functions))
+    lake = object.__new__(DeltaLake)
+    lake.spark, lake.tables = spark, {"bronze": "bronze", "silver": "silver"}
+    records = [{"id": "canonical", "mode": "Synthetic"}, {"id": "legacy", "mode": "simulation"}, {"id": "real", "mode": "real"}]
+    lake.put("bronze", records)
+    rows = spark.createDataFrame.call_args.args[0]
+    assert [json.loads(payload)["mode"] for _, payload in rows] == ["Synthetic", "Synthetic", "real"]
+    assert records[1]["mode"] == "simulation"
+    spark.table.return_value.where.return_value.count.return_value = 2
+    assert lake.delete_synthetic() == {"bronze": 2, "silver": 2}
+    predicate = functions.get_json_object.return_value
+    assert predicate.isin.call_args_list == [call("Synthetic", "simulation")] * 4
+    assert delta.forName.return_value.delete.call_args_list == [call(predicate.isin.return_value)] * 2
 
 
 @pytest.mark.parametrize("path", ["/Volumes/oci_medallion/prisma_ingest/landing", "/tmp/prisma/landing"])
@@ -142,11 +161,14 @@ def test_real_stream_resumes_after_bronze_commit_without_duplicate_events(tmp_pa
         assert any(item["report_counts"].get("x") == 20 for item in activity_snapshot["incidents"])
         for layer in ("bronze", "silver", "gold"):
             spark.sql(f"CREATE DATABASE IF NOT EXISTS oci_{layer}")
-        for table, values in (("prisma_silver_view_fixture", samples), ("prisma_gold_view_fixture", [activity_snapshot])):
+        for table, values in (("prisma_silver_view_fixture", samples), ("prisma_gold_view_fixture", [activity_snapshot]),
+                              ("prisma_current_fixture", [])):
             rows = [(item.get("id", item.get("version")), json.dumps(item)) for item in values]
             spark.createDataFrame(rows, "id STRING,payload STRING").write.format("delta").saveAsTable(table)
+        lake.tables["current"] = "prisma_current_fixture"
+        assert lake.stage_snapshot(activity_snapshot) == activity_snapshot
         install_post_views(spark, "spark_catalog", {"bronze": lake.tables["bronze"],
-            "silver": "prisma_silver_view_fixture", "gold": "prisma_gold_view_fixture"})
+            "silver": "prisma_silver_view_fixture", "gold": "prisma_gold_view_fixture", "current": lake.tables["current"]})
         assert spark.table("oci_bronze.social_posts_raw").count() == 3
         assert "source_hash_kind" in spark.table("oci_bronze.social_posts_raw").columns
         assert spark.table("oci_silver.social_posts").count() == len(samples)
@@ -156,6 +178,12 @@ def test_real_stream_resumes_after_bronze_commit_without_duplicate_events(tmp_pa
         for field in ("summary", "revision", "updated_at", "rule_versions", "correlation_windows_minutes"):
             assert published_event[field] == expected_event[field]
         assert spark.table("oci_gold.event_posts").count() == len(activity_snapshot["event_posts"])
+        assert spark.table("oci_silver.events").count() == len(activity_snapshot["incidents"])
+        assert spark.table("oci_silver.event_posts").count() == len(activity_snapshot["event_posts"])
+        next_state = {**activity_snapshot, "version": "next-state", "incidents": [], "event_posts": []}
+        assert lake.stage_snapshot(next_state) == next_state
+        assert spark.table("oci_silver.events").count() == spark.table("oci_silver.event_posts").count() == 0
+        assert spark.table("oci_gold.events").count() == len(activity_snapshot["incidents"])
         landing.write_file(raw, [], {"platform": "x", "window": 123})
         consume_landing(spark, lake, str(raw), str(checkpoint))
         assert spark.table(lake.tables["bronze"]).count() == 3

@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0052",
-    "username": "sim_bogota_0052",
-    "display_name": "Fictional Bogotá Reporter 052"
+    "username": "san_pineda",
+    "display_name": "Santiago Pineda"
   },
-  "message": "El humo del área de vegetación de Chapinero se desplaza hacia arriba, sin que yo vea viviendas afectadas. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Para quienes preguntan por el #incendio en Chapinero: desde donde estoy el humo sube desde la vegetación y NO veo viviendas afectadas. Eso es lo que puedo contar, no tengo vista de todo el sector. #Colombia #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 36,
   "available_offset_seconds": 36,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0052-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0052.webp",
+      "sha256": "0efaa2730124837d16e3a3aeb2a5a3d7ab8222ec1a7c9f1627b7082f472b9c88",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: humo que sale de vegetación de Chapinero y viviendas visibles intactas; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

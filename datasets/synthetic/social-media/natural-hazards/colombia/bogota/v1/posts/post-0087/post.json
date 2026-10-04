@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0087",
-    "username": "sim_bogota_0087",
-    "display_name": "Fictional Bogotá Reporter 087"
+    "username": "val_beltran",
+    "display_name": "Valentina Beltrán"
   },
-  "message": "En Ciudad Bolívar el barro del sendero no se ha retirado y aún baja agua desde la pendiente. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "El barro sigue ahí en el sendero de Ciudad Bolívar y todavía baja agua de la pendiente. No se ha retirado ese material. ¿Nos pueden indicar qué atención va a tener este punto? #deslizamiento #Bogota #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 168,
   "available_offset_seconds": 168,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0087-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0087.webp",
+      "sha256": "469b17950df121e191f7cc9b0821fcb49f8c3ef3918f879aeba180f7e8ee4551",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Remaining mud on a footpath with a small trickle from the slope. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

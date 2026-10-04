@@ -23,6 +23,13 @@ class Lake:
         self.log, self.data, self.fail = log, {"bronze": {}, "silver": {}, "gold": {}}, None
         self.objects = objects
 
+    def stage_snapshot(self, snapshot):
+        self.log.append("silver_current")
+        if self.fail == "silver_current":
+            raise RuntimeError("Injected Silver state failure")
+        self.current = copy.deepcopy(snapshot)
+        return copy.deepcopy(self.current)
+
     def consume(self, config):
         for key, body in self.objects.data.items():
             if key.startswith(config["landing_prefix"]) and key.endswith((".csv", ".ndjson")):
@@ -86,8 +93,36 @@ def runtime(monkeypatch):
     monkeypatch.setattr(pipeline, "mutate_document", mutate)
     monkeypatch.setattr(pipeline, "publish", publish)
     monkeypatch.setattr(pipeline, "upsert_posts", lambda _db, records, status, **_: log.append("posts:" + status))
+    monkeypatch.setattr(pipeline, "reset_version", lambda _db: 2)
+    monkeypatch.setattr(pipeline, "sensor_reset_version", lambda _db: 1)
     objects = Objects(log)
     return log, docs, publications, Lake(log, objects), objects
+
+
+def test_old_database_reset_contract_fails_before_ingestion_or_publication(runtime, monkeypatch):
+    log, docs, publications, lake, objects = runtime
+    monkeypatch.setattr(pipeline, "reset_version", lambda _db: 1)
+    with pytest.raises(RuntimeError, match="database contract"):
+        pipeline.run(None, None, CONFIG, connection=object(), objects=objects, lake=lake,
+                     client=object(), classifier=lambda events: events, clock=lambda: NOW)
+    assert log == [] and docs == publications == objects.data == {}
+
+
+def test_sensor_coordinate_overrides_enter_gold_adb_and_agent_publication_atomically(runtime):
+    from app.prisma.sensors import generate_batch
+    _log, docs, publications, lake, objects = runtime
+    sensor = {**generate_batch(NOW, sensor_count=100)[0], "id": "reading-1"}
+    lake.sensors = SimpleNamespace(latest=lambda _: [copy.deepcopy(sensor)])
+    before = pipeline.publish_snapshot(object(), objects, lake, CONFIG, [], {}, {}, NOW)
+    docs["reviews"] = {"sensor_locations": {sensor["sensor_id"]: {"lat": 4.6, "lon": -74.1}}}
+    updated = pipeline.publish_snapshot(object(), objects, lake, CONFIG, [], {}, {}, NOW + 1)
+    assert before["version"] != updated["version"]
+    assert updated["sensors"][0]["lat"] == 4.6 and updated["sensors"][0]["lon"] == -74.1
+    assert publications[updated["version"]] == updated
+    assert lake.data["gold"][updated["version"]]["sensors"] == updated["sensors"]
+    assert json.loads(objects.data[f"04_gold/prisma/snapshots/{updated['version']}.json"]) == updated
+    # The raw immutable measurement and the previous version are retained.
+    assert publications[before["version"]]["sensors"][0]["lat"] == sensor["lat"]
 
 
 def test_source_cursor_commits_after_landing_and_stream_owns_bronze_recovery(runtime):
@@ -154,6 +189,67 @@ def test_rules_upgrade_seeds_stable_ids_from_published_pointer_and_preserves_rev
     assert docs["event_registry"]["items"] == upgraded["incidents"]
 
 
+def test_review_changes_publish_consistently_without_new_input_and_keep_history(runtime):
+    _, docs, publications, lake, objects = runtime
+    event = normalize_event(simulation_events(0)[0])
+    lake.put("silver", [event])
+    def tick():
+        return pipeline.run(None, None, CONFIG, connection=object(), objects=objects, lake=lake,
+            client=object(), classifier=lambda _: pytest.fail("Review changes must not reclassify existing posts"), clock=lambda: NOW)
+    original = tick()
+    incident_id = original["incidents"][0]["id"]
+    versions = {original["version"]}
+    for status in ("validated", "rejected", "pending"):
+        note = "Human review: " + status
+        docs["reviews"] = {"items": {incident_id: {"status": status, "note": note, "evidence_ids": [event["id"]],
+                                                 "lat": 4.63, "lon": -74.15}}}
+        snapshot = tick()
+        assert snapshot["version"] not in versions
+        versions.add(snapshot["version"])
+        version = snapshot["version"]
+        pointer = json.loads(objects.data["04_gold/prisma/current.json"])
+        published = json.loads(objects.data[pointer["snapshot_key"]])
+        assert pointer["version"] == version == docs["status_pipeline"]["version"]
+        for saved in (snapshot, publications[version], lake.data["gold"][version], published):
+            incident = saved["incidents"][0]
+            assert incident["id"] == incident_id and incident["review_status"] == status
+            assert incident["review_note"] == note and incident["reviewed_evidence_ids"] == [event["id"]]
+            assert (incident["lat"], incident["lon"], incident["location_method"]) == (4.63, -74.15, "human_review")
+        assert snapshot["evidence"] == original["evidence"]
+    assert len(publications) == len(lake.data["gold"]) == 4
+    assert publications[original["version"]]["incidents"][0]["review_status"] == "pending"
+    assert lake.data["silver"][event["id"]] == event
+
+
+def test_failed_review_publication_keeps_prior_pointer_and_retry_publishes_saved_review(runtime):
+    _, docs, publications, lake, objects = runtime
+    event = normalize_event(simulation_events(0)[0])
+    lake.put("silver", [event])
+    def tick():
+        return pipeline.run(None, None, CONFIG, connection=object(), objects=objects, lake=lake,
+            client=object(), classifier=lambda _: [], clock=lambda: NOW)
+    previous = tick()
+    incident_id = previous["incidents"][0]["id"]
+    saved = {"status": "validated", "note": "Checked evidence", "evidence_ids": [event["id"]], "lat": 4.63, "lon": -74.15}
+    docs["reviews"] = {"items": {incident_id: saved}}
+    old_pointer = objects.data["04_gold/prisma/current.json"]
+    objects.fail = "04_gold/prisma/snapshots/"
+    with pytest.raises(RuntimeError):
+        tick()
+    assert objects.data["04_gold/prisma/current.json"] == old_pointer
+    assert docs["reviews"]["items"][incident_id] == saved
+    assert publications[previous["version"]]["incidents"][0]["review_status"] == "pending"
+    attempted = docs["runtime"]["publication"]["version"]
+    objects.fail = None
+    recovered = tick()
+    assert recovered["version"] == attempted
+    assert recovered["incidents"][0]["review_status"] == "validated"
+    assert recovered["incidents"][0]["review_note"] == "Checked evidence"
+    assert (recovered["incidents"][0]["lat"], recovered["incidents"][0]["lon"]) == (4.63, -74.15)
+    assert recovered["evidence"] == previous["evidence"]
+    assert json.loads(objects.data["04_gold/prisma/current.json"])["version"] == recovered["version"]
+
+
 def test_failed_classification_retries_bronze_without_fabricating_success(runtime):
     _, docs, _, lake, objects = runtime
     docs["simulation"] = {"revision": 1, "run_id": "run-one", "status": "running", "started_at": NOW, "elapsed_seconds": 0}
@@ -202,6 +298,7 @@ def test_adb_projection_recovers_after_silver_merge_without_reclassifying(runtim
 
 def test_persistent_runtime_keeps_ingestion_running_during_llm_failure(runtime, monkeypatch):
     _, docs, _, lake, objects = runtime
+    docs["status_sensorstream"] = {"sensor_layers_version": 2}
     post = normalize_event(simulation_events(0)[0])
     lake.put("bronze", [post])
     query = SimpleNamespace(id="csv-query", isActive=True, recentProgress=[], lastProgress={}, exception=lambda: None)
@@ -218,6 +315,37 @@ def test_persistent_runtime_keeps_ingestion_running_during_llm_failure(runtime, 
     with pytest.raises(KeyboardInterrupt):
         pipeline.run_persistent(None, object(), objects, lake, CONFIG, None, limited, object(), lambda: NOW)
     assert len(lake.data["bronze"]) == 2 and lake.data["silver"] == {} and stopped == [True]
+
+
+def test_publication_reads_silver_state_and_retains_previous_pointer_on_stage_failure(runtime):
+    log, _, publications, lake, objects = runtime
+    first = pipeline.publish_snapshot(object(), objects, lake, CONFIG, [], {}, {}, NOW)
+    assert lake.current == first == publications[first["version"]]
+    assert log.index("silver_current") < log.index("gold") < log.index("adb")
+    pointer = objects.data["04_gold/prisma/current.json"]
+    lake.fail = "silver_current"
+    with pytest.raises(RuntimeError, match="Silver state"):
+        pipeline.publish_snapshot(object(), objects, lake, CONFIG, [normalize_event(simulation_events(0)[0])], {}, {}, NOW + 1)
+    assert objects.data["04_gold/prisma/current.json"] == pointer
+    assert len(publications) == 1
+    lake.fail = None
+    retried = pipeline.publish_snapshot(object(), objects, lake, CONFIG, [normalize_event(simulation_events(0)[0])], {}, {}, NOW + 2)
+    assert retried == lake.current == publications[retried["version"]]
+
+
+def test_publisher_waits_for_matching_sensor_migration_without_stopping_landing(runtime, monkeypatch):
+    _, docs, publications, lake, objects = runtime
+    docs["status_sensorstream"] = {"sensor_layers_version": 2, "pipeline_revision": "older"}
+    docs["checkpoint_reset"] = {"status": "pending", "ready": True}
+    query = SimpleNamespace(isActive=True, exception=lambda: None, stop=lambda: None)
+    monkeypatch.setattr(pipeline, "start_landing", lambda *_a, **_kw: [("csv", query)])
+    monkeypatch.setattr(pipeline, "process_reset", lambda *_: pytest.fail("Reset cannot publish before the sensor migration"))
+    def waiting(_seconds):
+        assert query.isActive and not publications and "status_pipeline" not in docs
+        raise KeyboardInterrupt()
+    monkeypatch.setattr(pipeline.time, "sleep", waiting)
+    with pytest.raises(KeyboardInterrupt):
+        pipeline.run_persistent(None, object(), objects, lake, {**CONFIG, "pipeline_revision": "new"}, None, None, None, lambda: NOW)
 
 
 def test_enrichment_circuit_bounds_failures_and_configuration_revision_reopens_it(runtime):
@@ -262,6 +390,33 @@ def test_queued_manual_run_cannot_bypass_persisted_x_rate_limit(runtime):
     assert docs["status_x"]["next_due"] == pipeline.utc_text(NOW + 90)
 
 
+def test_disabled_real_source_allows_only_bounded_test_without_ingesting_or_advancing(runtime, monkeypatch):
+    _, docs, _, lake, objects = runtime
+    source = {**default_source("x"), "mode": "real", "enabled": False, "capture_running": True,
+              "credential_configured": True, "query": "#Bogota", "query_version": 1}
+    checkpoint = {"cursor": {"since_id": "15"}, "query_version": source["query_version"]}
+    docs["checkpoint_x"] = copy.deepcopy(checkpoint)
+    calls = []
+    def fetch(*args, **kwargs):
+        calls.append((args, kwargs))
+        return [simulation_events(0)[0]], {"since_id": "30"}
+    monkeypatch.setattr(x, "fetch_page", fetch)
+    for status in ({}, {"requested_action": "run"}):
+        pipeline.poll_source(object(), objects, lake, CONFIG, source, status, lambda **_: "test-token", NOW, object())
+    assert calls == [] and "status_x" not in docs
+    pipeline.poll_source(object(), objects, lake, CONFIG, source, {"requested_action": "test", "request_id": "test-1"},
+                         lambda **_: "test-token", NOW, object())
+    assert len(calls) == 1 and calls[0][1]["page_size"] == 10
+    assert docs["status_x"]["status"] == "tested" and docs["status_x"]["requested_action"] is None
+    assert docs["checkpoint_x"] == checkpoint and objects.data == {} and lake.data["bronze"] == {}
+    assert not source["enabled"]  # Testing does not repair or start legacy configuration.
+    docs["checkpoint_x"]["retry_at"] = NOW + 90
+    pipeline.poll_source(object(), objects, lake, CONFIG, source, {"requested_action": "test"},
+                         lambda **_: pytest.fail("Rate limit precedes credential read"), NOW, object())
+    assert len(calls) == 1 and docs["status_x"]["status"] == "rate_limited"
+    assert docs["checkpoint_x"]["cursor"] == checkpoint["cursor"]
+
+
 def test_reset_paused_at_zero_has_no_new_synthetic_evidence(runtime):
     _, docs, _, lake, objects = runtime
     docs["simulation"] = {"status": "paused", "elapsed_seconds": 0, "run_id": "new-reset-run"}
@@ -301,7 +456,7 @@ def test_classifier_closes_output_contract_and_preserves_simulation_provenance()
             return SimpleNamespace(data=SimpleNamespace(chat_response=SimpleNamespace(choices=[
                 SimpleNamespace(message=SimpleNamespace(content=[SimpleNamespace(text=text)]))])))
     result = classify([event], CONFIG, client=Model())
-    assert result[0]["mode"] == "simulation"
+    assert result[0]["mode"] == "Synthetic"
     assert result[0]["classification_method"] == "oci_genai:model"
     label["confidence"] = 8
     with pytest.raises(ValueError, match="confidence"):

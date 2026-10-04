@@ -304,7 +304,7 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
     ):
         raise LabPackError(f"Invalid lab scope: {lab_id}")
     if kind == "governance_extension" and (
-        scope != "global" or installation_modes != ("production",)
+        scope != "global" or installation_modes != ("laboratory", "production")
     ):
         raise LabPackError(f"Invalid governance extension scope: {lab_id}")
     agent = metadata.get("agent", {})

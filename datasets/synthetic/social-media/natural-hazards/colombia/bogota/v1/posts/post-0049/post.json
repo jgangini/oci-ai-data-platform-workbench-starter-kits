@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0049",
-    "username": "sim_bogota_0049",
-    "display_name": "Fictional Bogotá Reporter 049"
+    "username": "mar_pineda",
+    "display_name": "Mariana Pineda"
   },
-  "message": "Veo humo y pequeñas llamas entre vegetación seca en Chapinero; parece un incendio localizado. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Iba por el camino del barrio y alcancé a ver humo con llamitas entre la vegetación seca de Chapinero. Parece un incendio en ese pedazo, no sé hasta dónde llega. Ojo quienes van hacia el cerro. Bogotá, #Colombia #incendio",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -22,12 +22,12 @@
     {
       "id": "post-0049-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0049/media/image-01.svg",
-      "sha256": "b923e4081039bd440a2f5dd828e5a46996ba3849338612d42480a2e5fc88197e",
+      "mime_type": "image/webp",
+      "dataset_path": "media/fire-chapinero-active.webp",
+      "sha256": "7955dfadc6a3ce2577089fbca5311cefb5b0b39cc5b3489d5c96231bc955a310",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Chapinero; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of small flames and smoke over burning vegetation in Chapinero; a fictional scenario, not documentation of a real incident.",
       "is_simulated": true
     }
   ]

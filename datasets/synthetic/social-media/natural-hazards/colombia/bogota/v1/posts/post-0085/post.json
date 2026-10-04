@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0085",
-    "username": "sim_bogota_0085",
-    "display_name": "Fictional Bogotá Reporter 085"
+    "username": "mar_beltran",
+    "display_name": "Mariana Beltrán"
   },
-  "message": "El tramo afectado de Ciudad Bolívar sigue cerrado al paso informal de peatones por precaución. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Sigue sin usarse ese tramo del sendero de Ciudad Bolívar, por precaución después del deslizamiento. Si van a salir a la calle de abajo, tengan en cuenta el cierre del paso. #Bogota #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 144,
   "available_offset_seconds": 144,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0085-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0085.webp",
+      "sha256": "888cc2138e72c44e3c0b0840221630c7675f8b2487e61ae272ab4f0463cd0ba6",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: An empty hillside passage kept clear after a small soil slip. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

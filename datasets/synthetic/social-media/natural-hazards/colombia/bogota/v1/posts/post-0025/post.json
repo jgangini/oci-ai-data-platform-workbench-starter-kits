@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0025",
-    "username": "sim_bogota_0025",
-    "display_name": "Fictional Bogotá Reporter 025"
+    "username": "mar_arevalo",
+    "display_name": "Mariana Arévalo"
   },
-  "message": "En Bosa empieza a entrar agua de lluvia en un patio bajo; reporto una inundación localizada. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Vecinos de Bosa, empezó a meterse el agua de lluvia en un patio que queda bajito. La inundación que estoy viendo es en este punto; no sé cómo estarán las otras cuadras. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -22,12 +22,12 @@
     {
       "id": "post-0025-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0025/media/image-01.svg",
-      "sha256": "c997c0ac40de31571b909fbe67846e2954c380516b903521f8d9cc458e5c038f",
+      "mime_type": "image/webp",
+      "dataset_path": "media/flood-bosa-active.webp",
+      "sha256": "51108f7c665e7757758078c51b9a19c5b6377450bd283241701d3f08307504fe",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Bosa; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of localized flooding around residential entrances in Bosa; a fictional scenario, not documentation of a real incident.",
       "is_simulated": true
     }
   ]

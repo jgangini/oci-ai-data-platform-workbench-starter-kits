@@ -33,7 +33,7 @@ import {
   type ModuleOperationKind,
 } from "./registrationPoll";
 
-type ApiError = { detail?: string };
+type ApiError = { detail?: string | { message?: string } };
 type LabUser = {
   id: string;
   name: string;
@@ -72,6 +72,8 @@ type AdminSettingsResponse = {
   deployment_mode: "laboratory" | "production";
   operator_username: string;
   registration_code_configured: boolean;
+  time_zone: string;
+  time_zones: string[];
 };
 type AdminModule = {
   module_id: "ai_data_governance_vsc_extension" | (string & {});
@@ -431,7 +433,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as ApiError;
     throw new ApiRequestError(
-      body.detail || `Request failed (${response.status})`,
+      (typeof body.detail === 'string' ? body.detail : body.detail?.message) || `Request failed (${response.status})`,
       response.status,
       parseRetryAfter(response.headers.get("Retry-After")),
     );
@@ -786,7 +788,7 @@ function GovernanceModuleModal({
       >
         <header>
           <div>
-            <p className="eyebrow">Global production module</p>
+            <p className="eyebrow">Shared global module</p>
             <h2 id={titleId}>{module.display_name}</h2>
             <p id={descriptionId}>Manage the singleton through administrator {user.email}.</p>
           </div>
@@ -809,7 +811,7 @@ function GovernanceModuleModal({
             </span>
           </label>
           <p className="governance-module-note">
-            This installation is shared by every administrator. AIDP developers can use the Agent, while only AI Data Platform administrators can modify it.
+            One installation serves all AIDP developers across the Master Catalog. Only AI Data Platform administrators can deploy or modify it.
           </p>
           <p className="governance-module-note kit-version-copy">
             <strong>{module.installed_version ? `Installed ${module.installed_version}` : "Not installed"}</strong>
@@ -848,7 +850,7 @@ function GovernanceModuleModal({
             </>
           ) : (
             <button type="button" disabled={!selected || busy || transitioning} onClick={onInstall}>
-              Install
+              Deploy
             </button>
           )}
         </footer>
@@ -1711,7 +1713,9 @@ function AdminUsers() {
   const adminSession = useAdminSession();
   const publicConfig = usePublicConfig();
   const catalog = participantLabCatalog(publicConfig?.labs ?? fallbackCatalog);
-  const production = publicConfig?.deployment_mode === "production";
+  const governanceEntry = new URLSearchParams(window.location.search).get("module") === "ai_data_governance_vsc_extension";
+  const [governanceAdminId, setGovernanceAdminId] = useState("");
+  const [usersLoaded, setUsersLoaded] = useState(false);
   const [users, setUsers] = useState<LabUser[]>([]);
   const [modules, setModules] = useState<AdminModule[]>([]);
   const [search, setSearch] = useState("");
@@ -1754,6 +1758,7 @@ function AdminUsers() {
     try {
       const loaded = (await api<{ users: LabUser[] }>("/api/admin/users")).users;
       setUsers(loaded);
+      setUsersLoaded(true);
       return loaded;
     } catch (reason) {
       if (reason instanceof ApiRequestError && reason.status === 401)
@@ -1765,11 +1770,6 @@ function AdminUsers() {
     }
   }
   async function loadModules() {
-    if (!production) {
-      setModules([]);
-      setModuleLoadError("");
-      return [];
-    }
     setModuleLoadError("");
     try {
       const loaded = (await api<{ modules: AdminModule[] }>("/api/admin/modules")).modules;
@@ -1800,15 +1800,13 @@ function AdminUsers() {
   }
   useEffect(() => {
     void loadUsers();
+    void loadModules();
     return () => {
       createAbortRef.current?.abort();
       operationAbortRef.current?.abort();
       moduleAbortRef.current?.abort();
     };
   }, []);
-  useEffect(() => {
-    if (production) void loadModules();
-  }, [production]);
   const visible = users.filter((user) =>
     `${user.name} ${user.email}`.toLowerCase().includes(query.toLowerCase()),
   );
@@ -2068,7 +2066,7 @@ function AdminUsers() {
   }
 
   async function openModuleManager(user: LabUser) {
-    if (!production || !user.is_aidp_admin || !governanceModule) return;
+    if (!user.is_aidp_admin || !governanceModule) return;
     const refreshed = (await loadModules())?.find(
       ({ module_id }) => module_id === governanceModule.module_id,
     ) ?? governanceModule;
@@ -2078,7 +2076,7 @@ function AdminUsers() {
   }
 
   async function runModuleAction(kind: ModuleOperationKind) {
-    if (!moduleManagerUser || !moduleManagerUser.is_aidp_admin || !governanceModule) return;
+    if (!moduleManagerUser || !moduleManagerUser.is_aidp_admin || !governanceModule || moduleAbortRef.current) return;
     const recoverableKind = moduleOperationKind(governanceModule.status, governanceModule.operation_type);
     const operationKey = moduleOperationKey(governanceModule.module_id, kind);
     let operation;
@@ -2099,7 +2097,6 @@ function AdminUsers() {
     }
 
     const controller = new AbortController();
-    moduleAbortRef.current?.abort();
     moduleAbortRef.current = controller;
     setModuleOperating(true);
     setModuleOperationError("");
@@ -2171,6 +2168,25 @@ function AdminUsers() {
       >
         <section className="admin" aria-busy={operating || creating || moduleOperating} inert={operating || creating || moduleOperating}>
           <div className="admin-panel">
+            {governanceEntry && (
+              <div className="governance-module-body">
+                <a href="/admin/settings#application">Return to Settings</a>
+                <h2>AI Data Governance</h2>
+                <p className="governance-module-note">Deploy or redeploy the single shared module using an existing AI Data Platform administrator. This does not grant administrator access to participants.</p>
+                <label className="settings-field">AI Data Platform administrator
+                  <select value={governanceAdminId} onChange={event => setGovernanceAdminId(event.target.value)}>
+                    <option value="">Select an administrator</option>
+                    {users.filter(user => user.is_aidp_admin).map(user => <option key={user.id} value={user.id}>{user.email}</option>)}
+                  </select>
+                </label>
+                {usersLoaded && !users.some(user => user.is_aidp_admin) && <p role="alert">No AI Data Platform administrator is available. Deployment requires an existing AI_DATA_PLATFORM_ADMIN account.</p>}
+                <p role="status">{governanceModule ? governanceModule.status.replaceAll("_", " ") : moduleLoadError ? "Module status unavailable" : "Loading module status…"}</p>
+                <button type="button" disabled={!governanceModule || !users.some(user => user.id === governanceAdminId && user.is_aidp_admin)} onClick={() => {
+                  const user = users.find(user => user.id === governanceAdminId && user.is_aidp_admin);
+                  if (user) void openModuleManager(user);
+                }}>Deploy / Redeploy</button>
+              </div>
+            )}
             <div className="admin-panel-heading">
               <h1>Users</h1>
               <button
@@ -2219,7 +2235,7 @@ function AdminUsers() {
                   type="button"
                   onClick={() => {
                     void loadUsers();
-                    if (production) void loadModules();
+                    void loadModules();
                   }}
                   aria-label="Refresh users"
                   title="Refresh users"
@@ -2295,7 +2311,7 @@ function AdminUsers() {
                       </td>
                       <td className="row-actions">
                         <span className="row-action-group">
-                          {production && user.is_aidp_admin && governanceModule && (
+                          {user.is_aidp_admin && governanceModule && (
                             <button
                               className="table-action table-module"
                               type="button"
@@ -2412,9 +2428,9 @@ function AdminUsers() {
           setModuleSelected(selected);
           setModuleOperationError("");
         }}
-        onInstall={() => void runModuleAction("install")}
-        onResume={(kind) => void runModuleAction(kind)}
-        onRedeploy={() => void runModuleAction("redeploy")}
+        onInstall={() => setPendingModuleAction("install")}
+        onResume={setPendingModuleAction}
+        onRedeploy={() => setPendingModuleAction("redeploy")}
         onDelete={() => {
           setModuleOperationError("");
           setPendingModuleAction("delete");
@@ -2426,17 +2442,19 @@ function AdminUsers() {
         }}
       />
       <ConfirmModal
-        open={pendingModuleAction === "delete" && !moduleOperating}
-        kind="delete"
-        title="Delete global governance module?"
-        description={`This permanently deletes ${governanceModule?.display_name ?? "the module"}, its Agent deployment, dedicated AI Compute, credential, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema and shared Spark compute are retained.`}
+        open={Boolean(pendingModuleAction) && !moduleOperating}
+        kind={pendingModuleAction === "delete" ? "delete" : "question"}
+        title={pendingModuleAction === "delete" ? "Delete global governance module?" : pendingModuleAction === "install" ? "Deploy AI Data Governance?" : "Redeploy AI Data Governance?"}
+        description={pendingModuleAction === "delete"
+          ? `This permanently deletes ${governanceModule?.display_name ?? "the module"}, its Agent deployment, dedicated AI Compute, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema, shared Spark compute and shared OCI credentials are retained.`
+          : `${pendingModuleAction === "install" ? "Deploy" : "Redeploy"} the single shared Agent, dedicated AI Compute and governance workflow through administrator ${moduleManagerUser?.email ?? "selected above"}. This affects the global module used by all AIDP developers across the Master Catalog and does not grant administrator access to participants. Existing shared OCI credentials are retained.`}
         error={moduleOperationError}
-        confirmLabel="Delete module"
+        confirmLabel={pendingModuleAction === "delete" ? "Delete module" : "Accept"}
         onClose={() => {
           setPendingModuleAction(null);
           setModuleOperationError("");
         }}
-        onConfirm={() => void runModuleAction("delete")}
+        onConfirm={() => pendingModuleAction && void runModuleAction(pendingModuleAction)}
       />
       <ConfirmModal
         open={Boolean(pendingLabAction) && !operating}
@@ -2486,7 +2504,7 @@ function AdminUsers() {
           phase={moduleProgress?.phase}
           label={pendingModuleAction === "delete" ? "Deleting governance module" : "Reconciling governance module"}
           indeterminate
-          message={moduleProgress?.message || "Reconciling the global production module."}
+          message={moduleProgress?.message || "Reconciling the shared governance module."}
         />
       )}
     </>
@@ -2631,10 +2649,12 @@ function ApplicationReleaseSettings({
   release,
   busy,
   error,
+  onConfigureGovernance,
 }: {
   release: AdminApplicationRelease | null;
   busy: boolean;
   error: string;
+  onConfigureGovernance: () => void;
 }) {
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
@@ -2646,17 +2666,17 @@ function ApplicationReleaseSettings({
       : release?.update_available
         ? "Update available"
         : release?.latest_release
-          ? "Up to date"
+          ? "Updated to the latest version"
           : "Check unavailable";
   return (
-    <section className="application-release" aria-busy={busy}>
+    <section className="application-release application-version" aria-busy={busy}>
       <header className="application-release-heading">
         <div>
           <p className="eyebrow">GitHub release</p>
           <h2>Application version</h2>
           <p>Update the VM in place from the latest immutable release without reinstalling it.</p>
         </div>
-        <span className={`release-state ${release?.update_available || operationRunning ? "update" : "current"}`}>
+        <span className={`prisma-mode release-state ${release?.update_available || operationRunning ? "update" : "current real"}`}>
           {statusLabel}
         </span>
       </header>
@@ -2719,8 +2739,13 @@ function ApplicationReleaseSettings({
                     <td>{item.bundled_version}</td>
                     <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
                     <td className="release-package-actions">
+                      {item.package_id === "ai_data_governance_vsc_extension" && (
+                        <button type="button" className="module-configure module-deploy" onClick={onConfigureGovernance} aria-label="Deploy or redeploy AI Data Governance" title="Deploy or redeploy AI Data Governance" aria-haspopup="dialog">
+                          <RefreshIcon />
+                        </button>
+                      )}
                       {item.package_id === "territorial_control" && (
-                        <a className="module-configure" href="/admin/gods-eye-view" aria-label="Configure Territorial Control" title="Configure Territorial Control">
+                        <a className="module-configure" href="/admin/gods-eye-view" aria-label={`Configure ${item.display_name}`} title={`Configure ${item.display_name}`}>
                           <AdminLoginIcon />
                         </a>
                       )}
@@ -2730,9 +2755,6 @@ function ApplicationReleaseSettings({
               </tbody>
             </table>
           </div>
-          <p className="settings-help">
-            Updating the application changes the bundled kit versions. Existing participant installations remain unchanged until their Update or Redeploy action is used.
-          </p>
         </>
       ) : error ? (
         <p className="release-operation error" role="alert">{error}</p>
@@ -2754,8 +2776,13 @@ function AdminSettings() {
   const [deploymentMode, setDeploymentMode] = useState<"laboratory" | "production">("laboratory");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
+  const [timeZone, setTimeZone] = useState('America/Bogota');
+  const [savedTimeZone, setSavedTimeZone] = useState('America/Bogota');
+  const [timeZones, setTimeZones] = useState<{ value: string; label: string }[]>([]);
   const [applicationRelease, setApplicationRelease] = useState<AdminApplicationRelease | null>(null);
   const [releaseBusy, setReleaseBusy] = useState(false);
+  const [confirmReleaseUpdate, setConfirmReleaseUpdate] = useState(false);
+  const [confirmGovernance, setConfirmGovernance] = useState(false);
   const [releaseError, setReleaseError] = useState("");
   const [releaseProgress, setReleaseProgress] = useState<RegistrationResponse | null>(null);
   const [error, setError] = useState("");
@@ -2766,12 +2793,22 @@ function AdminSettings() {
   const serviceEndpointRef = useRef<HTMLInputElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const platformIdRef = useRef<HTMLInputElement>(null);
-  function applyAdminSettings(result: AdminSettingsResponse) {
+  const viewerUrlRef = useRef<HTMLInputElement>(null);
+  const viewerUrl = new URL('/gods-eye-view/', window.location.origin).href;
+  function applyAdminSettings(result: AdminSettingsResponse, section?: "registration" | "timezone") {
     setAidpServiceEndpoint(result.aidp_service_endpoint);
     setAidpUrl(result.aidp_url);
     setAidpPlatformId(result.aidp_platform_id);
     setDeploymentMode(result.deployment_mode);
     setRegistrationCodeConfigured(result.registration_code_configured);
+    if (!section || section === "timezone") setTimeZone(result.time_zone);
+    setSavedTimeZone(result.time_zone);
+    setTimeZones([...new Set([result.time_zone, ...result.time_zones])].flatMap(value => {
+      try {
+        const offset = new Intl.DateTimeFormat('en', { timeZone: value, timeZoneName: 'longOffset' }).formatToParts(new Date()).find(part => part.type === 'timeZoneName')?.value.replace('GMT', 'UTC');
+        return [{ value, label: `${value.replaceAll('_', ' ')} (${offset})` }];
+      } catch { return []; }
+    }));
   }
   async function loadApplicationRelease() {
     setReleaseError("");
@@ -2791,7 +2828,7 @@ function AdminSettings() {
   }
   useEffect(() => {
     void api<AdminSettingsResponse>("/api/admin/settings")
-      .then(applyAdminSettings)
+      .then(result => applyAdminSettings(result))
       .catch((reason) => {
         if (reason instanceof ApiRequestError && reason.status === 401)
           window.location.assign("/admin/login");
@@ -2839,7 +2876,7 @@ function AdminSettings() {
     }
     setToast(`${label} copied.`);
   }
-  async function saveSettings(section: "workbench" | "registration") {
+  async function saveSettings(section: "registration" | "timezone") {
     setError("");
     const rotatesRegistrationCode = section === "registration" && Boolean(registrationCode);
     if (rotatesRegistrationCode && !/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)) {
@@ -2850,18 +2887,20 @@ function AdminSettings() {
       const result = await api<AdminSettingsResponse>("/api/admin/settings", {
         method: "PUT",
         body: JSON.stringify({
-          ...(section === "workbench" && aidpUrl ? { aidp_url: aidpUrl } : {}),
           ...(rotatesRegistrationCode ? { registration_code: registrationCode } : {}),
+          ...(section === "timezone" ? { time_zone: timeZone } : {}),
         }),
       });
-      applyAdminSettings(result);
-      setRegistrationCode("");
-      setToast(section === "registration" ? "Registration code saved." : "AI Data Platform Workbench settings saved.");
+      applyAdminSettings(result, section);
+      if (rotatesRegistrationCode) setRegistrationCode("");
+      setToast(section === "registration" ? "Registration code saved." : "Time zone saved.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save settings");
     }
   }
   async function updateApplication() {
+    setConfirmReleaseUpdate(false);
+    if (!applicationRelease?.updater_available || releaseAbortRef.current) return;
     const runningOperation = applicationRelease?.operation &&
       applicationUpdateStates.has(applicationRelease.operation.status)
       ? applicationRelease.operation.operation_id
@@ -2869,7 +2908,6 @@ function AdminSettings() {
     const operationId = runningOperation || crypto.randomUUID();
     const previousRelease = applicationRelease?.current_release;
     const controller = new AbortController();
-    releaseAbortRef.current?.abort();
     releaseAbortRef.current = controller;
     setReleaseBusy(true);
     setReleaseError("");
@@ -2991,7 +3029,8 @@ function AdminSettings() {
                 <input
                   ref={urlRef}
                   value={aidpUrl}
-                  onChange={(event) => setAidpUrl(event.target.value)}
+                  readOnly
+                  spellCheck={false}
                   aria-label="AI Data Platform Workbench URL"
                   placeholder="Loading configuration…"
                 />
@@ -3042,11 +3081,6 @@ function AdminSettings() {
                 </button>
               </span>
             </label>
-            <div className="settings-actions">
-              <button type="button" className="settings-save" onClick={() => void saveSettings("workbench")} disabled={!aidpUrl}>
-                Save Settings
-              </button>
-            </div>
             <RegistrationAccessSettings
               deploymentMode={deploymentMode}
               registrationCode={registrationCode}
@@ -3070,16 +3104,32 @@ function AdminSettings() {
                 <strong>Application</strong>
                 <p>Manage the application release, starter kit versions and module configuration.</p>
               </div>
+              {configuringModule && <a className="module-return" href="/admin/settings#application"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>Return</a>}
               {!configuringModule && applicationRelease && (applicationRelease.update_available || (applicationRelease.operation && applicationUpdateStates.has(applicationRelease.operation.status))) &&
-                <button type="button" className="settings-save application-update" disabled={!applicationRelease.updater_available || releaseBusy} onClick={() => void updateApplication()}>
+                <button type="button" className="settings-save application-update" disabled={!applicationRelease.updater_available || releaseBusy} onClick={() => setConfirmReleaseUpdate(true)}>
                   <RefreshIcon />{releaseBusy ? "Updating…" : "Update from GitHub"}
                 </button>}
             </div>
-            {configuringModule ? <PrismaAdmin api={api} /> : <ApplicationReleaseSettings
+            {configuringModule ? <PrismaAdmin api={api} timeZone={savedTimeZone} searchIcon={<SearchIcon />} refreshIcon={<RefreshIcon />} viewerUrlControl={
+              <label className="settings-field">
+                God’s Eye View URL
+                <span className="settings-url-control settings-url-control-actions">
+                  <input ref={viewerUrlRef} value={viewerUrl} readOnly spellCheck={false} aria-label="God’s Eye View URL" />
+                  <button type="button" className="copy-url" onClick={() => void copyAidpValue(viewerUrl, viewerUrlRef, 'God’s Eye View URL')} aria-label="Copy God’s Eye View URL" title="Copy God’s Eye View URL"><CopyIcon /></button>
+                  <a className="copy-url open-url" href={viewerUrl} target="_blank" rel="noopener noreferrer" aria-label="Open God’s Eye View" title="Open God’s Eye View"><OpenExternalIcon /></a>
+                </span>
+              </label>
+            } /> : <><ApplicationReleaseSettings
               release={applicationRelease}
               busy={releaseBusy}
               error={releaseError}
-            />}
+              onConfigureGovernance={() => setConfirmGovernance(true)}
+            />
+              <div className="settings-time-zone-controls">
+                <label className="settings-field">Display time zone<select value={timeZone} onChange={event => setTimeZone(event.target.value)}>{timeZones.map(zone => <option key={zone.value} value={zone.value}>{zone.label}</option>)}</select></label>
+                <button type="button" className="settings-save" disabled={timeZone === savedTimeZone} onClick={() => void saveSettings('timezone')}>Save time zone</button>
+              </div>
+            </>}
           </section>
           {error && (
             <p className="notice error" role="alert">
@@ -3089,6 +3139,24 @@ function AdminSettings() {
         </div>
       </section>
       <Toast message={toast} onDismiss={() => setToast("")} />
+      <ConfirmModal
+        open={confirmGovernance}
+        kind="question"
+        title="AI Data Governance"
+        description="Open the shared module manager to deploy or redeploy one Agent, dedicated AI Compute and governance workflow for all AIDP developers across the Master Catalog. Select an existing AI Data Platform administrator there. Deployment starts only after you confirm its action; participants are not granted administrator access."
+        confirmLabel="Accept"
+        onClose={() => setConfirmGovernance(false)}
+        onConfirm={() => window.location.assign("/admin/users?module=ai_data_governance_vsc_extension")}
+      />
+      <ConfirmModal
+        open={confirmReleaseUpdate}
+        kind="question"
+        title="Update application?"
+        description="Update this VM to the latest published release and its bundled kit versions? Existing participant installations remain unchanged until their Update or Redeploy action is used."
+        confirmLabel="Update application"
+        onClose={() => setConfirmReleaseUpdate(false)}
+        onConfirm={() => void updateApplication()}
+      />
       {releaseBusy && (
         <ProvisioningOverlay
           phase={releaseProgress?.phase}

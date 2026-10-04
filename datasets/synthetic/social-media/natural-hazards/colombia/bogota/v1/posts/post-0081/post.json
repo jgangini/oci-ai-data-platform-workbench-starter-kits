@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0081",
-    "username": "sim_bogota_0081",
-    "display_name": "Fictional Bogotá Reporter 081"
+    "username": "pau_cuellar",
+    "display_name": "Paula Cuéllar"
   },
-  "message": "Una parte del paso peatonal de Ciudad Bolívar queda bloqueada por barro y piedras de la ladera. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Barro y piedras de la ladera están bloqueando una parte del paso peatonal en Ciudad Bolívar. Autoridades, necesitamos que revisen ese tramo, es por donde se conecta con la calle de abajo. #desastre en Bogotá #deslizamiento",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 96,
   "available_offset_seconds": 96,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0081-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0081.webp",
+      "sha256": "7c8861493c2f2f0f220c652cfdf281c6bd87db9915103f5ae74df1982154517a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Mud and small stones partly obstructing a pedestrian connection to the lower street. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

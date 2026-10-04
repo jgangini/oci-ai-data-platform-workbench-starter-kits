@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0037",
-    "username": "sim_bogota_0037",
-    "display_name": "Fictional Bogotá Reporter 037"
+    "username": "mar_quintero",
+    "display_name": "Mariana Quintero"
   },
-  "message": "El nivel se mantiene en el punto que observo de Bosa y todavía entra agua por un portón. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Sigo mirando el mismo punto de Bosa. El nivel se mantiene, pero todavía entra agua por el portón. Para quienes preguntaban: acá la inundación no ha cedido. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 144,
   "available_offset_seconds": 144,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0037-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0037.webp",
+      "sha256": "7c9ec0ca92e45b91bade8b5705426cdba3573deee8a666a61591db8fc57b835b",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of shallow water continuing to enter beneath a residential gate in fictional Bosa.",
+      "is_simulated": true
+    }
+  ]
 }

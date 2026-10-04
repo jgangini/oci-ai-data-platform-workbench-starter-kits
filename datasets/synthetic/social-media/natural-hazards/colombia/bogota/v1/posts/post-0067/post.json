@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0067",
-    "username": "sim_bogota_0067",
-    "display_name": "Fictional Bogotá Reporter 067"
+    "username": "dan_lozano",
+    "display_name": "Daniela Lozano"
   },
-  "message": "La columna de humo en Chapinero es menor; eso por sí solo no permite afirmar que el incendio terminó. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "La columna de humo está más bajita en Chapinero. Eso alivia un poco, sí, pero sería apresurado decir que el incendio terminó solo por eso. Sigo mirando desde el barrio. #Bogota #Colombia",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 216,
   "available_offset_seconds": 216,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0067-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0067.webp",
+      "sha256": "ff84e41d7a1aaaee6c9e3f993e9addd205f73065210cd34290da6c4de8183d3b",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: una columna baja de humo residual en vegetación de Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

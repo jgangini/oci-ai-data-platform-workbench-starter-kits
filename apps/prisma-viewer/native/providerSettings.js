@@ -1,10 +1,18 @@
 import { text } from './territorialLayer.js';
+export const managedProviderLabel = (configured) => configured ? 'Configured · server managed' : 'Not configured · server managed';
 
-export function selectableModels(payload) {
-  return Array.isArray(payload?.items) ? payload.items.filter((item) => typeof item.id === 'string' && item.selectable === true) : [];
+export function ociModelLabel(name, vendor) {
+  const friendly = typeof name === 'string' && name.trim() && !name.trim().startsWith('ocid1.') ? name.trim() : 'OCI conversational model';
+  return typeof vendor === 'string' && vendor.trim() ? `${friendly} · ${vendor.trim()}` : friendly;
 }
 
-export const managedProviderLabel = (configured) => configured ? 'Configured · server managed' : 'Not configured · server managed';
+export function ociProviderPresentation(value) {
+  const configured = value.configured === true;
+  return {
+    set: String(configured), label: managedProviderLabel(configured),
+    model: value.model_id ? ociModelLabel(value.model_name, value.model_vendor) : 'No model selected',
+  };
+}
 
 export function browserProviderConfig(payload) {
   const keys = ['googleApiKey', 'cesiumToken'];
@@ -17,21 +25,24 @@ export function browserProviderConfig(payload) {
   return options;
 }
 
-function nativeProviderPresentation(dialog, signal) {
+function nativeProviderPresentation(dialog, signal, ociRows) {
   const chip = document.getElementById('key-setup-chip');
   const description = dialog.querySelector('#key-setup-description');
-  if (description) description.textContent = 'Native provider keys are managed in the server environment. Availability below reflects configured credentials, not a feed or quota test. Configure the OCI text model in its separate section.';
+  if (description) description.textContent = 'Administrators manage provider keys and OCI models in Parameters. Availability below reflects configured credentials, not a feed or quota test.';
   const apply = () => {
+    const rowsHost = dialog.querySelector('[data-key-setup-rows]');
+    for (const row of ociRows) if (rowsHost && row.parentNode !== rowsHost) rowsHost.append(row);
     if (chip?.hidden) chip.hidden = false;
     const save = dialog.querySelector('[data-key-setup-apply]');
     if (save) { save.disabled = true; save.hidden = true; }
     for (const row of dialog.querySelectorAll('.key-setup-row')) {
+      if (ociRows.includes(row)) continue;
       const badge = row.querySelector('.key-setup-external');
       const label = managedProviderLabel(row.dataset.set === 'true');
-      if (badge && badge.textContent !== label) { badge.textContent = label; badge.title = 'Configure native provider credentials in the server environment.'; }
+      if (badge && badge.textContent !== label) { badge.textContent = label; badge.title = 'Configure provider credentials in Administration → God’s Eye View → Parameters.'; }
     }
     const note = dialog.querySelector('[data-key-setup-status]');
-    const explanation = 'Native key editing is disabled here. An administrator manages server credentials; OCI model selection and testing are available below.';
+    const explanation = 'Provider configuration is managed on the server.';
     if (note && note.textContent !== explanation) note.textContent = explanation;
   };
   // Native setup fetches its registry asynchronously and owns subsequent renders.
@@ -42,48 +53,48 @@ function nativeProviderPresentation(dialog, signal) {
   apply();
 }
 
-async function loadModelPage(request, signal, cursor, section) {
-  const select = section.querySelector('select');
-  const payload = await request(`/api/admin/prisma/oci-provider/models${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { signal });
-  for (const item of selectableModels(payload)) {
-    const existing = [...select.options].find((option) => option.value === item.id);
-    const option = existing || new Option(`${item.name || item.id}${item.vendor ? ` · ${item.vendor}` : ''}`, item.id);
-    option.dataset.selectable = 'true'; if (!existing) select.add(option);
+async function loadOciStatus(section, request, signal, path, voice) {
+  try {
+    const value = await request(path, { signal });
+    if (signal.aborted) return;
+    const presentation = ociProviderPresentation(value);
+    section.dataset.set = presentation.set;
+    section.querySelector('[data-oci-configured]').textContent = presentation.label;
+    section.querySelector('[data-oci-model]').textContent = `${value.region || 'Region unavailable'} · ${presentation.model}${voice && value.tts_model ? ` · xAI Grok TTS · ${value.voice || 'Voice unavailable'}` : ''}`;
+    return value;
+  } catch (error) {
+    if (!signal.aborted) {
+      section.querySelector('[data-oci-configured]').textContent = 'Configuration unavailable';
+      section.querySelector('[data-oci-model]').textContent = error.message;
+    }
   }
-  const next = payload.next_cursor || null; section.querySelector('[data-models]').textContent = next ? 'More models' : 'Refresh models';
-  section.querySelector('[data-oci-status]').textContent = select.options.length ? 'Choose an available model, then save. Region and credentials remain server-managed.' : 'No supported active chat models were returned.';
-  return next;
 }
 
-/** Adds OCI configuration without changing native voice or the native key writer. */
+function ociStatusRow(title, id, signal) {
+  const section = text('section', '', 'key-setup-row tc-oci-settings');
+  section.dataset.keyId = id; section.dataset.managed = 'external'; section.dataset.set = 'false';
+  section.setAttribute('aria-label', title);
+  section.innerHTML = `<div class="key-setup-row-head"><span class="key-setup-led" aria-hidden="true"></span><strong></strong><span class="key-setup-external" data-oci-configured>Loading configuration…</span></div><p data-oci-model class="key-setup-unlocks" role="status">Loading provider configuration…</p>`;
+  section.querySelector('strong').textContent = title;
+  signal.addEventListener('abort', () => section.remove(), { once: true });
+  return section;
+}
+
+/** Append read-only OCI status and an administration link for authorized operators. */
 export async function mountProviderSettings({ request, signal }) {
   const dialog = document.getElementById('key-setup');
   if (!dialog) return;
-  nativeProviderPresentation(dialog, signal);
-  const section = text('section', '', 'tc-oci-settings'); section.setAttribute('aria-label', 'OCI Generative AI settings');
-  section.innerHTML = `<h3>OCI Generative AI</h3><p data-oci-status role="status">Loading provider status…</p><p>Server-managed OCI credentials. Text assistance is separate from the native voice provider.</p><div data-oci-admin hidden><label>Model<select aria-label="OCI Generative AI model"></select></label><div class="tc-actions"><button type="button" data-models>Load models</button><button type="button" data-save disabled>Save model</button><button type="button" data-test>Test saved model</button></div></div>`;
-  dialog.querySelector('.key-setup-footer')?.before(section);
-  const status = section.querySelector('[data-oci-status]'); const admin = section.querySelector('[data-oci-admin]'); const select = section.querySelector('select');
-  let cursor = null, configuredModel = '';
-  function render(value) {
-    configuredModel = value.model_id || ''; admin.hidden = value.can_configure !== true;
-    status.textContent = `${value.region || 'Region unavailable'} · ${configuredModel || 'No model selected'} · ${value.message || value.status || (value.configured ? 'Configured' : 'Not configured')}`;
-    if (configuredModel && ![...select.options].some((option) => option.value === configuredModel)) select.add(new Option(`${configuredModel} (saved)`, configuredModel));
-    select.value = configuredModel;
+  const rows = [ociStatusRow('OCI Generative AI · text', 'oci', signal), ociStatusRow('OCI Generative AI · voice', 'oci-voice', signal)];
+  nativeProviderPresentation(dialog, signal, rows);
+  const statuses = await Promise.all([
+    loadOciStatus(rows[0], request, signal, '/api/prisma/oci-provider', false),
+    loadOciStatus(rows[1], request, signal, '/api/prisma/oci-voice', true),
+  ]);
+  if (!signal.aborted && statuses.some((value) => value?.can_configure === true)) {
+    const link = text('a', 'Manage parameters ↗', 'key-setup-get');
+    link.href = '/admin/gods-eye-view#parameters';
+    link.target = '_blank'; link.rel = 'noopener';
+    (dialog.querySelector('.key-setup-footer') || dialog).append(link);
+    signal.addEventListener('abort', () => link.remove(), { once: true });
   }
-  async function action(work) {
-    const buttons = [...section.querySelectorAll('button')]; buttons.forEach((button) => { button.disabled = true; });
-    try { await work(); }
-    catch (error) { if (!signal.aborted) status.textContent = error.message; }
-    finally { buttons.forEach((button) => { button.disabled = false; }); section.querySelector('[data-save]').disabled = !select.selectedOptions[0]?.dataset.selectable; }
-  }
-  select.addEventListener('change', () => { section.querySelector('[data-save]').disabled = !select.selectedOptions[0]?.dataset.selectable; }, { signal });
-  section.querySelector('[data-models]').addEventListener('click', () => void action(async () => {
-    cursor = await loadModelPage(request, signal, cursor, section);
-  }), { signal });
-  section.querySelector('[data-save]').addEventListener('click', () => void action(async () => { render(await request('/api/admin/prisma/oci-provider', { method: 'PUT', body: JSON.stringify({ model_id: select.value }), signal })); status.textContent += ' · Model saved.'; }), { signal });
-  section.querySelector('[data-test]').addEventListener('click', () => void action(async () => { const value = await request('/api/admin/prisma/oci-provider/test', { method: 'POST', body: '{}', signal }); render(value); status.textContent += value.test?.status === 'success' ? ' · Inference test passed.' : ' · Test did not confirm success.'; }), { signal });
-  signal.addEventListener('abort', () => section.remove(), { once: true });
-  try { render(await request('/api/prisma/oci-provider', { signal })); }
-  catch (error) { if (!signal.aborted) status.textContent = error.message; }
 }

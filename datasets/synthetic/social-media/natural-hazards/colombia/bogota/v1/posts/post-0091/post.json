@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0091",
-    "username": "sim_bogota_0091",
-    "display_name": "Fictional Bogotá Reporter 091"
+    "username": "dan_beltran",
+    "display_name": "Daniela Beltrán"
   },
-  "message": "En el punto que observo de Ciudad Bolívar no veo nuevos movimientos durante los últimos minutos. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "En este punto de Ciudad Bolívar llevo unos minutos sin ver nuevos movimientos de tierra. Solo puedo hablar del pedazo de ladera que tengo a la vista, no de toda la zona. #Bogota #deslizamiento #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 216,
   "available_offset_seconds": 216,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0091-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0091.webp",
+      "sha256": "00c6f3db90fcd9776c1ed9fc79edba6a86b55d0370af7a85b1b78b2413db0a41",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A still visible section of wet slope with earlier loose earth at its base. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

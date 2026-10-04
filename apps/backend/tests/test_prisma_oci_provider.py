@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import LOCAL_COOKIE_NAME, create_app
 from app.prisma.local import LocalPrismaRuntime
-from app.prisma.oci_provider import OciProvider, TextQuestion
+from app.prisma.oci_provider import OciProvider, TextQuestion, model_view, response_text
 from app.security import issue_session
 
 
@@ -27,13 +27,16 @@ class Catalog:
 
     def list_models(self, compartment, **kwargs):
         self.calls.append((compartment, kwargs))
-        items = [item for item in self.items if not kwargs.get("id") or item.id == kwargs["id"]]
+        items = [item for item in self.items if (not kwargs.get("id") or item.id == kwargs["id"])
+                 and (not kwargs.get("display_name") or item.display_name == kwargs["display_name"])]
         return SimpleNamespace(data=SimpleNamespace(items=items), headers={"opc-next-page": "next-page"} if not kwargs.get("page") else {})
 
 
 class Inference:
     def __init__(self):
         self.calls, self.error, self.during_call = [], None, None
+        self.answer = "OK"
+        self.response = None
 
     def chat(self, request):
         self.calls.append(request)
@@ -41,8 +44,18 @@ class Inference:
             self.during_call()
         if self.error:
             raise self.error
+        if self.response is not None:
+            return self.response
         return SimpleNamespace(headers={"opc-request-id": "safe/request-id"}, data=SimpleNamespace(chat_response=SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=[SimpleNamespace(text="OK")]))])))
+            choices=[SimpleNamespace(message=SimpleNamespace(content=[SimpleNamespace(text=self.answer)]))])))
+
+
+def recitation_response():
+    # SDK shape of the actual 394-byte HTTP 200 response: finishReason with no message.
+    models = oci.generative_ai_inference.models
+    return SimpleNamespace(headers={"opc-request-id": "safe/recitation"}, data=SimpleNamespace(chat_response=models.GenericChatResponse(
+        choices=[models.ChatChoice(index=0, finish_reason="recitation")],
+        usage=models.Usage(completion_tokens=2048, prompt_tokens=91, total_tokens=2139))))
 
 
 @pytest.fixture
@@ -69,20 +82,85 @@ def provider(tmp_path, monkeypatch):
 
 def test_catalog_pagination_selection_persistence_and_server_secret_boundary(provider):
     service, catalog, _, constructors = provider
+    catalog.items[0].display_name = "Grok conversational test"
     assert service.models()["next_cursor"] == "next-page"
     assert service.models("next-page")["next_cursor"] is None
     assert catalog.calls[-1][1]["page"] == "next-page"
     result = service.save("xai.test")
     assert result["configured"] and result["available"] and result["capabilities"] == {"text": True, "voice": False}
+    assert result["model_name"] == "Grok conversational test" and result["model_vendor"] == "xAI"
     assert result["last_test"] is None
     assert service.settings.agent_model_id == "published-aidp-model"
     restored = OciProvider(service.settings, LocalPrismaRuntime(service.runtime.store.path.parent), service.aidp_factory)
     assert restored.status()["model_id"] == "xai.test"
+    assert restored.status()["model_name"] == "Grok conversational test"
+    assert restored.status()["model_vendor"] == "xAI"
     for forbidden in ("private-key", "private-tenancy", "private-user", "private-fingerprint"):
         assert forbidden not in json.dumps(result) and forbidden not in json.dumps(service._state())
     assert all(isinstance(options["retry_strategy"], oci.retry.NoneRetryStrategy) for _, options in constructors)
     assert all(options["signer"] is service.aidp_factory().signer for _, options in constructors)
     assert all(call[1]["capability"] == ["CHAT"] and call[1]["lifecycle_state"] == "ACTIVE" for call in catalog.calls)
+
+
+@pytest.mark.parametrize("local", [True, False])
+def test_vm_defaults_require_viewer_opt_in_resolve_catalog_and_preserve_saved_selection(provider, local):
+    service, catalog, inference, _ = provider
+    document = {"sources": {"x": {"enabled": True}}}
+    if not local:
+        service.runtime = SimpleNamespace(_doc=lambda _: document,
+            _change=lambda _, change: document.update(change(document)) or document)
+    service.settings = replace(service.settings, local_development_mode=local)
+    assert service._state() == {} and not service.status()["configured"]
+    service.settings = replace(service.settings, prisma_enabled=True)
+    status = service.status()
+    assert status["configured"] and status["model_id"] == "xai.grok-4.6" and status["last_test"] is None
+    assert not catalog.calls and not inference.calls
+    deployed = model("ocid1.generativeaimodel.oc1.test.default")
+    deployed.display_name = "xai.grok-4.6"
+    catalog.items.append(deployed)
+    service.chat(TextQuestion(question="Hello"))
+    assert catalog.calls[-1][1]["display_name"] == "xai.grok-4.6"
+    assert inference.calls[-1].serving_mode.model_id == deployed.id
+    assert service.test()["last_test"]["status"] == "success"
+    service.settings = replace(service.settings, gods_eye_oci_text_model="deployment.changed")
+    assert service.test()["last_test"]["status"] == "success"
+    assert inference.calls[-1].serving_mode.model_id == deployed.id
+    service.save("xai.second")
+    saved = service._state()
+    service.settings = replace(service.settings, gods_eye_oci_text_model="deployment.changed")
+    assert service._state() == saved and service.status()["model_id"] == "xai.second"
+    assert document["sources"]["x"]["enabled"]
+    service.aidp_factory = lambda: SimpleNamespace()
+    assert not service.status()["configured"]
+
+
+def test_vm_model_defaults_are_environment_configurable_and_can_be_disabled(provider, monkeypatch):
+    service, _, _, _ = provider
+    monkeypatch.setenv("PRISMA_VIEWER_ENABLED", "true")
+    monkeypatch.setenv("GODS_EYE_OCI_TEXT_MODEL", " xai.custom ")
+    monkeypatch.setenv("GODS_EYE_OCI_VOICE_MODEL", " google.gemini-2.5-flash ")
+    monkeypatch.setenv("GODS_EYE_OCI_VOICE", "EVE")
+    settings = Settings.from_env()
+    assert settings.prisma_enabled and settings.gods_eye_oci_text_model == "xai.custom"
+    assert settings.gods_eye_oci_voice_model == "google.gemini-2.5-flash" and settings.gods_eye_oci_voice == "eve"
+    service.settings = replace(service.settings, prisma_enabled=True, gods_eye_oci_text_model="")
+    assert service._state() == {} and not service.status()["configured"]
+
+
+def test_deployment_alias_chooses_available_duplicate_and_rejects_all_retired(provider):
+    service, catalog, inference, _ = provider
+    service.settings = replace(service.settings, prisma_enabled=True)
+    retired = model("ocid1.generativeaimodel.oc1.test.retired")
+    active = model("ocid1.generativeaimodel.oc1.test.active")
+    retired.display_name = active.display_name = "xai.grok-4.6"
+    retired.time_on_demand_retired = datetime.now(timezone.utc) - timedelta(days=1)
+    catalog.items = [retired, active]
+    service.chat(TextQuestion(question="Hello"))
+    assert inference.calls[-1].serving_mode.model_id == active.id
+    active.time_on_demand_retired = retired.time_on_demand_retired
+    with pytest.raises(HTTPException) as failure:
+        service.chat(TextQuestion(question="Hello"))
+    assert failure.value.detail["code"] == "oci_model_not_selectable" and len(inference.calls) == 1
 
 
 @pytest.mark.parametrize("changes", [{"vendor": "Cohere"}, {"type": "CUSTOM"}, {"capabilities": ["TEXT_EMBEDDINGS"]},
@@ -108,6 +186,7 @@ def test_text_chat_and_test_are_bounded_nonstreaming_and_have_no_aidp_tools(prov
         {"role": "assistant", "content": "How can I help?"}], context={"locality": "Kennedy", "version": "gold-1"}))
     request = inference.calls[-1].chat_request
     assert result["scope"] == "general_text" and result["mode"] == "real" and result["answer"] == "OK"
+    assert result["model_name"] == "xai.test" and result["model_vendor"] == "xAI"
     assert request.is_stream is False and request.max_tokens == 512 and not request.tools
     assert [item.role for item in request.messages] == ["SYSTEM", "USER", "USER", "ASSISTANT", "USER"]
     assert "cannot see the screen" in request.messages[0].content[0].text
@@ -124,9 +203,35 @@ def test_provider_error_is_sanitized_recorded_and_never_silently_returns_a_fixtu
         asyncio.run(service.invoke("test"))
     assert failed.value.status_code == 429
     assert failed.value.detail["provider_status"] == 429 and failed.value.detail["request_id"] == "safe/429"
+    assert failed.value.detail["code"] == "oci_rate_limited"
     assert "PRIVATE CONFIG" not in json.dumps(failed.value.detail)
     assert service._state()["last_test"]["status"] == "error"
+    status = service.status()
+    assert status["configured"] is True and status["status"] == "configured" and status["model_name"] == "xai.test"
+    assert status["last_test"]["error"]["code"] == "oci_rate_limited"
     assert "key.pem" not in json.dumps(service._state()) and len(inference.calls) == 1
+
+
+def test_http_200_recitation_without_message_is_an_explicit_error_and_keeps_text_configured(provider):
+    service, _, inference, _ = provider
+    service.save("xai.test")
+    inference.response = recitation_response()
+    with pytest.raises(HTTPException) as error:
+        service.test()
+    assert error.value.status_code == 502 and error.value.detail == {
+        "code": "oci_invalid_response", "message": "OCI blocked the model response; no answer was returned", "request_id": "safe/recitation", "response_blocked": True}
+    assert service.status()["configured"] and service.status()["available"]
+    assert service.status()["last_test"]["status"] == "error"
+
+
+@pytest.mark.parametrize("choices", [None, [], [SimpleNamespace(message=None)],
+    [SimpleNamespace(message=SimpleNamespace(content=None), finish_reason="PRIVATE provider reason")]])
+def test_missing_choices_message_or_content_never_becomes_an_attribute_error(choices):
+    response = SimpleNamespace(headers={"opc-request-id": "invalid\nrequest-id"}, data=SimpleNamespace(chat_response=SimpleNamespace(choices=choices)))
+    with pytest.raises(HTTPException) as error:
+        response_text(response)
+    assert error.value.status_code == 502 and error.value.detail["code"] == "oci_invalid_response"
+    assert error.value.detail["request_id"] is None and "PRIVATE" not in json.dumps(error.value.detail)
 
 
 def test_finishing_test_cannot_overwrite_a_newer_model_selection(provider):
@@ -136,6 +241,30 @@ def test_finishing_test_cannot_overwrite_a_newer_model_selection(provider):
     result = service.test()
     assert result["test"]["model_id"] == "xai.test"
     assert result["model_id"] == "xai.second" and result["last_test"] is None
+    assert result["model_name"] == "xai.second"
+
+
+def test_legacy_ocid_label_resolves_on_test_and_missing_credentials_preserve_selection(provider):
+    service, catalog, _, _ = provider
+    item = model("ocid1.generativeaimodel.oc1.us-ashburn-1.example")
+    item.display_name = "Conversational model display name"
+    catalog.items.append(item)
+    service._state(lambda _: {"model_id": item.id, "last_test": None})
+    legacy = service.status()
+    assert legacy["configured"] is True and legacy["model_name"] == "OCI conversational model"
+    result = service.test()
+    assert result["model_name"] == item.display_name and result["model_vendor"] == "xAI"
+    assert service._state()["model_name"] == item.display_name
+    operator = service.aidp_factory
+    service.aidp_factory = lambda: SimpleNamespace()
+    unavailable = service.status()
+    assert unavailable["configured"] is False and unavailable["status"] == "unavailable"
+    assert unavailable["model_id"] == item.id and unavailable["model_name"] == item.display_name
+    assert unavailable["last_test"] == result["last_test"]
+    service.aidp_factory = operator
+    assert service.status()["configured"] is True
+    item.display_name = None
+    assert model_view(item)["name"] == "OCI conversational model"
 
 
 def test_local_without_profile_is_honestly_unavailable_and_explicit_profile_uses_native_signer(provider, tmp_path, monkeypatch):
@@ -194,3 +323,26 @@ def test_http_auth_configuration_boundary_payload_limits_and_rate_limit(provider
         assert reader.post("/api/prisma/oci-chat", json={"question": "Hello"}).status_code == 200
     blocked = reader.post("/api/prisma/oci-chat", json={"question": "Hello"})
     assert blocked.status_code == 429 and blocked.headers["Retry-After"]
+    assert blocked.json()["detail"]["code"] == "oci_request_limit"
+
+
+def test_local_test_and_chat_limit_preserves_last_provider_result_and_makes_no_oci_call(provider):
+    service, catalog, inference, _ = provider
+    service.save("xai.test")
+    app = create_app(service.settings)
+    app.state.oci_text_provider = service
+    admin = TestClient(app)
+    admin.cookies.set(LOCAL_COOKIE_NAME, issue_session(app.state.session_key, "admin"))
+    assert admin.post("/api/admin/prisma/oci-provider/test").status_code == 200
+    for _ in range(19):
+        assert admin.post("/api/prisma/oci-chat", json={"question": "Hello"}).status_code == 200
+    before = service._state()
+    catalog_calls = len(catalog.calls)
+    blocked = admin.post("/api/admin/prisma/oci-provider/test")
+    assert blocked.status_code == 429 and 1 <= int(blocked.headers["Retry-After"]) <= 60
+    assert blocked.json()["detail"]["code"] == "oci_request_limit"
+    assert "provider_status" not in blocked.json()["detail"] and "request_id" not in blocked.json()["detail"]
+    assert len(inference.calls) == 20 and len(catalog.calls) == catalog_calls
+    assert service._state() == before
+    assert admin.get("/api/prisma/oci-provider").json()["configured"] is True
+    assert admin.get("/api/prisma/oci-provider").json()["last_test"]["status"] == "success"

@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0008",
-    "username": "sim_bogota_0008",
-    "display_name": "Fictional Bogotá Reporter 008"
+    "username": "fel_rojas",
+    "display_name": "Felipe Rojas"
   },
-  "message": "Una tienda de Kennedy movió sus productos a estantes altos mientras entra agua por la puerta. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Tocó subir los productos a los estantes de arriba 😟 Ya nos está entrando agua por la puerta de la tienda, aquí en Kennedy. Uno no sabe qué mover primero... ¿Nos ayudan a revisar este sector? #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 84,
   "available_offset_seconds": 84,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0008-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0008.webp",
+      "sha256": "1308fde5fb1a968222db8738f5823406ae1c9a90395a75c5558d67eea5d3f2db",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0008: Interior of a tiny neighborhood grocery store in Kennedy, Bogotá. Informal smartphone photo from behind its counter showing a shopkeeper's arms placing plain unbranded dry-goods packages on high shelves; shallow floodwater entering the doorway and spreading a few centimeters over checked floor tiles. A red plastic stool and elevated sacks. No legible packaging. Close indoor perspective with rainy grey daylight outside.",
+      "is_simulated": true
+    }
+  ]
 }

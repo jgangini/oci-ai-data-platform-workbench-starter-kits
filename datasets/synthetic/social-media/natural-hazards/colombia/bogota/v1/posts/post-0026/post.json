@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0026",
-    "username": "sim_bogota_0026",
-    "display_name": "Fictional Bogotá Reporter 026"
+    "username": "cam_arevalo",
+    "display_name": "Camilo Arévalo"
   },
-  "message": "El sumidero de una esquina de Bosa devuelve agua mientras continúa el aguacero. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Ese sumidero de la esquina en Bosa está devolviendo agua en pleno aguacero. ¿Alguien del Acueducto puede revisar? Uno ve eso y se preocupa por las casas de al lado. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 12,
   "available_offset_seconds": 12,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0026-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0026.webp",
+      "sha256": "7ba15a8193314d616f7a65f438d474a90cbd2b9b9a893a7a9a654beb6439e45a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of storm-drain backflow during rain at a fictional Bosa street corner.",
+      "is_simulated": true
+    }
+  ]
 }

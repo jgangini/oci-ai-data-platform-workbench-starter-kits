@@ -98,6 +98,66 @@ def test_governed_access_accepts_catalog_without_direct_select() -> None:
     client._assert_permission_absent("/catalogs/aidp-lab", USER_OCID, "SELECT")
 
 
+@pytest.mark.parametrize("preferred_present", [True, False])
+@pytest.mark.parametrize("type_field,state_field", [("type", "lifecycleState"), ("credentialType", "lifeCycleState")])
+def test_governance_reuses_shared_credential_without_reading_or_rotating_keys(
+    preferred_present, type_field, state_field,
+) -> None:
+    client = bare_client()
+    credentials = [{"displayName": "PrismaWriterRuntime", "key": "writer-key",
+                    type_field: "SECRET_TOKEN", state_field: "ACTIVE"}]
+    if preferred_present:
+        credentials.append({"displayName": "AidpDataGovernanceExtension", "key": "governance-key",
+                            type_field: "SECRET_TOKEN", state_field: "ACTIVE"})
+    client._list = lambda *_args, **_kwargs: credentials
+    client._request = lambda *_args, **_kwargs: pytest.fail("Reuse must not mutate credentials")
+    client._credential_payload = lambda: pytest.fail("Reuse must not read the local private key")
+    assert client._ensure_governance_credential() == (
+        "governance-key" if preferred_present else "writer-key", False,
+    )
+
+
+@pytest.mark.parametrize("invalid", ["duplicate", "type", "state", "identifier"])
+def test_governance_invalid_preferred_credential_never_falls_back_or_mutates(invalid) -> None:
+    client = bare_client()
+    governance = {"displayName": "AidpDataGovernanceExtension", "key": "governance-key",
+                  "credentialType": "SECRET_TOKEN", "lifeCycleState": "ACTIVE"}
+    if invalid == "type":
+        governance["credentialType"] = "OCI_API_KEY"
+    elif invalid == "state":
+        governance["lifeCycleState"] = "CREATING"
+    elif invalid == "identifier":
+        governance.pop("key")
+    credentials = [governance, {"displayName": "PrismaWriterRuntime", "key": "writer-key",
+                                "type": "SECRET_TOKEN", "lifecycleState": "ACTIVE"}]
+    if invalid == "duplicate":
+        credentials.append({**governance, "key": "duplicate-key"})
+    client._list = lambda *_args, **_kwargs: credentials
+    client._request = lambda *_args, **_kwargs: pytest.fail("Invalid reuse must not mutate credentials")
+    client._credential_payload = lambda: pytest.fail("Invalid reuse must not read a private key")
+    with pytest.raises(AidpProvisionError):
+        client._ensure_governance_credential()
+
+
+def test_governance_creates_once_only_when_both_shared_credentials_are_missing() -> None:
+    client = bare_client()
+    credentials, mutations = [], []
+    payload = {"displayName": "AidpDataGovernanceExtension", "type": "SECRET_TOKEN"}
+    client._list = lambda *_args, **_kwargs: list(credentials)
+    client._credential_payload = lambda: payload
+
+    def request(method, path, **kwargs):
+        mutations.append((method, path, kwargs["payload"]))
+        credentials.append({**payload, "key": "created-key", "lifeCycleState": "ACTIVE"})
+        return FakeResponse()
+
+    client._request = request
+    assert client._ensure_governance_credential() == ("created-key", True)
+    client._credential_payload = lambda: pytest.fail("A retry must reuse the existing credential")
+    assert client._ensure_governance_credential() == ("created-key", False)
+    assert mutations == [("POST", "/credentials", payload)]
+
+
 def test_participant_receives_select_only_on_owned_lab_tables() -> None:
     client = bare_client()
     pack = load_lab_pack("banking")

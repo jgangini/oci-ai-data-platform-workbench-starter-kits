@@ -13,11 +13,13 @@ import time
 import zipfile
 from pathlib import Path
 from urllib.parse import quote, urlsplit
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "apps/backend"))
 from app.prisma.database import install_schema, read_document, write_document
 from app.prisma.scheduling import RUN_FAILED, RUN_SUCCESS, TASK_RUN_QUERY, run_state, task_outcome
+from app.prisma.runtime_secrets import identity_hash, shared_credential
 
 SESSION_RETENTION = {"retentionPeriodInDays": 7}
 PIPELINE_REQUIREMENTS = "httpx==0.28.1\noracledb==3.4.2\n"
@@ -120,14 +122,19 @@ def ensure(api, path, name, payload, *, ready=False, params=None):
 
 
 def credential(api, name, values):
-    ensure(api, "/credentials", name, {"displayName": name, "type": "SECRET_TOKEN",
+    payload = None if values is None else {"displayName": name, "type": "SECRET_TOKEN",
         "credentialDescription": "PRISMA managed runtime; never return secret values",
         "credentialDetails": {"credentialType": "SECRET_TOKEN", "secretTokenPair":
-            [{"secretKey": key, "secretValue": value} for key, value in values.items()]}}, ready=True)
+            [{"secretKey": key, "secretValue": value} for key, value in values.items()]}}
+    current = ensure(api, "/credentials", name, payload, ready=True)
+    if (current.get("type") or current.get("credentialType")) != "SECRET_TOKEN":
+        raise RuntimeError("Managed PRISMA credential has an incompatible type")
+    return current
 
 
 def database_users(api, wallet, wallet_password, admin_password, config, outputs, *, wallet_dsn, validate_wallet, generate_password):
     import oracledb
+    oci_credential = shared_credential(items(api, "/credentials"))
     with tempfile.TemporaryDirectory(prefix="prisma-bootstrap-") as directory:
         with zipfile.ZipFile(io.BytesIO(validate_wallet(wallet))) as archive:
             archive.extractall(directory)
@@ -138,9 +145,10 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
             cursor = connection.cursor()
             for user, name, reader in (("PRISMA_WRITER", "PrismaWriterRuntime", False), ("PRISMA_READER", "PrismaReaderRuntime", True)):
                 if named(api, "/credentials", name):
-                    ensure(api, "/credentials", name, None, ready=True)
+                    credential(api, name, None)
                     if reader:
-                        cursor.execute(f"GRANT SELECT ON ADMIN.PRISMA_V_SOCIAL_POSTS TO {user}")
+                        for view in ("PRISMA_V_SOCIAL_POSTS", "PRISMA_V_SENSOR_EVENTS"):
+                            cursor.execute(f"GRANT SELECT ON ADMIN.{view} TO {user}")
                     continue
                 generated_password = generate_password()
                 cursor.execute("SELECT COUNT(*) FROM ALL_USERS WHERE USERNAME=:name", name=user)
@@ -148,14 +156,14 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
                 cursor.execute(f'{verb} USER {user} IDENTIFIED BY "{generated_password}"')
                 cursor.execute(f"GRANT CREATE SESSION TO {user}")
                 if reader:
-                    for view in ("PRISMA_V_SNAPSHOTS", "PRISMA_V_INCIDENTS", "PRISMA_V_EVIDENCE", "PRISMA_V_SOCIAL_POSTS"):
+                    for view in ("PRISMA_V_SNAPSHOTS", "PRISMA_V_INCIDENTS", "PRISMA_V_EVIDENCE", "PRISMA_V_SOCIAL_POSTS", "PRISMA_V_SENSOR_EVENTS"):
                         cursor.execute(f"GRANT SELECT ON ADMIN.{view} TO {user}")
                 else:
                     cursor.execute(f"GRANT EXECUTE ON ADMIN.PRISMA_CONTROL TO {user}")
                 values = {"db_user": user, "db_password": generated_password, "dsn": dsn,
                     "wallet": base64.b64encode(wallet).decode(), "wallet_password": wallet_password,
                     "region": config["region"], "compartment_id": outputs["compartment_ocid"], "model_id": outputs["agent_model_id"]}
-                if not reader:
+                if not reader and oci_credential is None:
                     values.update({key: str(config[key]) for key in ("tenancy", "user", "fingerprint")})
                     values["private_key"] = Path(config["key_file"]).read_text(encoding="utf-8")
                 credential(api, name, values)
@@ -164,7 +172,7 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
 
 def runtime_archive():
     buffer = io.BytesIO()
-    names = ("__init__.py", "core.py", "correlation.py", "corpus.py", "media.py", "area.py", "x.py", "database.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "landing.py", "pipeline.py", "agent.py")
+    names = ("__init__.py", "core.py", "correlation.py", "corpus.py", "media.py", "area.py", "x.py", "database.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "sensor_capture.py", "landing.py", "pipeline.py", "sensors.py", "sensor_pipeline.py", "sensor_reset.py", "synthetic_reset.py", "agent.py")
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in names:
             info = zipfile.ZipInfo("prisma/" + name, date_time=(2026, 1, 1, 0, 0, 0))
@@ -244,22 +252,32 @@ def install_volumes(api, config):
             raise RuntimeError("PRISMA volume type or location differs from its configured contract")
 
 
+def cluster_job_assignments(api, base, compute):
+    assignments = {}
+    for job in items(api, base + "/jobs"):
+        if not job.get("key"):
+            raise RuntimeError("Cannot resolve a workspace job before cluster maintenance")
+        body = api.request("GET", base + "/jobs/" + quote(str(job["key"]), safe="")).body
+        clusters = body.get("jobClusters", []) + [task.get("cluster") or {} for task in body.get("tasks", [])]
+        assignments[job["key"]] = {cluster["clusterKey"] for cluster in clusters if cluster.get("clusterKey")}
+        if compute in assignments[job["key"]]:
+            if any((body.get(kind) or {}).get("pauseStatus") == "UNPAUSED" for kind in ("schedule", "continuous")):
+                raise RuntimeError("Pause jobs using the shared cluster before installing PRISMA libraries")
+    return assignments
+
+
 def cluster_idle(api, workspace, compute):
     base = f"/workspaces/{workspace}"
     detail = api.request("GET", base + "/clusters/" + quote(compute, safe="")).body
     if detail.get("attachedSessions") or detail.get("attachedNotebooks"):
         raise RuntimeError("PRISMA library installation requires a cluster without attached notebook sessions")
-    jobs = items(api, base + "/jobs")
-    for job in jobs:
-        body = api.request("GET", base + "/jobs/" + quote(str(job["key"]), safe="")).body
-        clusters = body.get("jobClusters", []) + [task.get("cluster") or {} for task in body.get("tasks", [])]
-        if any(cluster.get("clusterKey") == compute for cluster in clusters):
-            if any((body.get(kind) or {}).get("pauseStatus") == "UNPAUSED" for kind in ("schedule", "continuous")):
-                raise RuntimeError("Pause jobs using the shared cluster before installing PRISMA libraries")
-    # ponytail: conservatively block on any active workspace run; per-compute task filtering can relax this later.
+    assignments = cluster_job_assignments(api, base, compute)
     runs = items(api, base + "/jobRuns", {"sortBy": "timeCreated", "sortOrder": "DESC", "limit": 100})
-    if any((run.get("state") or {}).get("status") in {"PENDING", "QUEUED", "RUNNING", "CANCELING"} for run in runs):
-        raise RuntimeError("PRISMA library installation will not restart a cluster while workspace jobs are active")
+    for run in runs:
+        if run_state(run) not in RUN_SUCCESS | RUN_FAILED:
+            assigned = assignments.get(run.get("jobKey"))
+            if not assigned or compute in assigned:
+                raise RuntimeError("PRISMA library installation cannot resolve or safely exclude an active run on this cluster")
 
 
 def install_cluster_libraries(api, workspace, compute, *, ensure_folder):
@@ -300,28 +318,68 @@ def install_cluster_libraries(api, workspace, compute, *, ensure_folder):
         pause()
 
 
-def install_job(api, workspace, compute, config, bundle, *, ensure_folder):
+def install_stream_compute(api, workspace, name):
+    """Dedicated small USER cluster; omission of autoTerminationMinutes keeps it always on."""
+    from app.aidp import AidpClient
+    if name not in {"social_stream_compute", "sensor_stream_compute"}:
+        raise ValueError("Invalid dedicated streaming compute")
+    payload = {"type": "USER", "displayName": name,
+        "description": "Dedicated Territorial Control permanent streaming workflow",
+        "driverConfig": {"driverShape": "amd.generic", "driverShapeConfig": {"ocpus": 2, "memoryInGBs": 32}},
+        "workerConfig": {"workerShape": "amd.generic", "workerShapeConfig": {"ocpus": 2, "memoryInGBs": 32},
+                         "minWorkerCount": 1, "maxWorkerCount": 1},
+        "clusterRuntimeConfig": {"type": "SPARK", "sparkVersion": "3.5.0",
+            "sparkAdvancedConfigurations": {"spark.aidp.lineage.enabled": "true"}, "sparkEnvVariables": {}, "initScripts": []}}
+    path = f"/workspaces/{workspace}/clusters"
+    resource = ensure(api, path, name, payload, ready=True)
+    path += "/" + quote(str(resource["key"]), safe="")
+    expected = {key: value for key, value in payload.items() if key != "description"}
+    started = False
+    while True:
+        response = api.request("GET", path)
+        detail = response.body
+        if not AidpClient._notebook_matches(detail, expected) or detail.get("autoTerminationMinutes") not in (None, 0):
+            raise RuntimeError("Dedicated streaming compute differs from its always-on fixed-size contract")
+        state = str(detail.get("state") or detail.get("lifecycleState") or "").upper()
+        if state == "ACTIVE":
+            return str(resource["key"])
+        if state not in {"STOPPED", "STARTING"}:
+            raise RuntimeError("Dedicated streaming compute failed to become active: " + state)
+        if state == "STOPPED" and not started:
+            etag = response.headers.get("etag") or response.headers.get("ETag")
+            headers = {"opc-retry-token": uuid4().hex, **({"If-Match": etag} if etag else {})}
+            operation(api, api.request("POST", path + "/actions/start", payload={}, headers=headers))
+            started = True
+        pause()
+
+
+def install_job(api, workspace, compute, config, bundle, *, ensure_folder, workflow="social"):
     from app.aidp import AidpClient
     if config.get("streaming_mode", "finite") not in {"finite", "persistent"}:
         raise ValueError("Invalid Territorial Control streaming mode")
     persistent = config.get("streaming_mode") == "persistent"
+    if workflow not in {"social", "sensors"} or (workflow == "sensors" and not persistent):
+        raise ValueError("Invalid Territorial Control workflow")
+    task = "sensor_stream" if workflow == "sensors" else "prisma_tick"
+    module = "sensor_pipeline" if workflow == "sensors" else "pipeline"
     root = "/Workspace/medallon/prisma"
     ensure_folder(api, workspace, root)
-    source = bundle_prelude(bundle) + f"\nfrom prisma.pipeline import run\nrun(spark, aidputils.secrets.get, {config!r})\n"
+    source = bundle_prelude(bundle) + f"\nfrom prisma.{module} import run\nrun(spark, aidputils.secrets.get, {config!r})\n"
     cells = [{"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": value.splitlines(keepends=True)}
              for value in (source,)]
     notebook = {"nbformat": 4, "nbformat_minor": 5, "metadata": {"language_info": {"name": "python"}}, "cells": cells}
-    path = root + "/prisma_tick_" + hashlib.sha256(json.dumps(notebook, sort_keys=True).encode()).hexdigest()[:12] + ".ipynb"
+    path = root + "/" + task + "_" + hashlib.sha256(json.dumps(notebook, sort_keys=True).encode()).hexdigest()[:12] + ".ipynb"
     upload(api, workspace, path, notebook, "notebook")
-    payload = {"name": "prisma_bogota_tick", "path": root, "description": "Finite PRISMA collection and publication tick",
+    payload = {"name": "prisma_colombia_sensors" if workflow == "sensors" else "prisma_bogota_tick", "path": root, "description": "Finite PRISMA collection and publication tick",
         "maxConcurrentRuns": 1, "queue": {"isEnabled": False}, "timeoutSeconds": 600,
         "schedule": {"quartzCronExpression": "0 * * * * ?", "timezoneId": "UTC", "pauseStatus": "PAUSED"},
-        "jobClusters": [{"clusterKey": compute}], "tasks": [{"type": "NOTEBOOK_TASK", "taskKey": "prisma_tick",
+        "jobClusters": [{"clusterKey": compute}], "tasks": [{"type": "NOTEBOOK_TASK", "taskKey": task,
         "dependsOn": [], "runIf": "ALL_SUCCESS", "maxRetries": 0, "isRetryOnTimeout": False,
         "notebookPath": path, "cluster": {"clusterKey": compute}, "parameters": []}]}
     payload["tasks"][0]["isStreaming"] = persistent
     if persistent:
-        payload.update(description="Territorial Control persistent ingestion and enrichment", timeoutSeconds=0)
+        payload.update(description="Territorial Control persistent " + ("sensor TXT ingestion" if workflow == "sensors" else "social ingestion and publication"))
+        payload.pop("timeoutSeconds")
         payload["tasks"][0].pop("maxRetries")
         payload["tasks"][0].pop("isRetryOnTimeout")
     jobs_path = f"/workspaces/{workspace}/jobs"
@@ -337,9 +395,14 @@ def install_job(api, workspace, compute, config, bundle, *, ensure_folder):
         payload["schedule"] = {**payload["schedule"], "pauseStatus": "PAUSED"}
     def matches(body):
         return (all(AidpClient._notebook_matches(body.get(field), value) for field, value in payload.items() if field != "tasks")
+                and (not persistent or body.get("timeoutSeconds") in (None, 0))
                 and AidpClient._job_tasks_match(body.get("tasks"), payload["tasks"], compute)
                 and all(bool(task.get("isStreaming")) == persistent for task in body.get("tasks", [])))
     if not matches(detail.body):
+        active = [run for run in items(api, f"/workspaces/{workspace}/jobRuns", {"jobKey": key, "limit": 100})
+                  if run.get("jobKey") == key and run_state(run) not in RUN_SUCCESS | RUN_FAILED]
+        if active:
+            raise RuntimeError("Stop the managed Territorial Control workflow before upgrading its notebook or compute")
         operation(api, api.request("PUT", f"/workspaces/{workspace}/jobs/{key}", payload=payload,
                                   headers={"If-Match": detail.headers["etag"]} if detail.headers.get("etag") else None))
         if not matches(api.request("GET", f"/workspaces/{workspace}/jobs/{key}").body):
@@ -380,13 +443,15 @@ def wait_agent_deployment(api, base, region):
         pause(10)
 
 
-def publish_agent(api, workspace, bundle, region):
+def publish_agent(api, workspace, bundle, region, runtime=None):
     root = "/Workspace/medallon/prisma"
-    digest = hashlib.sha256(bundle).hexdigest()[:12]
+    agent_config = {key: runtime[key] for key in ("region", "model_id", "compartment_id", "oci_credential_name", "oci_identity_sha256")} if runtime is not None else None
+    suffix = "\nRUNTIME_CONFIG = " + repr(agent_config) + "\n" if agent_config is not None else ""
+    digest = hashlib.sha256(bundle + suffix.encode()).hexdigest()[:12]
     entry = root + f"/agent_{digest}.py"
     dependencies = root + "/requirements_" + digest + ".txt"
     upload(api, workspace, dependencies, "oracledb==3.4.2\n")
-    upload(api, workspace, entry, bundle_prelude(bundle) + (ROOT / "apps/backend/app/prisma/agent.py").read_text(encoding="utf-8").replace("from __future__ import annotations\n", ""))
+    upload(api, workspace, entry, bundle_prelude(bundle) + (ROOT / "apps/backend/app/prisma/agent.py").read_text(encoding="utf-8").replace("from __future__ import annotations\n", "") + suffix)
     compute = ensure(api, f"/workspaces/{workspace}/clusters", "prisma_agent_compute", {
         "type": "AI_COMPUTE", "displayName": "prisma_agent_compute", "description": "PRISMA conversational agent",
         "driverConfig": {"driverShapeConfig": {"ocpus": 1, "memoryInGBs": 16}}, "replicaConfig": {"minReplica": 1, "maxReplica": 1}}, ready=True)
@@ -460,6 +525,49 @@ def validate_publication(storage, runtime):
     return pointer["version"]
 
 
+def start_stream_job(api, workspace, job, task_key):
+    """Admit one permanent workflow; an existing active execution is reused."""
+    base = f"/workspaces/{workspace}"
+    detail = api.request("GET", base + "/jobs/" + quote(job, safe="")).body
+    tasks = detail.get("tasks", [])
+    if len(tasks) != 1 or tasks[0].get("taskKey") != task_key or tasks[0].get("isStreaming") is not True:
+        raise RuntimeError("Permanent workflow definition is incomplete")
+    active = [run for run in items(api, base + "/jobRuns", {"jobKey": job, "limit": 100})
+              if run.get("jobKey") == job and run_state(run) not in RUN_SUCCESS | RUN_FAILED]
+    if len(active) > 1:
+        raise RuntimeError("Permanent workflow has multiple active runs")
+    if active:
+        return str(active[0]["key"])
+    response = api.request("POST", base + "/jobRuns",
+        payload={"jobKey": job, "parameters": [], "queue": {"isEnabled": False}}, headers={"opc-retry-token": uuid4().hex})
+    operation(api, response)
+    key = str((response.body or {}).get("key") or "")
+    if not key:
+        raise RuntimeError("Permanent workflow did not return its run identity")
+    return key
+
+
+def wait_stream_jobs(api, storage, runtime, runs, connection):
+    """Acceptance is RUNNING plus current code heartbeats and coherent publication, never terminal SUCCESS."""
+    base = f"/workspaces/{runtime['workspace_key']}"
+    while True:
+        ready = True
+        for key, task in runs:
+            state = run_state(api.request("GET", base + "/jobRuns/" + quote(key, safe="")).body)
+            tasks = items(api, base + "/taskRuns", {"jobRunKey": key, **TASK_RUN_QUERY})
+            if state in RUN_SUCCESS | RUN_FAILED or any(item.get("taskKey") != task or run_state(item) in RUN_FAILED for item in tasks):
+                raise RuntimeError("Permanent workflow stopped or failed before readiness")
+            ready = ready and state == "RUNNING" and bool(tasks) and all(run_state(item) == "RUNNING" for item in tasks)
+        social = read_document(connection, "status_pipeline")
+        sensors = read_document(connection, "status_sensorstream")
+        current = all(item.get("pipeline_revision") == runtime["pipeline_revision"] for item in (social, sensors))
+        if ready and current and sensors.get("status") == "running" and social.get("status") in {"ready", "pending", "needs_attention"}:
+            version = validate_publication(storage, runtime)
+            if social.get("version") == version:
+                return version
+        pause(10)
+
+
 def bootstrap_prisma(api, context, outputs, config, signer, storage, wallet, wallet_password, admin_password, reconciled,
                      *, deadline, wallet_dsn, validate_wallet, generate_password, ensure_folder):
     global _deadline
@@ -469,32 +577,47 @@ def bootstrap_prisma(api, context, outputs, config, signer, storage, wallet, wal
                              api_version="20260430", resource_segment="aiDataPlatforms")
     database_users(agent_api, wallet, wallet_password, admin_password, {**config, "region": context["region"]}, outputs,
                    wallet_dsn=wallet_dsn, validate_wallet=validate_wallet, generate_password=generate_password)
+    oci_credential = shared_credential(items(agent_api, "/credentials"))
+    if oci_credential is None:
+        raise RuntimeError("Shared OCI runtime credential is unavailable")
     bundle = runtime_archive()
     runtime = {"namespace": outputs["objectstorage_namespace"], "bucket": outputs["medallion_bucket_names"]["gold"], "workbench_base": api.base,
-        "region": context["region"], "model_id": outputs["agent_model_id"], "compartment_id": outputs["compartment_ocid"], "catalog": reconciled["catalog_name"]}
+        "region": context["region"], "model_id": outputs["agent_model_id"], "compartment_id": outputs["compartment_ocid"], "catalog": reconciled["catalog_name"],
+        "streaming_mode": "persistent", "pipeline_revision": hashlib.sha256(bundle).hexdigest(),
+        "oci_credential_name": oci_credential["displayName"], "oci_identity_sha256": identity_hash(config)}
     runtime.update(landing_bucket=outputs["medallion_bucket_names"]["landing"], landing_prefix="01_landing/prisma/raw/",
         landing_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/landing",
-        checkpoint_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/checkpoints/bronze-v1")
+        checkpoint_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/checkpoints/bronze-v1",
+        sensor_landing_prefix="01_landing/prisma/raw/sensors/",
+        sensor_landing_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/landing/sensors",
+        sensor_checkpoint_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/checkpoints/sensors-v1")
     workspace = reconciled["workspace_key"]
     install_volumes(agent_api, runtime)
-    install_cluster_libraries(agent_api, workspace, reconciled["shared_compute_key"], ensure_folder=ensure_folder)
-    job = install_job(api, workspace, reconciled["shared_compute_key"], runtime, bundle, ensure_folder=ensure_folder)
+    social_compute = install_stream_compute(api, workspace, "social_stream_compute")
+    sensor_compute = install_stream_compute(api, workspace, "sensor_stream_compute")
+    for compute in (social_compute, sensor_compute):
+        install_cluster_libraries(agent_api, workspace, compute, ensure_folder=ensure_folder)
+    job = install_job(api, workspace, social_compute, runtime, bundle, ensure_folder=ensure_folder)
+    sensor_job = install_job(api, workspace, sensor_compute, runtime, bundle, ensure_folder=ensure_folder, workflow="sensors")
+    runtime.update(workspace_key=workspace, job_key=job, sensor_job_key=sensor_job,
+                   social_compute_key=social_compute, sensor_compute_key=sensor_compute)
+    agent = publish_agent(agent_api, workspace, bundle, context["region"], runtime)
+    # Materialize empty governed roots; Spark ignores these hidden non-event objects.
+    for prefix in (runtime["landing_prefix"], runtime["sensor_landing_prefix"]):
+        storage.put_object(runtime["namespace"], runtime["landing_bucket"], prefix + ".keep", b"", content_type="application/octet-stream")
     with tempfile.TemporaryDirectory(prefix="prisma-config-") as directory:
         with zipfile.ZipFile(io.BytesIO(wallet)) as archive:
             archive.extractall(directory)
         with oracledb.connect(user="ADMIN", password=admin_password, dsn=wallet_dsn(Path(directory)),
             config_dir=directory, wallet_location=directory, wallet_password=wallet_password) as connection:
             current = read_document(connection, "runtime")
-            desired = {**runtime, "workspace_key": workspace, "job_key": job}
+            desired = {**current, **runtime}
             if any(current.get(key) != value for key, value in desired.items()):
                 write_document(connection, "runtime", desired, current["revision"])
             connection.commit()
-    agent = publish_agent(agent_api, workspace, bundle, context["region"])
-    # Materialize the otherwise empty external-volume prefix; Spark ignores this hidden non-event object.
-    storage.put_object(runtime["namespace"], runtime["landing_bucket"], runtime["landing_prefix"] + ".keep",
-                       b"", content_type="application/octet-stream")
-    run_key = run_initial_job(api, workspace, job, hashlib.sha256(bundle).hexdigest())
-    version = validate_publication(storage, runtime)
+            sensor_run = start_stream_job(api, workspace, sensor_job, "sensor_stream")
+            run_key = start_stream_job(api, workspace, job, "prisma_tick")
+            version = wait_stream_jobs(api, storage, runtime, [(run_key, "prisma_tick"), (sensor_run, "sensor_stream")], connection)
     storage.put_object(runtime["namespace"], runtime["bucket"], ".control/prisma/agent.json", json.dumps(agent).encode(), content_type="application/json")
     return {"prisma_job_ready": True, "prisma_agent_ready": True, "prisma_revision": agent["revision"],
-            "prisma_acceptance_run": run_key, "prisma_snapshot_version": version, "external_volume_count": 1}
+            "prisma_acceptance_run": run_key, "prisma_sensor_run": sensor_run, "prisma_snapshot_version": version, "external_volume_count": 1}

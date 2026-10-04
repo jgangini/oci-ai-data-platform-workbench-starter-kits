@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0058",
-    "username": "sim_bogota_0058",
-    "display_name": "Fictional Bogotá Reporter 058"
+    "username": "nic_pineda",
+    "display_name": "Nicolás Pineda"
   },
-  "message": "Desde otro ángulo de Chapinero observo humo blanco junto al punto donde antes se veían llamas. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Actualizo desde otro ángulo del barrio: donde hace un rato veía llamas en Chapinero, ahora distingo humo blanco. Es lo que alcanzo a ver, nada más. #incendio #Bogota #Colombia",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 108,
   "available_offset_seconds": 108,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0058-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/fire-chapinero-smoldering.webp",
+      "sha256": "a5958098eec7c18802c65e35e5e92e2ca1c9d2c8c08bb140cd1e7f52db845b24",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of smoldering blackened vegetation with light smoke and no visible flames in Chapinero; a fictional scenario, not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

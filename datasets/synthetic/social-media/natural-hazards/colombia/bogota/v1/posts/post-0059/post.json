@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0059",
-    "username": "sim_bogota_0059",
-    "display_name": "Fictional Bogotá Reporter 059"
+    "username": "jul_pineda",
+    "display_name": "Juliana Pineda"
   },
-  "message": "En Chapinero se escucha a personas avisando del incendio sin acercarse a la zona de vegetación. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Se oye a la gente avisar «¡hay un incendio!» en Chapinero. Nadie de los que veo se ha acercado a la vegetación; por favor sigamos así, sin arrimarnos para mirar. Bogotá, Colombia.",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 120,
   "available_offset_seconds": 120,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0059-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0059.webp",
+      "sha256": "31fbf6cf3a1015358a461fd002bd0ca2b46934e0297828fddd99927e47be28d5",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: vecinos permanecen en un andén distante de la vegetación con humo en Chapinero; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0044",
-    "username": "sim_bogota_0044",
-    "display_name": "Fictional Bogotá Reporter 044"
+    "username": "fel_quintero",
+    "display_name": "Felipe Quintero"
   },
-  "message": "En el acceso de Bosa queda barro visible y los habitantes esperan antes de volver a pasar. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Quedó barro en el acceso de Bosa. Los vecinos estamos esperando antes de volver a pasar; no porque se vea menos agua vamos a salir corriendo. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 228,
   "available_offset_seconds": 228,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0044-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0044.webp",
+      "sha256": "4b7b14cf572a86e752d43ca8fb17ad081aa7206c857d6133dac235eca5e9d2c6",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of muddy access and neighbors waiting on dry ground after water recedes in fictional Bosa.",
+      "is_simulated": true
+    }
+  ]
 }

@@ -6,676 +6,1404 @@
   "duration_seconds": 600,
   "seed_default": 0,
   "license": "CC0-1.0",
-  "provenance": "Original fictional posts and hand-authored vector diagrams created for this demonstration; no third-party media or real accounts.",
+  "provenance": "Invented personal names, fictional posts and AI-generated photorealistic scenes for this demonstration; no real accounts or photographs of actual incidents. Name coincidences are accidental.",
   "location_provenance": "Representative locality anchors reused from verified core.LOCALITIES; no exact incident coordinates are asserted.",
   "posts": [
     {
       "fixture_id": "post-0001",
       "path": "posts/post-0001/post.json",
-      "sha256": "b270a3ca831e3104bcc18ece065b4b4c8a093a2229ab7cce358a865072af1fe7"
+      "sha256": "e12a766082dfddd66d3e96cef2a8f199682634710b51e7ced71f82f836a37369"
     },
     {
       "fixture_id": "post-0002",
       "path": "posts/post-0002/post.json",
-      "sha256": "9c66331d6b5c2d97cd6a031b5e3eb3703af1e9a5d1bada65d92cf02f2eae0d23"
+      "sha256": "9cdbad04736e1881d56185791ecf79ebe4bc0f82477a463d8edadc3b5eb00bb2"
     },
     {
       "fixture_id": "post-0003",
       "path": "posts/post-0003/post.json",
-      "sha256": "f901893ec4c0a7dea04a6e601741edaa46c4d3bd9dcea76195658dc2d5f74dbc"
+      "sha256": "e10bce0589fa6fc2614bfb0b551b8518c0455fb13601c429047f522d015941f9"
     },
     {
       "fixture_id": "post-0004",
       "path": "posts/post-0004/post.json",
-      "sha256": "b7e6de5132060a702e5e478f3f89ae7311d683a3dc238a5b99d43705a291c5fa"
+      "sha256": "34aa6b4c360f1096b8e41798524a46d672aef3973246fb21ced3924ad39d8e9b"
     },
     {
       "fixture_id": "post-0005",
       "path": "posts/post-0005/post.json",
-      "sha256": "ab44efa105a358090f620c3e9c001d480f4b567d6e27b20ecf5be998c8bd07a4"
+      "sha256": "506e4cb5a901ac9a0edc5ac9929a8e57702f68be57955c8caba586052055189a"
     },
     {
       "fixture_id": "post-0006",
       "path": "posts/post-0006/post.json",
-      "sha256": "dddcff5ce1dfdc965d0ac072f61eeecad8dfd99400764ce254b42dbdb39bdb6c"
+      "sha256": "2049dfa23365fdd8f6312770a8c515c622a91f19948823d486eb28be5ca4fe97"
     },
     {
       "fixture_id": "post-0007",
       "path": "posts/post-0007/post.json",
-      "sha256": "bed5812ba09c2b252783a3d559f87199f36190ceab80e6e9e6004c51463d163f"
+      "sha256": "888f37cc79bfce36244dd97ce3f076ce4978c67b07a9a16df65036a25f9cd60d"
     },
     {
       "fixture_id": "post-0008",
       "path": "posts/post-0008/post.json",
-      "sha256": "8a169b1598e6f7d869c8805a4700e8bd275e2ccba8c173392ca19defd48fef75"
+      "sha256": "b50dbe9c4a75fe28556c71b4fa3a0e546f8d8602e8be09f21662049dc1206c10"
     },
     {
       "fixture_id": "post-0009",
       "path": "posts/post-0009/post.json",
-      "sha256": "801591eb595eceb24b74d20cb84300b73545f8caf6e5bf284fa325d577dbe32a"
+      "sha256": "62215ac73f303326865dad2c9eaa3e9d75f9435d6d8f6df7186349798520de54"
     },
     {
       "fixture_id": "post-0010",
       "path": "posts/post-0010/post.json",
-      "sha256": "a10fd7e883bb84c4fea0ee1f408ee486f621b729dd199b747b4f228bf7afea83"
+      "sha256": "26dd979ed8368baaeb1b9f18032fc3660b5e914e4cf765907d76cb1e08030f6e"
     },
     {
       "fixture_id": "post-0011",
       "path": "posts/post-0011/post.json",
-      "sha256": "afb7d9bff730ff9b3a7c9fa98aa74a5e13a2e7c94451f2f4f67ce38adab9b2f8"
+      "sha256": "8e10308aa7277a5a720bd4907e96c4b80db8887e37abd623fa1fe6eed7a918ae"
     },
     {
       "fixture_id": "post-0012",
       "path": "posts/post-0012/post.json",
-      "sha256": "7d3c54fe09d2442eaadf629cd6395278cd8dd297319825e1645155b68e506d33"
+      "sha256": "a8a8b2c4b48750178079e0c42f0d6009548ab9702c913c2c120bfc94ab41705b"
     },
     {
       "fixture_id": "post-0013",
       "path": "posts/post-0013/post.json",
-      "sha256": "2b0d5a0906c1b3273256748938d85877cf3b01242036350c82e54fcb5b503032"
+      "sha256": "9d5a34f7727455432b76097591b0f97bebf8f14adc7648d0b8de95be1614fb51"
     },
     {
       "fixture_id": "post-0014",
       "path": "posts/post-0014/post.json",
-      "sha256": "a6a58735e2fe92d60e41782c883826b649a5f1d15315ca6d1dbcd661ca4192f9"
+      "sha256": "51c91f27a54885383e76b50aa9223b92c90b57e36aced656033e872299977dc6"
     },
     {
       "fixture_id": "post-0015",
       "path": "posts/post-0015/post.json",
-      "sha256": "6149467ee865c3359307698dcb511f725fbb06d1eace21186e2295ebd878b54d"
+      "sha256": "918c0533878966ac877e5673cc94178b266883617bebed305288b71a2cf4d902"
     },
     {
       "fixture_id": "post-0016",
       "path": "posts/post-0016/post.json",
-      "sha256": "1fecedca4d9061dce2e8ddf377191740c64886970b2e9fa6d203d7a7bc718fa9"
+      "sha256": "6d6940ba1ca34d55f5f81ba982906dbc0f4bf80359795f28efa95baa4b6f9103"
     },
     {
       "fixture_id": "post-0017",
       "path": "posts/post-0017/post.json",
-      "sha256": "a5b5e3fd458b88e27f01cb29e3fa87ff19f2ecf16228a105c32deeb02c9a2257"
+      "sha256": "8a97751e5e673fb7c39adb03bf5ab20ff16661d77f34805c7165eda03673d09e"
     },
     {
       "fixture_id": "post-0018",
       "path": "posts/post-0018/post.json",
-      "sha256": "e15fac9361600ec03958b1df96b4078127111ccdcc0e93b4fddd971066ff3f26"
+      "sha256": "cdf14093a3dfcc23ddc7504fe7fb870feeb0c6b81d8e60c7f5a3dcd5cbb91f96"
     },
     {
       "fixture_id": "post-0019",
       "path": "posts/post-0019/post.json",
-      "sha256": "2d6db2eca185442aad2b7783a44bf01437e0b61d5cabe8f75588e70565d95a43"
+      "sha256": "dec73fad3abed96b4d43932d76e70c4b72d2dd01c7750a0af1ce3d35e566feb7"
     },
     {
       "fixture_id": "post-0020",
       "path": "posts/post-0020/post.json",
-      "sha256": "5bcd470dd1f8dae4e6c8e9469d2b4dccccd399a965f343f4ed64bb7640ccbec7"
+      "sha256": "f7127fb11a23da5bb83c02892ca96698b922ae1ecf24430eb05a28ea66ac7606"
     },
     {
       "fixture_id": "post-0021",
       "path": "posts/post-0021/post.json",
-      "sha256": "44d2732478a7c6c4229ec937b24d16e3cbc1859b066cd329d502600cc070d629"
+      "sha256": "2bb5a827754ff53fb98e2ddd25b34a5a45480423777d27df70bb3fd67d96abce"
     },
     {
       "fixture_id": "post-0022",
       "path": "posts/post-0022/post.json",
-      "sha256": "47c997171a989eb287acb8cea08ad100948a9249fe0ae5837bac425baccbfad6"
+      "sha256": "260aa328e4eba4d3af398092b86e1352ba30fc8c46f3b7bc3a558293d72cd3c0"
     },
     {
       "fixture_id": "post-0023",
       "path": "posts/post-0023/post.json",
-      "sha256": "e4ee22df914a04335caa0eae75464af1b65ca1b6e75b7db6c295ee06ecc8da16"
+      "sha256": "feb63fc8556d73151ee640cbaa59b066e668013d503c5a15cd941561955bc4d7"
     },
     {
       "fixture_id": "post-0024",
       "path": "posts/post-0024/post.json",
-      "sha256": "ff2f6a76b73fdd4ff56fc9d407ff7499e3d8f6a75d8b40ad2aece2ef0c955520"
+      "sha256": "5248831333ecbedf1d765ed4f1647a6ed969b529a01a6cc7dc0177353a05d053"
     },
     {
       "fixture_id": "post-0025",
       "path": "posts/post-0025/post.json",
-      "sha256": "c07825d1cbdbcb2227406b1bc1bc773440a9afbb1c3d73aa007320f5f3ca84c6"
+      "sha256": "209979411fbf69af538164d1c9425387e9cd56681ef3920982ccfa412117bf1c"
     },
     {
       "fixture_id": "post-0026",
       "path": "posts/post-0026/post.json",
-      "sha256": "c43cefeee2c4dd1aeaeddd7724a5da45f1e0e5526156e90c7edacf428342f41a"
+      "sha256": "1d257360a9e38beb9e36197fe5819cb18fcc371d259db336cdffc646dd5d7335"
     },
     {
       "fixture_id": "post-0027",
       "path": "posts/post-0027/post.json",
-      "sha256": "e00aa1f7f58c1679a56826fa8ed0ede6cae2398335f5da86e092e26c4956cfba"
+      "sha256": "fd87424625b416314fcb028c640c5841014571bfe3a598337f9a630fdfd5bc27"
     },
     {
       "fixture_id": "post-0028",
       "path": "posts/post-0028/post.json",
-      "sha256": "ddc83af266aa37de57a9b644a86b3bedea9cf207eb8812d2e33d45633de0e59a"
+      "sha256": "fbd31616435377589434f2d66c66298c97f5f257800e19e82128593b561fc0ff"
     },
     {
       "fixture_id": "post-0029",
       "path": "posts/post-0029/post.json",
-      "sha256": "283ce1abdbfe6cdca46924cc3a6e4ae50a15b64aed0c8a380d13c118eb2789b9"
+      "sha256": "5384a1e378a51f10fd1996ae2ec455fb6462a05823fa2e6f3345a9cb735e9735"
     },
     {
       "fixture_id": "post-0030",
       "path": "posts/post-0030/post.json",
-      "sha256": "30dc77d69239f0851393ca42556cfc5ab41ed5ccf3cab2faeba26de36fe48170"
+      "sha256": "363648ca6b963891d705c79b34b0a72365016f737deb34f62bdc9968c712a97d"
     },
     {
       "fixture_id": "post-0031",
       "path": "posts/post-0031/post.json",
-      "sha256": "e28637a715099b60778bc4cc8aea2d6877e38c858b1a806dbe6b8c39035a11ac"
+      "sha256": "b13611e85888c8b0251ace4a5fce08aaa7bbde2b04b955eda97071c1a3edc446"
     },
     {
       "fixture_id": "post-0032",
       "path": "posts/post-0032/post.json",
-      "sha256": "7a964693ee255623c71386ba9a8ef3bbd6f856c56db4f95e30e117b2920ebb9b"
+      "sha256": "8635fd8d84c67573e06a722777dc5524ef8ade274f0673ed1f160a1ccf439c95"
     },
     {
       "fixture_id": "post-0033",
       "path": "posts/post-0033/post.json",
-      "sha256": "a4e614fc97f805940fdaff64b9bb0ea70d6bf2388a8d0edbba9a00abe25beb1b"
+      "sha256": "d745a370e200b04d85d20a336791512db59f6ae37b86f699a791079bc9151df0"
     },
     {
       "fixture_id": "post-0034",
       "path": "posts/post-0034/post.json",
-      "sha256": "2e83d0614288469220d8707943bc21ec5f6d80d95ac9131c4ffde7fe4f9192b7"
+      "sha256": "0df60369d9b24795f3bd5c4f07fd9f5f31d8b3bc2200dae319ab0b5f9277e7bb"
     },
     {
       "fixture_id": "post-0035",
       "path": "posts/post-0035/post.json",
-      "sha256": "0a8706a6c6850029233cc66bef86d88fcd1615b2f0007c6b5e3a0261a59000b9"
+      "sha256": "4090bc1dc132e787e5d78eccdcf0a804be2c5b6c5d8cafcc481014256f77ec74"
     },
     {
       "fixture_id": "post-0036",
       "path": "posts/post-0036/post.json",
-      "sha256": "51aba64b2eb0f1369a81279a921216adbf5984fb44e8723ee3574b8c81eb1d37"
+      "sha256": "fc9a91824ac2bf8adf369b3586f5486a5bdad85a1906e295d90bb456e86148be"
     },
     {
       "fixture_id": "post-0037",
       "path": "posts/post-0037/post.json",
-      "sha256": "574f2a7bc26f473a02dc0aed906b8a9d498b21c8e3f8588b9d457263c6a46956"
+      "sha256": "cc8442c75f263d61f77b4203b14953e85b9544dcee84304ce1427bf8f8eabb4c"
     },
     {
       "fixture_id": "post-0038",
       "path": "posts/post-0038/post.json",
-      "sha256": "57bc3dfe53a7375c97dd413794dc660d093c2e2bf6c84e1680ecfce5818e7bbd"
+      "sha256": "bde505c8c41694c498a45760a515b427e9f0048e9bb753b34671c92862bd3fda"
     },
     {
       "fixture_id": "post-0039",
       "path": "posts/post-0039/post.json",
-      "sha256": "cba90260decec1909206bdce85863556cf310b27e0fd59a65e471fd763cbcf0d"
+      "sha256": "570b0aa4709372aa385fdc39f77b4de4043f88cc03cf9406d3e7c2ab75e39daa"
     },
     {
       "fixture_id": "post-0040",
       "path": "posts/post-0040/post.json",
-      "sha256": "38ef2c66c2748bcf74d3fb74c569f46b639d13bcfec6643ccd7d202806df9df9"
+      "sha256": "826e6ad4e5dee58e74bf88f68975e1952688fb68e90994027640cfed9e98cd1d"
     },
     {
       "fixture_id": "post-0041",
       "path": "posts/post-0041/post.json",
-      "sha256": "39ba5d551fe3dbc477ec6a6372e1db1b7b75fd1dd02dc13ae101ed47ba2a8907"
+      "sha256": "5df6cf6fcb352a1f671d3e702fe46383601ee5bb47ccd1b492189d48a2612872"
     },
     {
       "fixture_id": "post-0042",
       "path": "posts/post-0042/post.json",
-      "sha256": "5b14c7ec5ff66fb57e1d327ce68f0bf34a6b77e439cbb5379e2c6932dabb32c9"
+      "sha256": "606031ed47249b044646a915853e89f01a30f2637d6406b8677e151e6b216465"
     },
     {
       "fixture_id": "post-0043",
       "path": "posts/post-0043/post.json",
-      "sha256": "06ddadd9489d7b3cf3d0ae1b46d571e2b7e50c8e2d607ecc0c692f6535a82b93"
+      "sha256": "37b803af3fdb00362b3c46b95e02062c6e88572e71ee9d828af28a80811e3cd6"
     },
     {
       "fixture_id": "post-0044",
       "path": "posts/post-0044/post.json",
-      "sha256": "7eef27acca02adf1f56dd60531830cc8c3a37d497b1bd48fac55171742852240"
+      "sha256": "fb98eb88cbf33edbbdff2a5e78d74c7087031ced56878164b8e8cfab39762be6"
     },
     {
       "fixture_id": "post-0045",
       "path": "posts/post-0045/post.json",
-      "sha256": "748b672d3e6a645bc5bd9293b375c9314f5970dd4d1d8035dc3f5173e4986d29"
+      "sha256": "c725d9a542d486e1feefb191f87924220fae5bd6e9476c73847013ef1027caa7"
     },
     {
       "fixture_id": "post-0046",
       "path": "posts/post-0046/post.json",
-      "sha256": "5484b4bbfbeb1e044d0d5690fcd1712ac930f8293ea332a07a25d9121fb383e5"
+      "sha256": "a5f20578cf0b7ed16f506ee0f507a41830068b8f8db3236c1faf09394e12c52d"
     },
     {
       "fixture_id": "post-0047",
       "path": "posts/post-0047/post.json",
-      "sha256": "35a1546909a85d5dae08a3a40b742d2153e9404544f6a42c366cd8e4d306f4ba"
+      "sha256": "3400f87ec936b9c7ec8ecb41d838d9eced0c23a5e3adf231667d189db714d582"
     },
     {
       "fixture_id": "post-0048",
       "path": "posts/post-0048/post.json",
-      "sha256": "594d7331058805f0ee3c13a4a0186bbeed982c0938cd51253a3b69638d87dac5"
+      "sha256": "550d5fbae09a229c5fb5fafff204fd9178bc216e5c10fa857810b3eb9ba7866e"
     },
     {
       "fixture_id": "post-0049",
       "path": "posts/post-0049/post.json",
-      "sha256": "df90737ca8d68834b1f4b7f5da2b61bc73696d6e0b827075ee0c5e61dcdff9bd"
+      "sha256": "05375cb87fd58a131b354a9a708589c313821fba046e1a4bbcaa30ff3363463e"
     },
     {
       "fixture_id": "post-0050",
       "path": "posts/post-0050/post.json",
-      "sha256": "325513ef96fdfa25c3996728839437904d1d32b257c018fe97bb06476656d3ff"
+      "sha256": "8d8192ccf1664193eed4e32c3f7648e8259e97d0f3e0aee2446ed8b4d678dee5"
     },
     {
       "fixture_id": "post-0051",
       "path": "posts/post-0051/post.json",
-      "sha256": "e31888ba7d6fb67e370a7a043427518a97328068f30ef18f1d240ac0242d7a42"
+      "sha256": "b53ae6b795116bb9d7031278b8891ebd096aa27fe674c52c221030fc606c610f"
     },
     {
       "fixture_id": "post-0052",
       "path": "posts/post-0052/post.json",
-      "sha256": "f5c37481bcda737870a7372e379cb2fcb567b03280ce35c65c5752e140b6c7c5"
+      "sha256": "86e4892c28d8a05cb67366ec830c53bb3cac806af2f4b3bc9756dbeeb267f860"
     },
     {
       "fixture_id": "post-0053",
       "path": "posts/post-0053/post.json",
-      "sha256": "cc8ffc11b0318e1638404f4c5d24119d4094542ff1709651047656de0dfad4f1"
+      "sha256": "2f0c7200822b64f5d4bbf78f77b3bfc17e6eeac0f23cacc8250016bbd5a13960"
     },
     {
       "fixture_id": "post-0054",
       "path": "posts/post-0054/post.json",
-      "sha256": "c867f96a863df15e30238f182361204dfb23cbe6b7ff04188b91d8fef527efdd"
+      "sha256": "fa295dd7b749252d9eef7a9d353b9192be6c83a4298013652ec2c22b06bbd000"
     },
     {
       "fixture_id": "post-0055",
       "path": "posts/post-0055/post.json",
-      "sha256": "d29fbe1be173256cd767685d0cac8f31562afb45ae65029650fa4a1ced87c5c3"
+      "sha256": "58cd473000fbf3d576d3c4e610b8c0c2b07e5eae9084a665ee12276c903bd97c"
     },
     {
       "fixture_id": "post-0056",
       "path": "posts/post-0056/post.json",
-      "sha256": "d838e160f43a091413cfbfae2e9ca63646709370821fcd879e7e25b9e3d5af98"
+      "sha256": "9f0458b904a42cde126bca0efb4f8ee20cb2ec400796b49e48664af016f6fcec"
     },
     {
       "fixture_id": "post-0057",
       "path": "posts/post-0057/post.json",
-      "sha256": "0c8b88797e2f1fe5267f912540b0dd666f78a9b17bc419057c439e45a0762652"
+      "sha256": "f6edaecf15998c0d3c259ae97c0dd2c7587d91e1c2a56bc4e4286bffbec46fcf"
     },
     {
       "fixture_id": "post-0058",
       "path": "posts/post-0058/post.json",
-      "sha256": "5dc17ed3855156506dd116b5560a2e4b592b57fab53c968e350282b09be79868"
+      "sha256": "15d94701148b8b6caadb397433a82dc6c0253bc1eafb12cfe9ae24405fc2c9b4"
     },
     {
       "fixture_id": "post-0059",
       "path": "posts/post-0059/post.json",
-      "sha256": "a97e9c04e47f4cb246a771a69a598fbd52394b435a94f4437c357b49b03f9ffb"
+      "sha256": "b0a5973caa6d744b86eec2909d0979dc6287b56d291f0ffa7c7398a747c21c4d"
     },
     {
       "fixture_id": "post-0060",
       "path": "posts/post-0060/post.json",
-      "sha256": "1977fd37709ac3ec671a0a17b90d288316f7975859e8e1cb94d74720f4f53c82"
+      "sha256": "40eb402aa10c995be2eeb63be783a4dfb832b573e07a9bd2dcea874e640b3929"
     },
     {
       "fixture_id": "post-0061",
       "path": "posts/post-0061/post.json",
-      "sha256": "6c650b304530f6ad2a1d0c753949446aa49d1f701f6882072fea991f6d5093ad"
+      "sha256": "1d4971f92ad6383b1a88551af45d5213ce738e74c2b31b03b07e5777bc40ed71"
     },
     {
       "fixture_id": "post-0062",
       "path": "posts/post-0062/post.json",
-      "sha256": "16ac2cf815b735e3580aa241ddb782610238a7727a25d8e65202f494937df129"
+      "sha256": "892e299a556115794f0eb06e8df95d6579f823c2781fccceb15fcee5727ad2f6"
     },
     {
       "fixture_id": "post-0063",
       "path": "posts/post-0063/post.json",
-      "sha256": "40ff43190383eb29a482c7683ab51ad81a84a1e1da2c5de98bd34e304b77fff7"
+      "sha256": "ad986d5963d8065decbc406988f0f917bfcf858f93f5a500b691f91a89f332ce"
     },
     {
       "fixture_id": "post-0064",
       "path": "posts/post-0064/post.json",
-      "sha256": "41a8e3ebc76a2998c70e921dac5b239894aff2df1e037af8cda22a5b3630859b"
+      "sha256": "21356af2d9a413bfcb16d067c84d67b99f85a239154a435a99992767cf3da25d"
     },
     {
       "fixture_id": "post-0065",
       "path": "posts/post-0065/post.json",
-      "sha256": "c2772796fb2411fbe6821bb2ebbb98c818127e90224b8b606f2205ef6cae569c"
+      "sha256": "aefa0eb068f0a5baa70db36c9e2468aabfc75ecf9d65f42b837c030f0948dbed"
     },
     {
       "fixture_id": "post-0066",
       "path": "posts/post-0066/post.json",
-      "sha256": "2db841ab9ef4ad6f8939abe34a8ceb0e8b4859bd04c98ec92963cc3d0b2a3f27"
+      "sha256": "801845ad8b6e71b78b71a479b1955ab42e5960fa19517c935a41b2cc441c35e1"
     },
     {
       "fixture_id": "post-0067",
       "path": "posts/post-0067/post.json",
-      "sha256": "c75d9efa5cf0bdf66a36cdd9ae239d38003dbbabf0c5855dec475637ab74c260"
+      "sha256": "603beb248a1b3470dae77d0f5a345dbb8c8f24a1a5083873a41bfdb2b732642e"
     },
     {
       "fixture_id": "post-0068",
       "path": "posts/post-0068/post.json",
-      "sha256": "8bdaec2c34de73374cece6a8009a5e39f7fa1a08eb3443198c1c1e455e2492e4"
+      "sha256": "445d913880cae2490a47932111f7ee34402af853cdb3e6e3e72aae06e294e6c6"
     },
     {
       "fixture_id": "post-0069",
       "path": "posts/post-0069/post.json",
-      "sha256": "bf0c953218f90c70e589483ddcb4722a490b840ec0d1ad3633a34cd329571868"
+      "sha256": "fadfe5cd272d9edd56affeaaa5ee52f408a4e9583a47479fa571586addf1f8f9"
     },
     {
       "fixture_id": "post-0070",
       "path": "posts/post-0070/post.json",
-      "sha256": "d67ed72155fbd1bc29df06aa83db607c5f989e62f94cef75346c3f7cfaae029e"
+      "sha256": "a4cdfd610731f29e4babd6b5f12909cb41d95e53fdee9e4dc76cefdde17b7c50"
     },
     {
       "fixture_id": "post-0071",
       "path": "posts/post-0071/post.json",
-      "sha256": "bda740532c3af6ca79001c70c0a4e28ad0c615188033a09d91cc51e7013ae040"
+      "sha256": "ee70652687c4468564ba32dc2f483f7469168b0714f0aa7ef7aa0b6e15773188"
     },
     {
       "fixture_id": "post-0072",
       "path": "posts/post-0072/post.json",
-      "sha256": "35489691f955bd25ae75b0a0ee62acfa2aa27a2551d07596a1e461e82bac6d81"
+      "sha256": "fb1e9b32696aef72be07e420fa3738c676375bb55d0f967663cf52fccbc00000"
     },
     {
       "fixture_id": "post-0073",
       "path": "posts/post-0073/post.json",
-      "sha256": "71d295819fe1572be8c0e1a4ec23e9b8422ee6cd0c44bbb976da6449e0c86d7c"
+      "sha256": "e17fe592a9716dbd31ea70409a445f578bde41de96385ed956f1d157adfe6aba"
     },
     {
       "fixture_id": "post-0074",
       "path": "posts/post-0074/post.json",
-      "sha256": "684a3912f39c364e98e273df1eed7f8e076fee58ca4f175e2b069e0b809c4513"
+      "sha256": "fcc871e74cc08b0c35833d5684b91c94e4151f739c9ba6c07af22e36c33a9b58"
     },
     {
       "fixture_id": "post-0075",
       "path": "posts/post-0075/post.json",
-      "sha256": "db7bfa7960fa4f56361f9ac9d2989b7d745168d3d6c7253c070257e49c8bf6e3"
+      "sha256": "63092c3d3a719dac202f5ff78319749909bc2c18c9bf930541ac0fa7a9ed536c"
     },
     {
       "fixture_id": "post-0076",
       "path": "posts/post-0076/post.json",
-      "sha256": "042bc6627636bdf9b372cc36600ab37a090236c9f27ec3da175114564811de18"
+      "sha256": "6c418eead911fc95ae1bb33e4b9eb383ed38cae3244015f90ca3d2976ea2472d"
     },
     {
       "fixture_id": "post-0077",
       "path": "posts/post-0077/post.json",
-      "sha256": "e8dbfda4ac4e5d05407dc023803d347bffd862ab14c87666b914ee6ba684839c"
+      "sha256": "3024e730b9260063d1cf4dd2b5fae7fd03e058bc020dffb0193bb1971098de7c"
     },
     {
       "fixture_id": "post-0078",
       "path": "posts/post-0078/post.json",
-      "sha256": "e413578ef49bb8a64d8040165219acc01c7cf4911a95fdd899554fe9edcbfa2c"
+      "sha256": "061ef6ea3e4470b81146a47230d0ada0ad8f8d79e7ddf5f9a6a0680cd0cb3ec0"
     },
     {
       "fixture_id": "post-0079",
       "path": "posts/post-0079/post.json",
-      "sha256": "1e5fb20826558a35946f7fbb1ae426d428227dcea8ba288c2dc7d0c36890bec0"
+      "sha256": "1a2c99d548d29c057fe9a3c226f8079bee30a07386d19d9eece1dcbdf0f3dc19"
     },
     {
       "fixture_id": "post-0080",
       "path": "posts/post-0080/post.json",
-      "sha256": "69134640bd562318df51ba0aa4eb1f2c0ed997c365ea35875c25291111165152"
+      "sha256": "910b76deda2219a4cf946a54cc0e407c8730bfb58f4db33790d519ffacbe6083"
     },
     {
       "fixture_id": "post-0081",
       "path": "posts/post-0081/post.json",
-      "sha256": "84091ba3762441075f0ec7b25bab687af8b2522f27c792925e8f98a1625b7886"
+      "sha256": "13582a60bc6831b8bce1b7c0b86277bf77f8cc9d02e7bd74fad50ce74792c7e7"
     },
     {
       "fixture_id": "post-0082",
       "path": "posts/post-0082/post.json",
-      "sha256": "70076cb5975721e7b9e88e7351437d6617c416d147e2344cee47ef2f70ceab18"
+      "sha256": "9c51b892d7e2c39f529f7b5e5c6044ed2ded3ef2fe46b154333548845efb57aa"
     },
     {
       "fixture_id": "post-0083",
       "path": "posts/post-0083/post.json",
-      "sha256": "e7315637c3fbc578fe1414ca676f484371812dc15c493c3d33955951ca3586e4"
+      "sha256": "36a384dd996003ec7b770dd172ff6d1dc3d802c397b86baf36cdf14f1d172a3e"
     },
     {
       "fixture_id": "post-0084",
       "path": "posts/post-0084/post.json",
-      "sha256": "dcda0e47db4327e437b29ffa377cab41ba6fd5786ed290d7eadbae7b1ddd56bb"
+      "sha256": "aa5aa10c28f5732ede703fa2409728ec379749e2595608c4cb639df5c339b30f"
     },
     {
       "fixture_id": "post-0085",
       "path": "posts/post-0085/post.json",
-      "sha256": "91115c55ae3f202be596088b61688b0eecec64344bc2019a549a798a5b39da55"
+      "sha256": "348e8285bcf63b73b8d8c1f40e42fc3a34772182e398dc1bd160b00c34277bc7"
     },
     {
       "fixture_id": "post-0086",
       "path": "posts/post-0086/post.json",
-      "sha256": "2f2a863b5ef7470aaa28f61095817179483e4afb31c916c926a6ccb2bd6eb323"
+      "sha256": "b82292897deaab7899307555bfd77fe227b97fbe1937ff2cd79b40737dba96df"
     },
     {
       "fixture_id": "post-0087",
       "path": "posts/post-0087/post.json",
-      "sha256": "e038cd015fd497c21f53f88531292809c30952c8630cd832dba02f5a2b5e4a64"
+      "sha256": "fab4eeb91b6941bc6156f76b771c33b166bef0aeba4929de1b21ac9b809633f8"
     },
     {
       "fixture_id": "post-0088",
       "path": "posts/post-0088/post.json",
-      "sha256": "7d74f25b400051cd34244ddcdad9d3ca073a5e9bd6e188057862159a8ae20df0"
+      "sha256": "7e4a129e2efb10d307a82b93dbb1b49d9e8a17e306cb0101824f9c619affaffd"
     },
     {
       "fixture_id": "post-0089",
       "path": "posts/post-0089/post.json",
-      "sha256": "915ebe2fca2cdee6fc1b6c49e8628c8dd5d3056a7b17083c1080408debb84da2"
+      "sha256": "0659190cb2b2e231abba16d3c75806243aa6e770455cefbd7a3d0e74aff83c5c"
     },
     {
       "fixture_id": "post-0090",
       "path": "posts/post-0090/post.json",
-      "sha256": "21fe5b31c128907923e6cb5a6afa4669425953785390b864b2f574bff218abb2"
+      "sha256": "111a632081772eee1ad9d3d41f66aa40f83ea7a8d2f7b53913558e507c058266"
     },
     {
       "fixture_id": "post-0091",
       "path": "posts/post-0091/post.json",
-      "sha256": "dfcd13e21b8b7d8a8dd8b0b394be762e86235d6976ff9a965fa3f2d0a893382d"
+      "sha256": "eec1b34abd581f64f65fa9f383b07d62046845e0b95218354801536ef2e67414"
     },
     {
       "fixture_id": "post-0092",
       "path": "posts/post-0092/post.json",
-      "sha256": "5aac3dd8c55fef78ef591b6156e93ca1fe56d3b737dc84367cf0ba9fc4b9be8d"
+      "sha256": "aa0ce4bd314312864292f29d3a01dd233c3566fe072eea45020c3f6bf1b91cc3"
     },
     {
       "fixture_id": "post-0093",
       "path": "posts/post-0093/post.json",
-      "sha256": "d4965fedcfeb515842bacdff8c5ab212077d99767e66e7cbeb5eab49f1acda5c"
+      "sha256": "50c4fe72b0634e78c71be1b045f2309ff07442b9ecd72c25693f3295931b5a9b"
     },
     {
       "fixture_id": "post-0094",
       "path": "posts/post-0094/post.json",
-      "sha256": "c30006a60638357427b783b4625c396c1a6766308b6e29a6344ce53dc90c3892"
+      "sha256": "fb652d4e27a26ce68f692729fe9677453eea1ae4e49b839c8dfb6cc2bbcc9ee2"
     },
     {
       "fixture_id": "post-0095",
       "path": "posts/post-0095/post.json",
-      "sha256": "354f2c575569f0066651470ddf95f725574dafa876ee63d8e1f72e35042e3aaa"
+      "sha256": "703b028f9b0eca542a73b7f3be1731094f9d7f23b14f62320d26f809da1ce939"
     },
     {
       "fixture_id": "post-0096",
       "path": "posts/post-0096/post.json",
-      "sha256": "8b56ab3e98de534f692d5ce824bfd6adcef012b5212777c5eb2969c635a353fa"
+      "sha256": "b9391bbab2dcc3c22f9d1bc2adf051aa6b74c954c7574281d051b19381809526"
     },
     {
       "fixture_id": "post-0097",
       "path": "posts/post-0097/post.json",
-      "sha256": "1eccd4f4cbb5c6f5eb4e282c297bac175bc8e49fb0b0f7536bd26dbe4cd35af9"
+      "sha256": "a5378fb4a723e5a77f92487b40d656210bd42d900cc434e24a9bfc831625b794"
     },
     {
       "fixture_id": "post-0098",
       "path": "posts/post-0098/post.json",
-      "sha256": "cc186c501496edb27b1769474afc7ad6beb23453d5a507d2aaebc9706d26e68c"
+      "sha256": "da2ef10f16726497fd7e2985d59c1bbfc880baaa7b5e99970a4940502e91af21"
     },
     {
       "fixture_id": "post-0099",
       "path": "posts/post-0099/post.json",
-      "sha256": "1e316b36978a7378a0e980ae0392b9e793e93bfcd6dca57f0534f4087d69332e"
+      "sha256": "e0ec5026bd0b2bdb8bf970704a1f08cd4a182c637a301207b47738bcfe57adb1"
     },
     {
       "fixture_id": "post-0100",
       "path": "posts/post-0100/post.json",
-      "sha256": "ecd1d9d4b4be73ef7b18c0d3115226545b03ce87971b30d01b88f4556b1a0e87"
+      "sha256": "e0f4873fc2844e075a0d86a6f3d77a67e77ae8719e6f24ac5001c5c49b213ba4"
     },
     {
       "fixture_id": "post-0101",
       "path": "posts/post-0101/post.json",
-      "sha256": "29f2fca6ce00c92534ad653d85a1201ef489af084cd109c1a08bdc04e4d90bec"
+      "sha256": "9f42f6b804f138c25f89dc93099e4b771daff994578c5ed84efefb257e4c46f9"
     },
     {
       "fixture_id": "post-0102",
       "path": "posts/post-0102/post.json",
-      "sha256": "7afdda41ad67b20acfe7fa42bfdce164619c4100a5906e4cb16628744801e408"
+      "sha256": "6817ec073bd3a39b4449ec758e80b46cd7acd2b2ee340bdfe7360f068ff47f40"
     },
     {
       "fixture_id": "post-0103",
       "path": "posts/post-0103/post.json",
-      "sha256": "cb922fd0faac429e890339212ea95c16514310292bca580dc4a76acd3cff8109"
+      "sha256": "fc0610f50fc583f987305fc826208367ca20d75774db7714c95beb8081b80543"
     },
     {
       "fixture_id": "post-0104",
       "path": "posts/post-0104/post.json",
-      "sha256": "f5a2aa304c63d99612ade4819aaac42f13318a0e69e8e042ac449c10a6d5347c"
+      "sha256": "703b70c77c6ff8a3fd1f27601896476f73ae4f9230715985354a4dd0b40368fa"
     },
     {
       "fixture_id": "post-0105",
       "path": "posts/post-0105/post.json",
-      "sha256": "349c4421de96bb9fc833b8afc31dbd1d1889ef9b355b1fdc02c81cf34ffed801"
+      "sha256": "a8c457682930922e4c28ca3db4a6e14087e927b9b5131a69ebc747a2f68b4f90"
     },
     {
       "fixture_id": "post-0106",
       "path": "posts/post-0106/post.json",
-      "sha256": "01073b8187d49750543656f40e4abc69e956625888572aed1b45933573148da6"
+      "sha256": "538fdcd23ef2ef85d128aa4ae0cb48f75d0fe1444a96ffa5e754fe2229e63689"
     },
     {
       "fixture_id": "post-0107",
       "path": "posts/post-0107/post.json",
-      "sha256": "71c40fd4415b49eeab1d8f9afed945d40fe3739074949ed5c0681ab3d64e4298"
+      "sha256": "2113f33a9d6fd8ddb67f96ef5aad54178ba0e956e10d0b07754758fb919c3842"
     },
     {
       "fixture_id": "post-0108",
       "path": "posts/post-0108/post.json",
-      "sha256": "62b2ffb344c25ccc67da089872c23057623717dfb7350cb300b9abe33de2cfcd"
+      "sha256": "d4bdbfe8d6b0e42446e6dd758ac284ae46cc212ecbe2898ebd65a44a4dd53c46"
     },
     {
       "fixture_id": "post-0109",
       "path": "posts/post-0109/post.json",
-      "sha256": "58eb5a58b72d66edd5ce198380fff583c89a7c7c02c6e010b854d68eb916b154"
+      "sha256": "3309a3e4be6f04584e650fb7525989bef9488026e7bcba2b30c67d464abdee81"
     },
     {
       "fixture_id": "post-0110",
       "path": "posts/post-0110/post.json",
-      "sha256": "90610cff1102ecb8f714a2fce490b96202f63641e1665a7adf93e4f44d085461"
+      "sha256": "fd000536ff46f6da6b0815f66750afb9b888ea732037de9ed2d0c5dd93f15fc8"
     },
     {
       "fixture_id": "post-0111",
       "path": "posts/post-0111/post.json",
-      "sha256": "63d2c140ea54adf4228405ff79eba7e90b7161736e809e73035909f916aa6c76"
+      "sha256": "61a04c8cba7ff26dfa0ae34214256e7a5bcbc6ff92af6a3a886ef926dd5137be"
     },
     {
       "fixture_id": "post-0112",
       "path": "posts/post-0112/post.json",
-      "sha256": "975535d536df5df8a3f0ed55f971fc22d7126955b29242cecda0cd0edfcbc381"
+      "sha256": "8157b86c30b8591182655fe210c36449c047379fef610a5bf51fe15c2a840f8c"
     },
     {
       "fixture_id": "post-0113",
       "path": "posts/post-0113/post.json",
-      "sha256": "ba712867fdd553beb431bd3921e5cf81d18dce0a889d5986144c97bee0265981"
+      "sha256": "0a04beb4345ffb0a8d39d2025779ce659201d74774d568d0cefe4190ce31c456"
     },
     {
       "fixture_id": "post-0114",
       "path": "posts/post-0114/post.json",
-      "sha256": "71cdbe1ec25ba4a23568ebbd844896d6f29241671ad5444041f7ef96113bc940"
+      "sha256": "9cb14843f443608ab6f39434137cdb48b8654cf6399180a9740a069ea55b5a6e"
     },
     {
       "fixture_id": "post-0115",
       "path": "posts/post-0115/post.json",
-      "sha256": "2eb187bba32f1b64c0755bc3a637ccdd79689c18632bc5983474c200010b4481"
+      "sha256": "e1cb47a84349e831f838b55aacc6ae2680bb8546bad9276b46bc68c0929224b1"
     },
     {
       "fixture_id": "post-0116",
       "path": "posts/post-0116/post.json",
-      "sha256": "2f5bc3709763e516f9e1801e76b1794549459ad52befd665095873d02813ea36"
+      "sha256": "948eda6e03539cca75837399cdb2955cac5b03ae745273490030ec1fa90e3fc2"
     },
     {
       "fixture_id": "post-0117",
       "path": "posts/post-0117/post.json",
-      "sha256": "bfd5a02e292dd8e29b67c303c8b74cb075ef589d12b4fb4e2182d0cd4961ed5e"
+      "sha256": "281d170d64df6d3e4dae2e5c273cdf9ed44f814e8986aec8a19215e8029b9240"
     },
     {
       "fixture_id": "post-0118",
       "path": "posts/post-0118/post.json",
-      "sha256": "15bf41ed8892f33a87bde183a31b5d4c1700eba3bef6a52a3d8ca5505e4b7651"
+      "sha256": "d8dcc1ea7506f4de1fe2a083e3f0714df0960cae2cc155bfffe3bf7ac6c2958f"
     },
     {
       "fixture_id": "post-0119",
       "path": "posts/post-0119/post.json",
-      "sha256": "2281576f01eaf999897f25c5131b153c7393c2f8750e3d83515344bf843e131f"
+      "sha256": "b82b306ff7e5af89d067ba7586ad1a7b9c3c34b2d9805e0db122b5d32b8819b0"
     },
     {
       "fixture_id": "post-0120",
       "path": "posts/post-0120/post.json",
-      "sha256": "3098f512c47e29a7eb212d6991a0a5f71e1f73c97ad6f3ed96863e3e24fa9fef"
+      "sha256": "4eb262cb8e1f87f5c467eb56fe9d03a657e1d588ccac3d1e7295c791c716d6ee"
     }
   ],
   "media": [
     {
       "id": "post-0001-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0001/media/image-01.svg",
-      "sha256": "7b246ab0ea3e5cf18b2c9ba4f9e44437f1d922191773e0e35fece9fc6650edfc",
+      "mime_type": "image/webp",
+      "dataset_path": "media/flood-kennedy-active.webp",
+      "sha256": "a533db1041bba7e1562204b16bb9448785b9007484a0c283bec244d2702273ed",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Kennedy; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of localized flooding on a residential street in Kennedy; a fictional scenario, not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0002-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0002.webp",
+      "sha256": "108b5050c0a1c2b6d0161874c738ca9362ef415328547ac1fe0af29143f9490b",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0002: Eye-level vertical smartphone photo taken from a pedestrian's dry strip of sidewalk looking diagonally along a narrow residential street in Kennedy, Bogotá, Colombia. Brown shallow floodwater completely hides the curb boundary; the dry narrow pavement in the immediate left foreground is the only walkable part. Concrete and red-brick two-storey Colombian houses with turquoise and rust-colored metal doors. Frame the flowing water close and obliquely, without a zebra crossing. No one in the current.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0003-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0003.webp",
+      "sha256": "8d327e8ca19973a7366d2b0775768d550bba869341d9b5506a5a25f3518cdda5",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0003: Horizontal imperfect smartphone photograph from the dry sheltered entrance of a red-brick residential row in Kennedy, Bogotá, Colombia. Neighbors in normal rain jackets, faces indistinct, lifting a small table and bags onto a raised doorstep because murky rainwater is collecting along several metal garage gates. Emphasize the domestic objects, a burgundy garage door and several damp entrances; houses remain standing. Ordinary localized shallow street flooding, not a catastrophic flood.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0004-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0004.webp",
+      "sha256": "044a11e78719664e0754155cec8fe2725008ca5e87c433e87599e0c17ff7920e",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0004: A close downward amateur smartphone photograph of an overwhelmed rectangular roadside storm-drain grate in a residential street in Kennedy, Bogotá, Colombia. Shallow murky rainwater spreads around the drain over rough asphalt, with a few leaves and curb stones, rain ripples. One mustard-yellow wall and grey metal garage gate partly seen at top. No people, no dramatic waves. This is a complaint documenting drainage failing during heavy rain.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0005-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0005.webp",
+      "sha256": "8b8e222d1298fbfe391e6cddbdcdaedaa4b49b21cc368ce53e1df7e6d7f6c66a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0005: A wide landscape amateur smartphone photograph taken from a second-floor apartment window in Kennedy, Bogotá, Colombia. A sliver of the dark window frame at right, looking steeply down a flooded residential intersection. Several ordinary compact cars wait on the dry approach before the standing brown rainwater, no vehicles driving through it. Close-packed unplastered brick houses, pale blue house front, power wires. Overcast rainy afternoon. Clearly elevated perspective, not a street-level photo.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0006-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0006.webp",
+      "sha256": "81baf696846ea0617976a2b361fd18e26888f15520ac65bc4242252c4c60de50",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0006: View from inside a small first-floor home in Kennedy, Bogotá, Colombia: three neighbors in plain sweaters move cardboard boxes from wet tiled floor onto a dining table, a thin sheet of brown rainwater entering under an open front door. Low uneven phone framing showing a chair and doorway. Red tile flooring, cream walls, modest lived-in home, faces not prominent. Localized minor flood, calm purposeful help.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0008-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0008.webp",
+      "sha256": "1308fde5fb1a968222db8738f5823406ae1c9a90395a75c5558d67eea5d3f2db",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0008: Interior of a tiny neighborhood grocery store in Kennedy, Bogotá. Informal smartphone photo from behind its counter showing a shopkeeper's arms placing plain unbranded dry-goods packages on high shelves; shallow floodwater entering the doorway and spreading a few centimeters over checked floor tiles. A red plastic stool and elevated sacks. No legible packaging. Close indoor perspective with rainy grey daylight outside.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0009-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0009.webp",
+      "sha256": "61ba6ea3b101ae1b22a06f6fc919edf2acfccaacea38c654e4f7eb98cbf26a52",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0009: Close-up handheld phone photo aimed at the edge of a sidewalk in Kennedy, Bogotá: murky shallow rainwater covering the lower part of the concrete curb; black iron fence and narrow wet garden strip at top. The water depth cannot be measured; focus on gentle ripples at curb, damp fallen petals and rough pavement. No grate in frame, no people, no zebra crossing, natural overcast afternoon.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0010-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0010.webp",
+      "sha256": "31b0998742e7620b2c5b01a3b8c2967249894c8332e71a016800de4214b5477a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0010: Amateur landscape smartphone photograph from beneath the roof of a small bus-stop shelter in Kennedy, Bogotá. Still shallow brown water gathered beside the shelter at the end of a residential block leading toward a wider avenue, distant blue city bus on the dry avenue. Bench in near right foreground, wet concrete, rainsoft focus in distance; no readable signage or transport logos. Safe waiting spot.",
       "is_simulated": true
     },
     {
       "id": "post-0011-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0011/media/image-01.svg",
-      "sha256": "4f0a8580fcc75432cf88b4e5d3e5359e196278a1c754484be28315a27da32370",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0011.webp",
+      "sha256": "ca4a459e6035578ad854eee86c8dbee3b7ce9cc344b9c5324d571b4954bea604",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Kennedy; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated photo of a dry raised residential corridor beside a waterlogged lower entrance in Kennedy; fictional scene.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0012-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0012.webp",
+      "sha256": "0e2e1fe0190f150fd2be7e8ca4a306262e3eb22fbcb8dfa32b35f79e0387c31a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0012: Very low angled phone photograph along flowing shallow brown rainwater in a Kennedy, Bogotá residential gutter, wet leaves and two small empty translucent plastic bottles carried past an uneven reddish-brick corner. Longer street is softly blurred in the background; foreground texture and moving small debris are the subject. No drain or people in frame, ordinary localized street flood, cloudy daylight.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0013-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0013.webp",
+      "sha256": "5877063d4b8ddf2dd6cf0477ca6cee6a3bba55fd564cd5b8a3b260640e55b5e4",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0013: Horizontal candid mobile photograph looking across a quiet flooded residential street in Kennedy, Bogotá from a sheltered stoop. Standing rainwater level stable below several raised thresholds; a pale mint house with two grey doors and an orange-brick building across the way, one black motorcycle parked high on a dry tiled porch. Still water reflections, drizzle easing, no dramatic movement, no people foreground.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0014-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0014.webp",
+      "sha256": "ea94acacca3f30bcb003b812dac1eeca5e56c5895665ee29ece93eec611ed132",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0014: Handheld phone photograph at the frontage of a small neighborhood hardware and household goods shop in Kennedy, Bogotá. Plain cardboard merchandise boxes and unbranded sacks resting on wooden planks lifted above damp ground, a cropped merchant's hands adjusting them. Outside the shuttered opening, the street is still covered with shallow muddy water. Focus on improvised raised shelves and supplies; grey metal shutter at left, no legible signage.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0015-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0015.webp",
+      "sha256": "f1480b61975a9a7f762b9750c27a050d5b05572cf811abe94d501fa9d8e315be",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0015: Downward smartphone photo of a ROUND iron manhole cover near a curb in Kennedy, Bogotá; wet leaves, crumpled anonymous plastic wrapping and small twigs collect around it while rainwater bypasses the clogged opening. Broken asphalt and red-painted low curb, wet beige wall corner at edge. Natural imperfect focus, ordinary morning-grey daylight, no people, no readable marks, no rectangular drain grate.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0016-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0016.webp",
+      "sha256": "4aa435cecf6892b9b7707e6a44817b0532e9550290aa85bce45ab98a3fb85c61",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0016: Amateur phone photograph from behind a short line of four pedestrians waiting to use a very narrow dry part of pavement beside a blue-grey residential fence in Kennedy, Bogotá. Floodwater covers the rest of the sidewalk crossing. People from rear, simple rain jackets and closed umbrellas, one older adult proceeding carefully on dry ground. No faces prominent, no danger spectacle. Medium-wide street-level perspective with deep diagonal composition.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0017-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/flood-kennedy-receding.webp",
+      "sha256": "d2ea3aa58812d999f7795738a6eb2484ec54e9fff4963d25363b8c0de6a156bf",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of receding floodwater and an emerging curb in Kennedy; a fictional scenario, not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0019-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0019.webp",
+      "sha256": "4a23947a36f8150b87bdc19c9089d088363a3fbe3f39039cd6ae33fae6a0a1c9",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0019: A quiet close landscape smartphone photo at a low angle in Kennedy, Bogotá after the rain eases: newly exposed upper edge of a concrete curb and a thin fresh muddy waterline on a tan wall, shallow brown water still standing farther into street. A few gravel pebbles and flattened leaves, soft grey reflected sky, no drain, no people, no buildings in wide view. Clearly receding water, not a surging current.",
       "is_simulated": true
     },
     {
       "id": "post-0025-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0025/media/image-01.svg",
-      "sha256": "c997c0ac40de31571b909fbe67846e2954c380516b903521f8d9cc458e5c038f",
+      "mime_type": "image/webp",
+      "dataset_path": "media/flood-bosa-active.webp",
+      "sha256": "51108f7c665e7757758078c51b9a19c5b6377450bd283241701d3f08307504fe",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Bosa; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of localized flooding around residential entrances in Bosa; a fictional scenario, not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0026-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0026.webp",
+      "sha256": "7ba15a8193314d616f7a65f438d474a90cbd2b9b9a893a7a9a654beb6439e45a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of storm-drain backflow during rain at a fictional Bosa street corner.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0027-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0027.webp",
+      "sha256": "e8b2c1e9b2f3df318b4ee0f4e0792a94bb1c1087268c2042ae9c6f61b05723df",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of shallow runoff carrying leaves along a fictional residential street in Bosa.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0028-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0028.webp",
+      "sha256": "fe8537323869ac40adef831daa0ed775c1b68d56b3fb80048d155e95849d6b3e",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of neighbors protecting furniture near flooded residential entrances in fictional Bosa.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0029-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0029.webp",
+      "sha256": "209aaef3d9297edc4f41e020d209b236604c8e3120cd97d9c66e6ff42b9c278d",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of an unmarked temporary barrier across a water-covered pedestrian passage in fictional Bosa.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0030-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0030.webp",
+      "sha256": "1a60910d4dc01fcd440ca3ee3c1d003fca463adcb71c9d9cf49185183e6dea58",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated elevated phone photograph of shallow floodwater around parked cars on a fictional Bosa residential road.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0032-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0032.webp",
+      "sha256": "ace742f9bb6d41ae2c98c4823f3f3c0506eb697aad6f1dbb4da9a68514cc7d20",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of boxes being moved away from a flooded entrance in a fictional small Bosa shop.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0033-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0033.webp",
+      "sha256": "7b39e46d542eca52ed10df82d60591a29eace8f1f36c13b7bae74519ef5c7a2c",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of street runoff reaching the first entry step of a fictional Bosa home.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0034-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0034.webp",
+      "sha256": "1a45f41e8cb2a7a92eaf71780f3b8631c81de16729d536067d667ade41d48986",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of pedestrians using a drier alternate path around a flooded fictional Bosa crossing.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0035-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0035.webp",
+      "sha256": "d18150198e163b06a80e5804422c769db2a3b22ffa319a4d7638e139aa478e76",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of neighbors moving lightweight patio items away from runoff in fictional Bosa.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0036-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0036.webp",
+      "sha256": "f14b2ff3309394cd5b7a0a5608d12fb155bcb01acb04d62940c70c5ca330501e",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of muddy water obscuring a road edge at a fictional Bosa block entrance.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0037-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0037.webp",
+      "sha256": "7c9ec0ca92e45b91bade8b5705426cdba3573deee8a666a61591db8fc57b835b",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of shallow water continuing to enter beneath a residential gate in fictional Bosa.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0038-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0038.webp",
+      "sha256": "4661bb66715598a4b10326c89e7a2995e95c3bd965c95487062c099847c8da2c",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of a household barrier separating a dry living area from a flooded exterior entrance in fictional Bosa.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0039-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0039.webp",
+      "sha256": "e2bcfd9d6dc8b21fa160d81cf040edffb2f701b31ed586559239eb6f1e5a0484",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of gutter overflow diverting toward a fictional Bosa residential entrance.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0040-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/flood-bosa-receding.webp",
+      "sha256": "846627987a9ad814895539fa98b54ea2c65326106c2045f03812ffe3dc6110bd",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of receding floodwater and muddy residential entrances in Bosa; a fictional scenario, not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0041-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0041.webp",
+      "sha256": "d2d0619e1f171d32b7d0ef42f73d5dc2ba08f0aef4d626ea869a4f39be6c5e26",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of slow drainage after rainfall eases at a fictional Bosa street corner.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0043-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0043.webp",
+      "sha256": "30997810b4b34f457fa72538b43d8b0946f8f0f56beb9d46853d35ad27eb8374",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of a damp mud line above receding water beside a fictional Bosa wall.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0044-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0044.webp",
+      "sha256": "4b7b14cf572a86e752d43ca8fb17ad081aa7206c857d6133dac235eca5e9d2c6",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of muddy access and neighbors waiting on dry ground after water recedes in fictional Bosa.",
       "is_simulated": true
     },
     {
       "id": "post-0049-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0049/media/image-01.svg",
-      "sha256": "b923e4081039bd440a2f5dd828e5a46996ba3849338612d42480a2e5fc88197e",
+      "mime_type": "image/webp",
+      "dataset_path": "media/fire-chapinero-active.webp",
+      "sha256": "7955dfadc6a3ce2577089fbca5311cefb5b0b39cc5b3489d5c96231bc955a310",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Chapinero; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of small flames and smoke over burning vegetation in Chapinero; a fictional scenario, not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0050-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0050.webp",
+      "sha256": "1f15187da15fcc2e5bf415804da64f2bab7e19c4d7dac3c65600aacade8707e4",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: humo oscuro sobre una franja de pasto, visto desde una ventana en Chapinero; no es una fotografía de un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0051-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0051.webp",
+      "sha256": "29b0a221ee7723a3d2eb26e92551e2052650985eea590197d099d35b0097b6ec",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: llamas bajas entre hojas y pasto, observadas desde un sendero a distancia en Chapinero; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0052-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0052.webp",
+      "sha256": "0efaa2730124837d16e3a3aeb2a5a3d7ab8222ec1a7c9f1627b7082f472b9c88",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: humo que sale de vegetación de Chapinero y viviendas visibles intactas; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0053-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0053.webp",
+      "sha256": "412cf7461f97b6437fd6d1334602f166e94b97c9a5aac87b188e38d0a8371cfb",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: un foco de fuego lejano en la vegetación de Chapinero, visto desde una calle residencial; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0054-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0054.webp",
+      "sha256": "2ef6ddb660e25a0019a64835dcb9b4d65843453240d07c0a8168892e0dec36a8",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: una humareda espesa sobre vegetación de Chapinero, observada desde un descansillo retirado; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0056-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0056.webp",
+      "sha256": "39a2ac509dee61927c1e1ef24431e9bf7475e4b283ec143bcd6fe794af995670",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: una nube gris oculta parcialmente la vegetación de Chapinero vista desde una esquina; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0057-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0057.webp",
+      "sha256": "8c792be588ceb98b25fd2c53f7ec1cd44d22fcd4fa5a259dfe7b0a718318f17b",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: fuego localizado que alcanza matas de pasto seco en Chapinero, visto a distancia; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0058-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/fire-chapinero-smoldering.webp",
+      "sha256": "a5958098eec7c18802c65e35e5e92e2ca1c9d2c8c08bb140cd1e7f52db845b24",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of smoldering blackened vegetation with light smoke and no visible flames in Chapinero; a fictional scenario, not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0059-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0059.webp",
+      "sha256": "31fbf6cf3a1015358a461fd002bd0ca2b46934e0297828fddd99927e47be28d5",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: vecinos permanecen en un andén distante de la vegetación con humo en Chapinero; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0060-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0060.webp",
+      "sha256": "5d5bd1ca8e8ef9c7983ad6fdb1c3a0101e7f77881aa8519358dd93b92867ef5c",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: el viento desvía una columna de humo sobre vegetación de Chapinero, vista desde un paradero; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0061-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0061.webp",
+      "sha256": "223b91f27b8915352508a1b48fabb9375806a60527c439e6e1f91335fe72e17d",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: llamas pequeñas y humo persistente en un parche de vegetación de Chapinero; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0062-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0062.webp",
+      "sha256": "e7845d429e65983f92fe145c207ca00af592f4bb0b20949781c319201ffbda5c",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: pasto ennegrecido que todavía humea en Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0063-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0063.webp",
+      "sha256": "5d2fbc013f932d4bf5864abc888db27cfcc81c556273b2c8e5e0535b97686cc8",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: una llama pequeña se aviva en pasto de Chapinero con una ráfaga, vista a distancia; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0064-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0064.webp",
+      "sha256": "56f6d9f8746d2e9b07f458a76e4f3296dda034cb13df5423e9ba4759a546a07d",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: humo residual que se dispersa sobre un terreno de Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0065-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0065.webp",
+      "sha256": "6dd94fb0dcd59ef3a06ccf5beeaeb5f77a366e96b36cdc4aa43177fd1fc0e0fd",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: varios puntos de humo entre vegetación de Chapinero, sin llamas visibles y con vista parcial; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0067-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0067.webp",
+      "sha256": "ff84e41d7a1aaaee6c9e3f993e9addd205f73065210cd34290da6c4de8183d3b",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: una columna baja de humo residual en vegetación de Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0068-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0068.webp",
+      "sha256": "ab09715be69d41708ea237f936df8ddad38e69a0dfc23e49ed574ebb3466d827",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: borde de pasto negro con hilos de humo residual en Chapinero, sin llamas visibles; no documenta un incidente real.",
       "is_simulated": true
     },
     {
       "id": "post-0073-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0073/media/image-01.svg",
-      "sha256": "a1ec31cfffead3181a08c580280b3442a897b411580aecd5d2904e256611a484",
+      "mime_type": "image/webp",
+      "dataset_path": "media/landslide-ciudad-bolivar.webp",
+      "sha256": "f5e1f00b437f256bf7480d2e81985a7953a47944ee64972ada9dc4c6922e636d",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Ciudad Bolívar; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of wet earth and stones from a small landslide beside a hillside path in Ciudad Bolívar; a fictional scenario, not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0074-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0074.webp",
+      "sha256": "f5ad8022c7a54c2c6dabb1d1b4d31eb72de55fb200525c377ddf625d3c236ae6",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Fresh damp earth at the foot of a grassy slope beside a path. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0075-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0075.webp",
+      "sha256": "c9c1b1419dbcaf0dab87027e9c6c3b9b7eddd793defa8939864e67abe65cafde",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A short section of hillside path partly covered with loose soil. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0076-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0076.webp",
+      "sha256": "f0c1258c24aafb8630bd5bc758b4ba7ba16d93a97cee8b8eecf030879ffe1548",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Residents keeping their distance from small soil falls beside a neighborhood path. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0077-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0077.webp",
+      "sha256": "d99770862d05214210babbf090a866c0303607dc290cbee33d4b747885041a2c",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Small recently fallen stones below a wet roadside cutting. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0078-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0078.webp",
+      "sha256": "056919c6fe536de4d0c58ad5cfba26539448372cd1c0d10eac02018080705f3f",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A small fresh step in the wet ground next to a hillside path. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0080-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0080.webp",
+      "sha256": "ce77d3bcecfc0778872f7899c918bcc13425dba471933e084c611e046acf364f",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A thin runoff trickle carrying fine silt down a wet slope. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0081-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0081.webp",
+      "sha256": "7c8861493c2f2f0f220c652cfdf281c6bd87db9915103f5ae74df1982154517a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Mud and small stones partly obstructing a pedestrian connection to the lower street. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0082-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0082.webp",
+      "sha256": "364f0d1bad8172dbc5a91cab85b5ea2f04379f3c433b02bc8e94ee73a2a6944a",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Detached soil and leaning plants seen from the opposite side of a path. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0083-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0083.webp",
+      "sha256": "7132946c604d818664ca1cca4b915a3b56828bbe709b7935b76b351a6222c750",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A shallow uneven verge and neighbors standing away from the path edge. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0084-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0084.webp",
+      "sha256": "2961a5a9d0ea8bc6442ecb5be655da8a81358f547356d910bad13d97497f23fd",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Narrow runoff channels on a wet bank above a low accumulation of soil. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0085-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0085.webp",
+      "sha256": "888cc2138e72c44e3c0b0840221630c7675f8b2487e61ae272ab4f0463cd0ba6",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: An empty hillside passage kept clear after a small soil slip. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0086-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0086.webp",
+      "sha256": "7932b2f643913111beb3730cb471fa280995218db9767a2cdea5a07d16ba4009",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A few small fresh clods dropping close to the face of a wet bank. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0087-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0087.webp",
+      "sha256": "469b17950df121e191f7cc9b0821fcb49f8c3ef3918f879aeba180f7e8ee4551",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Remaining mud on a footpath with a small trickle from the slope. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0088-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0088.webp",
+      "sha256": "b9a2cb67d8a25d45ba0f63febc9e519e8801e36dd545ef003f57d1cf3e7dfe57",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A saturated earthen bank after the rain has eased. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0089-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0089.webp",
+      "sha256": "8a22d989f1a69df5ede5c1978a7902090eb86e5a9306c9f37cb261409f2c3186",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A restricted view past a brick corner toward a wet slope and a loose stone. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0091-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0091.webp",
+      "sha256": "00c6f3db90fcd9776c1ed9fc79edba6a86b55d0370af7a85b1b78b2413db0a41",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A still visible section of wet slope with earlier loose earth at its base. Not documentation of a real incident.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0092-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0092.webp",
+      "sha256": "cf207eb032512a4854d6394e4ad6ce72697fd31668deb7b153ecea790e0fa038",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Loose earth still on part of a hillside passage during a pause in visible movement. Not documentation of a real incident.",
       "is_simulated": true
     },
     {
       "id": "post-0097-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0097/media/image-01.svg",
-      "sha256": "3a870e197d0d04bb1a8d52db35eb71cff7f3ea86704621213284b4491b7833ba",
+      "mime_type": "image/webp",
+      "dataset_path": "media/rain-suba.webp",
+      "sha256": "7bc61b2076457aa599affc2891cf43dd81e4f0ff61d0e54ac4ce6ded3280d110",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Suba; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of heavy rain and reduced visibility on a residential street in Suba; a fictional scenario, not documentation of a real incident.",
       "is_simulated": true
     }
-  ]
+  ],
+  "presentation_revision": 5,
+  "media_provenance": "media/generation.json"
 }

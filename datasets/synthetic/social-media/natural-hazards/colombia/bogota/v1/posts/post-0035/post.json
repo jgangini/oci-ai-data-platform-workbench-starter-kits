@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0035",
-    "username": "sim_bogota_0035",
-    "display_name": "Fictional Bogotá Reporter 035"
+    "username": "jul_arevalo",
+    "display_name": "Juliana Arévalo"
   },
-  "message": "Varios residentes de Bosa retiran objetos livianos de un patio antes de que se los lleve la corriente. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Los vecinos de Bosa están retirando las cosas livianas del patio antes de que se las lleve la corriente. Se agradece que se estén ayudando en medio de esta inundación. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 120,
   "available_offset_seconds": 120,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0035-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0035.webp",
+      "sha256": "d18150198e163b06a80e5804422c769db2a3b22ffa319a4d7638e139aa478e76",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of neighbors moving lightweight patio items away from runoff in fictional Bosa.",
+      "is_simulated": true
+    }
+  ]
 }

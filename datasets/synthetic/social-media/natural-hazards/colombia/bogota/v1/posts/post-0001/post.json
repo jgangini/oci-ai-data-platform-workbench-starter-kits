@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0001",
-    "username": "sim_bogota_0001",
-    "display_name": "Fictional Bogotá Reporter 001"
+    "username": "mar_rojas",
+    "display_name": "Mariana Rojas"
   },
-  "message": "Veo agua de lluvia sobre el paso peatonal; empieza una inundación en Kennedy. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Ojo si van a pasar por Kennedy: la lluvia ya cubrió el paso peatonal y está empezando una inundación. Yo por ahora no cruzo. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -22,12 +22,12 @@
     {
       "id": "post-0001-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0001/media/image-01.svg",
-      "sha256": "7b246ab0ea3e5cf18b2c9ba4f9e44437f1d922191773e0e35fece9fc6650edfc",
+      "mime_type": "image/webp",
+      "dataset_path": "media/flood-kennedy-active.webp",
+      "sha256": "a533db1041bba7e1562204b16bb9448785b9007484a0c283bec244d2702273ed",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Kennedy; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of localized flooding on a residential street in Kennedy; a fictional scenario, not documentation of a real incident.",
       "is_simulated": true
     }
   ]

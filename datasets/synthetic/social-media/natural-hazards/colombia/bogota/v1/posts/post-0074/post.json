@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0074",
-    "username": "sim_bogota_0074",
-    "display_name": "Fictional Bogotá Reporter 074"
+    "username": "cam_cuellar",
+    "display_name": "Camilo Cuéllar"
   },
-  "message": "Se ven fragmentos de suelo suelto al pie de una pendiente de Ciudad Bolívar después de la lluvia. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Después de la lluvia quedaron pedazos de tierra suelta al pie de la pendiente, acá en Ciudad Bolívar. Desde el camino se ven frescos. Lo comparto para que revisen ese borde, no para que se acerquen. Bogotá #deslizamiento #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 12,
   "available_offset_seconds": 12,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0074-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0074.webp",
+      "sha256": "f5ad8022c7a54c2c6dabb1d1b4d31eb72de55fb200525c377ddf625d3c236ae6",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Fresh damp earth at the foot of a grassy slope beside a path. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }
