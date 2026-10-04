@@ -111,6 +111,16 @@
           "after": ""
         }
       ]
+    },
+    {
+      "path": "src/ui/rightPanelRail.js",
+      "sha256": "05fbcd79c88960b77bfbda6262d6bb3e31be9b57d72f7111f2c70a286ff019c9",
+      "replacements": [
+        {
+          "before": "  const panels = [...stack.children].filter(\n    (panel) => panel.matches('[data-panel-id]') && !panel.hidden,\n  );",
+          "after": "  let panels = [...stack.children].filter(\n    (panel) => panel.matches('[data-panel-id]') && !panel.hidden,\n  );\n  const exclusivePanel = panels.find(\n    (panel) => panel.dataset.railExclusive !== undefined && !panel.classList.contains('collapsed'),\n  );\n  if (exclusivePanel) panels = [exclusivePanel];"
+        }
+      ]
     }
   ]
 }

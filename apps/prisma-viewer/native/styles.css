@@ -12,10 +12,6 @@
 #data-toggles [data-layer-id="agent-flow"] .data-icon { --tc-layer-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='2' width='6' height='6' rx='1'/%3E%3Crect x='16' y='9' width='6' height='6' rx='1'/%3E%3Crect x='2' y='16' width='6' height='6' rx='1'/%3E%3Cpath d='M8 5h4v14H8M12 12h4'/%3E%3C/svg%3E"); }
 #data-toggles :is([data-layer-id="territorial-events"], [data-layer-id="agent-flow"]) .data-icon { display: inline-block; width: 16px; min-width: 16px; height: 16px; font-size: 0 !important; background-color: currentColor; -webkit-mask: var(--tc-layer-icon) center / contain no-repeat; mask: var(--tc-layer-icon) center / contain no-repeat; }
 #data-toggles :is([data-layer-id="territorial-events"], [data-layer-id="agent-flow"]) .data-icon::before { content: none; }
-#scene-panel :is(.scene-panel-inner, .scene-shot-list) { scrollbar-width: thin; scrollbar-color: rgba(0, 212, 255, .5) rgba(255, 255, 255, .04); }
-#scene-panel :is(.scene-panel-inner, .scene-shot-list)::-webkit-scrollbar { width: 6px; }
-#scene-panel :is(.scene-panel-inner, .scene-shot-list)::-webkit-scrollbar-track { background: rgba(255, 255, 255, .04); border-radius: 999px; }
-#scene-panel :is(.scene-panel-inner, .scene-shot-list)::-webkit-scrollbar-thumb { background: linear-gradient(180deg, rgba(0, 212, 255, .65), rgba(0, 212, 255, .2)); border-radius: 999px; }
 /* Keep compact Radio in the rail's measured flow so every following panel moves with it. */
 #right-context-rail #global-context-panel .panel-header:has(#context-radio-mini:not([hidden])) { flex-wrap: wrap; row-gap: 8px; height: auto; }
 #global-context-panel #context-radio-dock { display: contents; }
@@ -121,15 +117,17 @@
 .tc-review-dialog .tc-review-confirm-note { max-height: 180px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border-left: 2px solid var(--accent); background: var(--accent-dim); }
 .tc-review-dialog button:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 3px; }
 /* Match Data Layers' native height ceiling while respecting the right rail's allocation. */
-#right-context-rail > #territorial-analyst:not(.collapsed), #right-context-rail.layout-focus > #territorial-analyst:not(.collapsed) { max-height: min(620px, calc(100vh - var(--left-stack-top) - var(--left-stack-gap) - 36px), var(--right-panel-allocated-height, 100vh)); }
+#right-context-rail:has(> [data-rail-exclusive]:not([hidden]):not(.collapsed)) > :not([data-rail-exclusive]) { display: none !important; }
+#right-context-rail > #territorial-analyst:not(.collapsed), #right-context-rail.layout-focus > #territorial-analyst:not(.collapsed) { height: 620px; max-height: min(620px, calc(100vh - var(--left-stack-top) - var(--left-stack-gap) - 36px), var(--right-stack-max-height, 100vh)); }
+@media (max-width: 720px) { #right-context-rail > #territorial-analyst:not(.collapsed) { height: 100%; max-height: 100%; } }
 #territorial-analyst:not(.collapsed) > .global-context-panel-inner { max-height: inherit; }
 #territorial-analyst .tc-panel-body { display: flex; flex-direction: column; gap: 8px; overflow-y: hidden; }
 #territorial-analyst [data-new] { display: grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; color: var(--text-secondary); background: transparent; border: 1px solid var(--glass-border); border-radius: 4px; cursor: pointer; }
 #territorial-analyst [data-new]:hover { color: var(--accent); border-color: var(--accent); }
 #territorial-analyst [data-new] svg { width: 14px; height: 14px; }
 #territorial-analyst.collapsed [data-new] { display: none; }
-.tc-chat-log { display: block; min-height: 0; max-height: none; overflow-y: auto; overscroll-behavior: contain; }
-#territorial-analyst :is(.tc-composer, [data-cancel], [data-chat-status]) { flex-shrink: 0; }
+.tc-chat-log { display: block; min-height: 0; max-height: none; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: auto; scrollbar-color: auto; }
+#territorial-analyst :is(.tc-composer, [data-chat-status]) { flex-shrink: 0; }
 #territorial-analyst [data-chat-status]:empty { display: none; }
 .tc-chat-log[hidden], .tc-agent-panel [hidden], .tc-social-panel [hidden], .tc-oci-settings [hidden] { display: none; }
 #key-setup .key-setup-footer { overflow-y: hidden; scrollbar-gutter: stable; scrollbar-width: thin; }
@@ -141,6 +139,6 @@
 #territorial-analyst .tc-composer textarea { display: block; height: 104px; min-height: 104px; padding: 10px 12px 48px; resize: vertical; }
 .tc-composer [data-turns] { position: absolute; bottom: 17px; left: 12px; color: var(--text-secondary); font-size: 11px; }
 .tc-composer .tc-send { position: absolute; bottom: 12px; right: 10px; border-radius: 50%; width: 32px; height: 32px; padding: 6px; }
-.tc-send svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tc-send svg { display: block; width: 100%; height: 100%; }
 .tc-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (min-width: 721px) { #right-context-rail:has(> :is(#territorial-panel, #territorial-analyst, #sensors-panel):not([hidden]):not(.collapsed)) { width: min(400px, calc(100vw - 32px)); } }

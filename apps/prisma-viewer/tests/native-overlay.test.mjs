@@ -7,6 +7,7 @@ import { claimPointer, releasePointer, pointerOwner } from '../.upstream/src/dat
 import { createTerritorialLayer, mountTerritorialPanel, seedBogotaView, TERRITORIAL_LAYER_ID } from '../native/territorialLayer.js';
 import { ShareLinkManager } from '../.upstream/src/sharelink.js';
 import { PanelChrome } from '../.upstream/src/ui/panelChrome.js';
+import { layoutRightPanelRail } from '../.upstream/src/ui/rightPanelRail.js';
 import { chatContext, createAgentFlowLayer, mountAnalyst } from '../native/analyst.js';
 import { LayerLifecycle } from '../.upstream/src/data/lifecycle.js';
 import { browserProviderConfig, managedProviderLabel, mountProviderSettings, ociModelLabel, ociProviderPresentation } from '../native/providerSettings.js';
@@ -30,14 +31,16 @@ const publication = (version = 'v1') => ({ version, published_at: '2026-10-03T00
 
 class PanelElement extends EventTarget {
   constructor(tag = 'div') {
-    super(); this.tagName = tag.toUpperCase(); this.dataset = {}; this.style = { setProperty(name, value) { this[name] = value; } }; this.nodes = new Map(); this.children = []; this.classes = new Set();
+    super(); this.tagName = tag.toUpperCase(); this.dataset = {}; this.style = { setProperty(name, value) { this[name] = value; }, getPropertyValue(name) { return this[name] || ''; }, removeProperty(name) { delete this[name]; } }; this.nodes = new Map(); this.children = []; this.classes = new Set();
     this.clientWidth = 1200; this.clientHeight = 800; this.offsetWidth = 360; this.offsetHeight = 300;
-    this.classList = { contains: (name) => this.classes.has(name), add: (name) => this.classes.add(name), toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name) };
+    this.classList = { contains: (name) => this.classes.has(name), add: (...names) => names.forEach(name => this.classes.add(name)), remove: (...names) => names.forEach(name => this.classes.delete(name)), toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name) };
     this.elements = { namedItem: (name) => this.querySelector(`[name="${name}"]`) };
     Object.defineProperty(this.elements, 'bbox', { get: () => this.elements.namedItem('bbox') });
   }
   set className(value) { this.classes = new Set(value.split(' ')); }
   setAttribute(name, value) { this[name] = value; }
+  removeAttribute(name) { delete this[name]; }
+  matches(selector) { return selector === '[data-panel-id]' && Object.hasOwn(this.dataset, 'panelId'); }
   getBoundingClientRect() { return { left: 0, top: 0, right: this.clientWidth, bottom: this.clientHeight, width: this.clientWidth, height: this.clientHeight }; }
   get offsetWidth() { return Math.min(this.contentWidth, parseFloat(this.style.width) || Infinity); }
   set offsetWidth(value) { this.contentWidth = value; }
@@ -602,9 +605,9 @@ test('Agent Flow requires a published snapshot before asking AIDP', () => {
 function analystHarness(t, request, options = {}) {
   const previous = globalThis.document, lifetime = new AbortController();
   const { startEnabled = true, agentFlow = createAgentFlowLayer(), ...settings } = options;
-  const rail = new PanelElement(), context = new PanelElement(), social = new PanelElement(), changes = [];
-  rail.append(context, social);
-  globalThis.document = { getElementById: (id) => id === 'global-context-panel' ? context : null,
+  const rail = new PanelElement(), context = new PanelElement(), social = new PanelElement(), sensors = new PanelElement(), changes = [];
+  rail.append(context, social, sensors);
+  globalThis.document = { getElementById: (id) => ({ 'global-context-panel': context, 'territorial-panel': social, 'sensors-panel': sensors })[id] || null,
     createElement: (tag) => new PanelElement(tag), body: { append() { assert.fail('Agent Flow belongs in the native Context rail'); } } };
   t.after(() => { lifetime.abort(); if (previous === undefined) delete globalThis.document; else globalThis.document = previous; });
   const { panel, ask } = mountAnalyst({ request, agentFlow, signal: lifetime.signal, showEvidence() {},
@@ -617,7 +620,7 @@ function analystHarness(t, request, options = {}) {
   const form = panel.querySelector('form');
   return { panel, form, textarea: form.querySelector('textarea'), log: panel.querySelector('#tc-aidp-log'),
     status: panel.querySelector('[data-chat-status]'), count: panel.querySelector('[data-turns]'),
-    rail, context, social, changes, lifetime, ask, agentFlow };
+    rail, context, social, sensors, changes, lifetime, ask, agentFlow };
 }
 
 function keydown(target, key, options = {}) {
@@ -625,17 +628,57 @@ function keydown(target, key, options = {}) {
   target.dispatchEvent(event); return event;
 }
 
+test('exclusive Agent Flow receives the whole right rail and restores siblings when collapsed or hidden', () => {
+  const allocation = '--right-panel-allocated-height';
+  function rail(withSiblings) {
+    const stack = new PanelElement(), chat = new PanelElement(), siblings = withSiblings ? [new PanelElement(), new PanelElement()] : [];
+    chat.id = 'territorial-analyst'; chat.dataset.railExclusive = '';
+    siblings.forEach((panel, index) => { panel.id = `sibling-${index}`; panel.classList.toggle('collapsed', index === 1); panel.style.setProperty(allocation, '111px'); });
+    for (const panel of [...siblings, chat]) {
+      panel.dataset.panelId = panel.id; panel.hidden = false;
+      panel.getBoundingClientRect = () => ({ left: 900, right: 1200, top: 150, bottom: 150 + (panel.classList.contains('collapsed') ? 42 : panel === chat ? 900 : 400), width: 300, height: panel.classList.contains('collapsed') ? 42 : panel === chat ? 900 : 400 });
+      stack.append(panel);
+    }
+    return { stack, chat, siblings };
+  }
+  const state = panel => ({ classes: [...panel.classes], hidden: panel.hidden, ariaHidden: panel['aria-hidden'], allocation: panel.style.getPropertyValue(allocation) });
+  for (const variant of ['minimal', 'operator', 'tactical']) for (const mobile of [false, true]) {
+    const run = ({ stack, chat }) => layoutRightPanelRail({ stack, obstacles: [], hud: { visible: true, variant }, preferredPanelId: chat.id,
+      windowRef: { innerHeight: 900, matchMedia: () => ({ matches: mobile }) }, getComputedStyle: () => ({ rowGap: '8px' }),
+      leftStack: { getBoundingClientRect: () => ({ top: 150 }) }, documentRef: { activeElement: null },
+      readDisplayScrollTop: () => 0, onCollapse() {}, onRetry() {},
+    });
+    const actual = rail(true), alone = rail(false), before = actual.siblings.map(state);
+    run(actual); run(alone);
+    assert.deepEqual(actual.siblings.map(state), before, `${variant}/${mobile}: exclusive chat must not mutate siblings`);
+    assert.equal(actual.chat.style.getPropertyValue(allocation), alone.chat.style.getPropertyValue(allocation));
+    assert.equal(actual.stack.dataset.requiredHeight, alone.stack.dataset.requiredHeight);
+    assert.equal(actual.stack.dataset.expandedCount, alone.stack.dataset.expandedCount);
+    assert.equal(actual.stack.dataset.layoutMode, mobile ? 'mobile' : 'focus');
+    for (const mode of ['collapsed', 'hidden']) {
+      const ordinary = rail(true); delete ordinary.chat.dataset.railExclusive;
+      for (const fixture of [actual, ordinary]) { fixture.chat.classList.toggle('collapsed', mode === 'collapsed'); fixture.chat.hidden = mode === 'hidden'; }
+      run(actual); run(ordinary);
+      assert.deepEqual(actual.siblings.map(state), ordinary.siblings.map(state), `${variant}/${mobile}/${mode}: restore normal sibling layout`);
+      assert.equal(actual.stack.dataset.requiredHeight, ordinary.stack.dataset.requiredHeight);
+      assert.equal(actual.stack.dataset.expandedCount, ordinary.stack.dataset.expandedCount);
+    }
+  }
+});
+
 test('Agent Flow is one native Context panel and Enter submits without taking Shift, IME or repeats', async (t) => {
   const requests = [];
   const view = analystHarness(t, async (path, options) => {
     requests.push({ path, body: JSON.parse(options.body) });
     return { answer: 'Evidence from Kennedy.', version: 'v1', session_id: 'first-session', runtime: 'aidp', actions: [], evidence_ids: [] };
   });
-  const { panel, form, textarea, rail, context, social, changes, lifetime } = view;
+  const { panel, form, textarea, rail, context, social, sensors, changes, lifetime } = view;
   assert.equal(panel.tagName, 'SECTION'); assert.equal(panel.id, 'territorial-analyst');
-  assert.deepEqual(rail.children, [context, panel, social]); assert.equal(panel.hidden, false); assert.equal(panel.classList.contains('collapsed'), false);
+  assert.equal(panel.dataset.railExclusive, '');
+  assert.deepEqual(rail.children, [context, panel, social, sensors]); assert.equal(panel.hidden, false); assert.equal(panel.classList.contains('collapsed'), false);
   assert.match(panel.innerHTML, /class="panel-title">Agent Flow</i);
   assert.match(panel.innerHTML, /id="tc-aidp-log"[^>]*role="log"[^>]*aria-label="Agent Flow conversation"/);
+  assert.match(panel.innerHTML, /id="tc-aidp-log" class="tc-chat-log scene-shot-list"/);
   assert.doesNotMatch(panel.innerHTML, /<summary|role="tab|tc-oci|data-provider=/);
   const header = panel.innerHTML.split('tc-panel-body')[0];
   assert.match(header, /data-new/); assert.match(header, /aria-label="New conversation"/); assert.match(header, /<svg/);
@@ -660,7 +703,7 @@ test('Agent Flow is one native Context panel and Enter submits without taking Sh
   assert.match(view.count.textContent, /^1 questions?$/); assert.equal(view.log.children.length, 2);
   assert.equal(textarea.value, '  What happened in Kennedy?  ');
   const changesBefore = changes.length; lifetime.abort(); disclosure.dispatchEvent(new Event('click'));
-  assert.equal(changes.length, changesBefore); assert.deepEqual(rail.children, [context, social]);
+  assert.equal(changes.length, changesBefore); assert.deepEqual(rail.children, [context, social, sensors]);
 });
 
 test('Agent Flow follows the native layer toggle, cancels GET and POST, and preserves its conversation', async (t) => {
@@ -696,21 +739,30 @@ test('Agent Flow follows the native layer toggle, cancels GET and POST, and pres
   assert.equal(view.textarea.value, 'Preserve my draft'); assert.equal(view.form['aria-busy'], 'false');
 });
 
-test('Agent Flow cancellation ignores late replies and New conversation clears count, log and AIDP session history', async (t) => {
+test('Agent Flow toggles one Send/Stop button, cancels with an empty draft and ignores late replies across conversations', async (t) => {
   const requests = [], pending = [];
   const { panel, form, textarea, log, status, count } = analystHarness(t, (path, options) => {
     requests.push({ path, body: JSON.parse(options.body), signal: options.signal });
     return new Promise((resolve) => pending.push(resolve));
   });
   const finish = async (sessionId) => { await new Promise(setImmediate); pending.shift()({ answer: 'AIDP evidence.', version: 'v1', session_id: sessionId, runtime: 'aidp', actions: [], evidence_ids: [] }); await new Promise(setImmediate); };
+  const send = form.querySelector('button'), sendIcon = send.innerHTML;
+  assert.doesNotMatch(panel.innerHTML, /data-cancel|Cancel request/);
+  assert.equal(send.type, 'submit'); assert.equal(send['aria-label'], 'Send question'); assert.equal(send.title, 'Send question');
+  assert.match(sendIcon, /M10\.3009 13\.6949L20\.102 3\.89742/); assert.match(sendIcon, /stroke="currentColor"/);
   textarea.value = 'First question'; form.requestSubmit(); await finish('first-session');
   textarea.value = 'Follow up'; form.requestSubmit(); await new Promise(setImmediate);
   assert.equal(requests[1].body.session_id, 'first-session'); assert.match(count.textContent, /^2 questions$/);
-  assert.equal(form['aria-busy'], 'true'); assert.equal(panel.querySelector('[data-cancel]').hidden, false);
+  assert.equal(form['aria-busy'], 'true'); assert.equal(form.querySelector('button'), send);
+  assert.equal(send.type, 'button'); assert.notEqual(send.disabled, true); assert.equal(send['aria-label'], 'Stop request'); assert.equal(send.title, 'Stop request');
+  assert.match(send.innerHTML, /fill-rule="evenodd"/); assert.match(send.innerHTML, /fill="currentColor"/); assert.notEqual(send.innerHTML, sendIcon);
   form.requestSubmit(); assert.equal(requests.length, 2);
-  panel.querySelector('[data-cancel]').dispatchEvent(new Event('click'));
+  textarea.value = '';
+  const stop = new Event('click', { cancelable: true }); send.dispatchEvent(stop);
+  assert.equal(stop.defaultPrevented, true, 'Stopping cannot activate Submit after the button returns to send mode');
   assert.equal(requests[1].signal.aborted, true); assert.equal(form['aria-busy'], 'false');
-  assert.equal(panel.querySelector('[data-cancel]').hidden, true); assert.match(status.textContent, /cancelled/i);
+  assert.equal(send.type, 'submit'); assert.equal(send['aria-label'], 'Send question'); assert.equal(send.title, 'Send question'); assert.equal(send.innerHTML, sendIcon);
+  assert.equal(requests.length, 2); assert.match(status.textContent, /cancelled/i);
   const messagesBefore = log.children.length; await finish('cancelled-session');
   assert.equal(log.children.length, messagesBefore);
   panel.querySelector('[data-new]').dispatchEvent(new Event('click'));
@@ -725,21 +777,33 @@ test('Agent Flow cancellation ignores late replies and New conversation clears c
   assert.equal(log.children.length, 2); assert.match(count.textContent, /^1 questions?$/);
 });
 
-test('voice questions reuse Agent Flow and published sensor context with versioned sensor citations', async (t) => {
+test('voice questions keep sensor context and valid citations leave exclusive chat while stale citations keep focus', async (t) => {
   const requests = [], selected = [], snapshot = { ...publication(), sensors: [{ id: 'reading-1', sensor_id: 'station-1' }] };
+  const show = (id) => { assert.equal(view.panel.classList.contains('collapsed'), true, 'Collapse before opening the destination'); selected.push(id); };
   const view = analystHarness(t, async (path, options) => {
     requests.push(JSON.parse(options.body));
     return { answer: 'Synthetic: no real observation or automatic incident validation.', version: 'v1', session_id: 'sensor-session',
-      runtime: 'aidp', evidence_ids: [], sensor_evidence_ids: ['reading-1'], actions: [] };
-  }, { layer: { state: () => ({ snapshot, filters: {}, selectedId: null }) }, sensorContext: () => ({ sensor_id: 'station-1' }), showSensor: (id) => selected.push(id) });
+      runtime: 'aidp', evidence_ids: ['x1'], sensor_evidence_ids: ['reading-1'], actions: [] };
+  }, { layer: { state: () => ({ snapshot, filters: {}, selectedId: null }) }, sensorContext: () => ({ sensor_id: 'station-1' }), showEvidence: show, showSensor: show });
   await view.ask('Compare this sensor with social reports.', { signal: new AbortController().signal });
   await view.ask('What changed?');
   assert.equal(requests[0].sensor_id, 'station-1'); assert.equal(requests[1].session_id, 'sensor-session');
   assert.equal(view.panel.classList.contains('collapsed'), false);
-  const citation = view.log.children[1].children.find((item) => item.tagName === 'BUTTON');
-  citation.dispatchEvent(new Event('click')); assert.deepEqual(selected, ['reading-1']);
-  snapshot.version = 'v2'; citation.dispatchEvent(new Event('click')); assert.deepEqual(selected, ['reading-1']);
-  assert.match(view.status.textContent, /earlier publication/);
+  const citations = view.log.children[1].children.filter((item) => item.tagName === 'BUTTON'), conversation = [...view.log.children];
+  assert.equal(citations.length, 2);
+  for (const [index, citation] of citations.entries()) {
+    view.agentFlow.enable(); citation.focus(); citation.dispatchEvent(new Event('click'));
+    assert.equal(document.activeElement, [view.social, view.sensors][index].querySelector('.panel-collapse-btn'));
+    assert.deepEqual(view.log.children, conversation, 'Opening evidence preserves the conversation');
+  }
+  assert.deepEqual(selected, ['x1', 'reading-1']);
+  snapshot.version = 'v2'; view.agentFlow.enable(); const changes = view.changes.length;
+  for (const citation of citations) {
+    citation.focus(); citation.dispatchEvent(new Event('click'));
+    assert.equal(document.activeElement, citation); assert.equal(view.panel.classList.contains('collapsed'), false);
+    assert.equal(view.changes.length, changes); assert.match(view.status.textContent, /earlier publication/);
+  }
+  assert.deepEqual(selected, ['x1', 'reading-1']); assert.deepEqual(view.log.children, conversation);
 });
 
 test('Agent Flow can use the Sensors publication when Social networks has never loaded', async (t) => {
@@ -751,6 +815,24 @@ test('Agent Flow can use the Sensors publication when Social networks has never 
   await view.ask('Sensor status?');
   assert.equal(requests[0].version, 'v1'); assert.equal(requests[0].sensor_id, 'station-1');
   assert.equal(view.log.children.length, 2);
+});
+
+test('Agent Flow focus actions release the sibling panel but filtering keeps chat open', async (t) => {
+  const snapshot = publication(), selected = [], filters = [];
+  const view = analystHarness(t, async () => ({ answer: 'Inspect the event.', version: 'v1', evidence_ids: [], actions: [
+    { type: 'focus_incident', incident_id: 'flood' }, { type: 'filter_incidents', filters: { locality: 'Kennedy' } },
+  ] }), { layer: { state: () => ({ snapshot, filters: {}, selectedId: null }),
+    select(id) { assert.equal(view.panel.classList.contains('collapsed'), true); selected.push(id); },
+    setFilters(value) { assert.equal(view.panel.classList.contains('collapsed'), false); filters.push(value); },
+  } });
+  await view.ask('What should I inspect?');
+  const [focus, filter] = view.log.children[1].children.filter(item => item.tagName === 'BUTTON');
+  filter.focus(); filter.dispatchEvent(new Event('click')); assert.deepEqual(filters, [{ locality: 'Kennedy' }]); assert.equal(document.activeElement, filter);
+  focus.focus(); focus.dispatchEvent(new Event('click')); assert.deepEqual(selected, ['flood']); assert.equal(view.log.children.length, 2);
+  assert.equal(document.activeElement, view.social.querySelector('.panel-collapse-btn'));
+  snapshot.version = 'v2'; view.agentFlow.enable(); focus.focus(); focus.dispatchEvent(new Event('click'));
+  assert.deepEqual(selected, ['flood']); assert.equal(view.panel.classList.contains('collapsed'), false); assert.equal(document.activeElement, focus);
+  assert.match(view.status.textContent, /publication changed/);
 });
 
 test('Agent Flow fetches a fresh publication for each question while both layers remain off', async (t) => {
@@ -781,8 +863,12 @@ for (const cancellation of ['button', 'voice']) test(`Agent Flow ${cancellation}
   assert.equal(view.form['aria-busy'], 'true');
   await assert.rejects(view.ask('Duplicate question'), /already processing/);
   if (cancellation === 'voice') turn.abort();
-  else view.panel.querySelector('[data-cancel]').dispatchEvent(new Event('click'));
+  else {
+    const send = view.form.querySelector('button'); assert.equal(send.type, 'button'); assert.equal(send['aria-label'], 'Stop request');
+    send.dispatchEvent(new Event('click', { cancelable: true }));
+  }
   assert.equal(requests[0].signal.aborted, true); assert.equal(view.form['aria-busy'], 'false');
+  assert.equal(view.form.querySelector('button')['aria-label'], 'Send question');
   resolve(publication());
   await assert.rejects(pending, { name: 'AbortError' });
   assert.deepEqual(requests.map(item => item.path), ['/api/prisma/snapshot']);
@@ -809,14 +895,23 @@ for (const enabled of [true, false]) test(`selected Sensors context excludes sta
     assert.deepEqual(requests[0], { question: 'Compare the selected sensor with social reports.', version: 'v2', filters: {}, sensor_id: 'station-1' });
 });
 
-test('publication conflicts refresh both layers and inactive Sensors cannot leak selection', async (t) => {
+test('publication conflicts restore Send for retry, refresh both layers and exclude inactive Sensors', async (t) => {
   const refreshed = [], requests = [];
-  const view = analystHarness(t, async (_path, options) => { requests.push(JSON.parse(options.body)); throw Object.assign(new Error('Publication changed'), { status: 409 }); },
+  const view = analystHarness(t, async (_path, options) => {
+    requests.push(JSON.parse(options.body));
+    if (requests.length === 1) throw Object.assign(new Error('Publication changed'), { status: 409 });
+    return { answer: 'Current evidence.', version: 'v1', evidence_ids: [], actions: [] };
+  },
     { layer: { state: () => ({ enabled: true, snapshot: publication(), filters: {}, selectedId: 'flood' }), update: async () => refreshed.push('social') },
       sensorContext: () => ({ enabled: false, snapshot: publication('v2'), sensor_id: 'station-1' }), refreshSensors: async () => refreshed.push('sensors') });
   await assert.rejects(view.ask('What changed?'), { status: 409 });
   assert.equal(requests[0].version, 'v1'); assert.equal(requests[0].sensor_id, undefined);
   assert.deepEqual(refreshed, ['social', 'sensors']); assert.match(view.status.textContent, /question is preserved/);
+  const send = view.form.querySelector('button'), sendIcon = send.innerHTML;
+  assert.equal(send.type, 'submit'); assert.equal(send['aria-label'], 'Send question'); assert.equal(view.form['aria-busy'], 'false');
+  const retry = view.ask('What changed?'); assert.equal(send.type, 'button'); assert.equal(send['aria-label'], 'Stop request');
+  assert.equal((await retry).answer, 'Current evidence.'); assert.equal(requests.length, 2);
+  assert.equal(send.type, 'submit'); assert.equal(send['aria-label'], 'Send question'); assert.equal(send.innerHTML, sendIcon); assert.equal(view.form['aria-busy'], 'false');
 });
 
 test('managed provider labels distinguish configuration from a verified connection', () => {

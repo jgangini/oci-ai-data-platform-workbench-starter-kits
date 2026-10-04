@@ -3,6 +3,9 @@ import { allowedActions, validateSnapshot } from '../src/model.js';
 import { text } from './territorialLayer.js';
 import { bindPanelDisclosure, collapsePanelOnEscape } from '../.upstream/src/ui/panelDisclosure.js';
 
+const sendIcon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10.3009 13.6949L20.102 3.89742M10.5795 14.1355L12.8019 18.5804C13.339 19.6545 13.6075 20.1916 13.9458 20.3356C14.2394 20.4606 14.575 20.4379 14.8492 20.2747C15.1651 20.0866 15.3591 19.5183 15.7472 18.3818L19.9463 6.08434C20.2845 5.09409 20.4535 4.59896 20.3378 4.27142C20.2371 3.98648 20.013 3.76234 19.7281 3.66167C19.4005 3.54595 18.9054 3.71502 17.9151 4.05315L5.61763 8.2523C4.48114 8.64037 3.91289 8.83441 3.72478 9.15032C3.56153 9.42447 3.53891 9.76007 3.66389 10.0536C3.80791 10.3919 4.34498 10.6605 5.41912 11.1975L9.86397 13.42C10.041 13.5085 10.1295 13.5527 10.2061 13.6118C10.2742 13.6643 10.3352 13.7253 10.3876 13.7933C10.4468 13.87 10.491 13.9585 10.5795 14.1355Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const stopIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM8.58579 8.58579C8 9.17157 8 10.1144 8 12C8 13.8856 8 14.8284 8.58579 15.4142C9.17157 16 10.1144 16 12 16C13.8856 16 14.8284 16 15.4142 15.4142C16 14.8284 16 13.8856 16 12C16 10.1144 16 9.17157 15.4142 8.58579C14.8284 8 13.8856 8 12 8C10.1144 8 9.17157 8 8.58579 8.58579Z" fill="currentColor"/></svg>';
+
 export function createAgentFlowLayer() {
   let enabled = false;
   const listeners = new Set();
@@ -22,48 +25,52 @@ export function chatContext(state, sensorContext = {}) {
     ...(sensorContext.enabled !== false && sensorContext.sensor_id ? { sensor_id: sensorContext.sensor_id } : {}) };
 }
 
-function renderAidpReply(reply, snapshot, { message, layer, state, status, showEvidence, showSensor }) {
+function renderAidpReply(reply, snapshot, { message, layer, state, status, showEvidence, showSensor, onChange }) {
   const entry = message('assistant', reply.answer);
   entry.append(text('small', `${reply.runtime === 'aidp' ? 'AIDP agent' : 'Local fixture response · no model inference'} · Publication ${reply.version}`));
   const evidenceIds = new Set(snapshot.evidence.map((item) => item.id));
   for (const id of reply.evidence_ids || []) {
     if (!evidenceIds.has(id)) continue;
     const button = text('button', `Evidence ${id}`); button.type = 'button';
-    button.addEventListener('click', () => { if (state().snapshot.version !== reply.version) { status.textContent = 'This answer belongs to an earlier publication. Ask again to inspect current evidence.'; return; } showEvidence(id); }); entry.append(button);
+    button.addEventListener('click', () => { if (state().snapshot.version !== reply.version) { status.textContent = 'This answer belongs to an earlier publication. Ask again to inspect current evidence.'; return; } onChange(true); showEvidence(id); document.getElementById('territorial-panel')?.querySelector('.panel-collapse-btn')?.focus(); }); entry.append(button);
   }
   const sensorIds = new Set((snapshot.sensors || []).map((item) => item.id));
   for (const id of reply.sensor_evidence_ids || []) {
     if (!sensorIds.has(id) || !showSensor) continue;
     const button = text('button', `Sensor evidence ${id}`); button.type = 'button';
-    button.addEventListener('click', () => { if (state().snapshot.version !== reply.version) { status.textContent = 'This answer belongs to an earlier publication. Ask again to inspect current sensor evidence.'; return; } showSensor(id); }); entry.append(button);
+    button.addEventListener('click', () => { if (state().snapshot.version !== reply.version) { status.textContent = 'This answer belongs to an earlier publication. Ask again to inspect current sensor evidence.'; return; } onChange(true); showSensor(id); document.getElementById('sensors-panel')?.querySelector('.panel-collapse-btn')?.focus(); }); entry.append(button);
   }
   for (const action of allowedActions(reply.actions, snapshot)) {
     const button = text('button', action.type === 'focus_incident' ? 'Focus event on map' : 'Apply suggested filters'); button.type = 'button';
     button.addEventListener('click', () => {
       if (state().snapshot.version !== reply.version) { status.textContent = 'The publication changed. Ask again before applying this action.'; return; }
-      if (action.type === 'focus_incident') layer.select(action.incident_id);
+      if (action.type === 'focus_incident') { onChange(true); layer.select(action.incident_id); document.getElementById('territorial-panel')?.querySelector('.panel-collapse-btn')?.focus(); }
       else layer.setFilters(action.filters);
     }); entry.append(button);
   }
 }
 
 export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSensor, sensorContext = () => ({}), refreshSensors, signal, setPanelCollapsed }) {
-  const panel = document.createElement('section'); panel.id = 'territorial-analyst'; panel.className = 'tc-agent-panel panel-collapsible collapsed'; panel.dataset.panelId = panel.id;
+  const panel = document.createElement('section'); panel.id = 'territorial-analyst'; panel.className = 'tc-agent-panel panel-collapsible collapsed'; panel.dataset.panelId = panel.id; panel.dataset.railExclusive = '';
   panel.innerHTML = `<div class="panel-glow"></div><div class="global-context-panel-inner"><div class="panel-header">
     <span class="panel-title">AGENT FLOW</span><span class="panel-divider"></span>
     <button class="tc-new-conversation" type="button" data-new aria-label="New conversation" title="New conversation"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5H5v14h14v-7M15 4h5v5m-9 4 9-9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <button class="panel-collapse-btn" data-dock-toggle-target="territorial-analyst" type="button" aria-expanded="false" aria-label="Expand Agent Flow" title="Expand Agent Flow"><span aria-hidden="true">▶</span></button>
     </div><div class="tc-panel-body data-toggle-list" data-rail-scroller>
-    <div id="tc-aidp-log" class="tc-chat-log data-toggle-list" role="log" aria-label="Agent Flow conversation" tabindex="0" data-rail-scroller></div>
-    <p data-chat-status role="status" aria-live="polite"></p><button type="button" data-cancel hidden>Cancel request</button>
-    <form class="tc-composer"><label class="tc-sr-only" for="tc-question">Ask Agent Flow</label><textarea id="tc-question" maxlength="2000" rows="3" placeholder="Ask Agent Flow…" required></textarea><span data-turns aria-label="Submitted questions">0 questions</span><button type="submit" class="tc-send" aria-label="Send question"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button></form></div></div>`;
+    <div id="tc-aidp-log" class="tc-chat-log scene-shot-list" role="log" aria-label="Agent Flow conversation" tabindex="0" data-rail-scroller></div>
+    <p data-chat-status role="status" aria-live="polite"></p>
+    <form class="tc-composer"><label class="tc-sr-only" for="tc-question">Ask Agent Flow</label><textarea id="tc-question" maxlength="2000" rows="3" placeholder="Ask Agent Flow…" required></textarea><span data-turns aria-label="Submitted questions">0 questions</span><button type="submit" class="tc-send" aria-label="Send question" title="Send question">${sendIcon}</button></form></div></div>`;
   document.getElementById('global-context-panel').after(panel);
   const onChange = (collapsed) => setPanelCollapsed(panel.id, collapsed, { explicit: true, persist: false, syncShare: false });
   const disclosure = bindPanelDisclosure({ panel, buttons: [panel.querySelector('.panel-collapse-btn')], onChange, onEscape: (event) => collapsePanelOnEscape(event, { panel, onChange }) });
-  const form = panel.querySelector('form'); const textarea = form.querySelector('textarea'); const status = panel.querySelector('[data-chat-status]');
+  const form = panel.querySelector('form'); const textarea = form.querySelector('textarea'); const send = form.querySelector('button'); const status = panel.querySelector('[data-chat-status]');
   const log = panel.querySelector('#tc-aidp-log');
   let busy = false, aidpSnapshot, aidpSession, lastReply, lastError, chatSnapshot, publicationRequest, questionGeneration = 0;
-  const setBusy = (value) => { busy = value; form.querySelector('button').disabled = value; form.setAttribute('aria-busy', String(value)); panel.querySelector('[data-cancel]').hidden = !value; };
+  const setBusy = (value) => {
+    busy = value; send.type = value ? 'button' : 'submit'; send.title = value ? 'Stop request' : 'Send question';
+    send.setAttribute('aria-label', send.title); send.innerHTML = value ? stopIcon : sendIcon; form.setAttribute('aria-busy', String(value));
+  };
+  setBusy(false);
   const message = (role, content) => { const entry = text('article', '', `tc-message tc-message-${role}`); entry.append(text('strong', role === 'user' ? 'You' : 'Agent Flow'), text('p', content)); log.append(entry); entry.scrollIntoView({ block: 'nearest' }); return entry; };
   const contextState = () => {
     const state = layer.state(), sensor = sensorContext();
@@ -78,7 +85,7 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
 
   function newAidpSession() {
     return createPrismaSession({ request, context: () => { const state = contextState(); aidpSnapshot = state.snapshot; return chatContext(state, sensorContext()); },
-      onReply: (reply) => { lastReply = reply; renderAidpReply(reply, aidpSnapshot, { message, layer, state: contextState, status, showEvidence, showSensor }); }, onBusy: setBusy, onSubmitted: (value) => { panel.querySelector('[data-turns]').textContent = `${value} ${value === 1 ? 'question' : 'questions'}`; },
+      onReply: (reply) => { lastReply = reply; renderAidpReply(reply, aidpSnapshot, { message, layer, state: contextState, status, showEvidence, showSensor, onChange }); }, onBusy: setBusy, onSubmitted: (value) => { panel.querySelector('[data-turns]').textContent = `${value} ${value === 1 ? 'question' : 'questions'}`; },
       onError: (error) => { lastError = error; status.textContent = error.status === 409 ? 'The publication changed. Your question is preserved; review the refreshed data and send it again.' : error.message; if (error.status === 409) void Promise.allSettled([layer.update(), refreshSensors?.()]); },
     });
   }
@@ -113,7 +120,7 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
       return lastReply;
     } finally { turnSignal?.removeEventListener('abort', cancel); if (generation === questionGeneration) { publicationRequest = undefined; setBusy(false); } }
   }
-  panel.querySelector('[data-cancel]').addEventListener('click', () => { cancel(); status.textContent = 'Request cancelled.'; }, { signal });
+  send.addEventListener('click', (event) => { if (busy) { event.preventDefault(); cancel(); status.textContent = 'Request cancelled.'; } }, { signal });
   panel.querySelector('[data-new]').addEventListener('click', () => { cancel(); log.replaceChildren(); status.textContent = ''; textarea.value = ''; aidpSession.destroy(); aidpSession = newAidpSession(); void aidpSession.start(); textarea.focus(); }, { signal });
   textarea.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
