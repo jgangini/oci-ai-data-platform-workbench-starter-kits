@@ -36,11 +36,25 @@ def test_local_project_grant_restart_revocation_and_admin_boundary(tmp_path):
     welcome = json.loads(welcome_path.read_text(encoding="utf-8"))
     credentials = {key: welcome[key] for key in ("username", "password")}
     assert participant.post("/api/local/prisma/login", json=credentials).status_code == 401
+    media_url = "/api/gods-eye-view/media/post-0001/image-01.svg"
+    assert participant.get(media_url).status_code == 401
     assert admin.put(f"/api/admin/prisma/users/{user_id}", json={"enabled": True}).status_code == 200
     assert participant.post("/api/local/prisma/login", json=credentials).status_code == 204
     session = participant.get("/api/prisma/session")
     assert session.status_code == 200 and session.headers["X-PRISMA-User"] == f"local-prisma:{user_id}"
     assert participant.get("/api/prisma/snapshot").status_code == 200
+    media = participant.get(media_url)
+    assert media.status_code == 200 and media.headers["content-type"] == "image/webp"
+    assert media.headers["content-security-policy"] == "default-src 'none'; sandbox"
+    assert admin.get("/api/admin/prisma/media/post-0001/image-01.svg").headers["content-security-policy"] == "default-src 'none'; sandbox"
+    assert participant.get("/api/prisma/snapshot").headers["content-security-policy"].startswith("default-src 'self';")
+    assert media.headers["x-content-type-options"] == "nosniff" and media.headers["cache-control"] == "no-store"
+    assert media.content[:4] == b"RIFF" and media.content[8:12] == b"WEBP"
+    assert participant.get(media_url.replace(".svg", ".png")).content == media.content
+    assert participant.get(media_url.replace(".svg", ".jpg")).status_code == 404
+    assert participant.get("/api/gods-eye-view/media/post-0007/image-01.svg").status_code == 404
+    assert participant.get("/api/gods-eye-view/media/post-0001/private.pem").status_code == 404
+    assert participant.get("/api/admin/prisma/media/post-0001/image-01.svg").status_code == 401
     workspace = participant.get("/api/local/prisma/workspace")
     assert workspace.status_code == 200 and workspace.json()["user"]["material"]["labs"][0]["lab_id"] == "banking"
     assert "password" not in workspace.text
@@ -48,6 +62,8 @@ def test_local_project_grant_restart_revocation_and_admin_boundary(tmp_path):
     assert participant.post("/api/admin/prisma/simulation", json={"action": "start"}).status_code == 401
     assert participant.put(f"/api/admin/prisma/users/{user_id}", json={"enabled": True}).status_code == 401
     assert participant.post("/api/prisma/incidents/any/review", json={"status": "validated"}).status_code == 401
+    assert participant.post("/api/prisma/sensors/any/location", json={"lat": 4.6, "lon": -74.1,
+        "expected_lat": 4.6, "expected_lon": -74.1}).status_code == 401
 
     restarted = create_app(settings)
     restarted_admin, restarted_participant = TestClient(restarted), TestClient(restarted)
@@ -61,6 +77,7 @@ def test_local_project_grant_restart_revocation_and_admin_boundary(tmp_path):
     assert {lab["lab_id"] for lab in updated_material["labs"]} == {"banking", "retail"}
     assert restarted_admin.put(f"/api/admin/prisma/users/{user_id}", json={"enabled": False}).status_code == 200
     assert restarted_participant.get("/api/prisma/snapshot").status_code == 401  # Existing cookie loses access immediately.
+    assert restarted_participant.get(media_url).status_code == 401
     assert restarted_participant.post("/api/local/prisma/login", json=credentials).status_code == 401
     assert restarted_admin.put(f"/api/admin/prisma/users/{user_id}", json={"enabled": True}).status_code == 200
     assert restarted_admin.delete(f"/api/admin/users/{user_id}").status_code == 204

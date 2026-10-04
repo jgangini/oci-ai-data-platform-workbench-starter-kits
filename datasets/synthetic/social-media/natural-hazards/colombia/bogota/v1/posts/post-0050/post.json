@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0050",
-    "username": "sim_bogota_0050",
-    "display_name": "Fictional Bogotá Reporter 050"
+    "username": "cam_pineda",
+    "display_name": "Camilo Pineda"
   },
-  "message": "Una franja de pasto de Chapinero emite humo oscuro mientras el viento mueve la columna. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Desde mi ventana en Chapinero se ve una franja de pasto soltando humo oscuro. El viento mueve la columna de un lado a otro... qué preocupación. ¿Alguien más lo está viendo desde el barrio? #Bogota #incendio #Colombia",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 12,
   "available_offset_seconds": 12,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0050-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0050.webp",
+      "sha256": "1f15187da15fcc2e5bf415804da64f2bab7e19c4d7dac3c65600aacade8707e4",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: humo oscuro sobre una franja de pasto, visto desde una ventana en Chapinero; no es una fotografía de un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

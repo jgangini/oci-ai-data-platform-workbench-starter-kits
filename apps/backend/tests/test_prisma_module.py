@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.aidp import AidpClient
+from app.config import Settings
 from app.prisma.local import LocalPrismaRuntime
 from app.prisma.module import TerritorialModule, run_state
 
@@ -18,7 +19,7 @@ def test_native_run_state_accepts_nested_or_top_level_status_without_false_readi
 def test_local_activation_is_persistent_idempotent_and_preserves_source_state(tmp_path):
     runtime = LocalPrismaRuntime(tmp_path)
     runtime.store.update_source("x", {"query": "Bogotá inundación", "enabled": False})
-    settings = SimpleNamespace(local_development_mode=True, prisma_enabled=True)
+    settings = Settings(local_development_mode=True, prisma_enabled=True)
     module = TerritorialModule(settings, runtime)
     first = asyncio.run(module.status(True))
     second = asyncio.run(TerritorialModule(settings, LocalPrismaRuntime(tmp_path)).status(True))
@@ -28,7 +29,7 @@ def test_local_activation_is_persistent_idempotent_and_preserves_source_state(tm
 
 
 def test_missing_infrastructure_never_attempts_native_or_vm_mutation():
-    module = TerritorialModule(SimpleNamespace(local_development_mode=False, prisma_enabled=False), None)
+    module = TerritorialModule(Settings(local_development_mode=False, prisma_enabled=False), None)
     assert asyncio.run(module.status())["status"] == "deployment_required"
     with pytest.raises(HTTPException) as error:
         asyncio.run(module.status(True))
@@ -38,7 +39,7 @@ def test_missing_infrastructure_never_attempts_native_or_vm_mutation():
 @pytest.mark.parametrize("task_status", ["SUCCEEDED", "FAILED", "RUNNING"])
 def test_cloud_activation_requires_native_job_task_and_snapshot_and_deduplicates(monkeypatch, task_status):
     document, calls = {}, []
-    module = TerritorialModule(SimpleNamespace(local_development_mode=False, prisma_enabled=True),
+    module = TerritorialModule(Settings(local_development_mode=False, prisma_enabled=True),
                                SimpleNamespace(_snapshot=lambda: {"version": "native-publication"}))
     client = SimpleNamespace(
         _request=lambda method, path, **_: calls.append((method, path)) or (
@@ -59,7 +60,7 @@ def test_cloud_activation_requires_native_job_task_and_snapshot_and_deduplicates
 
 
 def test_failed_prerequisites_cannot_start_or_enable_module(monkeypatch):
-    module = TerritorialModule(SimpleNamespace(local_development_mode=False, prisma_enabled=True), None)
+    module = TerritorialModule(Settings(local_development_mode=False, prisma_enabled=True), None)
     monkeypatch.setattr(module, "_read", lambda: {})
     monkeypatch.setattr(module, "_prerequisites", lambda **_: (_ for _ in ()).throw(RuntimeError("not ready")))
     monkeypatch.setattr(module, "_write", lambda _: pytest.fail("No state mutation before native readiness"))
@@ -74,7 +75,7 @@ def test_persistent_job_cannot_be_queued_for_finite_module_activation(monkeypatc
     client = SimpleNamespace(_request=lambda method, path, **_: calls.append((method, path)) or {
         "tasks": [{"taskKey": "prisma_tick", "isStreaming": True}]})
     runtime = SimpleNamespace(_doc=lambda _: {"workspace_key": "ws", "job_key": "job"}, aidp_factory=lambda: client)
-    module = TerritorialModule(SimpleNamespace(local_development_mode=False, prisma_enabled=True), runtime)
+    module = TerritorialModule(Settings(local_development_mode=False, prisma_enabled=True), runtime)
     monkeypatch.setattr(module, "_read", lambda: state)
     monkeypatch.setattr(module, "_write", lambda _: pytest.fail("Activation must not mutate state or enqueue streaming"))
     with pytest.raises(HTTPException) as error:
@@ -105,7 +106,7 @@ def test_activation_checks_all_native_task_attempts_across_pages(monkeypatch, ta
         return {"items": [task]}, {} if query.get("page") else {"opc-next-page": "second"}
     client = SimpleNamespace(_request=request, _page_items=AidpClient._page_items)
     client._list = lambda path, **kwargs: AidpClient._list(client, path, **kwargs)
-    module = TerritorialModule(SimpleNamespace(local_development_mode=False),
+    module = TerritorialModule(Settings(local_development_mode=False),
         SimpleNamespace(_snapshot=lambda: {"version": "verified"}))
     monkeypatch.setattr(module, "_write", lambda value: value)
     result = module._poll({"status": "activating", "enabled": False, "run_key": "run"}, client, {"workspace_key": "ws"})

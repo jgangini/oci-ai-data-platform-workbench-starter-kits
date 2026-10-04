@@ -38,14 +38,14 @@ def test_reposts_and_one_author_do_not_raise_corroboration_or_confirm_reality():
     snapshot = build_snapshot([original, copied, same_author], {}, 'v1', 'now')
     incident = snapshot['incidents'][0]
     assert incident['independent_source_count'] == 1 and incident['corroboration_score'] == 0
-    assert incident['mode'] == 'simulation' and incident['review_status'] == 'pending'
+    assert incident['mode'] == 'Synthetic' and incident['review_status'] == 'pending'
     independent = normalize_event({**seed, 'platform': 'sensor', 'source_id': 'river',
                                    'text': 'Nivel del río en ascenso, inundación en Kennedy',
                                    'raw_metadata': {'author_id': 'station-1'}})
     incident = build_snapshot([original, copied, independent], {}, 'v2', 'now')['incidents'][0]
     assert incident['independent_source_count'] == 2 and incident['corroboration_score'] == 25
     assert incident['corroboration_status'] == 'multiple_sources'
-    assert incident['review_status'] == 'pending' and incident['mode'] == 'simulation'
+    assert incident['review_status'] == 'pending' and incident['mode'] == 'Synthetic'
 
 
 def test_continuous_sources_correlate_without_counting_copies_and_replays_stay_isolated():
@@ -61,7 +61,7 @@ def test_continuous_sources_correlate_without_counting_copies_and_replays_stay_i
     incident = combined['incidents'][0]
     assert incident['independent_source_count'] == 2 and incident['corroboration_score'] == 25
     assert set(incident['evidence_ids']) == {event['id'] for event in events}
-    assert incident['mode'] == 'simulation' and incident['review_status'] == 'pending'
+    assert incident['mode'] == 'Synthetic' and incident['review_status'] == 'pending'
     assert len({event['raw_metadata']['capture_run_id'] for event in combined['evidence']}) == 3
     replays = [{**event, 'raw_metadata': {key: value for key, value in event['raw_metadata'].items()
         if key != 'capture_run_id'}} for event in events]

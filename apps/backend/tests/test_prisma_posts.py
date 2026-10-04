@@ -39,6 +39,58 @@ def test_cursor_pages_hold_insertion_ceiling_and_retries_do_not_add_rows(tmp_pat
         assert error.value.status_code == 409
 
 
+def test_all_networks_page_by_capture_order_and_keep_the_original_capture_time(tmp_path):
+    now = [NOW]
+    runtime = LocalPrismaRuntime(tmp_path, clock=lambda: now[0])
+    networks = ["x", "facebook", "instagram", "tiktok"] * 2
+    for index, platform in enumerate(networks):
+        runtime.store.persist_page(platform, [event(index, -index * 60, platform=platform)], {})
+        now[0] += 5
+    runtime.store.persist_page("sensor", [event(99, platform="sensor")], {})
+    first = page_result(runtime.store.posts(None, 3), None, b"key", now=now[0])
+    assert first["total"] == 8
+    assert [item["id"] for item in first["items"]] == ["tiktok:7", "instagram:6", "facebook:5"]
+    assert first["items"][0]["captured_at"] == utc_text(NOW + 35)
+    assert first["items"][0]["published_at"] == utc_text(NOW - 420)
+    now[0] += 300
+    runtime.store.persist_page("tiktok", [event(7, -420, platform="tiktok")], {})
+    runtime.store.persist_page("x", [event(100, -3600)], {})
+    seen = list(first["items"])
+    page = first
+    while page["next_cursor"]:
+        before, maximum = cursor_values(page["next_cursor"], None, b"key", now=now[0])
+        page = page_result(runtime.store.posts(None, 3, before, maximum), None, b"key", now=now[0])
+        assert page["total"] == 8 and page["version"] == first["version"]
+        seen.extend(page["items"])
+    assert [item["id"] for item in seen] == [f"{networks[i]}:{i}" for i in reversed(range(8))]
+    restarted = LocalPrismaRuntime(tmp_path, clock=lambda: now[0])
+    latest = page_result(restarted.store.posts(None, 100), None, b"key", now=now[0])
+    assert latest["total"] == 9 and latest["items"][0]["id"] == "x:100"
+    assert next(item for item in latest["items"] if item["id"] == "tiktok:7")["captured_at"] == utc_text(NOW + 35)
+    for platform in networks[:4]:
+        filtered = page_result(restarted.store.posts(platform, 1), platform, b"key", now=now[0])
+        assert {item["platform"] for item in filtered["items"]} == {platform}
+        with pytest.raises(HTTPException) as error:
+            cursor_values(filtered["next_cursor"], None, b"key", now=now[0])
+        assert error.value.status_code == 409
+        with pytest.raises(HTTPException) as error:
+            cursor_values(first["next_cursor"], platform, b"key", now=now[0])
+        assert error.value.status_code == 409
+    for platform, limit, before, maximum in [(None, 101, None, None), (None, True, None, None),
+            ("sensor", 20, None, None), (None, 20, -1, None), (None, 20, None, False)]:
+        with pytest.raises(ValueError):
+            restarted.store.posts(platform, limit, before, maximum)
+
+
+@pytest.mark.parametrize("status", ["captured", "ingested", "processed"])
+def test_post_view_keeps_processing_stage_and_does_not_invent_capture_time(status):
+    payload = event(1, ingested_at=utc_text(NOW + 100), observed_at=utc_text(NOW))
+    value = post_view({"payload": payload, "analysis_status": status, "captured_at": utc_text(NOW + 1)})
+    assert value["processing_status"] == status
+    assert value["captured_at"] == utc_text(NOW + 1) and value["ingested_at"] == utc_text(NOW + 100)
+    assert post_view({"payload": payload, "analysis_status": status})["captured_at"] is None
+
+
 def test_pause_resume_keeps_namespace_and_stale_save_cannot_replace_config(tmp_path):
     now = [NOW]
     runtime = LocalPrismaRuntime(tmp_path, clock=lambda: now[0])
@@ -66,6 +118,7 @@ def test_pause_resume_keeps_namespace_and_stale_save_cannot_replace_config(tmp_p
 def test_scheduled_capture_waiting_behind_pause_cannot_restart_it(tmp_path, monkeypatch):
     runtime = LocalPrismaRuntime(tmp_path, clock=lambda: NOW)
     runtime.store.update_source("x", {"mode": "real", "enabled": True, "capture_running": True})
+    runtime.credentials.put(runtime.store.source("x")["secret_ref"], "test-credential")
     captured = []
 
     def poll(source, test):
@@ -107,6 +160,9 @@ def test_event_ids_reviews_and_activity_remain_distinct_across_hour_boundary():
     changed = build_snapshot(records, {}, "v3", "", rules=rules, previous=later["incidents"], now=NOW + 4000)
     assert changed["incidents"][0]["id"] == incident["id"]
     assert changed["incidents"][0]["report_activity"] == "below_threshold"
+    assert changed["incidents"][0]["report_counts"] == {"x": 0}
+    assert len(changed["incidents"][0]["evidence_ids"]) == 20
+    assert changed["incidents"][0]["correlation_windows_minutes"] == {"x": 30}
 
 
 def test_admin_posts_and_media_require_authentication_and_thresholds_are_strict(tmp_path):
@@ -122,6 +178,17 @@ def test_admin_posts_and_media_require_authentication_and_thresholds_are_strict(
         assert client.post("/api/admin/prisma/sources/x/run").status_code == 200
         result = client.get("/api/admin/prisma/posts?platform=x").json()
         assert result["total"] == 1 and result["items"][0]["url"] == ""
+        app.state.prisma_runtime.store.persist_page("facebook", [event(123, platform="facebook")], {})
+        aggregate = client.get("/api/admin/prisma/posts?limit=1")
+        assert aggregate.status_code == 200 and aggregate.json()["total"] == 2
+        assert aggregate.json()["items"][0]["platform"] == "facebook"
+        assert aggregate.json()["items"][0]["captured_at"]
+        cursor = aggregate.json()["next_cursor"]
+        assert client.get("/api/admin/prisma/posts", params={"platform": "x", "cursor": cursor}).status_code == 409
+        next_page = client.get("/api/admin/prisma/posts", params={"cursor": cursor}).json()
+        assert [item["platform"] for item in next_page["items"]] == ["x"]
+        assert client.get("/api/admin/prisma/posts?limit=101").status_code == 422
+        assert client.get("/api/admin/prisma/posts?platform=unknown").status_code == 422
         assert client.post("/api/admin/prisma/sources/x/pause").json()["source"]["capture_state"] == "paused"
 
 

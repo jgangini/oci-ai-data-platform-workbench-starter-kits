@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from .agent_gateway import checked_endpoint
 from .scheduling import RUN_FAILED, RUN_SUCCESS, TASK_RUN_QUERY, job_path, run_state, submit_run, task_outcome
 
-PACKAGE = {"package_id": "territorial_control", "display_name": "Territorial Control · God’s Eye View",
+PACKAGE = {"package_id": "territorial_control", "display_name": "God’s Eye View · Custom layers",
            "bundled_version": "1.0.0", "kind": "module", "scope": "global", "status": "available"}
 
 
@@ -30,13 +30,13 @@ class TerritorialModule:
                 raise HTTPException(503, "The Territorial Control native runtime is not ready. Check the Deploy Studio post-apply result and retry.") from exc
 
     def _read(self):
-        if self.settings.local_development_mode:
+        if self.settings.prisma_local_mode:
             with self.runtime.store.connection() as db:
                 return self.runtime.store._get(db, "status_module", {})
         return self.runtime._doc("status_module")
 
     def _write(self, values):
-        if self.settings.local_development_mode:
+        if self.settings.prisma_local_mode:
             with self.runtime.store.connection() as db:
                 self.runtime.store._put(db, "status_module", values)
             return values
@@ -46,7 +46,7 @@ class TerritorialModule:
         return {"module_id": PACKAGE["package_id"], "display_name": PACKAGE["display_name"],
                 "installed": bool(state.get("enabled")), "enabled": bool(state.get("enabled")),
                 "status": state.get("status", "available"), "operation_id": state.get("operation_id"),
-                "viewer_url": "/gods-eye-view/", "runtime": "local_fixture" if self.settings.local_development_mode else "aidp",
+                "viewer_url": "/gods-eye-view/", "runtime": "local_fixture" if self.settings.prisma_local_mode else "aidp",
                 "message": state.get("message", "Enable the module to validate its viewer, native workflow and agent."), **values}
 
     def _prerequisites(self, *, finite_activation=False):
@@ -111,7 +111,7 @@ class TerritorialModule:
                 raise HTTPException(409, message)
             return self._response({}, status="deployment_required", message=message)
         state = self._read()
-        if self.settings.local_development_mode:
+        if self.settings.prisma_local_mode:
             if deploy and not state.get("enabled"):
                 state = self._write({"enabled": True, "status": "ready", "operation_id": str(uuid4()),
                                      "message": "Local simulation module enabled. OCI/AIDP deployment is not claimed."})

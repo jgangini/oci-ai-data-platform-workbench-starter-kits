@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0104",
-    "username": "sim_bogota_0104",
-    "display_name": "Fictional Bogotá Reporter 104"
+    "username": "fel_forero",
+    "display_name": "Felipe Forero"
   },
-  "message": "Recibí un aviso de tierra caída en una ladera de Bogotá; el mensaje no identifica la localidad. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Me reenviaron un aviso de tierra que cayó de una ladera en Bogotá. No dice la localidad ni cuál es el camino... así no hay cómo ubicarlo. Si comparten un reporte, incluyan por lo menos el sector. #deslizamiento #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": null,

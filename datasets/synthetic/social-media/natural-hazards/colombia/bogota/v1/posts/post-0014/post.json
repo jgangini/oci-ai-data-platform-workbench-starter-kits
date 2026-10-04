@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0014",
-    "username": "sim_bogota_0014",
-    "display_name": "Fictional Bogotá Reporter 014"
+    "username": "cam_salcedo",
+    "display_name": "Camilo Salcedo"
   },
-  "message": "Comerciantes de Kennedy colocaron tablas para apartar mercancía; el agua sigue en la calzada. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Los comerciantes de esta cuadra de Kennedy pusieron tablas para apartar la mercancía del agua. Uno quisiera seguir trabajando normal, pero la calzada sigue inundada. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 156,
   "available_offset_seconds": 156,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0014-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0014.webp",
+      "sha256": "ea94acacca3f30bcb003b812dac1eeca5e56c5895665ee29ece93eec611ed132",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0014: Handheld phone photograph at the frontage of a small neighborhood hardware and household goods shop in Kennedy, Bogotá. Plain cardboard merchandise boxes and unbranded sacks resting on wooden planks lifted above damp ground, a cropped merchant's hands adjusting them. Outside the shuttered opening, the street is still covered with shallow muddy water. Focus on improvised raised shelves and supplies; grey metal shutter at left, no legible signage.",
+      "is_simulated": true
+    }
+  ]
 }

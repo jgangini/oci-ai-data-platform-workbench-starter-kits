@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0078",
-    "username": "sim_bogota_0078",
-    "display_name": "Fictional Bogotá Reporter 078"
+    "username": "and_cuellar",
+    "display_name": "Andrés Cuéllar"
   },
-  "message": "El suelo de una ladera de Ciudad Bolívar muestra un pequeño escalón nuevo cerca del sendero. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "El terreno al lado del sendero tiene un escalón pequeño que antes no veía, en la ladera de Ciudad Bolívar. ¿Podrían revisar qué está pasando ahí? Preocupa verlo tan cerca del paso. Bogotá #deslizamiento #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 60,
   "available_offset_seconds": 60,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0078-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0078.webp",
+      "sha256": "056919c6fe536de4d0c58ad5cfba26539448372cd1c0d10eac02018080705f3f",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A small fresh step in the wet ground next to a hillside path. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

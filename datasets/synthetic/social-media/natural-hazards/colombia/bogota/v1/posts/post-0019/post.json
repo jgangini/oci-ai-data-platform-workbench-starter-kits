@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0019",
-    "username": "sim_bogota_0019",
-    "display_name": "Fictional Bogotá Reporter 019"
+    "username": "dan_salcedo",
+    "display_name": "Daniela Salcedo"
   },
-  "message": "Observación nueva en Kennedy: se distingue otra vez parte del bordillo, pero aún hay agua acumulada. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Ya se asoma otra vez parte del bordillo en Kennedy. Aún queda agua acumulada. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 216,
   "available_offset_seconds": 216,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0019-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0019.webp",
+      "sha256": "4a23947a36f8150b87bdc19c9089d088363a3fbe3f39039cd6ae33fae6a0a1c9",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0019: A quiet close landscape smartphone photo at a low angle in Kennedy, Bogotá after the rain eases: newly exposed upper edge of a concrete curb and a thin fresh muddy waterline on a tan wall, shallow brown water still standing farther into street. A few gravel pebbles and flattened leaves, soft grey reflected sky, no drain, no people, no buildings in wide view. Clearly receding water, not a surging current.",
+      "is_simulated": true
+    }
+  ]
 }

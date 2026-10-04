@@ -18,7 +18,7 @@ export default function nativeConfig({ command = 'serve' } = {}) {
     configurePreviewServer({ middlewares }) {
       middlewares.use('/__native_health', (_req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-        res.end(JSON.stringify({ status: 'ok', runtime: 'gods-eye-view' }));
+        res.end(JSON.stringify({ status: 'ok', runtime: 'gods-eye-view', provider_revision: process.env.GEV_PROVIDER_REVISION || 'environment' }));
       });
       middlewares.use('/__native_setup', (_req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });

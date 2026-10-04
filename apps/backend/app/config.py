@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from pytz import all_timezones_set, common_timezones
+
 from .security import hash_secret
 
 
@@ -82,8 +84,20 @@ class Settings:
     vm_update_enabled: bool = False
     cookie_secure: bool = True
     local_development_mode: bool = False
+    prisma_mode: str | None = None
     prisma_enabled: bool = False
+    gods_eye_oci_text_model: str = "xai.grok-4.6"
+    gods_eye_oci_voice_model: str = "google.gemini-2.5-flash-lite"
+    gods_eye_oci_voice: str = "ara"
     local_identity_artifact_dir: str = ""
+
+    def __post_init__(self):
+        if self.prisma_mode not in {None, "local", "oci"}:
+            raise ValueError("PRISMA_MODE must be local or oci")
+
+    @property
+    def prisma_local_mode(self) -> bool:
+        return self.local_development_mode if self.prisma_mode is None else self.prisma_mode == "local"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -133,7 +147,11 @@ class Settings:
             in {"1", "true", "yes"},
             cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
             local_development_mode=os.getenv("LOCAL_DEVELOPMENT_MODE", "false").lower() in {"1", "true", "yes"},
+            prisma_mode=os.getenv("PRISMA_MODE"),
             prisma_enabled=os.getenv("PRISMA_VIEWER_ENABLED", "false").lower() in {"1", "true", "yes"},
+            gods_eye_oci_text_model=os.getenv("GODS_EYE_OCI_TEXT_MODEL", "xai.grok-4.6").strip(),
+            gods_eye_oci_voice_model=os.getenv("GODS_EYE_OCI_VOICE_MODEL", "google.gemini-2.5-flash-lite").strip(),
+            gods_eye_oci_voice=os.getenv("GODS_EYE_OCI_VOICE", "ara").strip().lower(),
         )
 
     def identity_ready(self) -> bool:
@@ -168,7 +186,7 @@ class SettingsStore:
         self._settings = settings
         self._lock = threading.Lock()
 
-    def get_admin_settings(self) -> dict[str, str | bool]:
+    def get_admin_settings(self) -> dict[str, object]:
         values = self._load()
         return {
             "aidp_service_endpoint": (
@@ -181,6 +199,8 @@ class SettingsStore:
             "deployment_mode": self._settings.deployment_mode,
             "operator_username": self._settings.operator_username,
             "registration_code_configured": bool(values["registration_code_hash"]),
+            "time_zone": values["time_zone"],
+            "time_zones": list(common_timezones),
         }
 
     def get_registration_code_hash(self) -> str:
@@ -189,9 +209,9 @@ class SettingsStore:
     def get_workbench_url(self) -> str:
         return self._load()["aidp_workbench_url"]
 
-    def update(self, aidp_url: str | None, registration_code: str | None) -> dict[str, str | bool]:
-        if aidp_url is None and registration_code is None:
-            raise ValueError("Update the AI Data Platform URL or the lab registration code")
+    def update(self, aidp_url: str | None, registration_code: str | None, time_zone: str | None = None) -> dict[str, object]:
+        if aidp_url is None and registration_code is None and time_zone is None:
+            raise ValueError("Update the AI Data Platform URL, lab registration code or time zone")
         values = self._load()
         if aidp_url is not None:
             normalized = aidp_url.strip()
@@ -202,6 +222,10 @@ class SettingsStore:
             if self._settings.deployment_mode != "laboratory":
                 raise ValueError("Registration codes are available only in Laboratory mode")
             values["registration_code_hash"] = hash_secret(registration_code)
+        if time_zone is not None:
+            if time_zone not in all_timezones_set:
+                raise ValueError("Select a valid IANA time zone")
+            values["time_zone"] = time_zone
         self._write(values)
         return self.get_admin_settings()
 
@@ -229,11 +253,14 @@ class SettingsStore:
             "registration_code_hash": self._settings.registration_code_hash,
             "next_participant_code": 101,
             "participant_codes": {},
+            "time_zone": "America/Bogota",
         }
         path = Path(self._settings.aidp_settings_file)
         if path.is_file():
             try:
                 stored = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(stored.get("time_zone"), str) and stored["time_zone"] in all_timezones_set:
+                    values["time_zone"] = stored["time_zone"]
                 aidp_url = stored.get("aidp_workbench_url", "")
                 registration_code_hash = stored.get("registration_code_hash", "")
                 if isinstance(aidp_url, str) and _valid_workbench_url(aidp_url):

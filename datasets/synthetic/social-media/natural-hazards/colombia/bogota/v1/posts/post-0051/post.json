@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0051",
-    "username": "sim_bogota_0051",
-    "display_name": "Fictional Bogotá Reporter 051"
+    "username": "val_pineda",
+    "display_name": "Valentina Pineda"
   },
-  "message": "Desde un sitio apartado en Chapinero se distinguen llamas bajas sobre material vegetal. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Me quedé apartado del sendero: sí alcanzo a distinguir llamas bajitas entre las hojas y el pasto de Chapinero. No hace falta acercarse a grabar, vecinos. #incendio en Bogotá, Colombia.",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 24,
   "available_offset_seconds": 24,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0051-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0051.webp",
+      "sha256": "29b0a221ee7723a3d2eb26e92551e2052650985eea590197d099d35b0097b6ec",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: llamas bajas entre hojas y pasto, observadas desde un sendero a distancia en Chapinero; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

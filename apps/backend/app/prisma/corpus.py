@@ -6,10 +6,11 @@ import os
 from pathlib import Path
 import re
 
-from .core import PLATFORMS, utc_text
+from .core import SYNTHETIC_MODES, PLATFORMS, utc_text
 
 VERSION = "bogota-v1"
 DIRECTORY = "datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1"
+MEDIA_TYPES = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
 
 
 def dataset_root():
@@ -41,7 +42,14 @@ def _load_post(root, entry, media):
     if any(type(value) is not int for value in (published, available)) or not 0 <= published <= available < 600:
         raise ValueError("Invalid synthetic post chronology")
     for attachment in post["attachments"]:
-        if attachment not in media or not attachment["dataset_path"].startswith(f"posts/{identifier}/media/"):
+        extension = str(attachment.get("dataset_path", "")).rpartition(".")[2]
+        shared = re.fullmatch(r"media/[a-z0-9_-]+\.(?:png|jpe?g|webp)", attachment.get("dataset_path", ""))
+        bundled = re.fullmatch(rf"posts/{identifier}/media/image-\d{{2}}\.(?:svg|png|jpe?g|webp)", attachment.get("dataset_path", ""))
+        if (attachment not in media or not (shared or bundled)
+                or not re.fullmatch(rf"{identifier}-image-\d{{2}}", attachment.get("id", ""))
+                or attachment.get("type") != "image" or attachment.get("is_simulated") is not True
+                or attachment.get("mime_type") != MEDIA_TYPES.get(extension)
+                or attachment.get("origin") != ("synthetic_diagram" if extension == "svg" else "ai_generated")):
             raise ValueError("Synthetic attachment is not in the manifest")
         checked_file(root, attachment["dataset_path"], attachment["sha256"])
     return post
@@ -63,21 +71,41 @@ def load(root):
         posts.append(post)
     if len(posts) != manifest["post_count"] or len(posts) < 100:
         raise ValueError("Synthetic manifest post count mismatch")
+    image_hashes = [item["sha256"] for item in manifest["media"]]
+    if len(image_hashes) != len(set(image_hashes)):
+        raise ValueError("Synthetic publications must not reuse another publication's image")
     return tuple(posts)
 
 
 def media_file(fixture_id, filename):
-    """Resolve only bundled images; callers retain authentication and sandboxed SVG headers."""
-    if not re.fullmatch(r"post-\d{4}", fixture_id) or not re.fullmatch(r"image-\d{2}\.svg", filename):
+    """Resolve the fixture allowlist, including old SVG/PNG URLs for captured records."""
+    if not re.fullmatch(r"post-\d{4}", fixture_id) or not re.fullmatch(r"image-\d{2}\.(?:svg|png|jpe?g|webp)", filename):
         raise ValueError("Invalid synthetic media identifier")
     root = dataset_root()
     posts = load(root)
     matches = [item for post in posts if post["fixture_id"] == fixture_id for item in post["attachments"]
-               if item["dataset_path"] == f"posts/{fixture_id}/media/{filename}"]
-    if len(matches) != 1 or matches[0]["mime_type"] != "image/svg+xml" or matches[0]["origin"] != "synthetic_diagram":
+               if item["id"] == f"{fixture_id}-{filename.rpartition('.')[0]}"
+               and (filename.endswith((".svg", ".png")) or filename.rpartition(".")[2] == item["dataset_path"].rpartition(".")[2])]
+    if len(matches) != 1:
         raise FileNotFoundError("Synthetic media is not in the bundled allowlist")
     path, _ = checked_file(root, matches[0]["dataset_path"], matches[0]["sha256"])
     return path, dict(matches[0])
+
+
+def presentation(payload):
+    """Refresh a verified fictional fixture's display without changing the captured record."""
+    meta = payload.get("raw_metadata") or {}
+    if (payload.get("mode") not in SYNTHETIC_MODES or meta.get("synthetic") is not True
+            or meta.get("dataset_version") != VERSION):
+        return {}
+    post = next((post for post in load(dataset_root()) if post["fixture_id"] == meta.get("fixture_id")), None)
+    if post is None or post["platform"] != payload.get("platform") or post["author"]["id"] != meta.get("author_id"):
+        return {}
+    attachments = [dict(item) for item in post["attachments"]]
+    current_ids = {item["id"] for item in attachments}
+    attachments.extend(dict(item) for item in payload.get("attachments", []) if item.get("id") not in current_ids)
+    return {"text": post["message"], "username": post["author"]["username"],
+            "display_name": post["author"]["display_name"], "attachments": attachments}
 
 
 def events(platform, run_id, cycle, anchor_at, start, end, seed=0, version=VERSION):
@@ -100,7 +128,7 @@ def events(platform, run_id, cycle, anchor_at, start, end, seed=0, version=VERSI
             "country": post["country"], "city": post["city"], "locality": post["locality"], "lat": location["lat"], "lon": location["lon"],
             "location_method": "synthetic_locality_anchor" if post["locality"] else "unresolved",
             "location_precision": location["precision"], "location_provenance": location["provenance"],
-            "created_at": utc_text(anchor_at + published), "source_uri": "", "mode": "simulation", "is_simulated": True,
+            "created_at": utc_text(anchor_at + published), "source_uri": "", "mode": "Synthetic", "is_simulated": True,
             "attachments": [dict(item) for item in post["attachments"]],
             "raw_metadata": {"fixture_id": post["fixture_id"], "author_id": post["author"]["id"], "dataset_version": version,
                 "dataset_seed": seed, "scenario_run_id": f"{run_id}:{cycle}", "capture_run_id": run_id,

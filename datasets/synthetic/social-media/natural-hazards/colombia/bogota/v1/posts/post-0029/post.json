@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0029",
-    "username": "sim_bogota_0029",
-    "display_name": "Fictional Bogotá Reporter 029"
+    "username": "luc_arevalo",
+    "display_name": "Lucía Arévalo"
   },
-  "message": "En Bosa cerraron temporalmente un acceso peatonal porque el piso quedó cubierto de agua. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Aviso para quienes van caminando por Bosa: cerraron temporalmente este acceso peatonal porque el piso quedó tapado de agua. No cuenten con ese paso por ahora. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 48,
   "available_offset_seconds": 48,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0029-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0029.webp",
+      "sha256": "209aaef3d9297edc4f41e020d209b236604c8e3120cd97d9c66e6ff42b9c278d",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of an unmarked temporary barrier across a water-covered pedestrian passage in fictional Bosa.",
+      "is_simulated": true
+    }
+  ]
 }

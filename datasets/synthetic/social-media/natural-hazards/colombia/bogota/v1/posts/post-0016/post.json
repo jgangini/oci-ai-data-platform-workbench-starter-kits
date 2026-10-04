@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0016",
-    "username": "sim_bogota_0016",
-    "display_name": "Fictional Bogotá Reporter 016"
+    "username": "san_salcedo",
+    "display_name": "Santiago Salcedo"
   },
-  "message": "En Kennedy se formó una fila de peatones buscando el único paso que no está cubierto de agua. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Se armó fila en Kennedy para pasar por el único pedacito que sigue seco. Los que vienen caminando, tengan paciencia con quienes van más despacio. El resto del paso está cubierto de agua. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 180,
   "available_offset_seconds": 180,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0016-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0016.webp",
+      "sha256": "4aa435cecf6892b9b7707e6a44817b0532e9550290aa85bce45ab98a3fb85c61",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0016: Amateur phone photograph from behind a short line of four pedestrians waiting to use a very narrow dry part of pavement beside a blue-grey residential fence in Kennedy, Bogotá. Floodwater covers the rest of the sidewalk crossing. People from rear, simple rain jackets and closed umbrellas, one older adult proceeding carefully on dry ground. No faces prominent, no danger spectacle. Medium-wide street-level perspective with deep diagonal composition.",
+      "is_simulated": true
+    }
+  ]
 }

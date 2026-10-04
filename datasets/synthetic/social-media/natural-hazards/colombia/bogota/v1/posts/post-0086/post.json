@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0086",
-    "username": "sim_bogota_0086",
-    "display_name": "Fictional Bogotá Reporter 086"
+    "username": "cam_beltran",
+    "display_name": "Camilo Beltrán"
   },
-  "message": "Observo un pequeño desprendimiento adicional en la misma ladera de Ciudad Bolívar. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Acaba de soltarse otro poquito de tierra en la misma ladera de Ciudad Bolívar. Lo vi desde donde me quedé, no me acerqué. Ojo, el punto sigue moviéndose. Bogotá #deslizamiento #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 156,
   "available_offset_seconds": 156,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0086-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0086.webp",
+      "sha256": "7932b2f643913111beb3730cb471fa280995218db9767a2cdea5a07d16ba4009",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A few small fresh clods dropping close to the face of a wet bank. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

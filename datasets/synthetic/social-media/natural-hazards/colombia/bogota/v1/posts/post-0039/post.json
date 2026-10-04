@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0039",
-    "username": "sim_bogota_0039",
-    "display_name": "Fictional Bogotá Reporter 039"
+    "username": "val_quintero",
+    "display_name": "Valentina Quintero"
   },
-  "message": "La cuneta de una vía de Bosa está llena y el agua se desvía hacia un ingreso residencial. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "La cuneta de esta vía de Bosa se llenó y ahora el agua se está yendo hacia un ingreso residencial. Necesitamos atención en este punto, vecinos, no solo quedarnos mirando cómo entra. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 168,
   "available_offset_seconds": 168,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0039-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0039.webp",
+      "sha256": "e2bcfd9d6dc8b21fa160d81cf040edffb2f701b31ed586559239eb6f1e5a0484",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of gutter overflow diverting toward a fictional Bosa residential entrance.",
+      "is_simulated": true
+    }
+  ]
 }

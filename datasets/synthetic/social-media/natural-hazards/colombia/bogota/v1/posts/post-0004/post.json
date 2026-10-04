@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0004",
-    "username": "sim_bogota_0004",
-    "display_name": "Fictional Bogotá Reporter 004"
+    "username": "san_rojas",
+    "display_name": "Santiago Rojas"
   },
-  "message": "El drenaje de una vía residencial de Kennedy no evacua el agua y el charco sigue creciendo. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "¿Y el drenaje de esta calle residencial de Kennedy? No está sacando el agua y el charco crece a la vista. Acueducto, por favor revisen este punto antes de que siga empeorando. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 36,
   "available_offset_seconds": 36,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0004-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0004.webp",
+      "sha256": "044a11e78719664e0754155cec8fe2725008ca5e87c433e87599e0c17ff7920e",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0004: A close downward amateur smartphone photograph of an overwhelmed rectangular roadside storm-drain grate in a residential street in Kennedy, Bogotá, Colombia. Shallow murky rainwater spreads around the drain over rough asphalt, with a few leaves and curb stones, rain ripples. One mustard-yellow wall and grey metal garage gate partly seen at top. No people, no dramatic waves. This is a complaint documenting drainage failing during heavy rain.",
+      "is_simulated": true
+    }
+  ]
 }

@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0033",
-    "username": "sim_bogota_0033",
-    "display_name": "Fictional Bogotá Reporter 033"
+    "username": "pau_arevalo",
+    "display_name": "Paula Arévalo"
   },
-  "message": "El agua de escorrentía llega al primer escalón de una casa de Bosa; no tengo una medición exacta. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "En esta casa de Bosa el agua que baja por la calle ya llega al primer escalón. No tengo con qué medirla y prefiero no inventar una cifra. Les aviso por si vienen a este sector. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 96,
   "available_offset_seconds": 96,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0033-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0033.webp",
+      "sha256": "7b39e46d542eca52ed10df82d60591a29eace8f1f36c13b7bae74519ef5c7a2c",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of street runoff reaching the first entry step of a fictional Bosa home.",
+      "is_simulated": true
+    }
+  ]
 }

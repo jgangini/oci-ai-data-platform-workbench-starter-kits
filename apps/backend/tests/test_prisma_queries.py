@@ -5,11 +5,49 @@ import json
 import pytest
 
 from app.prisma import capture, landing, x
+from app.prisma.api import SourceUpdate
 from app.prisma.core import default_source, simulation_events
 from app.prisma.local import LocalPrismaRuntime
 
 
 NOW = 1791209100.0
+
+
+@pytest.mark.parametrize("query", ["a" * 500 + "\n" + "b" * 499, "😀" * 250 + "\n" + "b" * 499])
+def test_search_total_accepts_exactly_1000_browser_characters(query):
+    assert len(query.encode("utf-16-le")) // 2 == 1000
+    assert SourceUpdate(query=query).query == query
+    capture.validate_source({**default_source("x"), "query": query})
+    for oversized in (query + "a", query + "\n"):
+        with pytest.raises(ValueError):
+            SourceUpdate(query=oversized)
+        with pytest.raises(ValueError, match="1000"):
+            capture.validate_source({**default_source("x"), "query": oversized})
+
+
+@pytest.mark.parametrize("query", ["a" * 513, "😀" * 257, "\n".join(str(n) for n in range(11))])
+def test_search_total_keeps_per_line_and_line_count_limits(query):
+    with pytest.raises(ValueError, match="10 searches"):
+        capture.query_lines(query)
+    with pytest.raises(ValueError):
+        SourceUpdate(query=query)
+
+
+@pytest.mark.parametrize("mode", ["Synthetic", "simulation"])
+def test_source_mode_and_legacy_configuration_are_persisted_canonically(tmp_path, mode):
+    assert SourceUpdate(mode=mode).mode == "Synthetic"
+    runtime = LocalPrismaRuntime(tmp_path, clock=lambda: NOW)
+    result = asyncio.run(runtime.update_source("x", {"mode": mode, "query": "#bogota"}))
+    assert result["mode"] == runtime.store.source("x")["mode"] == "Synthetic"
+    runtime.credentials.put("CustomSecret", "fixture-token")
+    with runtime.store.connection() as db:
+        source = {**runtime.store.source("x"), "mode": "simulation", "capture_running": True,
+                  "credential_configured": True, "secret_ref": "CustomSecret"}
+        runtime.store._put(db, "source:x", source)
+    migrated = LocalPrismaRuntime(tmp_path, clock=lambda: NOW).store.source("x")
+    assert migrated == {**source, "mode": "Synthetic"}
+    with pytest.raises(ValueError):
+        SourceUpdate(mode="synthetic")
 
 
 def test_csv_roundtrip_unicode_quotes_newlines_empty_results_and_provenance(tmp_path):

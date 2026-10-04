@@ -116,27 +116,89 @@ Cesium services, native voice and other feeds require their respective provider
 keys and access. Retaining a native control is not proof that its provider is
 configured or geographically available.
 
-## Three separate assistant paths
+## Assistant paths and voice providers
 
 | Interface | Contract and scope |
 | --- | --- |
-| AIDP Analyst | `/api/prisma/chat`: versioned snapshot, current filters/selection, evidence references and explicit map-action buttons. Final JSON, not OpenAI Realtime or SSE. |
-| OCI Assistant | `/api/prisma/oci-chat`: general text inference using the saved server-side OCI model. Separate bounded conversation history; answers are not verified incident evidence. |
-| Original native voice | Upstream OpenAI Realtime integration and native tools. It retains its own provider configuration and session; OCI text does not implement or replace this protocol. |
+| Agent Flow | `/api/prisma/chat`: one AIDP conversation with a versioned snapshot, current filters/selection, evidence references and explicit map-action buttons. Final JSON, not OpenAI Realtime or SSE. |
+| OpenAI voice | Original upstream OpenAI Realtime integration and native tools, using the server OpenAI key. |
+| OCI voice | An adapter for the native voice control. A bounded WAV turn goes to an audio-capable OCI conversational model; `xai.grok-tts` generates the spoken response. This is turn-based audio, not OpenAI WebRTC or full-duplex streaming. |
 
-Text conversations have separate histories and counters. Cancel aborts a pending
-request and discards a late response. New conversation resets only the selected
-assistant. An AIDP 409 preserves the question and refreshes the publication for
+**Power up the globe** shows read-only provider status. Deployment supplies the
+OCI models and credentials; a fresh browser automatically uses configured OCI
+voice. Existing explicit browser preferences are preserved. Only one microphone
+controller is installed. The OCI card uses the native provider indicator:
+green means server credentials and a model are configured. Its last
+inference result remains separate; a quota error does not erase configuration.
+Friendly catalog names are displayed instead of model OCIDs.
+
+With `PRISMA_VIEWER_ENABLED=true`, a new deployment defaults to `xai.grok-4.6`
+for text and `google.gemini-2.5-flash-lite` with voice `ara` for audio turns.
+The administrator can override these through `GODS_EYE_OCI_TEXT_MODEL`,
+`GODS_EYE_OCI_VOICE_MODEL` and `GODS_EYE_OCI_VOICE` in the VM environment.
+Persisted selections take precedence. These defaults reuse the existing operator,
+region and compartment and do not run inference or claim availability at startup.
+
+When the OCI catalog returns `xai.grok-voice-agent`, the administrative API reports
+it as **Realtime connection not verified**. The catalog advertises audio and
+realtime capabilities, but this adapter does not yet implement a verified OCI
+realtime session for that model. It remains disabled rather than being routed
+through Gemini or TTS under a Grok Voice Agent label. Catalog availability,
+saved configuration and successful voice inference are separate checks.
+
+OCI voice uses the existing server operator and compartment. Neither PEM material
+nor signing credentials reach the browser. The audio endpoints accept bounded PCM
+WAV recordings up to 30 seconds; general API body limits remain unchanged. A voice
+turn may propose only supported camera actions and data-layer visibility changes,
+including Social networks. The client validates and executes these requests; the
+voice reply does not confirm execution. It cannot execute code, choose a backend
+URL, or confirm an incident. Published evidence remains in Agent Flow.
+Cancelling stops microphone tracks and playback and discards late responses. Audio
+is processed for the turn without persisting microphone recordings in the app.
+
+The native ON/OFF control starts automatic audio turns: speech followed by a
+900 ms pause sends the recording; playback finishes before listening resumes.
+Silence-only 30-second windows recycle locally without inference. The amplitude
+detector requires 250 ms above its threshold and can mistake sustained noise for
+speech; validate microphone levels in the demonstration room. This is not
+full-duplex realtime voice. OFF or any provider error stops the conversation.
+Microphone acceptance must check permission, a spoken utterance, the resulting
+response, and stopped input tracks. Test-file upload controls are not in the UI.
+Keep that result separate from unit tests or a successful text-to-speech call.
+The model contracts are documented by Oracle for
+[Gemini audio input](https://docs.oracle.com/en-us/iaas/Content/generative-ai/google-gemini-2-5-flash.htm)
+and [xAI speech output](https://docs.oracle.com/en-us/iaas/Content/generative-ai/xai-grok-tts.htm).
+
+Agent Flow is a single AIDP conversation in the native right rail below Context.
+Enter sends a question; Shift+Enter inserts a newline. The header's New conversation
+button resets its history and counter. Cancel aborts a pending request and discards
+a late response. An AIDP 409 preserves the question and refreshes the publication for
 manual retry. Evidence and map-action buttons refuse to apply an answer from an
 older publication. Model output is rendered as text, never executed as HTML/code.
+The expanded panel respects Data Layers' height ceiling; the conversation scrolls
+inside it while the composer remains visible.
+
+`PRISMA_MODE=oci` selects the real runtime independently of local development
+identity. Configure it on both the backend and viewer, with the existing operator
+profile and Autonomous runtime installed on the backend. An explicit
+`PRISMA_ADMIN_URL` makes the viewer obtain the authenticated backend's publication;
+OCI mode rejects a fixture publication. Without that URL, the deployed viewer
+continues reading Gold with its instance principal. Backend-proxy `/ready` checks
+the native viewer only and reports `publication_check=authenticated_backend_request`;
+module activation checks the backend deployment and snapshot separately.
+Local identity with OCI mode does not start a second capture producer: the
+deployed VM owns capture. Missing credentials or AIDP failures never select a
+fixture answer. Omitting the override retains the existing development defaults.
 
 The Territorial Control layer uses one native `CustomDataSource` and the native
 layer manager's ten-second refresh lifecycle. Disabling it stops its refresh;
 other layers remain intact. A fresh URL seeds a native Bogotá camera share state
 before startup; an existing hash is preserved. No delayed or recurring local
 camera override competes with native navigation or user-shared views.
-Inclusive periods use incident creation time in
-Bogotá (UTC−05:00); map-area filters carry the same bounds to AIDP. Events without
+Inclusive social periods use the linked publication's creation time;
+sensor periods are explicit filters on `observed_at`. Last-known sensor readings
+do not inherit the social feed's default 24-hour window. Map-area filters carry
+the same bounds to AIDP. Events without
 coordinates remain in the list unless a geographic area excludes them.
 Activity, severity, confidence, corroboration and human confirmation are distinct.
 Evidence preserves real/synthetic provenance. Only allowed real X photos whose

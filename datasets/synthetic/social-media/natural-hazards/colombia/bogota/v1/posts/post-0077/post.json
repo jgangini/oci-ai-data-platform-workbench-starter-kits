@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0077",
-    "username": "sim_bogota_0077",
-    "display_name": "Fictional Bogotá Reporter 077"
+    "username": "luc_cuellar",
+    "display_name": "Lucía Cuéllar"
   },
-  "message": "En Ciudad Bolívar observo piedras recientes junto a un talud húmedo; no me acerqué para medirlo. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Veo piedras recién caídas al lado del talud húmedo en Ciudad Bolívar. No me acerqué a mirar tamaños ni a medir nada; lo cuento desde donde estoy. #desastre #Bogota #deslizamiento",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 48,
   "available_offset_seconds": 48,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0077-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0077.webp",
+      "sha256": "d99770862d05214210babbf090a866c0303607dc290cbee33d4b747885041a2c",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Small recently fallen stones below a wet roadside cutting. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

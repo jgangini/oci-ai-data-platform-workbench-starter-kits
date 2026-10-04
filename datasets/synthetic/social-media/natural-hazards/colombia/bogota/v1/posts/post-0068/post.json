@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0068",
-    "username": "sim_bogota_0068",
-    "display_name": "Fictional Bogotá Reporter 068"
+    "username": "fel_lozano",
+    "display_name": "Felipe Lozano"
   },
-  "message": "En el borde visible de Chapinero quedan zonas de pasto ennegrecido que todavía desprenden humo. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Quedó pasto negro en el borde que alcanzo a ver de Chapinero, todavía sale humo de ahí. Vecinos, no demos por resuelto el incendio por ver menos humo. Bogotá, Colombia.",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 228,
   "available_offset_seconds": 228,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0068-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0068.webp",
+      "sha256": "ab09715be69d41708ea237f936df8ddad38e69a0dfc23e49ed574ebb3466d827",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: borde de pasto negro con hilos de humo residual en Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

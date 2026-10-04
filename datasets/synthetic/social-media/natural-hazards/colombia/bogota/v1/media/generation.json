@@ -1,0 +1,1666 @@
+{
+  "generator": "OpenAI image_gen",
+  "generated_at": "2026-10-03",
+  "generation_method": "Built-in image generation from text; no reference images or image editing.",
+  "purpose": "One independent AI-generated photograph for each of the 72 image-bearing fictional publications. Each image matches its post and scenario phase; different authors never share a photograph. These are fictional illustrative scenes, not photographs of actual sites or incidents.",
+  "source_media": "No third-party source photographs.",
+  "license": "CC0-1.0",
+  "assets": [
+    {
+      "dataset_path": "media/flood-kennedy-active.webp",
+      "sha256": "a533db1041bba7e1562204b16bb9448785b9007484a0c283bec244d2702273ed",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "prompt": "Use case: photorealistic-natural. Asset type: full-bleed landscape photo for a clearly labeled Synthetic social-media disaster exercise in Bogotá. Create a fictional yet highly realistic phone-camera photograph of shallow rainwater flooding a neighborhood street and zebra crossing in Kennedy, Bogotá, Colombia. Typical dense two- and three-storey red brick and painted stucco houses, metal roller shutters, overhead utility cables, Bogotá high-altitude gray overcast daylight, curb-level muddy gray rainwater and accurate wet asphalt reflections. View from a safe raised sidewalk at human eye level, medium-wide 4:3 landscape composition, crossing and water readable at thumbnail size. Natural ordinary phone photo with subtle texture, no dramatic cinematic grading. No identifiable people, no bodies, no destroyed homes, no readable addresses, no logos. This is AI-generated illustrative imagery, not documentation of a real incident. Do not put any captions, frame, card layout, UI, text or watermark inside the image.",
+      "fixture_id": "post-0001",
+      "scene": "flood-kennedy-active",
+      "alt_text": "Synthetic AI-generated scene of localized flooding on a residential street in Kennedy; a fictional scenario, not documentation of a real incident.",
+      "source_png": {
+        "dataset_path": "media/flood-kennedy-active.png",
+        "sha256": "6f6e68b76b0b587f43a4cc1ba0e56be797f7f693a05529961cf8f0d124fb7ae8"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0002",
+      "dataset_path": "media/unique-post-0002.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: a unique fictional eyewitness photo attached to one synthetic social-media post. Eye-level vertical smartphone photo taken from a pedestrian's dry strip of sidewalk looking diagonally along a narrow residential street in Kennedy, Bogotá, Colombia. Brown shallow floodwater completely hides the curb boundary; the dry narrow pavement in the immediate left foreground is the only walkable part. Concrete and red-brick two-storey Colombian houses with turquoise and rust-colored metal doors. Frame the flowing water close and obliquely, without a zebra crossing. No one in the current. Authentic unpolished phone capture, natural soft light, mundane imperfections, believable proportions and local urban materials. Make this a genuinely distinct original scene and camera position, not a crop/filter/recolor of another photograph. No collage, borders, text, watermark, logos, readable signs, invented street labels, emergency spectacle, or identifiable people. 4:3 photograph around 1024 pixels. This is synthetic illustrative imagery, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0002: Eye-level vertical smartphone photo taken from a pedestrian's dry strip of sidewalk looking diagonally along a narrow residential street in Kennedy, Bogotá, Colombia. Brown shallow floodwater completely hides the curb boundary; the dry narrow pavement in the immediate left foreground is the only walkable part. Concrete and red-brick two-storey Colombian houses with turquoise and rust-colored metal doors. Frame the flowing water close and obliquely, without a zebra crossing. No one in the current.",
+      "sha256": "108b5050c0a1c2b6d0161874c738ca9362ef415328547ac1fe0af29143f9490b",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0002.png",
+        "sha256": "c73580b76bb7d2eede3d87334e0b151ec65e5a8b75a23606612e2e23175750bb"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0003",
+      "dataset_path": "media/unique-post-0003.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: a unique fictional eyewitness photo attached to one synthetic social-media post. Horizontal imperfect smartphone photograph from the dry sheltered entrance of a red-brick residential row in Kennedy, Bogotá, Colombia. Neighbors in normal rain jackets, faces indistinct, lifting a small table and bags onto a raised doorstep because murky rainwater is collecting along several metal garage gates. Emphasize the domestic objects, a burgundy garage door and several damp entrances; houses remain standing. Ordinary localized shallow street flooding, not a catastrophic flood. Authentic unpolished phone capture, natural soft light, mundane imperfections, believable proportions and local urban materials. Make this a genuinely distinct original scene and camera position, not a crop/filter/recolor of another photograph. No collage, borders, text, watermark, logos, readable signs, invented street labels, emergency spectacle, or identifiable people. 4:3 photograph around 1024 pixels. This is synthetic illustrative imagery, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0003: Horizontal imperfect smartphone photograph from the dry sheltered entrance of a red-brick residential row in Kennedy, Bogotá, Colombia. Neighbors in normal rain jackets, faces indistinct, lifting a small table and bags onto a raised doorstep because murky rainwater is collecting along several metal garage gates. Emphasize the domestic objects, a burgundy garage door and several damp entrances; houses remain standing. Ordinary localized shallow street flooding, not a catastrophic flood.",
+      "sha256": "8d327e8ca19973a7366d2b0775768d550bba869341d9b5506a5a25f3518cdda5",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0003.png",
+        "sha256": "c0b10a8e8455860ed93fa66fafc792a0b9f71f81366cadea34e98f4b4ac86efa"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0004",
+      "dataset_path": "media/unique-post-0004.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: a unique fictional eyewitness photo attached to one synthetic social-media post. A close downward amateur smartphone photograph of an overwhelmed rectangular roadside storm-drain grate in a residential street in Kennedy, Bogotá, Colombia. Shallow murky rainwater spreads around the drain over rough asphalt, with a few leaves and curb stones, rain ripples. One mustard-yellow wall and grey metal garage gate partly seen at top. No people, no dramatic waves. This is a complaint documenting drainage failing during heavy rain. Authentic unpolished phone capture, natural soft light, mundane imperfections, believable proportions and local urban materials. Make this a genuinely distinct original scene and camera position, not a crop/filter/recolor of another photograph. No collage, borders, text, watermark, logos, readable signs, invented street labels, emergency spectacle, or identifiable people. 4:3 photograph around 1024 pixels. This is synthetic illustrative imagery, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0004: A close downward amateur smartphone photograph of an overwhelmed rectangular roadside storm-drain grate in a residential street in Kennedy, Bogotá, Colombia. Shallow murky rainwater spreads around the drain over rough asphalt, with a few leaves and curb stones, rain ripples. One mustard-yellow wall and grey metal garage gate partly seen at top. No people, no dramatic waves. This is a complaint documenting drainage failing during heavy rain.",
+      "sha256": "044a11e78719664e0754155cec8fe2725008ca5e87c433e87599e0c17ff7920e",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0004.png",
+        "sha256": "90ef653315c947e9e9c7b9b393a04467624ad664ac9b7d52d64f6ba62055eb6e"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0005",
+      "dataset_path": "media/unique-post-0005.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: a unique fictional eyewitness photo attached to one synthetic social-media post. A wide landscape amateur smartphone photograph taken from a second-floor apartment window in Kennedy, Bogotá, Colombia. A sliver of the dark window frame at right, looking steeply down a flooded residential intersection. Several ordinary compact cars wait on the dry approach before the standing brown rainwater, no vehicles driving through it. Close-packed unplastered brick houses, pale blue house front, power wires. Overcast rainy afternoon. Clearly elevated perspective, not a street-level photo. Authentic unpolished phone capture, natural soft light, mundane imperfections, believable proportions and local urban materials. Make this a genuinely distinct original scene and camera position, not a crop/filter/recolor of another photograph. No collage, borders, text, watermark, logos, readable signs, invented street labels, emergency spectacle, or identifiable people. 4:3 photograph around 1024 pixels. This is synthetic illustrative imagery, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0005: A wide landscape amateur smartphone photograph taken from a second-floor apartment window in Kennedy, Bogotá, Colombia. A sliver of the dark window frame at right, looking steeply down a flooded residential intersection. Several ordinary compact cars wait on the dry approach before the standing brown rainwater, no vehicles driving through it. Close-packed unplastered brick houses, pale blue house front, power wires. Overcast rainy afternoon. Clearly elevated perspective, not a street-level photo.",
+      "sha256": "8b8e222d1298fbfe391e6cddbdcdaedaa4b49b21cc368ce53e1df7e6d7f6c66a",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0005.png",
+        "sha256": "2f1c9c8c729dcadc95574d102b1ef3696b7c620569a6d979900a5a90b92a8358"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0006",
+      "dataset_path": "media/unique-post-0006.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: unique eyewitness-style picture for exactly one fictional synthetic social post. View from inside a small first-floor home in Kennedy, Bogotá, Colombia: three neighbors in plain sweaters move cardboard boxes from wet tiled floor onto a dining table, a thin sheet of brown rainwater entering under an open front door. Low uneven phone framing showing a chair and doorway. Red tile flooring, cream walls, modest lived-in home, faces not prominent. Localized minor flood, calm purposeful help. Authentic ordinary phone exposure, realistic local Colombian highland urban materials, restrained colors and believable proportions. Make an original composition distinct from any other post's photo, not a crop/filter/recolor. No collage, frame, UI, text, watermark, logos, readable signs, identifiable faces, injuries, or spectacular destruction. Single 4:3 photo around 1024 pixels. Synthetic illustrative image, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0006: View from inside a small first-floor home in Kennedy, Bogotá, Colombia: three neighbors in plain sweaters move cardboard boxes from wet tiled floor onto a dining table, a thin sheet of brown rainwater entering under an open front door. Low uneven phone framing showing a chair and doorway. Red tile flooring, cream walls, modest lived-in home, faces not prominent. Localized minor flood, calm purposeful help.",
+      "sha256": "81baf696846ea0617976a2b361fd18e26888f15520ac65bc4242252c4c60de50",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0006.png",
+        "sha256": "8cee02431909a0761451d24ecb3cfa3b8df1473ed41cd24cd11283fd317a7b49"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0008",
+      "dataset_path": "media/unique-post-0008.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: unique eyewitness-style picture for exactly one fictional synthetic social post. Interior of a tiny neighborhood grocery store in Kennedy, Bogotá. Informal smartphone photo from behind its counter showing a shopkeeper's arms placing plain unbranded dry-goods packages on high shelves; shallow floodwater entering the doorway and spreading a few centimeters over checked floor tiles. A red plastic stool and elevated sacks. No legible packaging. Close indoor perspective with rainy grey daylight outside. Authentic ordinary phone exposure, realistic local Colombian highland urban materials, restrained colors and believable proportions. Make an original composition distinct from any other post's photo, not a crop/filter/recolor. No collage, frame, UI, text, watermark, logos, readable signs, identifiable faces, injuries, or spectacular destruction. Single 4:3 photo around 1024 pixels. Synthetic illustrative image, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0008: Interior of a tiny neighborhood grocery store in Kennedy, Bogotá. Informal smartphone photo from behind its counter showing a shopkeeper's arms placing plain unbranded dry-goods packages on high shelves; shallow floodwater entering the doorway and spreading a few centimeters over checked floor tiles. A red plastic stool and elevated sacks. No legible packaging. Close indoor perspective with rainy grey daylight outside.",
+      "sha256": "1308fde5fb1a968222db8738f5823406ae1c9a90395a75c5558d67eea5d3f2db",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0008.png",
+        "sha256": "650d8ac89d831aec1dfb259674782114487f50d7407f73ac05fae9621cfb3376"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0009",
+      "dataset_path": "media/unique-post-0009.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: unique eyewitness-style picture for exactly one fictional synthetic social post. Close-up handheld phone photo aimed at the edge of a sidewalk in Kennedy, Bogotá: murky shallow rainwater covering the lower part of the concrete curb; black iron fence and narrow wet garden strip at top. The water depth cannot be measured; focus on gentle ripples at curb, damp fallen petals and rough pavement. No grate in frame, no people, no zebra crossing, natural overcast afternoon. Authentic ordinary phone exposure, realistic local Colombian highland urban materials, restrained colors and believable proportions. Make an original composition distinct from any other post's photo, not a crop/filter/recolor. No collage, frame, UI, text, watermark, logos, readable signs, identifiable faces, injuries, or spectacular destruction. Single 4:3 photo around 1024 pixels. Synthetic illustrative image, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0009: Close-up handheld phone photo aimed at the edge of a sidewalk in Kennedy, Bogotá: murky shallow rainwater covering the lower part of the concrete curb; black iron fence and narrow wet garden strip at top. The water depth cannot be measured; focus on gentle ripples at curb, damp fallen petals and rough pavement. No grate in frame, no people, no zebra crossing, natural overcast afternoon.",
+      "sha256": "61ba6ea3b101ae1b22a06f6fc919edf2acfccaacea38c654e4f7eb98cbf26a52",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0009.png",
+        "sha256": "6022433ca9e753c9a0296b98f3f66042a74c2b67fea948f6860316cdda47548f"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0010",
+      "dataset_path": "media/unique-post-0010.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: unique eyewitness-style picture for exactly one fictional synthetic social post. Amateur landscape smartphone photograph from beneath the roof of a small bus-stop shelter in Kennedy, Bogotá. Still shallow brown water gathered beside the shelter at the end of a residential block leading toward a wider avenue, distant blue city bus on the dry avenue. Bench in near right foreground, wet concrete, rainsoft focus in distance; no readable signage or transport logos. Safe waiting spot. Authentic ordinary phone exposure, realistic local Colombian highland urban materials, restrained colors and believable proportions. Make an original composition distinct from any other post's photo, not a crop/filter/recolor. No collage, frame, UI, text, watermark, logos, readable signs, identifiable faces, injuries, or spectacular destruction. Single 4:3 photo around 1024 pixels. Synthetic illustrative image, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0010: Amateur landscape smartphone photograph from beneath the roof of a small bus-stop shelter in Kennedy, Bogotá. Still shallow brown water gathered beside the shelter at the end of a residential block leading toward a wider avenue, distant blue city bus on the dry avenue. Bench in near right foreground, wet concrete, rainsoft focus in distance; no readable signage or transport logos. Safe waiting spot.",
+      "sha256": "31b0998742e7620b2c5b01a3b8c2967249894c8332e71a016800de4214b5477a",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0010.png",
+        "sha256": "880c51c40a8ea44c48c5f1ecd42671f7a97636b1c21c28cebfab1bf39c52d16b"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0011",
+      "dataset_path": "media/unique-post-0011.webp",
+      "prompt": "Use case: photorealistic-natural. Create one fictional amateur smartphone photograph of an EMPTY raised, dry tiled residential corridor in Kennedy, Bogotá, Colombia. The narrow passage follows a cream-colored wall beside a metal handrail and leads toward a dry courtyard at the back. Seen from the sheltered inner porch, shallow rainwater has pooled outside a lower entrance next to the corridor; the elevated walkway remains completely dry. A terracotta flowerpot, rough local brick textures, cloudy soft daylight, slightly tilted casual framing. The photograph documents the contrast between a usable dry route and a waterlogged doorway. NO people, no animals, no rescue, no danger scene, no text, logos or identifiable address, no collage. Photorealistic original 4:3 composition distinct from other fixture photos; AI-generated illustrative scene, not a real incident record.",
+      "alt_text": "Synthetic AI-generated photo of a dry raised residential corridor beside a waterlogged lower entrance in Kennedy; fictional scene.",
+      "sha256": "ca4a459e6035578ad854eee86c8dbee3b7ce9cc344b9c5324d571b4954bea604",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0011.png",
+        "sha256": "aa93764a159762b05213e9459bc00f5ae12d7fb4b621d7fc2f64887bf821f388"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0012",
+      "dataset_path": "media/unique-post-0012.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: unique eyewitness-style picture for exactly one fictional synthetic social post. Very low angled phone photograph along flowing shallow brown rainwater in a Kennedy, Bogotá residential gutter, wet leaves and two small empty translucent plastic bottles carried past an uneven reddish-brick corner. Longer street is softly blurred in the background; foreground texture and moving small debris are the subject. No drain or people in frame, ordinary localized street flood, cloudy daylight. Authentic ordinary phone exposure, realistic local Colombian highland urban materials, restrained colors and believable proportions. Make an original composition distinct from any other post's photo, not a crop/filter/recolor. No collage, frame, UI, text, watermark, logos, readable signs, identifiable faces, injuries, or spectacular destruction. Single 4:3 photo around 1024 pixels. Synthetic illustrative image, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0012: Very low angled phone photograph along flowing shallow brown rainwater in a Kennedy, Bogotá residential gutter, wet leaves and two small empty translucent plastic bottles carried past an uneven reddish-brick corner. Longer street is softly blurred in the background; foreground texture and moving small debris are the subject. No drain or people in frame, ordinary localized street flood, cloudy daylight.",
+      "sha256": "0e2e1fe0190f150fd2be7e8ca4a306262e3eb22fbcb8dfa32b35f79e0387c31a",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0012.png",
+        "sha256": "b2d146f07907107a0754625eb2bf99a71b64bea583f92202ac5964dbd19f2603"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0013",
+      "dataset_path": "media/unique-post-0013.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: unique eyewitness-style picture for exactly one fictional synthetic social post. Horizontal candid mobile photograph looking across a quiet flooded residential street in Kennedy, Bogotá from a sheltered stoop. Standing rainwater level stable below several raised thresholds; a pale mint house with two grey doors and an orange-brick building across the way, one black motorcycle parked high on a dry tiled porch. Still water reflections, drizzle easing, no dramatic movement, no people foreground. Authentic ordinary phone exposure, realistic local Colombian highland urban materials, restrained colors and believable proportions. Make an original composition distinct from any other post's photo, not a crop/filter/recolor. No collage, frame, UI, text, watermark, logos, readable signs, identifiable faces, injuries, or spectacular destruction. Single 4:3 photo around 1024 pixels. Synthetic illustrative image, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0013: Horizontal candid mobile photograph looking across a quiet flooded residential street in Kennedy, Bogotá from a sheltered stoop. Standing rainwater level stable below several raised thresholds; a pale mint house with two grey doors and an orange-brick building across the way, one black motorcycle parked high on a dry tiled porch. Still water reflections, drizzle easing, no dramatic movement, no people foreground.",
+      "sha256": "5877063d4b8ddf2dd6cf0477ca6cee6a3bba55fd564cd5b8a3b260640e55b5e4",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0013.png",
+        "sha256": "fd869f7380461b57583e9732d5b0874ccac967fdcb428744f135e44b93af7533"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0014",
+      "dataset_path": "media/unique-post-0014.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: unique eyewitness-style picture for exactly one fictional synthetic social post. Handheld phone photograph at the frontage of a small neighborhood hardware and household goods shop in Kennedy, Bogotá. Plain cardboard merchandise boxes and unbranded sacks resting on wooden planks lifted above damp ground, a cropped merchant's hands adjusting them. Outside the shuttered opening, the street is still covered with shallow muddy water. Focus on improvised raised shelves and supplies; grey metal shutter at left, no legible signage. Authentic ordinary phone exposure, realistic local Colombian highland urban materials, restrained colors and believable proportions. Make an original composition distinct from any other post's photo, not a crop/filter/recolor. No collage, frame, UI, text, watermark, logos, readable signs, identifiable faces, injuries, or spectacular destruction. Single 4:3 photo around 1024 pixels. Synthetic illustrative image, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0014: Handheld phone photograph at the frontage of a small neighborhood hardware and household goods shop in Kennedy, Bogotá. Plain cardboard merchandise boxes and unbranded sacks resting on wooden planks lifted above damp ground, a cropped merchant's hands adjusting them. Outside the shuttered opening, the street is still covered with shallow muddy water. Focus on improvised raised shelves and supplies; grey metal shutter at left, no legible signage.",
+      "sha256": "ea94acacca3f30bcb003b812dac1eeca5e56c5895665ee29ece93eec611ed132",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0014.png",
+        "sha256": "8eae1acb5ab21327b4d25cacf865d01dc7923077f90066eb6038109d184d1086"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0015",
+      "dataset_path": "media/unique-post-0015.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: unique eyewitness-style picture for exactly one fictional synthetic social post. Downward smartphone photo of a ROUND iron manhole cover near a curb in Kennedy, Bogotá; wet leaves, crumpled anonymous plastic wrapping and small twigs collect around it while rainwater bypasses the clogged opening. Broken asphalt and red-painted low curb, wet beige wall corner at edge. Natural imperfect focus, ordinary morning-grey daylight, no people, no readable marks, no rectangular drain grate. Authentic ordinary phone exposure, realistic local Colombian highland urban materials, restrained colors and believable proportions. Make an original composition distinct from any other post's photo, not a crop/filter/recolor. No collage, frame, UI, text, watermark, logos, readable signs, identifiable faces, injuries, or spectacular destruction. Single 4:3 photo around 1024 pixels. Synthetic illustrative image, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0015: Downward smartphone photo of a ROUND iron manhole cover near a curb in Kennedy, Bogotá; wet leaves, crumpled anonymous plastic wrapping and small twigs collect around it while rainwater bypasses the clogged opening. Broken asphalt and red-painted low curb, wet beige wall corner at edge. Natural imperfect focus, ordinary morning-grey daylight, no people, no readable marks, no rectangular drain grate.",
+      "sha256": "f1480b61975a9a7f762b9750c27a050d5b05572cf811abe94d501fa9d8e315be",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0015.png",
+        "sha256": "69591fd4c6a6621673410dc3c4768d5d9941846b03b0c7f9cff014841dac42a1"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0016",
+      "dataset_path": "media/unique-post-0016.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: unique eyewitness-style picture for exactly one fictional synthetic social post. Amateur phone photograph from behind a short line of four pedestrians waiting to use a very narrow dry part of pavement beside a blue-grey residential fence in Kennedy, Bogotá. Floodwater covers the rest of the sidewalk crossing. People from rear, simple rain jackets and closed umbrellas, one older adult proceeding carefully on dry ground. No faces prominent, no danger spectacle. Medium-wide street-level perspective with deep diagonal composition. Authentic ordinary phone exposure, realistic local Colombian highland urban materials, restrained colors and believable proportions. Make an original composition distinct from any other post's photo, not a crop/filter/recolor. No collage, frame, UI, text, watermark, logos, readable signs, identifiable faces, injuries, or spectacular destruction. Single 4:3 photo around 1024 pixels. Synthetic illustrative image, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0016: Amateur phone photograph from behind a short line of four pedestrians waiting to use a very narrow dry part of pavement beside a blue-grey residential fence in Kennedy, Bogotá. Floodwater covers the rest of the sidewalk crossing. People from rear, simple rain jackets and closed umbrellas, one older adult proceeding carefully on dry ground. No faces prominent, no danger spectacle. Medium-wide street-level perspective with deep diagonal composition.",
+      "sha256": "4aa435cecf6892b9b7707e6a44817b0532e9550290aa85bce45ab98a3fb85c61",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0016.png",
+        "sha256": "9d217422e1c6a7dbed2ef62f6d10d12f34bb850707cd8c2d5e6a8a9bae1421c2"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "dataset_path": "media/flood-kennedy-receding.webp",
+      "sha256": "d2ea3aa58812d999f7795738a6eb2484ec54e9fff4963d25363b8c0de6a156bf",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "prompt": "Use case: photorealistic-natural. Asset: full-bleed 4:3 landscape photo for a clearly labeled Synthetic training social post. Generate a fictional but realistic ordinary smartphone photo inspired by Bogotá, Colombia. Scene: A neighborhood intersection in Kennedy, Bogotá after floodwater has receded: exposed zebra crossing and wet asphalt, shallow puddles only along curb and small leaves/silt near drain, dense two-three storey redbrick/stucco homes and roller shutters, gray daylight. No deep water. Natural phone-camera perspective from a safe sidewalk at human eye level, realistic materials and high-altitude daylight, subtle grain, no cinematic lighting. Main environmental details clearly legible in small thumbnail. No identifiable people, no readable addresses or signs, no logos, no injuries. AI-generated illustrative imagery, not a real incident record. Image only: no frame, no UI, no illustration, no captions, no text, no watermark.",
+      "fixture_id": "post-0017",
+      "scene": "flood-kennedy-receding",
+      "alt_text": "Synthetic AI-generated scene of receding floodwater and an emerging curb in Kennedy; a fictional scenario, not documentation of a real incident.",
+      "source_png": {
+        "dataset_path": "media/flood-kennedy-receding.png",
+        "sha256": "6aaf90c07edb5f653716815168a697498b4fc5b7f1ab748e784df50b89ceaa1c"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0019",
+      "dataset_path": "media/unique-post-0019.webp",
+      "prompt": "Use case: photorealistic-natural. Asset: unique eyewitness-style picture for exactly one fictional synthetic social post. A quiet close landscape smartphone photo at a low angle in Kennedy, Bogotá after the rain eases: newly exposed upper edge of a concrete curb and a thin fresh muddy waterline on a tan wall, shallow brown water still standing farther into street. A few gravel pebbles and flattened leaves, soft grey reflected sky, no drain, no people, no buildings in wide view. Clearly receding water, not a surging current. Authentic ordinary phone exposure, realistic local Colombian highland urban materials, restrained colors and believable proportions. Make an original composition distinct from any other post's photo, not a crop/filter/recolor. No collage, frame, UI, text, watermark, logos, readable signs, identifiable faces, injuries, or spectacular destruction. Single 4:3 photo around 1024 pixels. Synthetic illustrative image, not documentation of an actual incident.",
+      "alt_text": "Synthetic AI-generated original image for post-0019: A quiet close landscape smartphone photo at a low angle in Kennedy, Bogotá after the rain eases: newly exposed upper edge of a concrete curb and a thin fresh muddy waterline on a tan wall, shallow brown water still standing farther into street. A few gravel pebbles and flattened leaves, soft grey reflected sky, no drain, no people, no buildings in wide view. Clearly receding water, not a surging current.",
+      "sha256": "4a23947a36f8150b87bdc19c9089d088363a3fbe3f39039cd6ae33fae6a0a1c9",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-kennedy-receding",
+      "source_png": {
+        "dataset_path": "media/unique-post-0019.png",
+        "sha256": "26fc76ac6a24dbfaf27dd8ad584986252a298772698f7213feefd7bebe759862"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "dataset_path": "media/flood-bosa-active.webp",
+      "sha256": "51108f7c665e7757758078c51b9a19c5b6377450bd283241701d3f08307504fe",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "prompt": "Use case: photorealistic-natural. Asset: full-bleed 4:3 landscape photo for a clearly labeled Synthetic training social post. Generate a fictional but realistic ordinary smartphone photo inspired by Bogotá, Colombia. Scene: A residential street in Bosa, southwest Bogotá, shallow muddy rainwater covers lower asphalt and curb edges. Dense two-storey redbrick and painted masonry houses, simple balconies, overhead wires, distant flat lowrise urban horizon, gray afternoon. Viewfromraisedsidewalk, water ripples and low curb readable. No catastrophically deep water. Natural phone-camera perspective from a safe sidewalk at human eye level, realistic materials and high-altitude daylight, subtle grain, no cinematic lighting. Main environmental details clearly legible in small thumbnail. No identifiable people, no readable addresses or signs, no logos, no injuries. AI-generated illustrative imagery, not a real incident record. Image only: no frame, no UI, no illustration, no captions, no text, no watermark.",
+      "fixture_id": "post-0025",
+      "scene": "flood-bosa-active",
+      "alt_text": "Synthetic AI-generated scene of localized flooding around residential entrances in Bosa; a fictional scenario, not documentation of a real incident.",
+      "source_png": {
+        "dataset_path": "media/flood-bosa-active.png",
+        "sha256": "0f3821eeefeeede0169e4d7e70b28d81dc977448aec55fd808a2276adec28719"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0026",
+      "dataset_path": "media/unique-post-0026.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active heavy rain. From a safe dry raised sidewalk, a low oblique close photograph of a rectangular curb storm-drain at a street corner visibly bubbling back muddy water into the gutter, raindrop rings on the shallow sheet of water. Residential doorsteps in background. Drain backflow is the clear subject, no geyser.",
+      "alt_text": "Synthetic AI-generated phone photograph of storm-drain backflow during rain at a fictional Bosa street corner.",
+      "sha256": "7ba15a8193314d616f7a65f438d474a90cbd2b9b9a893a7a9a654beb6439e45a",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0026.png",
+        "sha256": "17e000d12803a9de3be2c597562fce12bbcbc9bb2897db87c41b44c03b5c42b8"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0027",
+      "dataset_path": "media/unique-post-0027.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active rain. Waist-high diagonal view along a short residential side street: a thin shallow moving stream carries a few fallen green leaves and twigs past an uneven concrete curb. Broad foreground view of leaves and subtle flow lines, brick facades recede in background. No people or vehicles.",
+      "alt_text": "Synthetic AI-generated phone photograph of shallow runoff carrying leaves along a fictional residential street in Bosa.",
+      "sha256": "e8b2c1e9b2f3df318b4ee0f4e0792a94bb1c1087268c2042ae9c6f61b05723df",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0027.png",
+        "sha256": "9ab11b61f98454f7bb7ceacd2de8047f4c27114593a6e1909a277b818ad2c3e5"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0028",
+      "dataset_path": "media/unique-post-0028.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active localized flooding. Photograph taken from just inside a raised front doorway looking across two neighboring house entrances. Shallow water pooled at street-level thresholds; one adult seen only from back safely moves a small wooden chair farther inside onto dry tile, another stack of furniture already raised. Ordinary modest homes, no distress or danger.",
+      "alt_text": "Synthetic AI-generated phone photograph of neighbors protecting furniture near flooded residential entrances in fictional Bosa.",
+      "sha256": "fe8537323869ac40adef831daa0ed775c1b68d56b3fb80048d155e95849d6b3e",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0028.png",
+        "sha256": "35062ecc13db33e7391277c5aefa907e4fd78b244d0848ba8030d706fc656fe1"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0029",
+      "dataset_path": "media/unique-post-0029.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active rain flooding. A narrow pedestrian passage between brick homes is temporarily blocked with a simple unmarked portable barrier and a plain rope; beyond it the paving is covered in shallow rainwater. Eye-level phone photograph from the dry entrance to the passage. No readable warnings or letters; no people.",
+      "alt_text": "Synthetic AI-generated phone photograph of an unmarked temporary barrier across a water-covered pedestrian passage in fictional Bosa.",
+      "sha256": "209aaef3d9297edc4f41e020d209b236604c8e3120cd97d9c66e6ff42b9c278d",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0029.png",
+        "sha256": "09bf8ba10a18a7d75e2c690f9967e0e7fc8b49c74519a2fbe6bdb5e28275aa10"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0030",
+      "dataset_path": "media/unique-post-0030.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active flooding. Phone photograph looking steeply down from a second-floor balcony at a short flooded residential road and three parked small cars with only lower parts of tires in opaque shallow water. A small edge of balcony railing in foreground, distinct top-down viewpoint, muted brick facades. No license plates visible, no asserted depth.",
+      "alt_text": "Synthetic AI-generated elevated phone photograph of shallow floodwater around parked cars on a fictional Bosa residential road.",
+      "sha256": "1a60910d4dc01fcd440ca3ee3c1d003fca463adcb71c9d9cf49185183e6dea58",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0030.png",
+        "sha256": "5033f932b8b1363ac49e8c3cca65dd3008ce46a94c5dd55de1b1d658a083614e"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0032",
+      "dataset_path": "media/unique-post-0032.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active flooding at a small neighborhood shop. View from the shop interior toward the open plain metal shutter: a little muddy water has entered the front floor, while unbranded closed cardboard boxes are stacked on a dry shelf deeper inside. A pair of adult hands lifts one box, no face needed. No packaging print or signage.",
+      "alt_text": "Synthetic AI-generated phone photograph of boxes being moved away from a flooded entrance in a fictional small Bosa shop.",
+      "sha256": "ace742f9bb6d41ae2c98c4823f3f3c0506eb697aad6f1dbb4da9a68514cc7d20",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0032.png",
+        "sha256": "a7b44046ee44714cb64663909050f7c9dd4d20957a70e44c0e984f1688883372"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0033",
+      "dataset_path": "media/unique-post-0033.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active shallow flooding. Tight phone view downward from a safe doorway onto three rough concrete entry steps. Street runoff has just reached the bottom of the first step, with rainwater continuing past the threshold. Worn reddish tiled wall and dark green plain gate edge. No ruler, marks, or depth labels.",
+      "alt_text": "Synthetic AI-generated phone photograph of street runoff reaching the first entry step of a fictional Bosa home.",
+      "sha256": "7b39e46d542eca52ed10df82d60591a29eace8f1f36c13b7bae74519ef5c7a2c",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0033.png",
+        "sha256": "41aedcab7184c557ed9380b834454e77b7a09a1562f4c7a9d84fa5a1fa250cf7"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0034",
+      "dataset_path": "media/unique-post-0034.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active flooding at a small residential junction. Wide diagonal phone view from a dry curb of an intersection fully covered in shallow murky water. Two adults with plain umbrellas are seen from behind turning onto a visibly drier side walkway, avoiding the flooded crossing. No faces, children, signs, lettering or traffic spectacle.",
+      "alt_text": "Synthetic AI-generated phone photograph of pedestrians using a drier alternate path around a flooded fictional Bosa crossing.",
+      "sha256": "1a45f41e8cb2a7a92eaf71780f3b8631c81de16729d536067d667ade41d48986",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0034.png",
+        "sha256": "320eb1a73f2de434c7de0d7a959afd59515f1453a5a993712a874c3e332b4f29"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0035",
+      "dataset_path": "media/unique-post-0035.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active flood runoff in a small paved residential courtyard. Close casual view from sheltered doorway: two adults seen from shoulders down lift lightweight empty plastic chairs and a small planter onto a dry raised ledge, away from a shallow moving sheet of water. Simple brick walls and tiled patio, mutual help, no danger.",
+      "alt_text": "Synthetic AI-generated phone photograph of neighbors moving lightweight patio items away from runoff in fictional Bosa.",
+      "sha256": "d18150198e163b06a80e5804422c769db2a3b22ffa319a4d7638e139aa478e76",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0035.png",
+        "sha256": "6690538fbbd7f23660b01ac024cbfa4d69ec22622db602c14a70b099cbfa226e"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0036",
+      "dataset_path": "media/unique-post-0036.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active rain aftermath while floodwater still moving. Low phone view at the exit of a narrow residential block onto a larger paved road: brown muddy water obscures the exact curb edge, irregular road surface and sediment blending together. Foreground worn sidewalk corner is dry enough for photographer. No people, text or dramatic depths.",
+      "alt_text": "Synthetic AI-generated phone photograph of muddy water obscuring a road edge at a fictional Bosa block entrance.",
+      "sha256": "f14b2ff3309394cd5b7a0a5608d12fb155bcb01acb04d62940c70c5ca330501e",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0036.png",
+        "sha256": "684b972cec6e7c04327a11a51c3235272b2bc65a707f082bce78e076a5c6790e"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0037",
+      "dataset_path": "media/unique-post-0037.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Flooding has not yet receded. View from the dry interior of a house toward a closed plain gray metal gate: shallow rainwater is still seeping under the gate and spreading across the tiled entry floor. The visible outside street is wet, gray overcast light, small ripple lines, no exaggerated rising water or furniture damage.",
+      "alt_text": "Synthetic AI-generated phone photograph of shallow water continuing to enter beneath a residential gate in fictional Bosa.",
+      "sha256": "7c9ec0ca92e45b91bade8b5705426cdba3573deee8a666a61591db8fc57b835b",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0037.png",
+        "sha256": "fbec39de5bb88e4eb4774dfeb7e3441708546ff559e0976767bb6a9b5b39f364"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0038",
+      "dataset_path": "media/unique-post-0038.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active shallow flooding outside a residential entrance. A candid phone photograph from a dry interior hall looking toward a wet exterior doorway, with a plain household safety gate firmly separating the safe dry living area from the entrance. A small pair of clean children's boots and an empty pet bed rest well behind the safety barrier on the dry interior floor, while shallow water is visible only outside. No people or animals anywhere in the image. Quiet protective household arrangement, no danger or distress.",
+      "alt_text": "Synthetic AI-generated phone photograph of a household barrier separating a dry living area from a flooded exterior entrance in fictional Bosa.",
+      "sha256": "4661bb66715598a4b10326c89e7a2995e95c3bd965c95487062c099847c8da2c",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0038.png",
+        "sha256": "ff09af999d606a2d19a6e34579aaf7ced9e3f1ba0e7e8c16e1e5469b83d08bbe"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0039",
+      "dataset_path": "media/unique-post-0039.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Active rain flooding. Photo taken from a safe slightly elevated side viewpoint along an overfilled street gutter toward a residential entrance whose flat threshold is level with or slightly LOWER than the road. The sidewalk has a broad worn shallow access ramp sloping gently down from the road to the doorway. A continuous thin sheet of brown water spreads from the overflowing gutter across the ramp toward the entrance, gathering at the closed turquoise door. Physically plausible nearly level water surface, only small ripples; no waterfall, no spout, no jet under the door, no uphill flow. Foreground gutter, shallow ramp and wet entrance visible together. No people or signs.",
+      "alt_text": "Synthetic AI-generated phone photograph of gutter overflow diverting toward a fictional Bosa residential entrance.",
+      "sha256": "e2bcfd9d6dc8b21fa160d81cf040edffb2f701b31ed586559239eb6f1e5a0484",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0039.png",
+        "sha256": "dd3cd6fcaedd94d0e45a0b75731cf868eff83b94da37660ed357ede707178769"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "dataset_path": "media/flood-bosa-receding.webp",
+      "sha256": "846627987a9ad814895539fa98b54ea2c65326106c2045f03812ffe3dc6110bd",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "prompt": "Use case: photorealistic-natural. Asset: full-bleed 4:3 landscape photo for a clearly labeled Synthetic training social post. Generate a fictional but realistic ordinary smartphone photo inspired by Bogotá, Colombia. Scene: After localized rain flooding in Bosa, Bogotá: water level has dropped, asphalt clearly visible, only shallow curb puddles, damp silt and leaves beside a storm drain. Modest dense two-storey brick and pastel stucco residential houses, utility cables, cool overcast afternoon. No ongoing flood or deepwater. Natural phone-camera perspective from a safe sidewalk at human eye level, realistic materials and high-altitude daylight, subtle grain, no cinematic lighting. Main environmental details clearly legible in small thumbnail. No identifiable people, no readable addresses or signs, no logos, no injuries. AI-generated illustrative imagery, not a real incident record. Image only: no frame, no UI, no illustration, no captions, no text, no watermark.",
+      "fixture_id": "post-0040",
+      "scene": "flood-bosa-receding",
+      "alt_text": "Synthetic AI-generated scene of receding floodwater and muddy residential entrances in Bosa; a fictional scenario, not documentation of a real incident.",
+      "source_png": {
+        "dataset_path": "media/flood-bosa-receding.png",
+        "sha256": "8cc613cd3eddc945298d010f8421ea3f2cf1326294ef348135e02b1638919cc3"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0041",
+      "dataset_path": "media/unique-post-0041.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Later phase after the rain has eased. Close phone photograph of a street drain slowly taking away shallow residual water, gentle small whirlpool and wet leaves near grille, surrounding asphalt beginning to emerge. A different quiet residential corner with beige plaster and exposed brick in the background, cloudy brighter daylight, no heavy rain or active backflow.",
+      "alt_text": "Synthetic AI-generated phone photograph of slow drainage after rainfall eases at a fictional Bosa street corner.",
+      "sha256": "d2d0619e1f171d32b7d0ef42f73d5dc2ba08f0aef4d626ea869a4f39be6c5e26",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-receding",
+      "source_png": {
+        "dataset_path": "media/unique-post-0041.png",
+        "sha256": "78d477fe09fa9ab9a1d7f915bc75a7e437befd9624729bbe7ebed4b8e2f6b1c2"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0043",
+      "dataset_path": "media/unique-post-0043.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Later receding phase. Tight oblique phone photograph of the base of a worn light-yellow stucco residential wall: a natural horizontal dark damp mud stain sits slightly above the current shallow water surface, visibly suggesting the level has fallen a little. No measurement scale, handwritten mark, letters or numbers. Soft cloudy daylight and still residual puddle.",
+      "alt_text": "Synthetic AI-generated phone photograph of a damp mud line above receding water beside a fictional Bosa wall.",
+      "sha256": "30997810b4b34f457fa72538b43d8b0946f8f0f56beb9d46853d35ad27eb8374",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-receding",
+      "source_png": {
+        "dataset_path": "media/unique-post-0043.png",
+        "sha256": "d72d529021096cc6232a0d375bb28d5bf37770dd714472be75012ed0e8f8feb3"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0044",
+      "dataset_path": "media/unique-post-0044.webp",
+      "prompt": "Use case: photorealistic-natural. Create one new independent fictional smartphone photograph for a synthetic emergency-training dataset, not a collage. Landscape 4:3. Location resembles the ordinary low-rise brick and plaster residential blocks of Bosa, Bogotá, Colombia; no specific real address. Modest metal gates, tiled thresholds, concrete sidewalks, overcast cool daylight, natural amateur handheld framing, slight phone-camera imperfections. Plausible localized shallow urban rain flooding, not a catastrophic river flood. No logos, watermark, legible writing, numbers, license plates, signs, injured people, rescue claims or dramatic cinematic effects. No interface overlay. The image will be clearly labelled AI-generated/synthetic in the dataset, so do not add text inside the image. Later receding flood phase. Phone view toward a residential access now mostly covered in wet mud and a few small shallow puddles rather than standing floodwater. Two adults seen from behind wait on the dry raised sidewalk before crossing; a plain closed gate and low brick houses beyond. Soft cloudy light, cautious calm scene, no signage or text.",
+      "alt_text": "Synthetic AI-generated phone photograph of muddy access and neighbors waiting on dry ground after water recedes in fictional Bosa.",
+      "sha256": "4b7b14cf572a86e752d43ca8fb17ad081aa7206c857d6133dac235eca5e9d2c6",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "flood-bosa-receding",
+      "source_png": {
+        "dataset_path": "media/unique-post-0044.png",
+        "sha256": "e9cb721c13de107aca4effc2abd8563f278d99db7c6b0a9f65e07d121fe36701"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "dataset_path": "media/fire-chapinero-active.webp",
+      "sha256": "7955dfadc6a3ce2577089fbca5311cefb5b0b39cc5b3489d5c96231bc955a310",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "prompt": "Use case: photorealistic-natural. Asset: full-bleed 4:3 landscape photo for a clearly labeled Synthetic training social post. Generate a fictional but realistic ordinary smartphone photo inspired by Bogotá, Colombia. Scene: Eastern hills above Chapinero, Bogotá, viewed safely from the edge of a redbrick neighborhood. A limited vegetation fire on a scrub and eucalyptus hillside, small visible orange flames along a short patch of low dry vegetation and a gray smoke plume rising behind it. Intact brick rooftops in foreground, steep green mountain slope, cool cloudy high-altitude daylight. No buildings burning, no dramatic inferno. Natural phone-camera perspective from a safe location at human eye level, realistic materials, subtle grain, no cinematic lighting. Main environmental details clearly legible in small thumbnail. No identifiable people, no readable addresses or signs, no logos, no injuries. AI-generated illustrative imagery, not a real incident record. Image only: no frame, no UI, no illustration, no captions, no text, no watermark.",
+      "fixture_id": "post-0049",
+      "scene": "fire-chapinero-active",
+      "alt_text": "Synthetic AI-generated scene of small flames and smoke over burning vegetation in Chapinero; a fictional scenario, not documentation of a real incident.",
+      "source_png": {
+        "dataset_path": "media/fire-chapinero-active.png",
+        "sha256": "9fec84fb6687ae20707e0fc370b4fe345f0a28898fb4dbd238023adcc196bfbd"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0050",
+      "dataset_path": "media/unique-post-0050.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. View from inside a resident's window: a small part of an unpainted concrete windowsill and out-of-focus window edge in the foreground. Beyond an ordinary brick residential roof, a NARROW STRIP of dry hillside grass emits a dark gray smoke column pushed sideways by variable wind. The smoke, not a large flame, is the subject. Distant greenery and cloudy pale sky. The photographer stays well away from the fire.",
+      "alt_text": "Escena sintética generada por IA: humo oscuro sobre una franja de pasto, visto desde una ventana en Chapinero; no es una fotografía de un incidente real.",
+      "sha256": "1f15187da15fcc2e5bf415804da64f2bab7e19c4d7dac3c65600aacade8707e4",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0050.png",
+        "sha256": "e50a8edf8e928af3f4d1819b739b5daf592e6fab38a515188ab8192656b15d14"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0051",
+      "dataset_path": "media/unique-post-0051.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. View taken from a safe distance beside a rough pedestrian hillside path, looking diagonally across at LOW SMALL ORANGE FLAMES among dry leaves and yellow-brown grass. Dusty path stones dominate the foreground, a sparse wire fence recedes diagonally at the left, and a few shrubs occupy the upper right. Localized wispy smoke only. Absolutely no people standing near the flames. A casual phone photograph, not a dramatic cinematic wildfire.",
+      "alt_text": "Escena sintética generada por IA: llamas bajas entre hojas y pasto, observadas desde un sendero a distancia en Chapinero; no documenta un incidente real.",
+      "sha256": "29b0a221ee7723a3d2eb26e92551e2052650985eea590197d099d35b0097b6ec",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0051.png",
+        "sha256": "b5031c7af698eac56b098b1fc1291ee83ca811b8e3e2e9127eb198bfa3285391"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0052",
+      "dataset_path": "media/unique-post-0052.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Wide resident's-eye view between two ordinary brick buildings toward a vegetation patch on a green-brown hillside. Smoke rises only from the hillside grass and shrubs in the central distance. All visible homes and roofs are intact and unaffected, with clear space separating them from the small smoky patch. Slightly uneven handheld horizon. Keep the scope of the photograph limited: do not imply the whole locality is affected.",
+      "alt_text": "Escena sintética generada por IA: humo que sale de vegetación de Chapinero y viviendas visibles intactas; no documenta un incidente real.",
+      "sha256": "0efaa2730124837d16e3a3aeb2a5a3d7ab8222ec1a7c9f1627b7082f472b9c88",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0052.png",
+        "sha256": "c6a15f9cc702100205637dd0e19a5ca83c3ad1a1eea6f6a9a8c3e12e11ca9129"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0053",
+      "dataset_path": "media/unique-post-0053.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Long-distance phone view uphill from an ordinary sloping residential street. A SMALL ISOLATED orange fire focus is visible far away in hillside vegetation, with a modest rising trail of smoke. A plain gray boundary wall and an unmarked utility pole border the near street; no signs or text. Slight phone zoom softness in the distant fire, realistic scale and restrained color. The photographer is far from the burning area.",
+      "alt_text": "Escena sintética generada por IA: un foco de fuego lejano en la vegetación de Chapinero, visto desde una calle residencial; no documenta un incidente real.",
+      "sha256": "412cf7461f97b6437fd6d1334602f166e94b97c9a5aac87b188e38d0a8371cfb",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0053.png",
+        "sha256": "3a2344782e36094c7d894fa035f384319d2d24d55df56b51e2d44ee5d30547b0"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0054",
+      "dataset_path": "media/unique-post-0054.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Photograph from a safe broad concrete landing beside an uphill footpath, a weathered wooden handrail crossing the lower foreground. Beyond an open buffer, an uneven THICKER PUFF OF GRAY SMOKE rises from a limited grass-and-shrub patch; some lighter smoke surrounds it. No people at the burning edge. The hillside remains mostly green, with smoke occupying the upper left of the photograph; modest localized fire, not a city-wide disaster.",
+      "alt_text": "Escena sintética generada por IA: una humareda espesa sobre vegetación de Chapinero, observada desde un descansillo retirado; no documenta un incidente real.",
+      "sha256": "2ef6ddb660e25a0019a64835dcb9b4d65843453240d07c0a8168892e0dec36a8",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0054.png",
+        "sha256": "5a798dd285b003ba91789429f82a203d50d5a834dc62958c9820f81b8197949e"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0056",
+      "dataset_path": "media/unique-post-0056.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. View from a quiet residential street corner, with a close plain brick wall cropped along the RIGHT edge and asphalt in the lower foreground. A GRAY SMOKE CLOUD partially obscures the vegetation slope beyond the corner. Through the thin edges of the cloud one can still see dark shrub silhouettes. The smoke makes the source difficult to distinguish; do not invent large visible flames or damaged buildings. Natural phone shot with muted gray-green colors.",
+      "alt_text": "Escena sintética generada por IA: una nube gris oculta parcialmente la vegetación de Chapinero vista desde una esquina; no documenta un incidente real.",
+      "sha256": "39a2ac509dee61927c1e1ef24431e9bf7475e4b283ec143bcd6fe794af995670",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0056.png",
+        "sha256": "29376ae9b0430198227be9e914819b01b1c10b7ef71e8fd1970247f07f0f5156"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0057",
+      "dataset_path": "media/unique-post-0057.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Distant high-angle view from a safe residential terrace toward a dry grassy hillside pocket. Several modest connected tongues of flame appear to be reaching adjacent dry tufts, with a smoky edge and abundant unburned green vegetation surrounding the affected patch. No measurement markings and no claim about total area. Foreground includes a softly blurred simple terrace railing at the bottom, while the fire patch is off-center toward the right.",
+      "alt_text": "Escena sintética generada por IA: fuego localizado que alcanza matas de pasto seco en Chapinero, visto a distancia; no documenta un incidente real.",
+      "sha256": "8c792be588ceb98b25fd2c53f7ec1cd44d22fcd4fa5a259dfe7b0a718318f17b",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0057.png",
+        "sha256": "a80666706c1b699c8cad16f5a673643aea27d62af6f3bd8231ee1c6271542302"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "dataset_path": "media/fire-chapinero-smoldering.webp",
+      "sha256": "a5958098eec7c18802c65e35e5e92e2ca1c9d2c8c08bb140cd1e7f52db845b24",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "prompt": "Use case: photorealistic-natural. Asset: full-bleed 4:3 landscape photo for a clearly labeled Synthetic training social post. Generate a fictional but realistic ordinary smartphone photo inspired by Bogotá, Colombia. Scene: Eastern hills above Chapinero, Bogotá after a small vegetation fire has subsided. A dark scorched patch of low scrub on a steep green hillside, a few thin wisps of residual gray smoke, eucalyptus trees still standing, intact redbrick neighborhood rooftops at lower edge. No visible flames. Cool overcast high-altitude afternoon. Natural phone-camera perspective from a safe location at human eye level, realistic materials, subtle grain, no cinematic lighting. Main environmental details clearly legible in small thumbnail. No identifiable people, no readable addresses or signs, no logos, no injuries. AI-generated illustrative imagery, not a real incident record. Image only: no frame, no UI, no illustration, no captions, no text, no watermark.",
+      "fixture_id": "post-0058",
+      "scene": "fire-chapinero-smoldering",
+      "alt_text": "Synthetic AI-generated scene of smoldering blackened vegetation with light smoke and no visible flames in Chapinero; a fictional scenario, not documentation of a real incident.",
+      "source_png": {
+        "dataset_path": "media/fire-chapinero-smoldering.png",
+        "sha256": "e953e57b92ea2be93cc42a6a3abc6d2be86f36450354ed446de43938d8434604"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0059",
+      "dataset_path": "media/unique-post-0059.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Candid street-level phone photograph: three distant adult neighbors, small and unidentifiable, remain on a paved neighborhood walkway well away from a smoky dry-vegetation patch uphill. One gestures toward a modest smoke column; all stay behind the wide clear foreground distance, none approaches the vegetation. Focus on the spatial separation and the observable smoke, not on faces. Intact ordinary brick housing, natural everyday clothes, no uniforms or logos.",
+      "alt_text": "Escena sintética generada por IA: vecinos permanecen en un andén distante de la vegetación con humo en Chapinero; no documenta un incidente real.",
+      "sha256": "31fbf6cf3a1015358a461fd002bd0ca2b46934e0297828fddd99927e47be28d5",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0059.png",
+        "sha256": "b691d71dee62e41ef672a7bc066c8aad1e14d7e2d4fd5733d24a75a541a28b90"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0060",
+      "dataset_path": "media/unique-post-0060.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. View from an empty simple roadside bus-stop shelter with no writing or logos, a slim metal shelter support barely entering the left foreground. In the middle distance a modest smoke column rising from hillside grass bends abruptly sideways in a gust; a faint older vertical plume remains above. A few leaves on a nearby branch point with the wind. No large flames or affected homes. Ordinary restrained cellphone framing, cloudy Bogotá daylight.",
+      "alt_text": "Escena sintética generada por IA: el viento desvía una columna de humo sobre vegetación de Chapinero, vista desde un paradero; no documenta un incidente real.",
+      "sha256": "5d5bd1ca8e8ef9c7983ad6fdb1c3a0101e7f77881aa8519358dd93b92867ef5c",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0060.png",
+        "sha256": "f80d4310b2ca42049c9f005ae15e04c945cef913f390e48c6975f5b1548b0037"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0061",
+      "dataset_path": "media/unique-post-0061.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Safe-distance slightly zoomed phone photograph of a localized hillside fire becoming smaller: LOW DIM ORANGE FLAMES remain in just two small grass clumps, while soft gray smoke continues rising from the same blackening patch. Composition uses a broad unburned foreground of scrub and rocks and the affected patch low on the left; an intact brick wall is far in the background. Do not depict a fully extinguished scene.",
+      "alt_text": "Escena sintética generada por IA: llamas pequeñas y humo persistente en un parche de vegetación de Chapinero; no documenta un incidente real.",
+      "sha256": "223b91f27b8915352508a1b48fabb9375806a60527c439e6e1f91335fe72e17d",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0061.png",
+        "sha256": "4ea8dea72875dce28cf130b2c5360d73bf19c7b851372e192ddbaa771330d2ad"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0062",
+      "dataset_path": "media/unique-post-0062.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Recovery-phase view from a safe distance across a small hillside patch of DARK BLACKENED GRASS beside the earlier fire focus. Thin pale smoke still emerges from the charred tufts. NO VISIBLE FLAMES, no orange fire glow. Frame the diagonal boundary between green grass and charred vegetation, with a coarse gravel edge in the foreground and a few slender shrubs behind. Quiet observational cellphone shot under flat cloudy light.",
+      "alt_text": "Escena sintética generada por IA: pasto ennegrecido que todavía humea en Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "sha256": "e7845d429e65983f92fe145c207ca00af592f4bb0b20949781c319201ffbda5c",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-smoldering",
+      "source_png": {
+        "dataset_path": "media/unique-post-0062.png",
+        "sha256": "f518030d40bde4d9cd3a280b39462de4cef770401cf56769a68138c2af37873e"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0063",
+      "dataset_path": "media/unique-post-0063.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Distant phone photograph from beside a bend in a hillside pedestrian path, kept far from the source. ONE SMALL FRESH ORANGE FLAME is visible rising again from dry grass at the edge of a partly blackened patch as a gust bends fine smoke and surrounding grass sideways. The small rekindled flame is off-center left, with a simple stone retaining wall crossing the far background. Localized, not a wall of fire. No people near the source.",
+      "alt_text": "Escena sintética generada por IA: una llama pequeña se aviva en pasto de Chapinero con una ráfaga, vista a distancia; no documenta un incidente real.",
+      "sha256": "5d2fbc013f932d4bf5864abc888db27cfcc81c556273b2c8e5e0535b97686cc8",
+      "mime_type": "image/webp",
+      "width": 1672,
+      "height": 941,
+      "scene": "fire-chapinero-active",
+      "source_png": {
+        "dataset_path": "media/unique-post-0063.png",
+        "sha256": "6e999a14de51c25e826061f47d5840b50c7dd9efe813e6bc50ea557f471b6ff1"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0064",
+      "dataset_path": "media/unique-post-0064.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Recovery-phase wide phone view over a low concrete garden wall toward hillside vegetation. Light residual smoke is DISPERSING INTO TRANSPARENT WISPS from a single scorched grass patch, allowing more of the slope to be seen. NO FLAMES and no orange glow. Several healthy green bushes break up the background, clouded pale sky fills only a narrow band. Uneven casual handheld framing, not a polished landscape postcard.",
+      "alt_text": "Escena sintética generada por IA: humo residual que se dispersa sobre un terreno de Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "sha256": "56f6d9f8746d2e9b07f458a76e4f3296dda034cb13df5423e9ba4759a546a07d",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-smoldering",
+      "source_png": {
+        "dataset_path": "media/unique-post-0064.png",
+        "sha256": "d57efcaa5c696da07b9e1be4a70a97df62b0d604068b350451069c4229109ff7"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0065",
+      "dataset_path": "media/unique-post-0065.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Recovery-phase distant view of a partly obscured hillside area: THREE SMALL SEPARATE POINTS OF PALE SMOKE rise from darkened grass between bushes. NO TALL FLAME, NO SMALL FLAMES, and no orange glow. Some smoke and intervening vegetation make the points hard to distinguish; the unseen area behind must remain unseen. Frame from a safe neighborhood balcony with a cropped rough brick parapet at the bottom right, natural phone zoom softness.",
+      "alt_text": "Escena sintética generada por IA: varios puntos de humo entre vegetación de Chapinero, sin llamas visibles y con vista parcial; no documenta un incidente real.",
+      "sha256": "6dd94fb0dcd59ef3a06ccf5beeaeb5f77a366e96b36cdc4aa43177fd1fc0e0fd",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-smoldering",
+      "source_png": {
+        "dataset_path": "media/unique-post-0065.png",
+        "sha256": "9b6a7136c3ea229926257e871f0921fc4d8df7d6eb054683d7c8cf1eec8b5d52"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0067",
+      "dataset_path": "media/unique-post-0067.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Recovery-phase resident's phone photograph from a level neighborhood street toward a hillside. A LOW SHORT PLUME of thin pale smoke hugs a modest blackened vegetation patch; there are NO VISIBLE FLAMES and no orange glow. Surrounding shrubs and an ordinary tiled rooftop help show how low the plume is. Smoke remains clearly visible but restrained; do not imply official containment or a completely extinguished fire. Distinct wide view with cloudy sky and much unburned vegetation.",
+      "alt_text": "Escena sintética generada por IA: una columna baja de humo residual en vegetación de Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "sha256": "ff84e41d7a1aaaee6c9e3f993e9addd205f73065210cd34290da6c4de8183d3b",
+      "mime_type": "image/webp",
+      "width": 1672,
+      "height": 941,
+      "scene": "fire-chapinero-smoldering",
+      "source_png": {
+        "dataset_path": "media/unique-post-0067.png",
+        "sha256": "eec6532a639c076181071b1f4818600d50c272e696336fb70d56d471f6c977bc"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0068",
+      "dataset_path": "media/unique-post-0068.webp",
+      "prompt": "Use case: photorealistic-natural. Generate ONE entirely new standalone amateur cellphone photograph for a fictional Synthetic social-media demonstration, set at the urban hillside edge of Chapinero, Bogotá, Colombia. This is not documentation of an actual incident. Natural overcast Andean daylight, ordinary handheld phone exposure and authentic surface texture, believable modest localized dry-vegetation fire rather than a vast catastrophe. Landscape composition. No collage, image grid, frames, UI, captions, text overlays, watermarks, logos, readable signs, emergency branding, injured people or destroyed homes. Invent a distinct viewpoint, vegetation arrangement and surroundings for this photograph; do not reuse any prior composition. Recovery-phase off-center phone photograph of the visible edge of a scorched hillside patch from a safe path. BLACK GRASS TUFTS border intact green vegetation, and fine threads of white-gray smoke still curl from the black edge. NO VISIBLE FLAMES and no orange glow. A broad plain stone path occupies the lower left; do not show the hidden interior behind dense shrubs. Ordinary authentic daytime texture, not a dramatic close-up at the fire.",
+      "alt_text": "Escena sintética generada por IA: borde de pasto negro con hilos de humo residual en Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "sha256": "ab09715be69d41708ea237f936df8ddad38e69a0dfc23e49ed574ebb3466d827",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "fire-chapinero-smoldering",
+      "source_png": {
+        "dataset_path": "media/unique-post-0068.png",
+        "sha256": "5327140a86f627635483d35b3b75524a51de7f61b29883023f5782c55e52511d"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "dataset_path": "media/landslide-ciudad-bolivar.webp",
+      "sha256": "f5e1f00b437f256bf7480d2e81985a7953a47944ee64972ada9dc4c6922e636d",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "prompt": "Use case: photorealistic-natural. Asset: full-bleed 4:3 landscape photo for a clearly labeled Synthetic training social post. Generate a fictional but realistic ordinary smartphone photo inspired by Bogotá, Colombia. Scene: A narrow residential hillside road in Ciudad Bolívar, southern Bogotá after rain. A modest fresh landslide of wet brown soil, mud and small rocks spills from an exposed steep earthen embankment onto the roadside. Intact self-built redbrick houses rise along the hillside in the background, utility poles, wet asphalt, gray cloudy afternoon. No active falling earth, no collapsed buildings, no rescue personnel. Natural phone-camera perspective from a safe location at human eye level, realistic materials, subtle grain, no cinematic lighting. Main environmental details clearly legible in small thumbnail. No identifiable people, no readable addresses or signs, no logos, no injuries. AI-generated illustrative imagery, not a real incident record. Image only: no frame, no UI, no illustration, no captions, no text, no watermark.",
+      "fixture_id": "post-0073",
+      "scene": "landslide-ciudad-bolivar",
+      "alt_text": "Synthetic AI-generated scene of wet earth and stones from a small landslide beside a hillside path in Ciudad Bolívar; a fictional scenario, not documentation of a real incident.",
+      "source_png": {
+        "dataset_path": "media/landslide-ciudad-bolivar.png",
+        "sha256": "1b998c07fd66a3aa9f8352d722d5e27111bae429a5ed4b889673fcb481d57274"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0074",
+      "dataset_path": "media/unique-post-0074.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Viewed diagonally from a safe point on an ordinary path: fresh loose clods of damp brown earth at the foot of a low grass-topped slope after rain. Frame the clods in the lower right, uphill brick neighborhood blurred in the left background. The narrow path is still mostly clear. No visibly moving material.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Fresh damp earth at the foot of a grassy slope beside a path. Not documentation of a real incident.",
+      "sha256": "f5ad8022c7a54c2c6dabb1d1b4d31eb72de55fb200525c377ddf625d3c236ae6",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0074.png",
+        "sha256": "afc6cbc45fbd25248f87e124b5c3eb38689043f358f035440f8825f85d674675"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0075",
+      "dataset_path": "media/unique-post-0075.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. A shoulder-height view looking down a narrow concrete hillside footpath. A shallow fan of freshly slipped brown soil covers only the left half of a short section, with the right half still exposed. Modest brick homes and a descending bend in the far background. Make the partly covered path the visual focus.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A short section of hillside path partly covered with loose soil. Not documentation of a real incident.",
+      "sha256": "c9c1b1419dbcaf0dab87027e9c6c3b9b7eddd793defa8939864e67abe65cafde",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0075.png",
+        "sha256": "fa9c4d077761b86ca5884c94b89e6722b3b62a5189e6e463fa6b454dc579a267"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0076",
+      "dataset_path": "media/unique-post-0076.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Wide view from across a descending neighborhood path, showing a small wet earthen slope to the left with a scattering of little fallen clods at its base. Two tiny distant adult neighbors walk on the far side of the lane well away from it, back views only. Ordinary everyday scene, ample clear pavement, no disaster spectacle.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Residents keeping their distance from small soil falls beside a neighborhood path. Not documentation of a real incident.",
+      "sha256": "f0c1258c24aafb8630bd5bc758b4ba7ba16d93a97cee8b8eecf030879ffe1548",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0076.png",
+        "sha256": "76a38f2da6aa1def941aaf6b33e497e6340feeedd4ab776d075f03fa6820419f"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0077",
+      "dataset_path": "media/unique-post-0077.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Photograph from several meters away, modest zoom feel: a handful of recently fallen small stones scattered beside a steep damp soil cutting, wet grit and thin grass roots. Composition mostly the mottled slope and path edge, a dull red brick corner far right, no view suggesting the whole slope has collapsed.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Small recently fallen stones below a wet roadside cutting. Not documentation of a real incident.",
+      "sha256": "d99770862d05214210babbf090a866c0303607dc290cbee33d4b747885041a2c",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0077.png",
+        "sha256": "6cda0abe25875758976bee3ab8fcdcc0f661d16915343c3e96684ea179b65b37"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0078",
+      "dataset_path": "media/unique-post-0078.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Oblique view along a hillside pedestrian path. On its soil verge a subtle fresh step or small shallow slump in the earth, only roughly ten centimeters, is visible among grass roots; wet path in foreground, simple concrete stairs receding uphill. Do not exaggerate into a deep crack, chasm or giant landslide.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A small fresh step in the wet ground next to a hillside path. Not documentation of a real incident.",
+      "sha256": "056919c6fe536de4d0c58ad5cfba26539448372cd1c0d10eac02018080705f3f",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0078.png",
+        "sha256": "bce2fd9c71293dd714986074cec9a1b34d8b66b19a63a1fbeeda14e70098e754"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0080",
+      "dataset_path": "media/unique-post-0080.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Low but safely distant sideways view of a narrow trickle of cloudy water running down a wet dirt bank toward the path, bringing a little fine silt. Frame a thin glistening channel among earth and grass; rough residential concrete path bottom, soft grey light. No rushing torrent or large mudflow.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A thin runoff trickle carrying fine silt down a wet slope. Not documentation of a real incident.",
+      "sha256": "ce77d3bcecfc0778872f7899c918bcc13425dba471933e084c611e046acf364f",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0080.png",
+        "sha256": "30cbb90e891d49ffb7f4775a7191bc93f6a5f37a9d39b524ab00280c7585cc8a"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0081",
+      "dataset_path": "media/unique-post-0081.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Looking from the top of a small concrete stair connection toward a residential street below: modest mud and scattered fist-sized or smaller stones block part of the pedestrian landing where it borders a soil slope. Clear remainder visible, hillside brick homes beyond. No road destruction or house damage.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Mud and small stones partly obstructing a pedestrian connection to the lower street. Not documentation of a real incident.",
+      "sha256": "7c8861493c2f2f0f220c652cfdf281c6bd87db9915103f5ae74df1982154517a",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0081.png",
+        "sha256": "bf4ab6ecd5d9ed0130b41f3ffd3e169eb11d0a1f06814237fd5ba614f36b634e"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0082",
+      "dataset_path": "media/unique-post-0082.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. From solid pavement on the opposite side of the path, photograph a small patch of detached soil alongside slightly leaning green plants on a wet bank. Foreground dry-ish pavement strip grounds safe distance; tilted grasses and two small shrubs near exposed roots, distant brick facade. No uprooted big tree.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Detached soil and leaning plants seen from the opposite side of a path. Not documentation of a real incident.",
+      "sha256": "364f0d1bad8172dbc5a91cab85b5ea2f04379f3c433b02bc8e94ee73a2a6944a",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0082.png",
+        "sha256": "c9de6b19f52e2e5289c03d269e7c8e9c25fe214c7a7c35d31c4394dba3be7c1e"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0083",
+      "dataset_path": "media/unique-post-0083.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. A wide, slightly tilted phone shot from the bend of a hillside lane: the outer soil verge looks slightly slumped, with a shallow uneven edge and a little fallen earth below. Two very small neighbors in the distant background stand far from the edge; no identifiable faces. Scene suggests cautious uncertainty, not a dramatic collapse.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A shallow uneven verge and neighbors standing away from the path edge. Not documentation of a real incident.",
+      "sha256": "7132946c604d818664ca1cca4b915a3b56828bbe709b7935b76b351a6222c750",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0083.png",
+        "sha256": "9d295efa2b6d634c66c7c84d9d1b54553a50d9fb2a356f47355d3bdd2701c221"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0084",
+      "dataset_path": "media/unique-post-0084.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Straight-on view from the path opposite a modest exposed soil bank. Several narrow rainfall erosion channels streak the brown surface and a low fan of damp grit has accumulated at its foot. Green grass caps the bank, cropped red-brick terrace beyond. Photograph shows only local runoff traces and debris.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Narrow runoff channels on a wet bank above a low accumulation of soil. Not documentation of a real incident.",
+      "sha256": "2961a5a9d0ea8bc6442ecb5be655da8a81358f547356d910bad13d97497f23fd",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0084.png",
+        "sha256": "9c0025bad82ad61eaafd5b607747b1e58f69578f466141ac9729827a592ce04d"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0085",
+      "dataset_path": "media/unique-post-0085.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Eye-level view of an unused small hillside pedestrian passage after a minor soil slip. A modest fallen-earth patch lies across part of the route; a simple plain unprinted rope strung across two modest posts at a safe distance indicates the passage is avoided, without any sign or official markings. Empty path, dull afternoon light, street visible lower down.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: An empty hillside passage kept clear after a small soil slip. Not documentation of a real incident.",
+      "sha256": "888cc2138e72c44e3c0b0840221630c7675f8b2487e61ae272ab4f0463cd0ba6",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0085.png",
+        "sha256": "109c1f0e45c945f04ea31de5f5d30def1c1a5f96b74e00133da48dfd77c6d889"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0086",
+      "dataset_path": "media/unique-post-0086.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Candid distant phone capture of a small wet earthen bank just after a few more little clods have loosened: a few small grains and one walnut-sized clod are dropping close to the bank, a tiny fresh patch exposed above. Most soil remains intact. Slight handheld motion softness, no dramatic cloud or avalanche.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A few small fresh clods dropping close to the face of a wet bank. Not documentation of a real incident.",
+      "sha256": "7932b2f643913111beb3730cb471fa280995218db9767a2cdea5a07d16ba4009",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0086.png",
+        "sha256": "bef66720bc43c6efbdb0c902c7a71f51440bd1452835db1b1eca363c8fdef214"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0087",
+      "dataset_path": "media/unique-post-0087.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Photograph at a diagonal across a neighborhood footpath: lingering shallow mud on the concrete and a thin thread of water coming off the adjacent slope. Small scattered gravel, no cleanup crew or heavy equipment. Frame wet pavement in foreground and a brick stair wall to the left; practical ordinary phone record.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Remaining mud on a footpath with a small trickle from the slope. Not documentation of a real incident.",
+      "sha256": "469b17950df121e191f7cc9b0821fcb49f8c3ef3918f879aeba180f7e8ee4551",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0087.png",
+        "sha256": "929d3295b1479c91f9309b71f7d7867bf38ee7543415d2b517c592faa5270d3c"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0088",
+      "dataset_path": "media/unique-post-0088.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Tighter eye-level composition of an intact but saturated earthen slope after rain has eased: dark wet soil sheen, beads on sparse grass, several thin seep lines, old small soil accumulation at bottom. Overcast sky is becoming a little brighter. No rain streaks, no fresh falling material, no large instability shown.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A saturated earthen bank after the rain has eased. Not documentation of a real incident.",
+      "sha256": "b9a2cb67d8a25d45ba0f63febc9e519e8801e36dd545ef003f57d1cf3e7dfe57",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0088.png",
+        "sha256": "1315e204c53d11bbb2e70ccc2e0de0b74d8689ae871eb6e485aa534c85c796da"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0089",
+      "dataset_path": "media/unique-post-0089.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Limited partially obstructed view around a rough brick corner from a safe residential path toward only a small section of a wet hillside bank. Foreground brick edge and plant leaves conceal much of the bank; one small loose stone visible on ground, no falling stones or dramatic event actually shown. The photograph must honestly convey a restricted view.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A restricted view past a brick corner toward a wet slope and a loose stone. Not documentation of a real incident.",
+      "sha256": "8a22d989f1a69df5ede5c1978a7902090eb86e5a9306c9f37cb261409f2c3186",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0089.png",
+        "sha256": "5b81655716031848134bcdc2467a8eca0c01b7213321159ce840dcd752280575"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0091",
+      "dataset_path": "media/unique-post-0091.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Quiet close-to-medium view from across a path of a limited patch of wet hillside with earlier small loose earth resting at its base. Everything still, no airborne material, no apparent new movement; some intact grass above and a plain concrete ledge bottom. Soft flat daylight. Do not portray all the area as safe or repaired.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A still visible section of wet slope with earlier loose earth at its base. Not documentation of a real incident.",
+      "sha256": "00c6f3db90fcd9776c1ed9fc79edba6a86b55d0370af7a85b1b78b2413db0a41",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0091.png",
+        "sha256": "ce15ccd146d399f72e0f163c53c0569227c29d792ef52ab0166f13d1173e1eb7"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "fixture_id": "post-0092",
+      "dataset_path": "media/unique-post-0092.webp",
+      "prompt": "Use case: photorealistic-natural. Asset type: unique image attachment for a fictional Synthetic social-media post. Generate one landscape 4:3 amateur smartphone photograph taken by an ordinary resident in a modest hillside neighborhood of Ciudad Bolívar, Bogotá, Colombia. High-altitude overcast daylight, unfinished reddish brick houses, ordinary concrete pedestrian paths, credible wet soil and small stones; natural exposure, handheld imperfect framing, fine real textures, no cinematic treatment. This is a new, independent photograph, not a variant, crop, collage or contact sheet. The event is a small local soil slip, never a major disaster. No casualties, injuries, emergency personnel, damaged homes, dramatic boulders, readable text, legible signs, logos, watermarks or embedded captions. Wide view along a narrow sloping pedestrian passage with an existing small pile of detached damp earth remaining on part of the path. No motion, no cleanup, no new debris in air; loose soil bank next to it and ordinary residential brick walls uphill. Brighter grey afternoon, slightly off-center amateur phone framing.",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Loose earth still on part of a hillside passage during a pause in visible movement. Not documentation of a real incident.",
+      "sha256": "cf207eb032512a4854d6394e4ad6ce72697fd31668deb7b153ecea790e0fa038",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "scene": "landslide-ciudad-bolivar",
+      "source_png": {
+        "dataset_path": "media/unique-post-0092.png",
+        "sha256": "834e79ab27943b7902ff6b62dcd8be37648860ccb43b230a6ac82ccdea7abb02"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "dataset_path": "media/rain-suba.webp",
+      "sha256": "7bc61b2076457aa599affc2891cf43dd81e4f0ff61d0e54ac4ce6ded3280d110",
+      "mime_type": "image/webp",
+      "width": 1448,
+      "height": 1086,
+      "prompt": "Use case: photorealistic-natural. Asset: full-bleed 4:3 landscape photo for a clearly labeled Synthetic training social post. Generate a fictional but realistic ordinary smartphone photo inspired by Bogotá, Colombia. Scene: Heavy rain in a residential neighborhood of Suba, Bogotá. Wet street beside typical redbrick mid-rise apartment buildings and leafy sidewalk trees moving slightly in the wind. Visible rain streaks and softened distant visibility, shallow road puddles and realistic wet asphalt reflections. Camera sheltered under a simple awning, cool gray high-altitude daylight. No severe flood or building damage. Natural phone-camera perspective from a safe location at human eye level, realistic materials, subtle grain, no cinematic lighting. Main environmental details clearly legible in small thumbnail. No identifiable people, no readable addresses or signs, no logos, no injuries. AI-generated illustrative imagery, not a real incident record. Image only: no frame, no UI, no illustration, no captions, no text, no watermark.",
+      "fixture_id": "post-0097",
+      "scene": "rain-suba",
+      "alt_text": "Synthetic AI-generated scene of heavy rain and reduced visibility on a residential street in Suba; a fictional scenario, not documentation of a real incident.",
+      "source_png": {
+        "dataset_path": "media/rain-suba.png",
+        "sha256": "8acd5736d8e9e420d62f5fa6690e1ccddadcc6d75d766c4718d46f8a2d6e1218"
+      },
+      "encoding": {
+        "format": "WebP",
+        "quality": 90,
+        "method": 6,
+        "pillow_version": "12.3.0",
+        "resized": false,
+        "cropped": false
+      }
+    }
+  ]
+}

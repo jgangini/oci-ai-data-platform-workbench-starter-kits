@@ -3,6 +3,8 @@ from datetime import datetime
 import hashlib
 import math
 
+from .core import SYNTHETIC_MODES
+
 
 def timestamp(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
@@ -10,8 +12,10 @@ def timestamp(value):
 
 def identity(event):
     meta = event.get("raw_metadata", {})
-    scenario = meta.get("scenario_run_id", "") if event["mode"] == "simulation" and not meta.get("capture_run_id") else ""
-    return event["mode"], event["category"], event["locality"], scenario
+    scenario = meta.get("scenario_run_id", "") if event["mode"] in SYNTHETIC_MODES and not meta.get("capture_run_id") else ""
+    # Identity keeps its original token so existing reviews and memberships survive.
+    mode = "simulation" if event["mode"] in SYNTHETIC_MODES else event["mode"]
+    return mode, event["category"], event["locality"], scenario
 
 
 def nearby(left, right):

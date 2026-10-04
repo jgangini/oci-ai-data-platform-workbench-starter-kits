@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0063",
-    "username": "sim_bogota_0063",
-    "display_name": "Fictional Bogotá Reporter 063"
+    "username": "val_lozano",
+    "display_name": "Valentina Lozano"
   },
-  "message": "Una ráfaga vuelve a avivar una llama visible en el pasto de Chapinero; sigo observando desde lejos. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Uy, una ráfaga volvió a avivar una llama en el pasto de Chapinero. La estoy viendo a distancia; me quedo acá, lejos del borde del camino. #incendio #Colombia #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 168,
   "available_offset_seconds": 168,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0063-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0063.webp",
+      "sha256": "5d2fbc013f932d4bf5864abc888db27cfcc81c556273b2c8e5e0535b97686cc8",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: una llama pequeña se aviva en pasto de Chapinero con una ráfaga, vista a distancia; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

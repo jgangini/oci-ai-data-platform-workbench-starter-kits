@@ -30,6 +30,7 @@ from .governance import (
     governance_sync_notebook,
 )
 from .lab_packs import LabAsset, LabPack, available_lab_ids, load_lab_pack
+from .prisma.runtime_secrets import identity_hash, shared_credential
 from .notebooks import (
     LAYER_PREFIXES,
     WORKSPACE_ROOT,
@@ -169,8 +170,6 @@ class LocalAidpClient:
         self._platform_admin_ocids.add(user_ocid)
 
     async def list_modules(self) -> list[dict[str, Any]]:
-        if self.settings.deployment_mode != "production":
-            return []
         return [_module_payload(self._module)]
 
     async def install_governance_module(
@@ -180,8 +179,6 @@ class LocalAidpClient:
         *,
         role_membership_verified: bool = False,
     ) -> dict[str, Any]:
-        if self.settings.deployment_mode != "production":
-            raise AidpProvisionConflict("Governance modules are available only in production mode")
         if not role_membership_verified and not await self.is_platform_admin(user_ocid):
             raise AidpProvisionConflict("The selected user is not an AI_DATA_PLATFORM_ADMIN")
         async with self._module_lock:
@@ -2748,8 +2745,6 @@ class AidpClient:
         )
 
     def _module_status(self) -> dict[str, Any]:
-        if self.settings.deployment_mode != "production":
-            return _module_payload()
         workspace_key = str(self._workspace()["key"])
         manifest = self._module_manifest(workspace_key)
         if manifest is None:
@@ -2778,8 +2773,6 @@ class AidpClient:
         )
 
     async def list_modules(self) -> list[dict[str, Any]]:
-        if self.settings.deployment_mode != "production":
-            return []
         return [await asyncio.to_thread(self._module_status)]
 
     def _ensure_governance_bucket(self) -> bool:
@@ -2812,7 +2805,7 @@ class AidpClient:
             raise AidpProvisionError("The dedicated governance OCI credential is incomplete.")
         return {
             "displayName": GOVERNANCE_CREDENTIAL_NAME,
-            "credentialDescription": "Dedicated OCI credential for the global governance extension",
+            "credentialDescription": "Shared OCI credential for governance and PRISMA runtimes",
             "type": "SECRET_TOKEN",
             "credentialDetails": {
                 "credentialType": "SECRET_TOKEN",
@@ -2830,24 +2823,26 @@ class AidpClient:
         }
 
     def _ensure_governance_credential(self) -> tuple[str, bool]:
-        matches = [item for item in self._list("/credentials", params={"displayName": GOVERNANCE_CREDENTIAL_NAME}, phase="control") if self._resource_name(item) == GOVERNANCE_CREDENTIAL_NAME]
-        if len(matches) > 1:
-            raise AidpProvisionError(f"AIDP has duplicate credentials named {GOVERNANCE_CREDENTIAL_NAME}.")
-        payload = self._credential_payload()
-        if not matches:
-            self._request("POST", "/credentials", payload=payload, phase="control")
-            matches = [item for item in self._list("/credentials", params={"displayName": GOVERNANCE_CREDENTIAL_NAME}, phase="control") if self._resource_name(item) == GOVERNANCE_CREDENTIAL_NAME]
-            if len(matches) != 1:
+        credential = self._shared_oci_credential()
+        created = credential is None
+        if credential is None:
+            self._request("POST", "/credentials", payload=self._credential_payload(), phase="control")
+            credential = self._shared_oci_credential()
+            if credential is None:
                 raise AidpProvisionPending("AIDP has not published the governance credential yet.", "control")
-            return str(matches[0].get("key") or matches[0].get("id") or ""), True
-        credential = matches[0]
-        if str(credential.get("type") or credential.get("credentialType") or "") != "SECRET_TOKEN":
-            raise AidpProvisionError("The existing governance credential has an incompatible type.")
-        key = str(credential.get("key") or credential.get("id") or "")
-        if not key:
-            raise AidpProvisionPending("The governance credential identifier is not ready.", "control")
-        self._request("PUT", f"/credentials/{quote(key, safe='')}", payload=payload, phase="control", retry_scope=f"credential:{hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()}")
-        return key, False
+        return str(credential.get("key") or credential["id"]), created
+
+    def _shared_oci_credential(self) -> dict[str, Any] | None:
+        try:
+            return shared_credential(self._list("/credentials", phase="control"))
+        except RuntimeError as exc:
+            raise AidpProvisionError(str(exc)) from exc
+
+    def _governance_oci_config(self) -> dict[str, str]:
+        credential = self._shared_oci_credential()
+        if credential is None:
+            raise AidpProvisionError("The shared OCI credential is unavailable.")
+        return {"credential_name": credential["displayName"], "identity_sha256": identity_hash(self._oci_config)}
 
     def _governance_job_payload(
         self,
@@ -2868,6 +2863,7 @@ class AidpClient:
             bootstrap_snapshot=bootstrap_snapshot,
             workspace_key=workspace_key,
             job_key=job_key,
+            **self._governance_oci_config(),
         )
         changed = self._upload_notebook(workspace_key, notebook_path, notebook, repair_drift=True)
         return {
@@ -3281,6 +3277,7 @@ class AidpClient:
             region=self.settings.aidp_region,
             compartment_id=self.settings.compartment_id,
             platform_id=self.settings.aidp_platform_id,
+            **self._governance_oci_config(),
         )
         source_hash = hashlib.sha256(source).hexdigest()
         descriptor = json.dumps({
@@ -3531,8 +3528,6 @@ class AidpClient:
         }
 
     def _governance_workspace(self) -> str:
-        if self.settings.deployment_mode != "production":
-            raise AidpProvisionConflict("Governance modules are available only in production mode")
         return str(self._workspace()["key"])
 
     def _start_governance_install(
@@ -3885,16 +3880,6 @@ class AidpClient:
                 self._request("DELETE", f"/workspaces/{workspace_key}/clusters/{quote(key, safe='')}", allow_not_found=True, phase="cleanup")
             raise AidpProvisionPending("The dedicated governance AI compute deletion is still in progress.", "cleanup")
 
-    def _delete_governance_credential(self) -> None:
-        matches = [item for item in self._list("/credentials", params={"displayName": GOVERNANCE_CREDENTIAL_NAME}, phase="cleanup") if self._resource_name(item) == GOVERNANCE_CREDENTIAL_NAME]
-        if len(matches) > 1:
-            raise AidpProvisionError("AIDP has duplicate governance credentials.")
-        if matches:
-            key = str(matches[0].get("key") or matches[0].get("id") or "")
-            if key:
-                self._request("DELETE", f"/credentials/{quote(key, safe='')}", allow_not_found=True, phase="cleanup")
-            raise AidpProvisionPending("The governance credential deletion is still in progress.", "cleanup")
-
     def _delete_governance_tables(self) -> None:
         catalog = self._catalog(CATALOG_NAME, allow_missing=True)
         if catalog is None:
@@ -4058,7 +4043,7 @@ class AidpClient:
         self._cleanup_agent(workspace_key, GOVERNANCE_AGENT_NAME)
         self._delete_governance_compute(workspace_key)
         self._cleanup_lab_job(workspace_key, GOVERNANCE_JOB_NAME)
-        self._delete_governance_credential()
+        # ponytail: OCI credentials are shared with PRISMA; module removal retains them.
         for path in (
             f"{MODULE_ROOT}/agent/governance_agent.py",
             f"{MODULE_ROOT}/agent/requirements.txt",

@@ -2,4 +2,4 @@
 apps/backend/app/labs/** text eol=lf
 apps/frontend/public/brand-icons/** text eol=lf
 apps/prisma-viewer/public/brand-icons/** text eol=lf
-datasets/synthetic/** text eol=lf
+datasets/synthetic/** text=auto eol=lf

@@ -26,8 +26,10 @@ export function validPeriod(filters) {
   return !filters.date_from || !filters.date_to || Date.parse(filters.date_from) <= Date.parse(filters.date_to);
 }
 
+const canonicalMode = (mode) => mode === 'simulation' ? 'Synthetic' : mode;
+
 export function modeLabel(mode) {
-  return mode === 'real' ? 'REAL' : mode === 'simulation' ? 'SIMULATED' : 'UNCLASSIFIED';
+  return mode === 'real' ? 'REAL' : canonicalMode(mode) === 'Synthetic' ? 'Synthetic' : 'UNCLASSIFIED';
 }
 
 export const displayLocality = (value) => value === 'Sin localizar' ? 'Location unresolved' : value;
@@ -35,17 +37,24 @@ export const displaySeverity = (value) => ({ low: 'Low', medium: 'Medium', high:
 
 export function evidenceFor(snapshot, incident) {
   const ids = new Set(incident?.evidence_ids ?? []);
-  return snapshot.evidence.filter((item) => ids.has(item.id));
+  return [...new Map(snapshot.evidence.filter((item) => ids.has(item.id)).map((item) => [item.id, item])).values()];
 }
 
-export function reportActivity(incident) {
+export function reportActivity(incident, selectedEvidence = []) {
   const labels = { below_threshold: 'Below threshold', low: 'Low', medium: 'Medium', high: 'High' };
-  const counts = incident.report_counts;
+  const counts = incident.report_counts && typeof incident.report_counts === 'object' && !Array.isArray(incident.report_counts) ? incident.report_counts : {};
+  const linked = [...new Map(selectedEvidence.filter((item) => incident.evidence_ids?.includes(item.id)).map((item) => [item.id, item])).values()];
+  const platforms = new Set([...Object.keys(counts).filter((key) => Number.isSafeInteger(counts[key]) && counts[key] >= 0), ...linked.map((item) => item.platform)]);
   return {
     level: labels[incident.report_activity] || 'Unavailable',
-    networks: Object.entries(counts && typeof counts === 'object' && !Array.isArray(counts) ? counts : {})
-      .filter(([, count]) => Number.isSafeInteger(count) && count >= 0)
-      .map(([platform, count]) => ({ platform, count, level: labels[incident.report_activity_by_platform?.[platform]] || 'Unavailable' })),
+    networks: [...platforms].map((platform) => {
+      const posts = linked.filter((item) => item.platform === platform);
+      const dates = posts.map((item) => item.created_at).filter((value) => typeof value === 'string' && Number.isFinite(Date.parse(value))).sort((a, b) => Date.parse(a) - Date.parse(b));
+      const window = incident.correlation_windows_minutes?.[platform];
+      return { platform, count: Number.isSafeInteger(counts[platform]) && counts[platform] >= 0 ? counts[platform] : null,
+        total: posts.length, windowMinutes: Number.isSafeInteger(window) && window > 0 ? window : null, latestAt: dates.at(-1) || null,
+        level: labels[incident.report_activity_by_platform?.[platform]] || 'Unavailable' };
+    }),
   };
 }
 
@@ -74,14 +83,22 @@ function validArea(value) {
 export function filteredIncidents(snapshot, filters) {
   if (!validPeriod(filters) || !validArea(filters.bbox)) return [];
   const bounds = parseBbox(filters.bbox);
-  return snapshot.incidents.filter((incident) => FILTER_KEYS.every((key) => {
-    if (!filters[key]) return true;
-    if (key === 'bbox') return withinBbox(incident, bounds);
-    if (key === 'date_from') return Date.parse(incident.created_at) >= Date.parse(filters.date_from);
-    if (key === 'date_to') return Date.parse(incident.created_at) <= Date.parse(filters.date_to);
-    if (key === 'platform') return evidenceFor(snapshot, incident).some((item) => item.platform === filters.platform);
-    return String(incident[key]) === String(filters[key]);
-  }));
+  return snapshot.incidents.filter((incident) => {
+    if (filters.date_from || filters.date_to || filters.platform) {
+      const publications = evidenceFor(snapshot, incident);
+      const matches = (publications.length ? publications : [incident]).some((item) => {
+        const created = Date.parse(item.created_at || incident.created_at);
+        return (!filters.platform || item.platform === filters.platform) && (!filters.date_from || created >= Date.parse(filters.date_from)) && (!filters.date_to || created <= Date.parse(filters.date_to));
+      });
+      if (!matches) return false;
+    }
+    return FILTER_KEYS.every((key) => {
+      if (!filters[key] || DATE_KEYS.includes(key) || key === 'platform') return true;
+      if (key === 'bbox') return withinBbox(incident, bounds);
+      if (key === 'mode') return canonicalMode(incident.mode) === canonicalMode(filters.mode);
+      return String(incident[key]) === String(filters[key]);
+    });
+  });
 }
 
 export function safeSourceUrl(value) {
@@ -92,13 +109,24 @@ export function safeSourceUrl(value) {
 }
 
 export function photosFor(evidence, incident) {
-  if (evidence.mode !== 'real' || incident?.review_status !== 'validated' || !incident.evidence_ids?.includes(evidence.id) || !incident.reviewed_evidence_ids?.includes(evidence.id) || evidence.platform !== 'x' || !Array.isArray(evidence.media)) return [];
-  return evidence.media.filter((media) => {
+  if (!incident?.evidence_ids?.includes(evidence?.id)) return [];
+  const originals = evidence.platform === 'x' && Array.isArray(evidence.media) ? evidence.media.filter((media) => {
     const safe = safeSourceUrl(media?.url);
     if (media?.type !== 'photo' || !safe) return false;
     const url = new URL(safe);
-    return url.hostname === 'pbs.twimg.com' && !url.port && url.pathname.startsWith('/media/');
-  }).slice(0, 4);
+    return url.hostname === 'pbs.twimg.com' && !url.port && !url.hash && url.pathname.startsWith('/media/');
+  }) : [];
+  const bundled = canonicalMode(evidence.mode) === 'Synthetic' && Array.isArray(evidence.attachments) ? evidence.attachments.flatMap((item) => {
+    if (item?.type !== 'image' || !/^[a-f0-9]{64}$/.test(item.sha256 || '')) return [];
+    const legacy = /^posts\/(post-\d{4})\/media\/(image-\d{2}\.svg)$/.exec(item.dataset_path || '');
+    if (legacy && item.mime_type === 'image/svg+xml') return [{ ...item, url: `/api/gods-eye-view/media/${legacy[1]}/${legacy[2]}` }];
+    const asset = /^media\/[a-z0-9_-]+\.(png|jpg|jpeg|webp)$/.exec(item.dataset_path || '');
+    const identifier = /^(post-\d{4})-(image-\d{2})$/.exec(item.id || '');
+    const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
+    if (!asset || !identifier || item.origin !== 'ai_generated' || item.mime_type !== mimeTypes[asset[1]]) return [];
+    return [{ ...item, url: `/api/gods-eye-view/media/${identifier[1]}/${identifier[2]}.${asset[1]}` }];
+  }) : [];
+  return [...new Map([...originals, ...bundled].map((item) => [item.url, item])).values()].slice(0, 4);
 }
 
 export function allowedActions(actions, snapshot) {

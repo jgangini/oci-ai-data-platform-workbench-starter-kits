@@ -34,7 +34,7 @@ def main():
         assert len(state.json()["sources"]) == 4
         assert "bearer_token" not in state.text
         source = next(item for item in state.json()["sources"] if item["platform"] == "x")
-        assert source["mode"] == "simulation", "Use the synthetic-only fixture for this smoke test"
+        assert source["mode"] == "Synthetic", "Use the Synthetic-only fixture for this smoke test"
         endpoint = "/api/admin/prisma/sources/x"
         original = {name: source[name] for name in ("mode", "query", "interval_minutes")}
         before = client.get("/api/prisma/snapshot")
@@ -43,7 +43,7 @@ def main():
         landing_count = state.json()["capture_summary"]["landing_count"]
         try:
             client.put(endpoint, json={"enabled": False}).raise_for_status()
-            client.put(endpoint, json={"enabled": True, "mode": "simulation", "interval_minutes": 5,
+            client.put(endpoint, json={"enabled": True, "mode": "Synthetic", "interval_minutes": 5,
                 "query": "#bogota #inundacion\n#colombia #incendio\n#desastre"}).raise_for_status()
             started = client.post(endpoint + "/run")
             started.raise_for_status()

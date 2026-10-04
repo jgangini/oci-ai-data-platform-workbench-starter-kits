@@ -1,23 +1,27 @@
 """Synthetic search input; its clock, filtering and cursors are shared by local and OCI VM producers."""
 import re
 
-from .core import PLATFORMS, folded, simulation_events
+from .core import SYNTHETIC_MODES, PLATFORMS, folded, simulation_events
 
 
 def query_lines(value):
     """Each nonempty line is an independent search; preserve its operators and spelling."""
+    if not isinstance(value, str) or len(value.encode("utf-16-le", "surrogatepass")) // 2 > 1000:
+        raise ValueError("Searches must contain at most 1000 characters in total")
     lines = [line.strip() for line in value.splitlines() if line.strip()]
-    if len(lines) > 10 or any(len(line) > 512 for line in lines):
+    if len(lines) > 10 or any(len(line.encode("utf-16-le", "surrogatepass")) // 2 > 512 for line in lines):
         raise ValueError("Use up to 10 searches, with at most 512 characters per line")
     return list(dict.fromkeys(lines)) or [""]
 
 
 def validate_source(source):
     """Apply the same connector/query boundary to local and cloud administration."""
+    if source["mode"] not in (*SYNTHETIC_MODES, "real"):
+        raise ValueError("Unsupported source mode")
     queries = query_lines(source["query"])
     if source["mode"] == "real":
         if source["platform"] != "x":
-            raise ValueError("Only X supports real capture; other platforms support simulation")
+            raise ValueError("Only X supports real capture; other platforms support Synthetic capture")
         if queries == [""]:
             raise ValueError("Real X capture requires a query")
     else:
@@ -114,12 +118,12 @@ def window_events(source, run_id, anchor_at, start, end):
 
 
 def sources(configured):
-    return [source for source in configured if source["enabled"] and source["mode"] == "simulation"] + [
+    return [source for source in configured if source["enabled"] and source["mode"] in SYNTHETIC_MODES] + [
         {"platform": name, "query": "", "interval_minutes": 1} for name in ("sensor", "sire", "linea123")]
 
 
 def inputs(configured, controls, legacy):
-    active = [item for item in configured if item["enabled"] and item["mode"] == "simulation"]
+    active = [item for item in configured if item["enabled"] and item["mode"] in SYNTHETIC_MODES]
     continuous = any(item.get("capture_running", False) for item in active)
     for source in sources(active):
         institutional = source["platform"] not in {item["platform"] for item in configured}

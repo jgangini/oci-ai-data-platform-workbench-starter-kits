@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0032",
-    "username": "sim_bogota_0032",
-    "display_name": "Fictional Bogotá Reporter 032"
+    "username": "fel_arevalo",
+    "display_name": "Felipe Arévalo"
   },
-  "message": "La entrada de un pequeño local de Bosa está inundada y su personal mueve cajas al fondo. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Somos un local pequeño en Bosa y ya se inundó la entrada. Estamos pasando las cajas al fondo para protegerlas; de verdad qué difícil trabajar así. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 84,
   "available_offset_seconds": 84,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0032-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0032.webp",
+      "sha256": "ace742f9bb6d41ae2c98c4823f3f3c0506eb697aad6f1dbb4da9a68514cc7d20",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of boxes being moved away from a flooded entrance in a fictional small Bosa shop.",
+      "is_simulated": true
+    }
+  ]
 }

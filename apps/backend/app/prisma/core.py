@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
@@ -10,6 +11,14 @@ from .media import photos
 
 
 PLATFORMS = ("x", "facebook", "instagram", "tiktok")
+SYNTHETIC_MODES = ("Synthetic", "simulation")
+
+
+def canonical_mode(value):
+    """Read legacy provenance while writing the canonical persisted mode."""
+    return "Synthetic" if value == "simulation" else value
+
+
 SOURCE_FIELDS = {"enabled", "mode", "query", "interval_minutes", "secret_ref", "credential_configured", "capture_running",
                  "status", "last_run_at", "next_due", "last_error", "last_received_count", "capture_paused",
                  "correlation_window_minutes", "report_thresholds", "config_version"}
@@ -39,7 +48,7 @@ CATEGORY_NAMES = {"inundacion": "Flooding", "incendio": "Fire", "movimiento_masa
 
 def default_source(platform: str) -> dict:
     query = "#bogota #inundacion\n#colombia #incendio\n#desastre"
-    return {"platform": platform, "enabled": True, "capture_running": False, "mode": "simulation", "query": query,
+    return {"platform": platform, "enabled": True, "capture_running": False, "mode": "Synthetic", "query": query,
             "interval_minutes": 5, "secret_ref": f"gods-eye-view-{platform}", "credential_configured": False,
             "correlation_window_minutes": 30, "report_thresholds": {"low": 5, "medium": 10, "high": 20}, "config_version": 1,
             "status": "simulation", "last_run_at": None, "next_due": None, "last_error": None, "last_received_count": None}
@@ -59,6 +68,8 @@ def aidp_credential_name(platform: str, reference: str) -> str:
 def source_migration(platform: str, source: dict) -> dict:
     """Upgrade unchanged defaults while keeping custom queries and live secret references."""
     defaults, changes = default_source(platform), {}
+    if source.get("mode") == "simulation":
+        changes["mode"] = "Synthetic"
     previous_query = "(Bogotá OR Bogota OR #Bogota) (inundación OR inundacion OR incendio OR deslizamiento OR derrumbe OR lluvia) -is:retweet" if platform == "x" else ""
     if source.get("query") == previous_query:
         changes["query"] = defaults["query"]
@@ -89,7 +100,7 @@ def _event_location(event: dict, normalized: str) -> tuple:
     locality = event.get("locality")
     # ponytail: lexical inference is only for our Bogotá simulation; real reports
     # require the classifier's jurisdiction decision, not a matching place name.
-    if not locality and event["mode"] == "simulation":
+    if not locality and event["mode"] in SYNTHETIC_MODES:
         matches = [name for name in LOCALITIES if re.search(r"\b" + re.escape(folded(name)) + r"\b", normalized)]
         locality = matches[0] if len(matches) == 1 else None
     if locality not in LOCALITIES:
@@ -103,9 +114,9 @@ def _event_location(event: dict, normalized: str) -> tuple:
 
 def normalize_event(event: dict) -> dict:
     platform, source_id = str(event["platform"]), str(event["source_id"])
-    if event.get("mode") not in {"simulation", "real"} or not source_id:
+    if event.get("mode") not in (*SYNTHETIC_MODES, "real") or not source_id:
         raise ValueError("Each event needs an explicit mode and source identifier")
-    simulated = event["mode"] == "simulation"
+    simulated = event["mode"] in SYNTHETIC_MODES
     if "is_simulated" in event and (type(event["is_simulated"]) is not bool or event["is_simulated"] != simulated):
         raise ValueError("Simulation provenance must agree with the event mode")
     text = str(event.get("text", ""))[:12000]
@@ -124,7 +135,7 @@ def normalize_event(event: dict) -> dict:
     return {
         "id": f"{platform}:{source_id}", "platform": platform, "source_id": source_id,
         "text": text, "created_at": created_at, "observed_at": event.get("observed_at", created_at),
-        "source_uri": event.get("source_uri", ""), "mode": event["mode"], "is_simulated": simulated,
+        "source_uri": event.get("source_uri", ""), "mode": canonical_mode(event["mode"]), "is_simulated": simulated,
         "category": category, "locality": locality, "lat": lat, "lon": lon,
         "location_method": method, "severity": event.get("severity", "medium"),
         "classification_method": event.get("classification_method", "provided" if event.get("category") else "keyword_rules"),
@@ -172,11 +183,36 @@ def legacy_groups(events):
         # ponytail: hourly locality buckets can split boundary events; production needs sliding spatial/time clustering.
         metadata = event["raw_metadata"]
         # Continuous sources share locality/time correlation; bounded replays retain scenario isolation.
-        scenario = metadata.get("scenario_run_id", "") if event["mode"] == "simulation" and not metadata.get("capture_run_id") else ""
-        key = "|".join((event["mode"], event["category"], event["locality"], event["created_at"][:13], scenario))
+        scenario = metadata.get("scenario_run_id", "") if event["mode"] in SYNTHETIC_MODES and not metadata.get("capture_run_id") else ""
+        # Preserve incident IDs and reviews across the persisted provenance rename.
+        mode = "simulation" if event["mode"] in SYNTHETIC_MODES else event["mode"]
+        key = "|".join((mode, event["category"], event["locality"], event["created_at"][:13], scenario))
         incident_id = "incident-" + hashlib.sha256(key.encode()).hexdigest()[:16]
         groups.setdefault(incident_id, []).append(event)
     return groups
+
+
+def validate_review(status, note, lat=None, lon=None):
+    if status not in {"pending", "validated", "rejected"}:
+        raise ValueError("Unsupported review status")
+    if not isinstance(note, str) or len(note) > 1000:
+        raise ValueError("Review notes must contain at most 1000 characters")
+    if (lat is None) != (lon is None):
+        raise ValueError("Latitude and longitude must be provided together")
+    if lat is not None and any(type(value) not in (int, float) or not math.isfinite(value) or abs(value) > limit
+                               for value, limit in ((lat, 90), (lon, 180))):
+        raise ValueError("Coordinates must be finite numbers within latitude/longitude bounds")
+
+
+def review_location(incident, previous, lat=None, lon=None):
+    """Keep human coordinates separate from evidence and consult the durable review lock."""
+    position = {key: previous[key] for key in ("lat", "lon") if key in previous}
+    current = (position.get("lat", incident.get("lat")), position.get("lon", incident.get("lon")))
+    if lat is not None and (lat, lon) != current:
+        if previous.get("status", incident.get("review_status")) == "validated":
+            raise ValueError("Save the event as not validated before changing its coordinates")
+        position = {"lat": lat, "lon": lon}
+    return {**position, "location_method": "human_review"} if position else {}
 
 
 def incident_summary(first, evidence):
@@ -187,6 +223,7 @@ def incident_summary(first, evidence):
 
 
 def build_snapshot(events: list[dict], reviews: dict, version: str, published_at: str, *, rules=None, previous=None, now=None) -> dict:
+    events = [{**event, "mode": canonical_mode(event["mode"])} for event in events]
     groups = legacy_groups(events)
     if rules is not None:
         from .correlation import group_events
@@ -203,7 +240,8 @@ def build_snapshot(events: list[dict], reviews: dict, version: str, published_at
             "severity": max((item["severity"] for item in evidence), key=lambda item: SEVERITIES.get(item, 0)),
             "confidence": max(item["confidence"] for item in evidence),
             "lat": first["lat"], "lon": first["lon"], "location_method": first["location_method"],
-            "mode": first["mode"], "is_simulated": first["mode"] == "simulation", "evidence_ids": sorted({item["id"] for item in evidence}),
+            **review_location(first, review),
+            "mode": first["mode"], "is_simulated": first["mode"] in SYNTHETIC_MODES, "evidence_ids": sorted({item["id"] for item in evidence}),
             "review_status": review.get("status", "pending"), "review_note": review.get("note", ""),
             "reviewed_evidence_ids": review.get("evidence_ids", []),
             **corroboration(evidence),
@@ -245,7 +283,7 @@ def simulation_events(elapsed_seconds: float, anchor_at: float | None = None) ->
           + (" #desastre #inundacion" if any(word in folded(text) for word in ("inund", "aneg", "rio")) else
              " #desastre #lluvia" if "lluvia" in folded(text) else
              " #desastre #incendio" if any(word in folded(text) for word in ("incend", "humo")) else
-             " #desastre" if "cultura" not in folded(text) else ""), "mode": "simulation", "is_simulated": True,
+             " #desastre" if "cultura" not in folded(text) else ""), "mode": "Synthetic", "is_simulated": True,
          "created_at": (anchor + timedelta(seconds=offset)).isoformat().replace("+00:00", "Z"),
          "source_uri": "", "severity": severity, "confidence": 0.8,
          "raw_metadata": {"scenario": "bogota-10min-v1", "offset_seconds": offset, "synthetic": True}}

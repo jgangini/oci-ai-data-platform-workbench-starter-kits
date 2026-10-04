@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0064",
-    "username": "sim_bogota_0064",
-    "display_name": "Fictional Bogotá Reporter 064"
+    "username": "san_lozano",
+    "display_name": "Santiago Lozano"
   },
-  "message": "El humo de Chapinero se dispersa más que antes, pero aún nace del mismo terreno con vegetación. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Se dispersa más el humo de Chapinero que hace un momento, aunque sigue saliendo del mismo terreno. Dejo esta actualización para no quedarnos solo con el primer reporte. Bogotá, Colombia. #incendio",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 180,
   "available_offset_seconds": 180,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0064-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0064.webp",
+      "sha256": "56f6d9f8746d2e9b07f458a76e4f3296dda034cb13df5423e9ba4759a546a07d",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: humo residual que se dispersa sobre un terreno de Chapinero, sin llamas visibles; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

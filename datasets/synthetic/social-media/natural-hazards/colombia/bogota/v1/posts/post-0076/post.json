@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0076",
-    "username": "sim_bogota_0076",
-    "display_name": "Fictional Bogotá Reporter 076"
+    "username": "san_cuellar",
+    "display_name": "Santiago Cuéllar"
   },
-  "message": "Personas de Ciudad Bolívar evitan una pendiente donde aparecieron desprendimientos pequeños. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Por acá la gente está evitando la pendiente de Ciudad Bolívar donde empezaron a caer pedacitos de tierra. Si van bajando por el camino del barrio, tengan presente ese punto. #Bogota #desastre #deslizamiento",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 36,
   "available_offset_seconds": 36,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0076-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0076.webp",
+      "sha256": "f0c1258c24aafb8630bd5bc758b4ba7ba16d93a97cee8b8eecf030879ffe1548",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Residents keeping their distance from small soil falls beside a neighborhood path. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

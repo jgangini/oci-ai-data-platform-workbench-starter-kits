@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0002",
-    "username": "sim_bogota_0002",
-    "display_name": "Fictional Bogotá Reporter 002"
+    "username": "cam_rojas",
+    "display_name": "Camilo Rojas"
   },
-  "message": "La corriente cubre el borde del andén en Kennedy y obliga a caminar por una zona seca. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Me tocó buscar por dónde caminar en Kennedy: la corriente tapó el borde del andén y solo se puede avanzar por la parte seca. Pilas los que vienen a pie. #Bogota #inundacion",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 12,
   "available_offset_seconds": 12,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0002-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0002.webp",
+      "sha256": "108b5050c0a1c2b6d0161874c738ca9362ef415328547ac1fe0af29143f9490b",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0002: Eye-level vertical smartphone photo taken from a pedestrian's dry strip of sidewalk looking diagonally along a narrow residential street in Kennedy, Bogotá, Colombia. Brown shallow floodwater completely hides the curb boundary; the dry narrow pavement in the immediate left foreground is the only walkable part. Concrete and red-brick two-storey Colombian houses with turquoise and rust-colored metal doors. Frame the flowing water close and obliquely, without a zebra crossing. No one in the current.",
+      "is_simulated": true
+    }
+  ]
 }

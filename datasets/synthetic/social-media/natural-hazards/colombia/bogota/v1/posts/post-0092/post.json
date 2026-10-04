@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0092",
-    "username": "sim_bogota_0092",
-    "display_name": "Fictional Bogotá Reporter 092"
+    "username": "fel_beltran",
+    "display_name": "Felipe Beltrán"
   },
-  "message": "El material desprendido permanece en Ciudad Bolívar; una pausa visible no confirma estabilidad de la ladera. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Parece que hubo una pausa, pero la tierra desprendida sigue sobre el paso en Ciudad Bolívar. Que ahora no se mueva no significa que la ladera esté firme. #desastre #Bogota #deslizamiento",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 228,
   "available_offset_seconds": 228,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0092-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0092.webp",
+      "sha256": "cf207eb032512a4854d6394e4ad6ce72697fd31668deb7b153ecea790e0fa038",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Loose earth still on part of a hillside passage during a pause in visible movement. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

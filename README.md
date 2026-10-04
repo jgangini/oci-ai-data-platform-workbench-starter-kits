@@ -4,7 +4,7 @@ Oracle AI Data Platform Workbench Starter Kits is a reusable collection of hands
 
 The project deploys the shared OCI infrastructure once. Participants can then register for one or more starter kits without receiving generated or user-specific copies of the source data. Every participant uses the same canonical CSV files and notebooks, which makes exercises and expected results reproducible.
 
-Current validation target: **v2.2.0**. This release keeps the five-bucket Medallion Architecture and replaces the OKE governance gateway and participant Agent with one production-only, OCI-native **AI Data Governance for VSC Extension** module.
+Current validation target: **v2.2.0**. This release keeps the five-bucket Medallion Architecture and replaces the OKE governance gateway and participant Agent with one global, OCI-native **AI Data Governance** module available in Laboratory and Production modes.
 
 ## What the project provides
 
@@ -104,9 +104,9 @@ Healthcare prepares patient, provider, appointment, and encounter data for opera
 - Gold tables: `healthcare_patient_utilization` and `healthcare_provider_daily`; the final notebook validates the real pipeline lineage.
 - Reproducible check: encounter cost total `557597.00`.
 
-### AI Data Governance for VSC Extension
+### AI Data Governance
 
-This optional production module is a global singleton rather than a participant starter kit. An administrator selects a user assigned to `AI_DATA_PLATFORM_ADMIN` to install it. All active participants in `AIDP_DEVELOPER` receive `USE` on the resulting Agent; only `AI_DATA_PLATFORM_ADMIN` receives `ADMIN`, so participants can invoke and test the Agent without changing its code, deployment, or permissions.
+This optional module is a global singleton available in Laboratory and Production modes. An administrator selects a user assigned to `AI_DATA_PLATFORM_ADMIN` to install it. All active participants in `AIDP_DEVELOPER` receive `USE` on the resulting Agent; only `AI_DATA_PLATFORM_ADMIN` receives `ADMIN`, so participants can invoke and test the Agent without changing its code, deployment, or permissions.
 
 The Agent exposes only `catalog_inventory` and `catalog_lineage`. It reads every active Master Catalog catalog and excludes `oci_medallion.oci_artifacts` so the control tables cannot ingest themselves. There is no session token, arbitrary SQL tool, registered-query tool, gateway, or direct participant grant on the dedicated AI Compute. Autonomous AI Database remains deployed for the AIDP Agent checkpointer.
 
@@ -119,7 +119,7 @@ One continuous AIDP workflow synchronizes metadata every 30 seconds with `maxCon
 
 The workflow never changes access-policy rows. Safe renames preserve the stable column identifier; ambiguous identity creates a new identifier so access is not inherited incorrectly. An unchanged snapshot skips its MERGE, and failures remain fail-closed.
 
-Redeploy repairs the notebook, workflow, dedicated compute, Agent, deployment, and RBAC without clearing metadata or access mappings. Delete performs an explicit full module cleanup: it disables and pauses first, removes only module-owned resources and the four exact table prefixes, preserves `oci_artifacts`, the shared schema, shared Spark compute, and Autonomous database, then removes the protected global operation manifest last. See [`docs/data-governance.md`](docs/data-governance.md) for the full contract.
+Redeploy repairs the notebook, workflow, dedicated compute, Agent, deployment, and RBAC without clearing metadata or access mappings. Delete performs an explicit full module cleanup: it disables and pauses first, removes only module-owned resources and the four exact table prefixes, preserves shared OCI credentials, `oci_artifacts`, the shared schema, shared Spark compute, and Autonomous database, then removes the protected global operation manifest last. See [`docs/data-governance.md`](docs/data-governance.md) for the full contract.
 
 ## End-to-end user guide
 
@@ -226,7 +226,7 @@ The application updater accepts only a newer stable GitHub release that is marke
 
 Application updates change the package versions bundled for future installs and redeploys. Existing participant kits are not changed automatically: when an installed version differs from the bundled version, the participant manager shows **Update available** and reuses that kit's idempotent Update/Redeploy action.
 
-In Production mode, selecting a user with the `AI_DATA_PLATFORM_ADMIN` assignment exposes the global **AI Data Governance for VSC Extension** control. Its installed state is shared across administrators. Install and Redeploy are idempotent; Delete requires explicit confirmation because it removes all module-owned resources and control tables.
+In Laboratory and Production modes, **Settings → Application → AI Data Governance → Deploy / Redeploy** lets an administrator select a user with the `AI_DATA_PLATFORM_ADMIN` assignment. Its installed state is shared across administrators. Install and Redeploy are idempotent; Delete requires explicit confirmation because it removes all module-owned resources and control tables.
 
 ## Reproducibility and participant isolation
 

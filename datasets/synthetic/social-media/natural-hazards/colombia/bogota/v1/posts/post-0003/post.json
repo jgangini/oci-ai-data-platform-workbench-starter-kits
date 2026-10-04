@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0003",
-    "username": "sim_bogota_0003",
-    "display_name": "Fictional Bogotá Reporter 003"
+    "username": "val_rojas",
+    "display_name": "Valentina Rojas"
   },
-  "message": "En Kennedy hay agua acumulada frente a varios portones; vecinos levantan sus pertenencias. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Qué angustia ver a los vecinos levantando sus cosas. Aquí en Kennedy el agua se está quedando frente a varios portones; si tienen familia por el sector, avísenle. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 24,
   "available_offset_seconds": 24,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0003-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0003.webp",
+      "sha256": "8d327e8ca19973a7366d2b0775768d550bba869341d9b5506a5a25f3518cdda5",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0003: Horizontal imperfect smartphone photograph from the dry sheltered entrance of a red-brick residential row in Kennedy, Bogotá, Colombia. Neighbors in normal rain jackets, faces indistinct, lifting a small table and bags onto a raised doorstep because murky rainwater is collecting along several metal garage gates. Emphasize the domestic objects, a burgundy garage door and several damp entrances; houses remain standing. Ordinary localized shallow street flooding, not a catastrophic flood.",
+      "is_simulated": true
+    }
+  ]
 }

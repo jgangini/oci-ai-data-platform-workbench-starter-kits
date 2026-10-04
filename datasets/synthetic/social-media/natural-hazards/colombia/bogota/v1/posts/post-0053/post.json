@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0053",
-    "username": "sim_bogota_0053",
-    "display_name": "Fictional Bogotá Reporter 053"
+    "username": "luc_pineda",
+    "display_name": "Lucía Pineda"
   },
-  "message": "Hay olor a material vegetal quemado en Chapinero y se mantiene un foco de fuego visible a distancia. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Qué olor a quemado está llegando por acá. Mirando hacia la vegetación de Chapinero todavía veo un foco de fuego a lo lejos. Por favor, autoridades, revisen este punto; uno desde el barrio no sabe qué tan grande es. Bogotá, Colombia. #incendio",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 48,
   "available_offset_seconds": 48,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0053-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0053.webp",
+      "sha256": "412cf7461f97b6437fd6d1334602f166e94b97c9a5aac87b188e38d0a8371cfb",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: un foco de fuego lejano en la vegetación de Chapinero, visto desde una calle residencial; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

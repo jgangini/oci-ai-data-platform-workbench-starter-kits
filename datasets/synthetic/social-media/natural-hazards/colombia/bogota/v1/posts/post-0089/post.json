@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0089",
-    "username": "sim_bogota_0089",
-    "display_name": "Fictional Bogotá Reporter 089"
+    "username": "luc_beltran",
+    "display_name": "Lucía Beltrán"
   },
-  "message": "Se escuchó caer una piedra en la ladera de Ciudad Bolívar; no es posible ver todo el terreno desde aquí. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Escuché caer una piedra por el lado de la ladera en Ciudad Bolívar. Desde acá no se ve todo el terreno, así que no sé qué más se pudo mover. #desastre #deslizamiento Bogotá",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 192,
   "available_offset_seconds": 192,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0089-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0089.webp",
+      "sha256": "8a22d989f1a69df5ede5c1978a7902090eb86e5a9306c9f37cb261409f2c3186",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A restricted view past a brick corner toward a wet slope and a loose stone. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

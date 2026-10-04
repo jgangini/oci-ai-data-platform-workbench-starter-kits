@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0061",
-    "username": "sim_bogota_0061",
-    "display_name": "Fictional Bogotá Reporter 061"
+    "username": "mar_lozano",
+    "display_name": "Mariana Lozano"
   },
-  "message": "En el mismo sector de Chapinero continúa saliendo humo aunque las llamas se ven más pequeñas. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Las llamas se ven más pequeñas en ese mismo punto de Chapinero, pero el humo sigue saliendo. Ojalá mejore pronto; por ahora no diría que ya pasó. #incendio en Bogotá, Colombia.",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 144,
   "available_offset_seconds": 144,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0061-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0061.webp",
+      "sha256": "223b91f27b8915352508a1b48fabb9375806a60527c439e6e1f91335fe72e17d",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: llamas pequeñas y humo persistente en un parche de vegetación de Chapinero; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

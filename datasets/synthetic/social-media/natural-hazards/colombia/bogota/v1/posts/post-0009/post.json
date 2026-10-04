@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0009",
-    "username": "sim_bogota_0009",
-    "display_name": "Fictional Bogotá Reporter 009"
+    "username": "pau_rojas",
+    "display_name": "Paula Rojas"
   },
-  "message": "La acumulación en Kennedy ya tapa la parte baja del bordillo, aunque no puedo medir la profundidad. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "Por donde estoy en Kennedy el agua ya tapa la parte baja del bordillo. No me atrevo a decir cuántos centímetros tiene: desde acá no puedo medirla. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 96,
   "available_offset_seconds": 96,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0009-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0009.webp",
+      "sha256": "61ba6ea3b101ae1b22a06f6fc919edf2acfccaacea38c654e4f7eb98cbf26a52",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0009: Close-up handheld phone photo aimed at the edge of a sidewalk in Kennedy, Bogotá: murky shallow rainwater covering the lower part of the concrete curb; black iron fence and narrow wet garden strip at top. The water depth cannot be measured; focus on gentle ripples at curb, damp fallen petals and rough pavement. No grate in frame, no people, no zebra crossing, natural overcast afternoon.",
+      "is_simulated": true
+    }
+  ]
 }

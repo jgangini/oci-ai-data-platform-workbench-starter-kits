@@ -1,12 +1,12 @@
 {
   "datasets": [],
-  "display_name": "AI Data Governance for VSC Extension",
+  "display_name": "AI Data Governance",
   "expected_results": {},
   "lab_id": "ai_data_governance_vsc_extension",
   "notebooks": [],
   "kind": "governance_extension",
   "scope": "global",
-  "installation_modes": ["production"],
+  "installation_modes": ["laboratory", "production"],
   "agent": {
     "name": "ai_data_governance_vsc_extension",
     "editable": true,
@@ -82,7 +82,7 @@
       }
     ]
   },
-  "pack_sha256": "4cebe3369f50fe40b3e42cf029f780476f75877c4d2de352896be555c4e60bb9",
+  "pack_sha256": "8dcb767ac56167cbd122a80943e5453b1313383d7a39d28595c2dfafe4c148b4",
   "pack_version": "3.0.0",
   "schema_version": 1,
   "status": "available",

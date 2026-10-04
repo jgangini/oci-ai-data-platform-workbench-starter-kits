@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0084",
-    "username": "sim_bogota_0084",
-    "display_name": "Fictional Bogotá Reporter 084"
+    "username": "mat_cuellar",
+    "display_name": "Mateo Cuéllar"
   },
-  "message": "Hay huellas nuevas de escorrentía sobre una pendiente de Ciudad Bolívar y material acumulado abajo. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "La pendiente de Ciudad Bolívar quedó marcada por los caminos del agua y abajo hay material acumulado. Se ve desde el paso de enfrente, sin acercarse al talud. #Bogota #deslizamiento #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 132,
   "available_offset_seconds": 132,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0084-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0084.webp",
+      "sha256": "2961a5a9d0ea8bc6442ecb5be655da8a81358f547356d910bad13d97497f23fd",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: Narrow runoff channels on a wet bank above a low accumulation of soil. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

@@ -14,6 +14,24 @@
   ],
   "patches": [
     {
+      "path": "src/data/localGeojsonCore.js",
+      "sha256": "161dad48c19b01cc5859f673f975f78740b40963fd52cd2aba9bef8091115c9e",
+      "replacements": [
+        {
+          "before": "function refreshLocalTerrainFloor(viewer, record) {",
+          "after": "export function refreshLocalTerrainFloor(viewer, record) {"
+        },
+        {
+          "before": "function setLocalGroundHeight(record, height) {",
+          "after": "export function setLocalGroundHeight(record, height) {"
+        },
+        {
+          "before": "function updateLocalStemGeometry(viewer, record, now, knownDistance = null) {",
+          "after": "export function updateLocalStemGeometry(viewer, record, now, knownDistance = null) {"
+        }
+      ]
+    },
+    {
       "path": "src/main.js",
       "sha256": "3eaccb0e89704d8177d3cc8bdfc90c7d33c62fdffe5dc5496b76b3062ea77794",
       "replacements": [
@@ -91,6 +109,16 @@
         {
           "before": "  getBhoteKoshiFlood,\n",
           "after": ""
+        }
+      ]
+    },
+    {
+      "path": "src/ui/rightPanelRail.js",
+      "sha256": "05fbcd79c88960b77bfbda6262d6bb3e31be9b57d72f7111f2c70a286ff019c9",
+      "replacements": [
+        {
+          "before": "  const panels = [...stack.children].filter(\n    (panel) => panel.matches('[data-panel-id]') && !panel.hidden,\n  );",
+          "after": "  let panels = [...stack.children].filter(\n    (panel) => panel.matches('[data-panel-id]') && !panel.hidden,\n  );\n  const exclusivePanel = panels.find(\n    (panel) => panel.dataset.railExclusive !== undefined && !panel.classList.contains('collapsed'),\n  );\n  if (exclusivePanel) panels = [exclusivePanel];"
         }
       ]
     }

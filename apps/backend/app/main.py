@@ -132,6 +132,7 @@ class SettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     aidp_url: str | None = Field(default=None, min_length=1, max_length=2_048)
     registration_code: str | None = Field(default=None, min_length=1, max_length=9)
+    time_zone: str | None = Field(default=None, min_length=1, max_length=100)
 
     @field_validator("registration_code")
     @classmethod
@@ -183,7 +184,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        prisma_task = asyncio.create_task(run_local_prisma(app)) if settings.local_development_mode or settings.prisma_enabled else None
+        run_producer = (settings.local_development_mode or settings.prisma_enabled) and not (settings.local_development_mode and not settings.prisma_local_mode)
+        prisma_task = asyncio.create_task(run_local_prisma(app)) if run_producer else None
         try:
             yield
         finally:
@@ -191,7 +193,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 prisma_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await prisma_task
-        for client in (app.state.identity_client, app.state.aidp_client):
+        for client in (app.state.identity_client, app.state.aidp_client, app.state.prisma_aidp_client):
             if client is not None:
                 await client.close()
 
@@ -209,6 +211,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.login_limiter = RateLimiter(5, 60)
     app.state.identity_client = None
     app.state.aidp_client = None
+    app.state.prisma_aidp_client = None
     app.state.release_manager = ApplicationReleaseManager(settings)
     app.state.health_lock = asyncio.Lock()
     app.state.health_expires_at = 0.0
@@ -237,6 +240,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.aidp_factory = default_aidp_factory
 
+    def prisma_aidp_factory():
+        if not settings.local_development_mode or settings.prisma_local_mode:
+            return app.state.aidp_factory()
+        if app.state.prisma_aidp_client is None:
+            app.state.prisma_aidp_client = AidpClient(settings)
+        return app.state.prisma_aidp_client
+
+    app.state.prisma_aidp_factory = prisma_aidp_factory
+
     async def refresh_local_material(identity, user_id, user):
         if isinstance(identity, LocalIdentityClient):
             assigned = await app.state.aidp_factory().list_user_labs([user["ocid"]])
@@ -259,7 +271,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def security_headers(request: Request, call_next: Callable):
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = (
+        response.headers.setdefault("Content-Security-Policy",
             "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
             "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         )
@@ -491,17 +503,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-PRISMA-User"] = username
         return {"username": username, "operator_username": settings.operator_username}
 
-    async def admin_settings_payload() -> dict[str, str | bool]:
+    async def admin_settings_payload() -> dict[str, object]:
         return app.state.settings_store.get_admin_settings()
 
     @app.get("/api/admin/settings")
-    async def admin_settings(_admin: str = Depends(require_admin)) -> dict[str, str | bool]:
+    async def admin_settings(_admin: str = Depends(require_admin)) -> dict[str, object]:
         return await admin_settings_payload()
 
     @app.put("/api/admin/settings")
-    async def update_admin_settings(payload: SettingsRequest, _admin: str = Depends(require_admin)) -> dict[str, str | bool]:
+    async def update_admin_settings(payload: SettingsRequest, _admin: str = Depends(require_admin)) -> dict[str, object]:
         try:
-            app.state.settings_store.update(payload.aidp_url, payload.registration_code)
+            app.state.settings_store.update(payload.aidp_url, payload.registration_code, payload.time_zone)
             return await admin_settings_payload()
         except ValueError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
@@ -586,8 +598,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     async def selected_platform_admin(user_id: str) -> dict[str, Any]:
         require_identity()
-        if settings.deployment_mode != "production":
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Governance modules are not available in laboratory mode")
         if not settings.aidp_ready():
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
         aidp = app.state.aidp_factory()
@@ -631,7 +641,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return JSONResponse(status_code=202, content={
             "module_id": module.get("module_id") or "ai_data_governance_vsc_extension",
-            "display_name": module.get("display_name") or "AI Data Governance for VSC Extension",
+            "display_name": module.get("display_name") or "AI Data Governance",
             "status": str(module.get("status") or pending_status),
             "installed": bool(module.get("installed", True)),
             "phase": exc.phase,
@@ -643,8 +653,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/admin/modules")
     async def admin_modules(_admin: str = Depends(require_admin)) -> dict[str, list[dict[str, Any]]]:
-        if settings.deployment_mode != "production":
-            return {"modules": []}
         if not settings.aidp_ready():
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
         try:
@@ -672,7 +680,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
         except AidpProvisionError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        result["message"] = "AI Data Governance for VSC Extension is active."
+        result["message"] = "AI Data Governance is active."
         return JSONResponse(content=result)
 
     @app.post("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension/redeploy")
@@ -693,7 +701,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
         except AidpProvisionError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        result["message"] = "AI Data Governance for VSC Extension was redeployed."
+        result["message"] = "AI Data Governance was redeployed."
         return JSONResponse(content=result)
 
     @app.delete("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension")
@@ -713,7 +721,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
         except AidpProvisionError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        result["message"] = "AI Data Governance for VSC Extension was deleted completely."
+        result["message"] = "AI Data Governance was removed. Shared OCI credentials are retained."
         return JSONResponse(content=result)
 
     @app.post("/api/admin/users")

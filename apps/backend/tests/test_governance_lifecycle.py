@@ -518,6 +518,8 @@ def test_concurrent_install_reuses_the_manifest_operation_without_reconciliation
 
 def test_failed_delete_resumes_exact_phase_and_operation() -> None:
     client = module_client()
+    client._list = lambda *_args, **_kwargs: pytest.fail("Module deletion must not inspect shared credentials for deletion")
+    client._request = lambda *_args, **_kwargs: pytest.fail("Module deletion must retain the shared OCI credential")
     state = manifest("delete", phase="pause")
     client._module_manifest = lambda _workspace: state
     client._write_module_manifest = lambda *_args: None
@@ -527,7 +529,6 @@ def test_failed_delete_resumes_exact_phase_and_operation() -> None:
     client._cleanup_agent = lambda *_args: None
     client._delete_governance_compute = lambda *_args: None
     client._cleanup_lab_job = lambda *_args: None
-    client._delete_governance_credential = lambda: None
     client._delete_workspace_path = lambda *_args: None
     client._delete_governance_tables = lambda: None
     client._delete_governance_prefixes = lambda: None
@@ -578,7 +579,6 @@ def test_failed_install_without_workflow_cleans_up_without_provisioning_one() ->
     client._cleanup_agent = lambda *_args: None
     client._delete_governance_compute = lambda *_args: None
     client._cleanup_lab_job = lambda *_args: None
-    client._delete_governance_credential = lambda: None
     client._delete_workspace_path = lambda *_args: None
     client._delete_governance_tables = lambda: None
     client._delete_governance_prefixes = lambda: None
@@ -627,6 +627,7 @@ def test_terminal_error_persists_only_sanitized_code_and_pending_does_not() -> N
 
 def test_redeploy_revision_is_requested_once_and_then_completed_on_visible_update() -> None:
     client = module_client()
+    client._governance_oci_config = lambda: {"credential_name": "PrismaWriterRuntime", "identity_sha256": "a" * 64}
     state = {
         "status": "redeploying",
         "operation": {"operation_id": OPERATION_ID, "type": "redeploy", "phase": "started"},

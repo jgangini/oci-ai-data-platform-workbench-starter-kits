@@ -3,10 +3,10 @@
   "platform": "facebook",
   "author": {
     "id": "fictional-author-0043",
-    "username": "sim_bogota_0043",
-    "display_name": "Fictional Bogotá Reporter 043"
+    "username": "dan_quintero",
+    "display_name": "Daniela Quintero"
   },
-  "message": "Nueva observación en Bosa: el agua retrocedió algunos centímetros respecto de una marca del muro. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "El agua bajó unos centímetros frente a la marca del muro en Bosa. Algo es algo. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Bosa",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 216,
   "available_offset_seconds": 216,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0043-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0043.webp",
+      "sha256": "30997810b4b34f457fa72538b43d8b0946f8f0f56beb9d46853d35ad27eb8374",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated phone photograph of a damp mud line above receding water beside a fictional Bosa wall.",
+      "is_simulated": true
+    }
+  ]
 }

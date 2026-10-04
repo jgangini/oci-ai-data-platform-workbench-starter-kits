@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 import threading
@@ -51,6 +52,95 @@ class Runtime(CloudRuntime):
 
     def _project_posts(self, events, now, key):
         self.projected = (events, now, key)
+
+
+def test_review_note_limit_is_enforced_before_cloud_io(monkeypatch):
+    runtime = Runtime()
+    calls = []
+    async def io(function, *args):
+        calls.append(args)
+        return {"review_status": args[1]}
+    monkeypatch.setattr(runtime, "_io", io)
+    assert asyncio.run(runtime.review("incident-1", "validated", "n" * 1000)) == {"review_status": "validated"}
+    with pytest.raises(ValueError, match="1000"):
+        asyncio.run(runtime.review("incident-1", "rejected", "n" * 1001))
+    assert calls == [("incident-1", "validated", "n" * 1000)]
+
+
+@pytest.mark.parametrize("lat,lon", [(True, -74), (float("nan"), -74), (4, float("inf")),
+                                      (91, 0), (0, -181), (4, None), (None, -74)])
+def test_invalid_review_coordinates_fail_before_cloud_io(monkeypatch, lat, lon):
+    runtime = Runtime()
+    async def unexpected_io(*_args):
+        pytest.fail("Invalid coordinates must not reach cloud I/O")
+    monkeypatch.setattr(runtime, "_io", unexpected_io)
+    with pytest.raises(ValueError):
+        asyncio.run(runtime.review("incident-1", "pending", "", lat=lat, lon=lon))
+
+
+def test_review_coordinate_lock_uses_durable_control_when_publication_is_stale(monkeypatch):
+    runtime = Runtime()
+    incident = {"id": "incident-1", "lat": 4.62, "lon": -74.16, "review_status": "pending", "evidence_ids": ["x:1"]}
+    monkeypatch.setattr(runtime, "_snapshot", lambda: {"incidents": [copy.deepcopy(incident)]})
+    saved = asyncio.run(runtime.review("incident-1", "validated", "Located", ["x:1"], 4.63, -74.15))
+    assert (saved["lat"], saved["lon"], saved["location_method"]) == (4.63, -74.15, "human_review")
+    assert saved["review_pending_publication"] is True and runtime._snapshot()["incidents"][0] == incident
+    previous = copy.deepcopy(runtime.documents["reviews"])
+    calls = list(runtime.client.calls)
+    for status in ("validated", "pending", "rejected"):
+        with pytest.raises(HTTPException) as conflict:
+            asyncio.run(runtime.review("incident-1", status, "Must not move yet", ["x:1"], 4.64, -74.15))
+        assert conflict.value.status_code == 409
+        assert runtime.documents["reviews"] == previous and runtime.client.calls == calls
+    # The published snapshot can also lag the unlock: the durable state remains authoritative.
+    incident["review_status"] = "validated"
+    asyncio.run(runtime.review("incident-1", "pending", "Unlock only"))
+    moved = asyncio.run(runtime.review("incident-1", "rejected", "Moved after unlock", ["x:1"], 4.64, -74.15))
+    retained = asyncio.run(runtime.review("incident-1", "pending", "Keep coordinates"))
+    assert (moved["lat"], retained["lat"], retained["lon"]) == (4.64, 4.64, -74.15)
+    assert runtime.documents["reviews"]["items"]["incident-1"]["lat"] == 4.64
+
+
+@pytest.mark.parametrize("status", ["validated", "rejected", "pending"])
+def test_cloud_review_returns_saved_note_and_evidence_but_awaits_publication(monkeypatch, status):
+    runtime = Runtime()
+    incident = {"id": "incident-1", "review_status": "pending", "review_note": "Old note",
+                "evidence_ids": ["x:current"], "reviewed_evidence_ids": ["x:older"]}
+    monkeypatch.setattr(runtime, "_snapshot", lambda: {"incidents": [copy.deepcopy(incident)]})
+    result = asyncio.run(runtime.review("incident-1", status, "New human review"))
+    saved = runtime.documents["reviews"]["items"]["incident-1"]
+    assert saved["status"] == result["review_status"] == status
+    assert saved["note"] == result["review_note"] == "New human review"
+    assert saved["evidence_ids"] == result["reviewed_evidence_ids"] == ["x:current"]
+    assert saved["updated_at"] and result["review_saved"] is True and result["review_pending_publication"] is True
+    assert runtime._snapshot()["incidents"][0]["review_note"] == "Old note"
+    assert [call[0] for call in runtime.client.calls] == ["GET", "PUT", "POST"]
+    assert runtime.client.calls[1][2]["payload"]["schedule"]["pauseStatus"] == "PAUSED"
+
+
+def test_review_wake_failure_retains_saved_control_and_reports_publication_pending(monkeypatch):
+    runtime = Runtime()
+    monkeypatch.setattr(runtime, "_snapshot", lambda: {"incidents": [{"id": "incident-1", "evidence_ids": ["x:1"]}]})
+    def failed_wake(_request_id):
+        raise RuntimeError("PRIVATE native job response")
+    monkeypatch.setattr(runtime, "_wake", failed_wake)
+    result = asyncio.run(runtime.review("incident-1", "validated", "Saved before job failure"))
+    assert result["review_saved"] is True and result["review_pending_publication"] is True
+    assert result["publication_error"] == "Review saved, but publication could not be started. Try again."
+    assert "PRIVATE" not in json.dumps(result)
+    assert runtime.documents["reviews"]["items"]["incident-1"]["status"] == "validated"
+    assert "event_registry" not in runtime.documents
+
+
+def test_cloud_review_rejects_changed_evidence_before_saving_or_waking(monkeypatch):
+    runtime = Runtime()
+    monkeypatch.setattr(runtime, "_snapshot", lambda: {"incidents": [{"id": "incident-1", "evidence_ids": ["x:1", "x:2"]}]})
+    with pytest.raises(HTTPException) as conflict:
+        asyncio.run(runtime.review("incident-1", "validated", "Only saw first post", ["x:1"]))
+    assert conflict.value.status_code == 409
+    assert "reviews" not in runtime.documents and not runtime.client.calls
+    result = asyncio.run(runtime.review("incident-1", "validated", "Checked both posts", ["x:2", "x:1"]))
+    assert result["review_saved"] is True and result["reviewed_evidence_ids"] == ["x:1", "x:2"]
 
 
 def test_explicit_finite_run_is_queued_after_idle_schedule_is_paused():
@@ -169,6 +259,26 @@ def test_save_only_queues_a_run_when_capture_is_active(active):
     assert runtime.client.calls[1][2]["payload"]["schedule"]["pauseStatus"] == ("UNPAUSED" if active else "PAUSED")
 
 
+@pytest.mark.parametrize("job_timeout,task_timeout", [(None, 0), (0, None), (600, 300)])
+def test_scheduler_omits_default_timeouts_without_mutating_native_get(job_timeout, task_timeout):
+    job = {"name": "PRISMA", "timeoutSeconds": job_timeout,
+           "tasks": [{"taskKey": "prisma_tick", "isStreaming": True, "timeoutSeconds": task_timeout}]}
+    original, writes = copy.deepcopy(job), []
+    def request(method, path, **options):
+        if method == "GET":
+            return job, {}
+        writes.append(options["payload"])
+    scheduling.set_schedule(request, {"workspace_key": "workspace", "job_key": "job"}, True)
+    payload = writes[0]
+    assert ("timeoutSeconds" in payload) == (job_timeout not in (None, 0))
+    assert ("timeoutSeconds" in payload["tasks"][0]) == (task_timeout not in (None, 0))
+    if job_timeout:
+        assert payload["timeoutSeconds"] == job_timeout
+        assert payload["tasks"][0]["timeoutSeconds"] == task_timeout
+    assert payload["schedule"]["pauseStatus"] == "PAUSED"
+    assert job == original
+
+
 @pytest.mark.parametrize("mode", ["real", "simulation"])
 @pytest.mark.parametrize("other_active", [False, True])
 def test_stopping_capture_queues_one_final_drain_then_idle_save_does_not(mode, other_active):
@@ -220,18 +330,13 @@ def test_failed_final_drain_is_observable_and_explicit_run_can_retry(monkeypatch
     assert runtime.documents["checkpoint_synthetic"] == checkpoint and runtime.documents["status_synthetic"] == landing_status
     monkeypatch.setattr(runtime.client, "_request", request)
     runtime.client.calls.clear()
-    with pytest.raises(HTTPException) as disabled:
-        asyncio.run(runtime.run_source("x"))
-    assert disabled.value.status_code == 409 and runtime.client.calls == []
-    asyncio.run(runtime.update_source("x", {"enabled": True}))
-    assert [call[0] for call in runtime.client.calls] == ["GET", "PUT"]
-    runtime.client.calls.clear()
-    asyncio.run(runtime.run_source("x"))
+    result = asyncio.run(runtime.run_source("x"))
+    assert result["source"]["enabled"] and result["source"]["capture_running"]
     assert [call[0] for call in runtime.client.calls] == ["GET", "PUT", "POST"]
     assert runtime.documents["checkpoint_synthetic"] == checkpoint and runtime.documents["status_synthetic"] == landing_status
 
 
-def test_run_waiting_behind_disable_save_rechecks_source_and_cannot_reactivate(monkeypatch):
+def test_explicit_run_waiting_behind_disable_save_reactivates_after_save(monkeypatch):
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
     runtime = Runtime()
@@ -261,13 +366,51 @@ def test_run_waiting_behind_disable_save_rechecks_source_and_cannot_reactivate(m
         finally:
             finish_save.set()
         assert not save.result(timeout=5)["enabled"]
-        with pytest.raises(HTTPException) as disabled:
-            run.result(timeout=5)
-    assert disabled.value.status_code == 409
+        result = run.result(timeout=5)
+    assert result["source"]["enabled"] and result["source"]["capture_running"]
     source = runtime.documents["configuration"]["sources"]["x"]
-    assert not source["enabled"] and not source["capture_running"]
+    assert source["enabled"] and source["capture_running"] and not source["capture_paused"]
+    assert runtime.documents["checkpoint_controls"]["x"]["run_id"]
+    assert [call[0] for call in runtime.client.calls] == ["GET", "PUT", "GET", "PUT", "POST"]
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_explicit_run_repairs_legacy_disabled_source_even_with_stale_running_flag(running):
+    runtime = Runtime()
+    runtime.documents["configuration"] = {"sources": {"x": {**default_source("x"), "enabled": False, "capture_running": running}}}
+    result = asyncio.run(runtime.run_source("x"))
+    saved = runtime.documents["configuration"]["sources"]["x"]
+    assert saved["enabled"] and saved["capture_running"] and not saved["capture_paused"]
+    assert result["source"]["enabled"] and runtime.documents["checkpoint_controls"]["x"]["run_id"]
+
+
+@pytest.mark.parametrize("mode", ["Synthetic", "real"])
+def test_connection_test_of_disabled_source_never_enables_capture(mode):
+    runtime = Runtime()
+    source = {**default_source("x"), "mode": mode, "enabled": False, "capture_running": False, "credential_configured": True}
+    runtime.documents["configuration"] = {"sources": {"x": source}}
+    runtime.documents["checkpoint_x"] = {"cursor": {"since_id": "15"}}
+    configuration, checkpoint = copy.deepcopy(runtime.documents["configuration"]), copy.deepcopy(runtime.documents["checkpoint_x"])
+    result = asyncio.run(runtime.test_source("x"))
+    assert result["status"] == ("queued" if mode == "real" else "simulation")
+    assert runtime.documents["configuration"] == configuration and runtime.documents["checkpoint_x"] == checkpoint
     assert "checkpoint_controls" not in runtime.documents
-    assert [call[0] for call in runtime.client.calls] == ["GET", "PUT"]
+    if mode == "real":
+        assert runtime.documents["status_x"]["requested_action"] == "test"
+        assert runtime.client.calls[1][2]["payload"]["schedule"]["pauseStatus"] == "PAUSED"
+    else:
+        assert runtime.client.calls == []
+
+
+@pytest.mark.parametrize("action", ["test_source", "run_source"])
+def test_disabled_real_source_without_credential_cannot_activate_or_queue(action):
+    runtime = Runtime()
+    runtime.documents["configuration"] = {"sources": {"x": {**default_source("x"), "mode": "real", "enabled": False}}}
+    before = copy.deepcopy(runtime.documents)
+    with pytest.raises(HTTPException) as missing:
+        asyncio.run(getattr(runtime, action)("x"))
+    assert missing.value.status_code == 409
+    assert runtime.documents == before and runtime.client.calls == []
 
 
 def test_stop_waits_for_inflight_csv_before_disabling_and_submitting_drain(monkeypatch):
@@ -365,7 +508,7 @@ def test_stale_source_status_cannot_replace_current_configuration():
     runtime.documents["status_x"] = {"configuration_revision": 1, "enabled": True,
         "mode": "real", "query": "wrong", "status": "ready", "next_due": "2099-01-01T00:00:00Z"}
     source = runtime._sources()["sources"][0]
-    assert source["enabled"] is False and source["mode"] == "simulation" and source["query"] == "Bogotá"
+    assert source["enabled"] is False and source["mode"] == "Synthetic" and source["query"] == "Bogotá"
     assert source["status"] == "disabled" and source["next_due"] is None
 
 

@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0013",
-    "username": "sim_bogota_0013",
-    "display_name": "Fictional Bogotá Reporter 013"
+    "username": "mar_salcedo",
+    "display_name": "Mariana Salcedo"
   },
-  "message": "En el tramo que observo de Kennedy el nivel dejó de subir, pero continúa el anegamiento. · Bogotá #Bogota #Colombia #inundacion #desastre",
+  "message": "En el tramo de Kennedy que estoy mirando dejó de subir el nivel, pero la calle sigue anegada. #inundacion #Bogota",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Kennedy",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 144,
   "available_offset_seconds": 144,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0013-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0013.webp",
+      "sha256": "5877063d4b8ddf2dd6cf0477ca6cee6a3bba55fd564cd5b8a3b260640e55b5e4",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated original image for post-0013: Horizontal candid mobile photograph looking across a quiet flooded residential street in Kennedy, Bogotá from a sheltered stoop. Standing rainwater level stable below several raised thresholds; a pale mint house with two grey doors and an orange-brick building across the way, one black motorcycle parked high on a dry tiled porch. Still water reflections, drizzle easing, no dramatic movement, no people foreground.",
+      "is_simulated": true
+    }
+  ]
 }

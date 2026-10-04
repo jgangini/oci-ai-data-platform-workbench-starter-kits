@@ -3,10 +3,10 @@
   "platform": "instagram",
   "author": {
     "id": "fictional-author-0057",
-    "username": "sim_bogota_0057",
-    "display_name": "Fictional Bogotá Reporter 057"
+    "username": "pau_pineda",
+    "display_name": "Paula Pineda"
   },
-  "message": "El fuego de Chapinero parece avanzar sobre pasto seco; no puedo estimar el área afectada. · Bogotá #Bogota #Colombia #incendio #desastre",
+  "message": "Me da la impresión de que el fuego va cogiendo más pasto seco en Chapinero, pero no sé calcular el área ni quiero poner una cifra por inventar. Lo estoy viendo desde lejos. #Colombia #incendio Bogotá",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Chapinero",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 96,
   "available_offset_seconds": 96,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0057-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0057.webp",
+      "sha256": "8c792be588ceb98b25fd2c53f7ec1cd44d22fcd4fa5a259dfe7b0a718318f17b",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Escena sintética generada por IA: fuego localizado que alcanza matas de pasto seco en Chapinero, visto a distancia; no documenta un incidente real.",
+      "is_simulated": true
+    }
+  ]
 }

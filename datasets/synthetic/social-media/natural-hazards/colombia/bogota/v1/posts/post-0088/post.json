@@ -3,10 +3,10 @@
   "platform": "tiktok",
   "author": {
     "id": "fictional-author-0088",
-    "username": "sim_bogota_0088",
-    "display_name": "Fictional Bogotá Reporter 088"
+    "username": "san_beltran",
+    "display_name": "Santiago Beltrán"
   },
-  "message": "La lluvia disminuyó en Ciudad Bolívar, pero la superficie del talud continúa muy húmeda. · Bogotá #Bogota #Colombia #deslizamiento #desastre",
+  "message": "Bajó la lluvia en Ciudad Bolívar, menos mal, pero el talud sigue empapado. No confundamos una cosa con la otra: la pendiente no se secó de repente. #Bogota #desastre #deslizamiento",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Ciudad Bolívar",
@@ -18,5 +18,17 @@
   },
   "published_offset_seconds": 180,
   "available_offset_seconds": 180,
-  "attachments": []
+  "attachments": [
+    {
+      "id": "post-0088-image-01",
+      "type": "image",
+      "mime_type": "image/webp",
+      "dataset_path": "media/unique-post-0088.webp",
+      "sha256": "b9a2cb67d8a25d45ba0f63febc9e519e8801e36dd545ef003f57d1cf3e7dfe57",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated fictional scene in Ciudad Bolívar: A saturated earthen bank after the rain has eased. Not documentation of a real incident.",
+      "is_simulated": true
+    }
+  ]
 }

@@ -49,6 +49,19 @@ def request_id(value):
     return value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9/_.:-]{1,256}", value) else None
 
 
+def response_text(response, *, code="oci_invalid_response", limit=16000):
+    choices = getattr(getattr(response.data, "chat_response", None), "choices", None)
+    choice = choices[0] if isinstance(choices, list) and choices else None
+    content = getattr(getattr(choice, "message", None), "content", None)
+    text = "".join(part.text for part in content if isinstance(getattr(part, "text", None), str)) if isinstance(content, list) else ""
+    blocked = getattr(choice, "finish_reason", None) in {"recitation", "content_filter", "safety"}
+    if blocked or not text.strip() or len(text) > limit:
+        message = "OCI blocked the model response; no answer was returned" if blocked else "OCI did not return a bounded answer"
+        raise HTTPException(502, {"code": code, "message": message, "request_id": request_id(response.headers.get("opc-request-id")),
+                                 **({"response_blocked": True} if blocked else {})})
+    return text
+
+
 def provider_failure(error):
     status = getattr(error, "status", None)
     code, message = {
@@ -73,11 +86,16 @@ def model_view(model):
         reason = "This assistant requires a pretrained model with on-demand serving"
     elif retired and retired <= datetime.now(timezone.utc):
         reason = "On-demand serving for this model has retired"
-    return {"id": model.id, "name": model.display_name or model.id, "vendor": model.vendor,
+    name = model.display_name or model.id
+    if name.lower().startswith("ocid1."):
+        name = "OCI conversational model"
+    return {"id": model.id, "name": name, "vendor": model.vendor,
             "version": model.version, "selectable": reason is None, "reason": reason}
 
 
 class OciProvider:
+    state_key = "oci_provider"
+
     def __init__(self, settings, runtime, aidp_factory):
         self.settings, self.runtime, self.aidp_factory = settings, runtime, aidp_factory
 
@@ -89,22 +107,27 @@ class OciProvider:
         except Exception as error:
             raise provider_failure(error) from None
 
+    def _default_state(self):
+        model_id = self.settings.gods_eye_oci_text_model
+        return {"model_id": model_id, "model_name": model_id, "last_test": None} if self.settings.prisma_enabled and model_id else {}
+
     def _state(self, change=None):
-        if self.settings.local_development_mode:
+        defaults = self._default_state()
+        if self.settings.prisma_local_mode:
             store = self.runtime.store
             with store.connection() as db:
                 if change is not None:
                     db.execute("BEGIN IMMEDIATE")
-                state = store._get(db, "oci_provider", {})
+                state = store._get(db, self.state_key, defaults)
                 if change is not None:
                     state = change(state)
-                    store._put(db, "oci_provider", state)
+                    store._put(db, self.state_key, state)
                 return state
         if change is not None:
-            document = self.runtime._change("configuration", lambda current: {**current, "oci_provider": change(current.get("oci_provider", {}))})
+            document = self.runtime._change("configuration", lambda current: {**current, self.state_key: change(current.get(self.state_key, defaults))})
         else:
             document = self.runtime._doc("configuration")
-        return document.get("oci_provider", {})
+        return document.get(self.state_key, defaults)
 
     def _operator(self):
         operator = self.aidp_factory()
@@ -133,7 +156,11 @@ class OciProvider:
         except Exception:
             available, region = False, self.settings.aidp_region
         selected = state.get("model_id", "")
-        return {"provider": "oci", "configured": bool(selected), "available": available, "model_id": selected,
+        name = state.get("model_name") or selected
+        if name.lower().startswith("ocid1."):
+            name = "OCI conversational model"
+        return {"provider": "oci", "configured": bool(selected) and available, "available": available, "model_id": selected,
+                "model_name": name, "model_vendor": state.get("model_vendor", ""),
                 "region": region, "credential_source": "server_operator", "capabilities": {"text": True, "voice": False},
                 "status": "unavailable" if not available else "configured" if selected else "model_required",
                 "last_test": state.get("last_test"),
@@ -149,15 +176,21 @@ class OciProvider:
     def _selected_model(self, model_id):
         if not model_id:
             raise HTTPException(409, {"code": "oci_model_required", "message": "Select an OCI conversational model first"})
-        response = self._sdk_client().list_models(self.settings.compartment_id, id=model_id, capability=["CHAT"], lifecycle_state="ACTIVE", limit=100)
-        selected = next((model_view(item) for item in response.data.items if item.id == model_id), None)
-        if selected is None or not selected["selectable"]:
+        client, selected = self._sdk_client(), None
+        for selector in (("id",) if model_id.startswith("ocid1.") else ("display_name", "id")):
+            response = client.list_models(self.settings.compartment_id, **{selector: model_id}, capability=["CHAT"], lifecycle_state="ACTIVE", limit=100)
+            matches = [model_view(item) for item in response.data.items if model_id in {item.id, item.display_name}]
+            selected = next((item for item in matches if item["selectable"]), None)
+            if matches:
+                break
+        if selected is None:
             raise HTTPException(422, {"code": "oci_model_not_selectable", "message": "Choose an active on-demand GENERIC chat model from the current OCI catalog"})
         return selected
 
     def save(self, model_id):
         selected = self._selected_model(model_id)
-        self._state(lambda _: {"model_id": selected["id"], "saved_at": utc_text(time.time()), "last_test": None})
+        self._state(lambda _: {"model_id": selected["id"], "model_name": selected["name"], "model_vendor": selected["vendor"],
+                               "saved_at": utc_text(time.time()), "last_test": None})
         return self.status()
 
     def _complete(self, model_id, payload, max_tokens):
@@ -177,30 +210,29 @@ class OciProvider:
         response = self._sdk_client(inference=True).chat(models.ChatDetails(compartment_id=self.settings.compartment_id,
             serving_mode=models.OnDemandServingMode(model_id=model_id),
             chat_request=models.GenericChatRequest(messages=messages, max_tokens=max_tokens, temperature=0, is_stream=False)))
-        answer = "".join(part.text for part in response.data.chat_response.choices[0].message.content if getattr(part, "text", None))
-        if not answer.strip() or len(answer) > 16000:
-            raise HTTPException(502, {"code": "oci_invalid_response", "message": "OCI did not return a bounded text response"})
+        answer = response_text(response)
         return {"provider": "oci", "model_id": model_id, "answer": answer, "mode": "real", "scope": "general_text",
                 "request_id": request_id(response.headers.get("opc-request-id"))}
 
     def chat(self, payload):
         model_id = self._state().get("model_id", "")
-        self._selected_model(model_id)
-        return self._complete(model_id, payload, 512)
+        selected = self._selected_model(model_id)
+        return {**self._complete(selected["id"], payload, 512), "model_name": selected["name"], "model_vendor": selected["vendor"]}
 
     def test(self):
         state = self._state()
         model_id = state.get("model_id", "")
-        failure = None
+        failure, metadata = None, {}
         try:
-            self._selected_model(model_id)
-            response = self._complete(model_id, TextQuestion(question="Reply with only OK."), 16)
+            selected = self._selected_model(model_id)
+            metadata = {"model_name": selected["name"], "model_vendor": selected["vendor"]}
+            response = self._complete(selected["id"], TextQuestion(question="Reply with only OK."), 16)
             result = {"status": "success", "request_id": response["request_id"]}
         except Exception as error:
             failure = error if isinstance(error, HTTPException) else provider_failure(error)
             result = {"status": "error", "error": failure.detail}
         result.update(model_id=model_id, tested_at=utc_text(time.time()))
-        self._state(lambda current: {**current, "last_test": result} if current.get("model_id") == model_id else current)
+        self._state(lambda current: {**current, **metadata, "last_test": result} if current.get("model_id") == model_id else current)
         if failure:
             raise failure from None
         return {**self.status(), "test": result}

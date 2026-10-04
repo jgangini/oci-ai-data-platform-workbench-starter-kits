@@ -3,10 +3,10 @@
   "platform": "x",
   "author": {
     "id": "fictional-author-0097",
-    "username": "sim_bogota_0097",
-    "display_name": "Fictional Bogotá Reporter 097"
+    "username": "mar_forero",
+    "display_name": "Mariana Forero"
   },
-  "message": "Lluvia intensa en Suba: el aguacero reduce la visibilidad y golpea con fuerza los techos. · Bogotá #Bogota #Colombia #lluvia #desastre",
+  "message": "¡Qué aguacero en Suba! 🌧️ Apenas se distingue la calle desde la ventana y en los techos suena durísimo. Si están por salir, tengan en cuenta cómo está la visibilidad. #lluvia #Bogota #desastre",
   "country": "Colombia",
   "city": "Bogotá",
   "locality": "Suba",
@@ -22,12 +22,12 @@
     {
       "id": "post-0097-image-01",
       "type": "image",
-      "mime_type": "image/svg+xml",
-      "dataset_path": "posts/post-0097/media/image-01.svg",
-      "sha256": "3a870e197d0d04bb1a8d52db35eb71cff7f3ea86704621213284b4491b7833ba",
+      "mime_type": "image/webp",
+      "dataset_path": "media/rain-suba.webp",
+      "sha256": "7bc61b2076457aa599affc2891cf43dd81e4f0ff61d0e54ac4ce6ded3280d110",
       "license": "CC0-1.0",
-      "origin": "synthetic_diagram",
-      "alt_text": "Synthetic, nonphotographic diagram for Suba; not evidence of a real event.",
+      "origin": "ai_generated",
+      "alt_text": "Synthetic AI-generated scene of heavy rain and reduced visibility on a residential street in Suba; a fictional scenario, not documentation of a real incident.",
       "is_simulated": true
     }
   ]

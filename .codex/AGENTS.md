@@ -21,6 +21,9 @@ Keep this file repo-specific. Do not duplicate universal rules that already live
 
 - Required checks beyond global Graphify and Sentrux: mock-provider Terraform contract, Python tests, frontend build/tests, and container health smoke test.
 - Safe shortcuts for docs-only work: no runtime checks when only prose changes.
+- Windows sandbox pytest runs must use a fresh, nonexistent `--basetemp=.tmp/<task-specific-name>` directory; the global TEMP pytest directory repeatedly fails with access denied. Check the path does not exist first, because pytest clears an existing basetemp.
+- Native viewer tests must use the Cesium version pinned in `apps/prisma-viewer/.upstream/package-lock.json` and installed under `.upstream/node_modules`; the Docker build installs that tree only. The legacy viewer's root `node_modules` may contain a different Cesium version and internal module paths.
+- AIDP source uploads and diagnostic payloads must read and write UTF-8 explicitly. The Windows default can corrupt Spanish prompts and docstrings. Normalize line endings only when comparing source equivalence; verify artifact hashes against the original bytes.
 - Release, deploy, or approval gates: never tag/release until Terraform and all application checks pass; OCI APPLY is always an explicit external action.
 
 ## Repo-Specific Friction

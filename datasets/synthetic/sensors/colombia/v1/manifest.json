@@ -1,0 +1,34 @@
+{
+  "mode": "Synthetic",
+  "is_simulated": true,
+  "records": 4000,
+  "interval_minutes": 5,
+  "observed_batch_at": "2026-10-03T18:00:00+00:00",
+  "files": [
+    {
+      "path": "sensors/rainfall/sim-1791050400-0.txt",
+      "records": 800,
+      "sha256": "a11126abccfa9ebeb9fc0ffb0015b1624c58b4bd9582f6713985491fea54f1d9"
+    },
+    {
+      "path": "sensors/river_level/sim-1791050400-0.txt",
+      "records": 800,
+      "sha256": "2225e351c61f20a103ef19f0541acc0ac6016ea1b8657ad5522a53d9b60b3638"
+    },
+    {
+      "path": "sensors/soil_moisture/sim-1791050400-0.txt",
+      "records": 800,
+      "sha256": "a78a83ce542681725a248901d59a49a76c53c40342b51c01798af7d54232564b"
+    },
+    {
+      "path": "sensors/temperature/sim-1791050400-0.txt",
+      "records": 800,
+      "sha256": "271a6f68d1ca113a5eba86b967e72f9c588f1b1b49f33747ddc87a588c0e21ee"
+    },
+    {
+      "path": "sensors/wind_speed/sim-1791050400-0.txt",
+      "records": 800,
+      "sha256": "05bccdd3074d1b56515fcfed7c49397177a19f291dcdb93b3e3a9e6b5d456ca5"
+    }
+  ]
+}

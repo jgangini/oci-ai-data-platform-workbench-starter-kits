@@ -1,0 +1,13 @@
+.source/
+.tmp/
+.venv/
+.git/
+.codex/
+.aidp/
+graphify-out/
+datasets/
+apps/prisma-viewer/.upstream/
+**/node_modules/
+**/dist/
+**/__pycache__/
+terraform/.terraform/
