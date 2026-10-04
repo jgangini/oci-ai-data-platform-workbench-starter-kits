@@ -58,18 +58,14 @@ function installDocument(t) {
 
 async function panelHarness(t, sensors = [reading(), reading(2)]) {
   installDocument(t);
-  const data = { ...publication('v1', sensors), can_review: true }, mutations = [], h = harness(async () => structuredClone(data));
-  const { panel } = mountSensorsPanel({ layer: h.layer, request: (path, options) => new Promise((resolve, reject) => mutations.push({ path, ...options, resolve, reject })), signal: h.lifetime.signal,
+  const data = { ...publication('v1', sensors), can_review: true }, reads = [];
+  const h = harness(async (path, options) => { reads.push({ path, options }); return structuredClone(data); });
+  const { panel } = mountSensorsPanel({ layer: h.layer, signal: h.lifetime.signal,
     setPanelCollapsed: (_id, value) => { panel.className = value ? 'collapsed' : ''; } });
   h.layer.init(h.viewer); h.layer.enable(); await h.layer.update(); h.layer.select(sensors[0].id);
   t.after(() => { h.lifetime.abort(); h.layer.destroy(); });
-  const form = panel.querySelector('.sensors-detail').querySelector('form'), dialog = () => document.body.querySelectorAll('dialog')[0];
-  return { ...h, panel, data, mutations, form, dialog,
-    coordinate: name => form.querySelector(`[name="${name}"]`), save: () => form.querySelector('button'), feedback: () => form.querySelector('.tc-review-status'),
-    submit: () => form.dispatchEvent(new Event('submit', { cancelable: true })),
-    edit(lat, lon) { this.coordinate('lat').value = String(lat); this.coordinate('lon').value = String(lon); form.dispatchEvent(new Event('input')); },
-    dialogButton: text => dialog()?.querySelectorAll('button').find(button => button.textContent === text), settle: () => new Promise(setImmediate),
-  };
+  const detail = panel.querySelector('.sensors-detail');
+  return { ...h, panel, data, reads, detail, coordinates: () => detail.querySelectorAll('dd').map(value => value.textContent) };
 }
 
 test('sensor boundary accepts latest Synthetic readings and rejects malformed or duplicate measurements', () => {
@@ -379,30 +375,12 @@ test('sensor Filter submits drafts explicitly, numbers continue across pages, an
   assert.deepEqual(list.children.slice(0, 3).map(row => row.querySelector('.sensor-status').dataset.status), ['normal', 'warning', 'critical']);
   const metadata = list.children[0].querySelector('.scene-shot-meta');
   assert.equal(metadata.textContent, 'Rainfall · '); assert.equal(metadata.children[0].textContent, 'normal'); assert.equal(metadata.children[1].textContent, ' · 12.3 mm');
-  view.panel.querySelector('[data-next]').dispatchEvent(new Event('click')); assert.match(list.children[0].querySelector('.scene-shot-label').textContent, /^#0051 sensor-50/);
+  view.panel.querySelector('[data-next]').dispatchEvent(new Event('click')); assert.equal(view.detail.hidden, false); assert.deepEqual(view.coordinates(), ['4.65', '-74.1']); assert.match(list.children[0].querySelector('.scene-shot-label').textContent, /^#0051 sensor-50/);
   filters.elements.q.value = 'sensor-54'; filters.elements.q.dispatchEvent(new Event('input')); filters.dispatchEvent(new Event('change'));
   assert.equal(view.layer.state().items.length, 55, 'Typing does not repaint the map before Filter');
   filters.dispatchEvent(new Event('submit', { cancelable: true }));
   assert.equal(view.layer.state().items.length, 1); assert.equal(view.panel.querySelector('[data-page]').textContent, '1 / 1');
   assert.match(list.children[0].querySelector('.scene-shot-label').textContent, /^#0001 sensor-54/);
-});
-
-test('sensor location Save validates input and opens one confirmation; Cancel and Escape send no mutation', async t => {
-  const view = await panelHarness(t);
-  view.edit('', -74.1); view.submit(); assert.equal(view.dialog(), undefined); assert.match(view.feedback().textContent, /within Colombia/);
-  view.edit(91, -74.1); view.submit(); assert.equal(view.dialog(), undefined); assert.equal(view.mutations.length, 0);
-  view.edit(4.66, -74.12); view.submit(); view.submit();
-  assert.equal(document.body.querySelectorAll('dialog').length, 1); assert.equal(view.dialog().open, true);
-  assert.equal(view.dialog()['aria-label'], 'Save sensor coordinates?'); assert.equal(document.activeElement, view.dialogButton('Cancel'));
-  assert.equal(view.coordinate('lat').disabled, true); assert.equal(view.mutations.length, 0);
-  assert.equal(view.form['aria-busy'], 'true');
-  view.dialogButton('Cancel').dispatchEvent(new Event('click')); await view.settle();
-  assert.equal(view.dialog(), undefined); assert.equal(view.coordinate('lat').disabled, false); assert.equal(view.coordinate('lat').value, '4.66'); assert.equal(document.activeElement, view.save());
-  assert.equal(view.form['aria-busy'], 'false');
-  view.submit(); const escape = new Event('cancel', { cancelable: true }); view.dialog().dispatchEvent(escape); await view.settle();
-  assert.equal(escape.defaultPrevented, true); assert.equal(view.dialog(), undefined); assert.equal(view.mutations.length, 0);
-  view.data.can_review = false; await view.layer.update(); assert.equal(view.save().hidden, true); assert.equal(view.coordinate('lat').readOnly, true);
-  view.submit(); assert.equal(view.dialog(), undefined); assert.equal(view.mutations.length, 0);
 });
 
 test('unsubmitted family, department and search drafts survive polling and refreshed department options', async t => {
@@ -415,85 +393,25 @@ test('unsubmitted family, department and search drafts survive polling and refre
   assert.equal(filters.elements.sensor_type.value, 'rainfall'); assert.equal(filters.elements.department.value, 'Bogotá'); assert.equal(filters.elements.q.value, 'sensor-1');
 });
 
-test('sensor Save sends frozen coordinates once, preserves polling drafts and waits for the persisted publication', async t => {
-  const view = await panelHarness(t);
-  view.edit(4.66, -74.12); view.data.version = 'v2'; view.data.sensors[0].id = 'new-reading'; view.data.sensors[0].value = 25; await view.layer.update();
-  assert.equal(view.layer.state().selectedId, 'new-reading'); assert.equal(view.coordinate('lat').value, '4.66'); assert.equal(view.coordinate('lon').value, '-74.12');
-  view.submit(); const confirm = view.dialogButton('Confirm save'); confirm.dispatchEvent(new Event('click')); confirm.dispatchEvent(new Event('click')); await view.settle();
-  const request = view.mutations[0]; assert.equal(view.mutations.length, 1); assert.equal(request.path, '/api/prisma/sensors/sensor-1/location'); assert.equal(request.method, 'POST');
-  assert.deepEqual(JSON.parse(request.body), { lat: 4.66, lon: -74.12, expected_lat: 4.65, expected_lon: -74.1 });
-  await view.layer.update(); assert.equal(request.signal.aborted, false); assert.equal(view.coordinate('lat').value, '4.66');
-  view.submit(); assert.equal(view.dialog(), undefined); assert.equal(view.mutations.length, 1);
-  request.resolve({ location_saved: true, sensor_id: 'sensor-1', lat: 4.66, lon: -74.12, location_pending_publication: true }); await view.settle();
-  assert.match(view.feedback().textContent, /Waiting for.*publication/); assert.equal(view.save().disabled, false);
-  await view.layer.update(); assert.match(view.feedback().textContent, /Waiting for/, 'Previous published coordinates do not acknowledge a draft');
-  view.data.version = 'v3'; Object.assign(view.data.sensors[0], { lat: 4.66, lon: -74.12 }); await view.layer.update();
-  assert.equal(view.feedback().textContent, 'Coordinates saved.'); assert.equal(view.save().disabled, false); assert.equal(view.coordinate('lat').value, '4.66');
-});
-
-test('failed sensor saves preserve edits; conflicts refresh expected coordinates and require a new confirmation', async t => {
-  const view = await panelHarness(t); view.edit(4.66, -74.12); view.submit(); view.dialogButton('Confirm save').dispatchEvent(new Event('click')); await view.settle();
-  view.mutations[0].reject(new Error('Unavailable')); await view.settle();
-  assert.match(view.feedback().textContent, /could not be confirmed: Unavailable/); assert.equal(view.feedback().role, 'alert'); assert.equal(view.save().disabled, false);
-  await view.layer.update(); assert.equal(view.coordinate('lat').value, '4.66');
-  view.submit(); view.dialogButton('Confirm save').dispatchEvent(new Event('click')); await view.settle();
-  view.data.version = 'v2'; Object.assign(view.data.sensors[0], { lat: 4.67, lon: -74.13 });
-  view.mutations[1].reject(Object.assign(new Error('Conflict'), { status: 409 })); await view.settle();
-  assert.match(view.feedback().textContent, /Published coordinates: 4.67, -74.13/); assert.equal(view.coordinate('lat').value, '4.66'); assert.equal(view.mutations.length, 2);
-  view.submit(); view.dialogButton('Confirm save').dispatchEvent(new Event('click')); await view.settle();
-  assert.deepEqual(JSON.parse(view.mutations[2].body), { lat: 4.66, lon: -74.12, expected_lat: 4.67, expected_lon: -74.13 });
-  view.mutations[2].resolve({ location_saved: true, sensor_id: 'wrong-sensor', lat: 4.66, lon: -74.12 }); await view.settle();
-  assert.match(view.feedback().textContent, /server did not confirm/); assert.equal(view.feedback().role, 'alert'); assert.equal(view.coordinate('lat').value, '4.66');
-});
-
-test('an acknowledged immediate Save keeps accepted coordinates while the follow-up publication is unavailable', async t => {
-  const view = await panelHarness(t); view.edit(4.66, -74.12); view.submit(); view.dialogButton('Confirm save').dispatchEvent(new Event('click')); await view.settle();
-  view.data.sensors[0].value = NaN;
-  view.mutations[0].resolve({ location_saved: true, sensor_id: 'sensor-1', lat: 4.66, lon: -74.12, location_pending_publication: false }); await view.settle();
-  assert.equal(view.layer.state().snapshot.sensors[0].lat, 4.65, 'The failed refresh retains the last publication');
-  assert.equal(view.coordinate('lat').value, '4.66'); assert.equal(view.coordinate('lon').value, '-74.12');
-  assert.equal(view.save().disabled, false, 'A confirmed durable save can be retried if publication fails');
-  view.data.version = 'v2'; Object.assign(view.data.sensors[0], { value: 12.3, lat: 4.66, lon: -74.12 }); await view.layer.update();
-  assert.equal(view.save().disabled, false); assert.equal(view.feedback().textContent, 'Coordinates saved.');
-});
-
-test('publication failure allows an explicitly confirmed retry using the durable saved coordinates', async t => {
-  const view = await panelHarness(t); view.edit(4.66, -74.12); view.submit(); view.dialogButton('Confirm save').dispatchEvent(new Event('click')); await view.settle();
-  view.mutations[0].resolve({ location_saved: true, sensor_id: 'sensor-1', lat: 4.66, lon: -74.12, location_pending_publication: true, publication_error: 'Publication failed. Try again.' }); await view.settle();
-  assert.match(view.feedback().textContent, /Publication failed/); assert.equal(view.save().disabled, false); assert.equal(view.coordinate('lat').value, '4.66');
-  view.submit(); assert.equal(view.mutations.length, 1, 'Retry still requires confirmation'); view.dialogButton('Confirm save').dispatchEvent(new Event('click')); await view.settle();
-  assert.deepEqual(JSON.parse(view.mutations[1].body), { lat: 4.66, lon: -74.12, expected_lat: 4.66, expected_lon: -74.12 });
-  view.data.version = 'v2'; Object.assign(view.data.sensors[0], { lat: 4.66, lon: -74.12 });
-  view.mutations[1].resolve({ location_saved: true, sensor_id: 'sensor-1', lat: 4.66, lon: -74.12, location_pending_publication: false }); await view.settle();
-  assert.equal(view.feedback().textContent, 'Coordinates saved.'); assert.equal(view.coordinate('lat').value, '4.66');
-});
-
-test('a conflict after an accepted pending Save cannot turn the rejected correction into success', async t => {
-  const view = await panelHarness(t); view.edit(4.66, -74.12); view.submit(); view.dialogButton('Confirm save').dispatchEvent(new Event('click')); await view.settle();
-  view.mutations[0].resolve({ location_saved: true, sensor_id: 'sensor-1', lat: 4.66, lon: -74.12, location_pending_publication: true }); await view.settle();
-  assert.match(view.feedback().textContent, /Waiting for/);
-  view.edit(4.68, -74.14); view.submit(); view.dialogButton('Confirm save').dispatchEvent(new Event('click')); await view.settle();
-  assert.deepEqual(JSON.parse(view.mutations[1].body), { lat: 4.68, lon: -74.14, expected_lat: 4.66, expected_lon: -74.12 });
-  view.mutations[1].reject(Object.assign(new Error('Conflict'), { status: 409 })); await view.settle();
-  assert.match(view.feedback().textContent, /Location changed since editing.*Published coordinates: 4.65, -74.1/);
-  assert.equal(view.feedback().role, 'alert'); assert.equal(view.coordinate('lat').value, '4.68'); assert.equal(view.coordinate('lon').value, '-74.14');
-  await view.layer.update(); assert.equal(view.feedback().role, 'alert'); assert.doesNotMatch(view.feedback().textContent, /Coordinates saved/);
-  assert.equal(view.mutations.length, 2, 'A rejected correction is not retried automatically');
-});
-
-test('changing selection expires sensor confirmation and ignores a late acknowledgment after shutdown', async t => {
-  const view = await panelHarness(t); view.edit(4.66, -74.12); view.submit();
-  view.layer.select('event-2'); await view.settle(); assert.equal(view.dialog(), undefined); assert.equal(view.mutations.length, 0);
-  view.layer.select('event-1'); assert.equal(view.coordinate('lat').value, '4.66'); view.submit();
-  view.dialogButton('Confirm save').dispatchEvent(new Event('click')); await view.settle();
-  const request = view.mutations[0]; view.lifetime.abort(); assert.equal(request.signal.aborted, true);
-  request.resolve({ location_saved: true, sensor_id: 'sensor-1', lat: 4.66, lon: -74.12 }); await view.settle();
-  assert.doesNotMatch(view.feedback().textContent, /^Coordinates saved/); assert.equal(view.layer.state().snapshot.sensors[0].lat, 4.65);
-});
-
-test('disabling Sensors or losing review access cancels an open confirmation without a mutation', async t => {
-  const view = await panelHarness(t); view.edit(4.66, -74.12); view.submit(); view.layer.disable(); await view.settle();
-  assert.equal(view.dialog(), undefined); assert.equal(view.mutations.length, 0);
-  view.layer.enable(); view.submit(); view.data.can_review = false; await view.layer.update(); await view.settle();
-  assert.equal(view.dialog(), undefined); assert.equal(view.mutations.length, 0); assert.equal(view.save().hidden, true); assert.equal(view.coordinate('lat').readOnly, true);
+test('sensor coordinates stay read-only and follow selection and valid publications regardless of review access', async t => {
+  const view = await panelHarness(t, [reading(), reading(2, { lat: 4.7, lon: -74.2 })]);
+  const values = view.detail.querySelectorAll('dd');
+  assert.deepEqual(view.detail.querySelectorAll('dt').map(item => item.textContent), ['Latitude', 'Longitude']);
+  assert.deepEqual(view.coordinates(), ['4.65', '-74.1']);
+  for (const canReview of [true, false]) {
+    view.data.can_review = canReview; await view.layer.update();
+    for (const tag of ['form', 'input', 'button', 'textarea', 'select']) assert.equal(view.detail.querySelectorAll(tag).length, 0);
+    assert.equal(document.body.querySelectorAll('dialog').length, 0);
+    assert.deepEqual(view.detail.querySelectorAll('dd'), values, 'Polling keeps display nodes mounted');
+  }
+  view.layer.select('event-2'); assert.deepEqual(view.coordinates(), ['4.7', '-74.2']);
+  view.data.version = 'v2'; Object.assign(view.data.sensors[1], { id: 'latest-2', lat: 4.71, lon: -74.21 }); await view.layer.update();
+  assert.equal(view.layer.state().selectedId, 'latest-2'); assert.deepEqual(view.coordinates(), ['4.71', '-74.21']);
+  view.data.version = 'bad'; view.data.sensors[1].lat = NaN; assert.equal(await view.layer.update(), false);
+  assert.deepEqual(view.coordinates(), ['4.71', '-74.21'], 'Failed publications retain the last valid coordinates');
+  view.layer.setFilters({ q: 'sensor-1' }); assert.equal(view.detail.hidden, true); assert.deepEqual(view.coordinates(), ['', '']);
+  view.layer.setFilters({}); assert.equal(view.detail.hidden, true, 'Clearing a filter does not restore an excluded selection');
+  view.layer.select('event-1'); assert.equal(view.detail.hidden, false); assert.deepEqual(view.coordinates(), ['4.65', '-74.1']);
+  assert.ok(view.reads.length > 0);
+  assert.ok(view.reads.every(({ path, options }) => path === '/api/prisma/snapshot' && (options?.method || 'GET') === 'GET'));
 });

@@ -3,7 +3,6 @@ import { clearOverlaySource, setOverlayEntries, setOverlaySourceVisible } from '
 import { isPointerFree } from '../.upstream/src/data/inputOwnership.js';
 import { GROUND_SAMPLE_MAX_ARMED_RETRIES, refreshLocalTerrainFloor, setLocalGroundHeight, updateLocalStemGeometry } from '../.upstream/src/data/localGeojsonCore.js';
 import { selectInfraLod, applyInfraEvictionGrace } from '../.upstream/src/data/localGeojsonLod.js';
-import { createSceneDialog } from '../.upstream/src/ui/sceneSharing.js';
 import { utcToBogota } from '../src/model.js';
 
 export const SENSOR_LAYER_ID = 'sensors';
@@ -181,96 +180,7 @@ export function createSensorsLayer({ Cesium, request, signal }) {
   return layer;
 }
 
-function confirmSensorLocation(item, values, signal) {
-  return new Promise((resolve) => {
-    let dialog;
-    const finish = (confirmed = false) => {
-      if (!dialog) return;
-      dialog.dispose(); dialog = null; signal.removeEventListener('abort', cancel); resolve(confirmed);
-    };
-    const cancel = () => finish();
-    dialog = createSceneDialog('Save sensor coordinates?', cancel);
-    dialog.element.classList.add('tc-review-dialog');
-    dialog.text(sensorTitle(item));
-    dialog.text(`Latitude: ${values.lat} · Longitude: ${values.lon}`);
-    dialog.button('Confirm save', () => finish(true));
-    dialog.listen(dialog.element, 'keydown', (event) => { if (event.key === 'Escape') event.stopPropagation(); });
-    dialog.footer.querySelector('button').focus();
-    signal.addEventListener('abort', cancel, { once: true });
-    if (signal.aborted) cancel();
-  });
-}
-
-function mountSensorLocationEditor({ detail, layer, request, signal }) {
-  const form = label('form', '', 'tc-review'), coordinates = label('div', '', 'tc-review-coordinates'), inputs = {}, drafts = new Map();
-  for (const [name, title, min, max] of [['lat', 'Latitude', -4.3, 13.6], ['lon', 'Longitude', -81.8, -66.7]]) {
-    const field = label('label', title), input = label('input'); input.name = name; input.type = 'number'; input.step = 'any'; input.min = min; input.max = max; input.required = true;
-    field.append(input); coordinates.append(field); inputs[name] = input;
-  }
-  const save = label('button', 'Save'), status = label('p', '', 'tc-review-status'); save.type = 'submit'; status.setAttribute('role', 'status');
-  form.append(coordinates, save, status); detail.append(form);
-  let selected, operation;
-  const render = (item, state) => {
-    if (selected?.sensor_id !== item?.sensor_id || !state.enabled || !state.snapshot.can_review) operation?.abort();
-    selected = item; detail.hidden = !item;
-    if (!item) return;
-    let draft = drafts.get(item.sensor_id);
-    if (!draft || (!draft.busy && !draft.dirty && !draft.pending)) {
-      draft = { ...draft, lat: String(item.lat), lon: String(item.lon), expected_lat: item.lat, expected_lon: item.lon };
-      drafts.set(item.sensor_id, draft);
-    }
-    if (draft.pending && item.lat === draft.expected_lat && item.lon === draft.expected_lon) { draft.pending = false; if (!draft.dirty && !draft.error) draft.message = 'Coordinates saved.'; }
-    form.setAttribute('aria-busy', String(!!draft.busy));
-    for (const name of ['lat', 'lon']) { inputs[name].value = draft[name]; inputs[name].disabled = !!draft.busy; inputs[name].readOnly = !state.snapshot.can_review; }
-    save.hidden = !state.snapshot.can_review; save.disabled = !!draft.busy;
-    status.textContent = draft.message || ''; status.setAttribute('role', draft.error ? 'alert' : 'status');
-  };
-  form.addEventListener('input', () => {
-    if (!selected) return;
-    const draft = drafts.get(selected.sensor_id); draft.lat = inputs.lat.value; draft.lon = inputs.lon.value;
-    draft.dirty = draft.lat !== String(draft.expected_lat) || draft.lon !== String(draft.expected_lon);
-  }, { signal });
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (!selected || !layer.state().snapshot.can_review) return;
-    const item = selected, draft = drafts.get(item.sensor_id);
-    if (draft.busy) return;
-    const values = { lat: Number(inputs.lat.value), lon: Number(inputs.lon.value), expected_lat: draft.expected_lat, expected_lon: draft.expected_lon };
-    if (!inputs.lat.value.trim() || !inputs.lon.value.trim() || !Number.isFinite(values.lat) || !Number.isFinite(values.lon) || values.lat < -4.3 || values.lat > 13.6 || values.lon < -81.8 || values.lon > -66.7) {
-      draft.message = 'Enter valid latitude and longitude within Colombia.'; draft.error = true; render(selected, layer.state()); return;
-    }
-    operation = new AbortController(); const turn = operation, requestSignal = AbortSignal.any([signal, turn.signal]);
-    draft.busy = true; draft.error = false; render(selected, layer.state());
-    try {
-      if (!await confirmSensorLocation(item, values, requestSignal)) return;
-      requestSignal.throwIfAborted(); draft.message = 'Saving coordinates…'; render(selected, layer.state());
-      const result = await request(`/api/prisma/sensors/${encodeURIComponent(item.sensor_id)}/location`, { method: 'POST', body: JSON.stringify(values), signal: requestSignal });
-      requestSignal.throwIfAborted();
-      if (result.location_saved !== true || result.sensor_id !== item.sensor_id || result.lat !== values.lat || result.lon !== values.lon) throw new Error('The server did not confirm these coordinates. Refresh before trying again.');
-      Object.assign(draft, { lat: String(result.lat), lon: String(result.lon), expected_lat: result.lat, expected_lon: result.lon, dirty: false, pending: true });
-      draft.message = 'Coordinates saved. Waiting for the updated publication.';
-      if (result.publication_error) draft.message += ` ${result.publication_error}`;
-      await layer.update();
-    } catch (error) {
-      if (!requestSignal.aborted) {
-        draft.error = true; draft.message = `Save could not be confirmed: ${error.message || 'Refresh before trying again.'}`;
-        if (error.status === 409) {
-          draft.pending = false; draft.dirty = true;
-          const refreshed = await layer.update(), latest = refreshed && layer.state().snapshot.sensors.find((row) => row.sensor_id === item.sensor_id);
-          if (latest) { draft.expected_lat = latest.lat; draft.expected_lon = latest.lon; draft.message = `Location changed since editing. Published coordinates: ${latest.lat}, ${latest.lon}. Review your coordinates and save again.`; }
-        }
-      }
-    } finally {
-      draft.busy = false; if (operation === turn) operation = undefined;
-      render(selected, layer.state());
-      if (selected?.sensor_id === item.sensor_id && layer.state().enabled) save.focus({ preventScroll: true });
-    }
-  }, { signal });
-  signal.addEventListener('abort', () => operation?.abort(), { once: true });
-  return { render };
-}
-
-export function mountSensorsPanel({ layer, request, signal, setPanelCollapsed }) {
+export function mountSensorsPanel({ layer, signal, setPanelCollapsed }) {
   const panel = label('section', '', 'tc-social-panel panel-collapsible collapsed'); panel.id = 'sensors-panel'; panel.dataset.panelId = panel.id; panel.hidden = true;
   panel.innerHTML = `<div class="panel-glow"></div><div class="global-context-panel-inner"><div class="panel-header"><span class="panel-title">SENSORS</span><span class="panel-divider"></span><button class="panel-collapse-btn" data-dock-toggle-target="sensors-panel" type="button" aria-expanded="false" aria-label="Expand Sensors" title="Expand Sensors"><span aria-hidden="true">▶</span></button></div>
     <div class="tc-panel-body data-toggle-list" data-rail-scroller><p data-status role="status"></p><form class="tc-filters" aria-label="Sensor filters"><label>Family<select name="sensor_type"><option value="">All</option></select></label><label>Department<select name="department"><option value="">All</option></select></label><div class="sensors-search"><label for="sensors-query">Search sensors</label><div class="sensors-search-controls"><input id="sensors-query" name="q" type="search" maxlength="200" placeholder="Sensor or municipality"><button type="submit">Filter</button></div></div></form><div class="sensors-list scene-shot-list" aria-label="Sensors"></div><div class="sensors-pages"><button type="button" data-previous aria-label="Previous sensors">Previous</button><span data-page></span><button type="button" data-next aria-label="Next sensors">Next</button></div><section class="sensors-detail" aria-label="Sensor coordinates"></section></div></div>`;
@@ -278,7 +188,12 @@ export function mountSensorsPanel({ layer, request, signal, setPanelCollapsed })
   const onChange = (collapsed) => setPanelCollapsed(panel.id, collapsed, { explicit: true, persist: false, syncShare: false });
   const disclosure = bindPanelDisclosure({ panel, buttons: [panel.querySelector('.panel-collapse-btn')], onChange, onEscape: (event) => collapsePanelOnEscape(event, { panel, onChange }) });
   const form = panel.querySelector('form'), list = panel.querySelector('.sensors-list'), detail = panel.querySelector('.sensors-detail');
-  const locationEditor = mountSensorLocationEditor({ detail, layer, request, signal });
+  const coordinates = label('dl', '', 'sensors-coordinates'), coordinateValues = {};
+  for (const [name, title] of [['lat', 'Latitude'], ['lon', 'Longitude']]) {
+    const field = label('div'), value = label('dd');
+    field.append(label('dt', title), value); coordinates.append(field); coordinateValues[name] = value;
+  }
+  detail.append(coordinates);
   for (const [value, name] of Object.entries(sensorFamilies)) { const option = label('option', name); option.value = value; form.elements.sensor_type.append(option); }
   let page = 0, previousEnabled = false, previousSelection, departments = '', appliedFilters, listKey;
   const render = (state) => {
@@ -318,7 +233,8 @@ export function mountSensorsPanel({ layer, request, signal, setPanelCollapsed })
     }
     panel.querySelector('[data-page]').textContent = `${page + 1} / ${pages}`;
     panel.querySelector('[data-previous]').disabled = page === 0; panel.querySelector('[data-next]').disabled = page + 1 >= pages;
-    locationEditor.render(selected, state);
+    detail.hidden = !selected;
+    for (const name of ['lat', 'lon']) coordinateValues[name].textContent = selected ? String(selected[name]) : '';
   };
   const apply = () => { page = 0; list.scrollTop = 0; layer.setFilters({ sensor_type: form.elements.sensor_type.value, department: form.elements.department.value, q: form.elements.q.value.trim() }); };
   form.addEventListener('submit', (event) => { event.preventDefault(); apply(); }, { signal });

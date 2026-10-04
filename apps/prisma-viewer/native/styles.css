@@ -104,7 +104,9 @@
 .sensor-status[data-status="warning"] { color: #fb923c; }
 .sensor-status[data-status="critical"] { color: #f87171; }
 .sensors-pages { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-block: 10px; }
-.sensors-detail { overflow-wrap: anywhere; border-top: 1px solid var(--glass-border); }
+.sensors-detail { overflow-wrap: anywhere; border-top: 1px solid var(--glass-border); padding-top: 12px; }
+.sensors-coordinates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.sensors-coordinates dd { margin: 4px 0 0; color: var(--text-secondary); }
 .sensors-detail:empty, #sensors-panel [data-status]:empty { display: none; }
 .tc-review-status:empty { display: none; }
 .tc-review-status { color: var(--accent); }

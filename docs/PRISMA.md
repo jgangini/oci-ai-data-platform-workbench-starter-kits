@@ -489,6 +489,8 @@ version and the existing Delta/Autonomous/Object Storage commit sequence; the
 pointer advances only after the complete snapshot is durable. The agent's
 read-only `PRISMA_V_SENSOR_EVENTS` projection uses that same version. The viewer
 reads the private Gold snapshot; neither browser nor agent queries Delta directly.
+The Sensors panel supports filtering, searching and selection; its latitude and
+longitude are read-only values from that publication.
 The demo
 validates at most 25,000 records per microbatch on the driver; larger ingestion
 volumes require distributed validation rather than increasing this bound.

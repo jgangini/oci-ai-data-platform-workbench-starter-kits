@@ -58,7 +58,7 @@ startApplication().then(async ({ controls }) => {
   if (voiceProvider === 'openai') document.querySelector('#gev-voice-control .gev-voice-kicker').textContent = 'OPENAI VOICE';
   const panel = mountTerritorialPanel({ layer: territorial, request, signal: lifetime,
     setPanelCollapsed: (...args) => controls.styleManager.setPanelCollapsed(...args) });
-  mountSensorsPanel({ layer: sensors, request, signal: lifetime, setPanelCollapsed: (...args) => controls.styleManager.setPanelCollapsed(...args) });
+  mountSensorsPanel({ layer: sensors, signal: lifetime, setPanelCollapsed: (...args) => controls.styleManager.setPanelCollapsed(...args) });
   analyst = mountAnalyst({ layer: territorial, agentFlow, request, showEvidence: panel.showEvidence, signal: lifetime,
     sensorContext: () => { const state = sensors.state(), selected = state.items.find(item => item.id === state.selectedId); return { snapshot: state.snapshot, enabled: state.enabled, ...(selected ? { sensor_id: selected.sensor_id } : {}) }; },
     refreshSensors: () => sensors.update(),
