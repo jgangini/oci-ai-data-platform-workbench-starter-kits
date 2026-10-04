@@ -1,4 +1,9 @@
 /* Scoped extensions: native Godâ€™s Eye View keeps its complete layout and styles. */
+/* Align attribution with Power up where the footer has room beside the dock. */
+@media (min-width: 1400px) {
+  :root:not([data-ui-theme="cyber"]) body:not(.ui-clean-view, .recording-mode, .cockpit-mode, .scene-playback-mode) #cesium-credits,
+  :root:not([data-ui-theme="cyber"]) body:not(.ui-clean-view, .recording-mode, .cockpit-mode, .scene-playback-mode):has(#intel-hud[data-variant="minimal"].active) #cesium-credits { bottom: .9rem; }
+}
 #gev-voice-control .gev-voice-help-detail { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 #gev-voice-control[data-provider="oci"] .gev-voice-cost { margin-left: 0; }
 #gev-voice-control[data-provider="oci"] .gev-voice-provider { cursor: default; pointer-events: none; }
