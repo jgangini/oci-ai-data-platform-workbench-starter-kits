@@ -309,7 +309,7 @@ def test_sensor_stream_late_failure_preserves_a_completed_reset(monkeypatch):
     completed = {**stale, "status": "completed", "version": "gold-clean"}
     checkpoint_writes = []
     monkeypatch.setattr(database, "read_document", lambda *_: stale)
-    monkeypatch.setattr(database, "sensor_reset_version", lambda _: 1)
+    monkeypatch.setattr(database, "sensor_reset_version", lambda _: 2)
     def mutate(_db, name, change):
         result = change(copy.deepcopy(completed) if name == "checkpoint_reset" else {})
         if name == "checkpoint_reset":

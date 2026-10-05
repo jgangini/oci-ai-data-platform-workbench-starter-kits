@@ -37,7 +37,7 @@ END PRISMA_CONTROL;"""
 
 PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
   FUNCTION RESET_VERSION RETURN NUMBER IS BEGIN RETURN 2; END;
-  FUNCTION SENSOR_RESET_VERSION RETURN NUMBER IS BEGIN RETURN 1; END;
+  FUNCTION SENSOR_RESET_VERSION RETURN NUMBER IS BEGIN RETURN 2; END;
   PROCEDURE require_reset(p_operation_id VARCHAR2) IS v_count NUMBER;
   BEGIN
     SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_CONTROL_DOCS WHERE name='checkpoint_reset'
@@ -76,7 +76,7 @@ PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
   PROCEDURE REPLACE_SENSOR_PUBLICATION(p_operation_id VARCHAR2, p_sensor_type VARCHAR2, p_old VARCHAR2, p_new VARCHAR2)
   IS v_count NUMBER;
   BEGIN
-    IF p_sensor_type IS NULL OR p_sensor_type NOT IN ('river_level','rainfall','temperature','soil_moisture','wind_speed')
+    IF p_sensor_type IS NULL OR p_sensor_type NOT IN ('all','river_level','rainfall','temperature','soil_moisture','wind_speed')
     THEN RAISE_APPLICATION_ERROR(-20002,'Invalid sensor reset type'); END IF;
     SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_CONTROL_DOCS WHERE name='checkpoint_reset'
       AND JSON_VALUE(payload,'$.operation_id')=p_operation_id
@@ -84,17 +84,12 @@ PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
       AND JSON_VALUE(payload,'$.status')='pending'
       AND JSON_VALUE(payload,'$.ready')='true';
     IF v_count!=1 THEN RAISE_APPLICATION_ERROR(-20002,'Sensor reset is not active'); END IF;
-    SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_PUBLICATIONS p,
-      JSON_TABLE(p.payload,'$.sensors[*]' COLUMNS (
-        sensor_type VARCHAR2(30) PATH '$.sensor_type', sensor_json CLOB FORMAT JSON PATH '$')) s
-      WHERE p.version=p_old AND s.sensor_type=p_sensor_type
-      AND NOT JSON_EXISTS(s.sensor_json,'$?((@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true)' ERROR ON ERROR);
-    IF v_count!=0 THEN RAISE_APPLICATION_ERROR(-20002,'Sensor reset requires simulated readings'); END IF;
     SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_PUBLICATIONS WHERE version=p_new AND version!=p_old
-      AND NOT JSON_EXISTS(payload,'$.sensors[*]?(@.sensor_type == $kind)' PASSING p_sensor_type AS "kind" ERROR ON ERROR);
+      AND NOT JSON_EXISTS(payload,'$.sensors[*]?(($kind == "all" || @.sensor_type == $kind) && (@.sensor_type == "river_level" || @.sensor_type == "rainfall" || @.sensor_type == "temperature" || @.sensor_type == "soil_moisture" || @.sensor_type == "wind_speed") && (@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true)'
+        PASSING p_sensor_type AS "kind" ERROR ON ERROR);
     IF v_count!=1 THEN RAISE_APPLICATION_ERROR(-20002,'Clean sensor replacement publication is missing'); END IF;
     DELETE FROM ADMIN.PRISMA_PUBLICATIONS WHERE version=p_old
-      AND JSON_EXISTS(payload,'$.sensors[*]?(@.sensor_type == $kind && (@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true)'
+      AND JSON_EXISTS(payload,'$.sensors[*]?(($kind == "all" || @.sensor_type == $kind) && (@.sensor_type == "river_level" || @.sensor_type == "rainfall" || @.sensor_type == "temperature" || @.sensor_type == "soil_moisture" || @.sensor_type == "wind_speed") && (@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true)'
         PASSING p_sensor_type AS "kind" ERROR ON ERROR);
   END;
   PROCEDURE valid_name(p_name VARCHAR2) IS BEGIN
@@ -322,7 +317,7 @@ def replace_synthetic_publication(connection, operation_id, old, new):
 
 def replace_sensor_publication(connection, operation_id, sensor_type, old, new):
     from .sensors import SENSOR_TYPES
-    if not isinstance(sensor_type, str) or sensor_type not in SENSOR_TYPES:
+    if not isinstance(sensor_type, str) or sensor_type not in (*SENSOR_TYPES, "all"):
         raise ValueError("Invalid sensor reset type")
     connection.cursor().callproc("ADMIN.PRISMA_CONTROL.REPLACE_SENSOR_PUBLICATION", [operation_id, sensor_type, old, new])
     connection.commit()

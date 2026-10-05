@@ -37,7 +37,7 @@
 .territorial-reset-dialog::backdrop { background: rgba(0,0,0,.3); backdrop-filter: blur(5px); }
 .territorial-reset-dialog h2 { font-family: inherit; }
 .territorial-reset-popup { width: min(100%, 360px); border-radius: 16px; color: #514741; background: #fff; box-shadow: 0 24px 64px rgba(64,43,31,.2); }
-.territorial-reset-popup .registration-result { width: 100%; border: 0; box-shadow: none; font-size: .82rem; }
+.territorial-reset-popup .registration-result { width: 100%; border: 0; box-shadow: none; }.territorial-reset-popup::backdrop { background: rgba(247,244,239,.8); backdrop-filter: blur(8px); }.territorial-reset-track span { width: 35%; animation: reset-progress 1.4s ease-in-out infinite; }@keyframes reset-progress { from { transform: translateX(-100%); } to { transform: translateX(386%); } }@media (prefers-reduced-motion: reduce) { .territorial-reset-track span { animation: none; transform: translateX(90%); } }
 .territorial-reset-popup-actions { display: flex; justify-content: center; padding: 0 24px 24px; }
 .territorial-network-panel { gap: 24px; }
 .territorial-module-content { display: grid; gap: 24px; }

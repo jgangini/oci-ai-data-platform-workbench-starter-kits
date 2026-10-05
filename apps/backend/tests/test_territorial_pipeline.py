@@ -94,7 +94,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(pipeline, "publish", publish)
     monkeypatch.setattr(pipeline, "upsert_posts", lambda _db, records, status, **_: log.append("posts:" + status))
     monkeypatch.setattr(pipeline, "reset_version", lambda _db: 2)
-    monkeypatch.setattr(pipeline, "sensor_reset_version", lambda _db: 1)
+    monkeypatch.setattr(pipeline, "sensor_reset_version", lambda _db: 2)
     objects = Objects(log)
     return log, docs, publications, Lake(log, objects), objects
 

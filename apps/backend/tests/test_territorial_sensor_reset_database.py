@@ -1,4 +1,4 @@
-"""Bounded definer-package contract for deleting one simulated sensor family."""
+"""Bounded definer-package contract for deleting simulated sensor readings."""
 from types import SimpleNamespace
 
 import pytest
@@ -15,11 +15,11 @@ def test_sensor_reset_capability_is_independent_from_social_reset_and_does_not_c
     assert database.sensor_reset_version(connection) == 1
     assert calls == [("ADMIN.PRISMA_CONTROL.SENSOR_RESET_VERSION", int, [])]
     assert "FUNCTION SENSOR_RESET_VERSION RETURN NUMBER;" in database.PACKAGE_SPEC
-    assert "FUNCTION SENSOR_RESET_VERSION RETURN NUMBER IS BEGIN RETURN 1; END;" in database.PACKAGE_BODY
+    assert "FUNCTION SENSOR_RESET_VERSION RETURN NUMBER IS BEGIN RETURN 2; END;" in database.PACKAGE_BODY
     assert "FUNCTION RESET_VERSION RETURN NUMBER IS BEGIN RETURN 2; END;" in database.PACKAGE_BODY
 
 
-@pytest.mark.parametrize("sensor_type", sensors.SENSOR_TYPES)
+@pytest.mark.parametrize("sensor_type", (*sensors.SENSOR_TYPES, "all"))
 def test_sensor_publication_replacement_binds_exact_scope_and_commits_after_success(sensor_type):
     calls = []
     connection = SimpleNamespace(cursor=lambda: SimpleNamespace(callproc=lambda name, values: calls.append((name, values))),
@@ -29,7 +29,7 @@ def test_sensor_publication_replacement_binds_exact_scope_and_commits_after_succ
                       ["operation-1", sensor_type, "old-version", "clean-version"]), "commit"]
 
 
-@pytest.mark.parametrize("sensor_type", [None, "", "all", "Rainfall", "rainfall' OR 1=1", True, ["rainfall"]])
+@pytest.mark.parametrize("sensor_type", [None, "", "Rainfall", "rainfall' OR 1=1", True, ["rainfall"]])
 def test_invalid_sensor_reset_type_cannot_reach_database(sensor_type):
     with pytest.raises(ValueError, match="Invalid sensor reset type"):
         database.replace_sensor_publication(object(), "operation-1", sensor_type, "old", "new")
@@ -55,16 +55,16 @@ def test_sensor_sql_rejects_unscoped_commands_and_unproven_readings_before_delet
                       "JSON_VALUE(payload,'$.ready')='true'", "p_sensor_type IS NULL"):
         assert predicate in procedure
     assert all(f"'{kind}'" in procedure for kind in sensors.SENSOR_TYPES)
-    assert "WHERE p.version=p_old AND s.sensor_type=p_sensor_type" in procedure
     assert '(@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true' in procedure
-    assert procedure.index("Sensor reset is not active") < procedure.index("Sensor reset requires simulated readings")
-    assert procedure.index("Sensor reset requires simulated readings") < procedure.index("Clean sensor replacement publication is missing")
+    assert procedure.index("Sensor reset is not active") < procedure.index("Clean sensor replacement publication is missing")
     assert procedure.index("Clean sensor replacement publication is missing") < procedure.index("DELETE FROM")
     assert "WHERE version=p_new AND version!=p_old" in procedure
-    assert "AND NOT JSON_EXISTS(payload,'$.sensors[*]?(@.sensor_type == $kind)'" in procedure
+    assert "AND NOT JSON_EXISTS(payload,'$.sensors[*]?(($kind == \"all\" || @.sensor_type == $kind) &&" in procedure
     deletion = procedure.split("DELETE FROM", 1)[1]
     assert "ADMIN.PRISMA_PUBLICATIONS WHERE version=p_old" in deletion
-    assert '@.sensor_type == $kind && (@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true' in deletion
+    assert '($kind == "all" || @.sensor_type == $kind)' in deletion
+    assert all(f'@.sensor_type == "{kind}"' in deletion for kind in sensors.SENSOR_TYPES)
+    assert '(@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true' in deletion
     assert 'PASSING p_sensor_type AS "kind" ERROR ON ERROR' in deletion
     assert "PRISMA_SOCIAL_POSTS" not in procedure and "$.evidence" not in deletion and "$.incidents" not in deletion
     assert "TRUNCATE" not in procedure and "DROP" not in procedure

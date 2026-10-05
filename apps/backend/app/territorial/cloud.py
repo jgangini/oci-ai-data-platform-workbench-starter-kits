@@ -513,7 +513,7 @@ class CloudRuntime:
     async def sensors(self):
         config = await self._io(sensor_capture.cloud_configuration, self)
         config = sensor_reset.annotated(config, await self._io(self._doc, "checkpoint_reset"))
-        return {"config": config, "configs": config["configs"], "sensor_schedule": config["sensor_schedule"], "runtime": "aidp"}
+        return {"config": config, "configs": config["configs"], "reset": config["reset"], "sensor_schedule": config["sensor_schedule"], "runtime": "aidp"}
 
     async def update_sensors(self, values, sensor_type=None):
         values = dict(values)

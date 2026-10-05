@@ -116,18 +116,22 @@ class SensorLake:
         from delta.tables import DeltaTable
         from pyspark.sql import functions as F
         from .sensors import SENSOR_TYPES
-        if kind not in SENSOR_TYPES:
+        if kind != "all" and kind not in SENSOR_TYPES:
             raise ValueError("Unknown sensor type")
-        selected = F.col("sensor_type") == kind
+        selected = F.col("sensor_type").isin(*SENSOR_TYPES) if kind == "all" else F.col("sensor_type") == kind
+        synthetic = F.col("mode").isin("Synthetic", "simulation") & (F.col("is_simulated") == True)
+        real = (F.col("mode") == "real") & (F.col("is_simulated") == False)
         with self.lock:
             tables = (self.table, self.current_table, self.legacy_table)
             for table in tables:
                 frame = self.spark.table(table).where(selected)
-                if frame.where(~F.coalesce(F.col("mode").isin("Synthetic", "simulation") & (F.col("is_simulated") == True), F.lit(False))).limit(1).count():
-                    raise ValueError("Sensor deletion requires synthetic provenance")
-            count = self.spark.table(self.table).where(selected).count()
+                if frame.where(~F.coalesce(synthetic | real, F.lit(False))).limit(1).count():
+                    raise ValueError("Sensor deletion requires unambiguous provenance")
+            count = self.spark.table(self.table).where(selected & synthetic).count()
             for table in tables:
-                DeltaTable.forName(self.spark, table).delete(selected)
+                DeltaTable.forName(self.spark, table).delete(selected & synthetic)
+            # A removed synthetic latest row may have hidden an earlier real reading of the same station.
+            self._merge_current(self.spark.table(self.table).where(selected))
             return count
 
     def start(self, path, checkpoint, *, persistent=False):
@@ -189,7 +193,7 @@ def run(spark, secret_get, config, *, clock=time.time, connection=None, lake=Non
     ensure_volumes(spark, config)
     with ExitStack() as stack:
         connection = connection or stack.enter_context(database_connection(secret_get, "PrismaWriterRuntime"))
-        if sensor_reset_version(connection) != 1:
+        if sensor_reset_version(connection) != 2:
             raise RuntimeError("Sensor reset database contract is not installed")
         lake = lake or SensorLake(spark, config, RLock())
         query, restored = None, False
@@ -204,7 +208,7 @@ def run(spark, secret_get, config, *, clock=time.time, connection=None, lake=Non
                 if query is not None and (query.exception() or not query.isActive):
                     raise RuntimeError("The persistent sensor stream stopped")
                 mutate_document(connection, "status_sensorstream", lambda current: {**current,
-                    "status": "resetting" if held else "running", "pipeline_revision": config["pipeline_revision"], "sensor_reset_version": 1,
+                    "status": "resetting" if held else "running", "pipeline_revision": config["pipeline_revision"], "sensor_reset_version": 2,
                     "sensor_layers_version": 2, "last_error": None,
                     "last_run_at": utc_text(clock()), "stream": stream_progress([("sensor_txt", query)]) if query is not None else {}})
                 time.sleep(10)

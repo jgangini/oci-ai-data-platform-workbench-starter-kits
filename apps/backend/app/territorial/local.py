@@ -269,7 +269,7 @@ class LocalTerritorialRuntime:
         config = sensor_capture.local_configuration(self.store)
         with self.store.connection() as db:
             config = sensor_reset.annotated(config, self.store._get(db, "synthetic_reset", {}))
-        return {"config": config, "configs": config["configs"], "sensor_schedule": config["sensor_schedule"], "runtime": "local_fixture"}
+        return {"config": config, "configs": config["configs"], "reset": config["reset"], "sensor_schedule": config["sensor_schedule"], "runtime": "local_fixture"}
 
     async def update_sensors(self, values, sensor_type=None):
         values = dict(values)

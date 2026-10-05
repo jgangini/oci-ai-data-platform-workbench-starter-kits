@@ -282,6 +282,14 @@ def mount_territorial(app, require_admin, require_viewer=None):
     async def pause_sensors():
         return await invoke("control_sensors", False)
 
+    @router.get("/api/admin/territorial/sensors/reset")
+    async def sensors_reset_status():
+        return await invoke("sensor_reset_status", "all")
+
+    @router.post("/api/admin/territorial/sensors/reset")
+    async def reset_all_sensors(payload: SyntheticReset):
+        return await invoke("reset_sensors", "all", str(payload.operation_id))
+
     @router.put("/api/admin/territorial/sensors/{sensor_type}")
     async def update_sensor_family(sensor_type: SensorType, payload: SensorFamilyUpdate):
         return await invoke("update_sensors", payload.model_dump(exclude_none=True), sensor_type)

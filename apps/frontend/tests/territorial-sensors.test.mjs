@@ -189,29 +189,29 @@ test('each sensor tab uses the Social Networks capture labels and independent ti
   assert.equal(h.find('span', p => p.role === 'status').props.className, 'territorial-mode territorial-capture-state paused');
 });
 
-test('a delayed sensor cleanup keeps its original tab and preserves sibling drafts and controls', async t => {
-  const h = harness(t); h.requests[0].resolve(configuration({ river_level: { capture_running: true } })); await h.settle();
-  const reset = h.find('SyntheticDataReset', p => p.sensor.type === 'river_level');
-  const wrappers = () => h.nodes().filter(node => node.type === 'span' && node.props.children?.type?.name === 'SyntheticDataReset');
-  assert.equal(wrappers().length, 5); assert.deepEqual(wrappers().filter(node => !node.props.hidden).map(node => node.key), ['river_level']);
-  h.act(() => reset.props.onChange({ operation_id: 'river-reset', sensor_type: 'river_level', status: 'pending' }, ''));
+for (const legacy of [false, true]) test(`${legacy ? 'legacy family' : 'global'} sensor cleanup has one control and blocks new captures without losing drafts`, async t => {
+  const h = harness(t); h.requests[0].resolve(configuration()); await h.settle();
+  h.select('rainfall'); h.act(() => h.find('input', p => p.max === '5000').props.onChange({ target: { value: '600' } }));
+  const reset = h.find('SyntheticDataReset');
+  assert.equal(h.nodes().filter(node => node.type?.name === 'SyntheticDataReset').length, 1);
+  assert.equal(reset.props.sensor.type, 'all');
+  const pending = { operation_id: 'sensor-reset', sensor_type: legacy ? 'river_level' : 'all', status: 'pending', revision: 4 };
+  h.poll();
+  h.requests[1].resolve(legacy ? configuration({ river_level: { reset: pending } }) : { ...configuration(), reset: pending }); await h.settle();
+  assert.deepEqual(h.find('SyntheticDataReset').props.status, pending, 'Legacy status scope is passed unchanged');
+  h.act(() => reset.props.onChange(pending, ''));
   assert.equal(h.find('CaptureScheduleForm').props.disabled, true);
-  assert.equal(h.find('fieldset').props.disabled, true); h.submit(); assert.equal(h.requests.length, 1);
-  h.select('rainfall'); assert.equal(h.find('fieldset').props.disabled, false);
-  assert.equal(h.find('CaptureScheduleForm').props.disabled, true, 'Shared schedule cannot change while another family reset is pending');
-  assert.deepEqual(wrappers().filter(node => !node.props.hidden).map(node => node.key), ['rainfall']);
-  assert.ok(wrappers().some(node => node.key === 'river_level' && node.props.hidden), 'The pending type remains mounted while hidden');
-  h.act(() => h.find('input', p => p.max === '5000').props.onChange({ target: { value: '600' } }));
-  h.act(() => reset.props.onChange({ operation_id: 'river-reset', sensor_type: 'river_level', status: 'error' }, 'River cleanup failed'));
-  assert.equal(h.find('fieldset').props.disabled, false, 'A sibling cleanup error cannot disable this draft');
-  h.select('river_level'); assert.equal(h.find('fieldset').props.disabled, true);
-  h.select('rainfall');
-  h.act(() => { reset.props.onChange({ operation_id: 'river-reset', sensor_type: 'river_level', status: 'completed' }, ''); reset.props.onComplete(); });
-  assert.equal(h.requests[1].path, '/api/admin/territorial/sensors');
-  h.requests[1].resolve(configuration({ river_level: { config_version: 2 } })); await h.settle();
+  for (const family of families) {
+    h.select(family); assert.equal(h.find('fieldset').props.disabled, true);
+    h.submit(); assert.equal(h.requests.length, 2);
+  }
+  h.select('rainfall'); assert.equal(h.find('input', p => p.max === '5000').props.value, 600);
+  const completed = { ...pending, status: 'completed', revision: 5, completed_at: '2026-10-06T10:00:00Z' };
+  h.act(() => { reset.props.onChange(completed, ''); reset.props.onComplete(); });
+  assert.equal(h.requests[2].path, '/api/admin/territorial/sensors');
+  h.requests[2].resolve({ ...configuration(), reset: completed }); await h.settle();
   assert.equal(h.find('CaptureScheduleForm').props.disabled, false);
+  assert.equal(h.find('fieldset').props.disabled, false);
   assert.equal(h.find('input', p => p.max === '5000').props.value, 600);
   assert.equal(h.find('TerritorialSensorReadings').key, '1');
-  h.select('river_level'); assert.equal(h.find('fieldset').props.disabled, false);
-  assert.equal(h.find('button', p => p.children === 'Pause').props.disabled, true);
 });

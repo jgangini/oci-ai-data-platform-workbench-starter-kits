@@ -73,7 +73,7 @@ test('sensor deletion confirms its selected scope, preserves locations and retri
   const sensor = { type: 'river_level', label: 'River Level' }, view = harness(t, undefined, 'aidp', sensor);
   view.click('Delete River Level data');
   assert.match(view.markup(), /Delete River Level data\?/);
-  assert.match(view.markup(), /Other sensor types, social network data, saved sensor locations and sensor configuration are kept/);
+  assert.match(view.markup(), /Other sensor types, real readings, social network data, saved sensor locations and sensor configuration are kept/);
   assert.doesNotMatch(view.markup(), /across all networks|Delete all Synthetic/);
   view.click('Cancel'); assert.equal(view.requests.length, 0);
   view.click('Delete River Level data'); view.confirm();
@@ -204,21 +204,37 @@ test('double network failure retains the operation and checks status without sub
   assert.equal(view.requests.filter(request => request.method === 'POST').length, 1); assert.equal(view.completed(), 1);
 });
 
-test('a pending reset can be explicitly retried with its same ID, without duplicate in-flight submissions', async t => {
+test('healthy pending resets only poll and failures require a fresh same-ID confirmation', async t => {
   const view = harness(t, { operation_id: 'interrupted-native-job', status: 'pending' });
+  assert.doesNotMatch(view.markup(), /Retry/);
+  assert.equal(view.find('button').props.disabled, true);
+  view.poll(); view.requests[0].resolve({ operation_id: 'interrupted-native-job', status: 'error', error: 'Job interrupted' }); await view.settle();
   view.click('Retry Synthetic reset');
-  view.poll(); view.requests[0].resolve({ operation_id: 'interrupted-native-job', status: 'pending' }); await view.settle();
-  assert.equal(view.modal(), true, 'A status poll must not dismiss the pending retry confirmation');
+  assert.equal(view.requests.length, 1, 'Reviewing a retry never posts');
+  view.click('Cancel'); assert.equal(view.requests.length, 1);
+  view.click('Retry Synthetic reset'); view.escape(); assert.equal(view.requests.length, 1);
+  view.click('Retry Synthetic reset');
   const confirm = view.find('button', props => props.className === 'confirm-primary').props.onClick;
   confirm(); confirm(); await view.settle();
   assert.equal(view.requests.length, 2); assert.equal(view.find('button').props.disabled, true);
   assert.deepEqual(JSON.parse(view.requests[1].body), { operation_id: 'interrupted-native-job', confirm: true });
   view.requests[1].resolve({ operation_id: 'interrupted-native-job', status: 'pending' }); await view.settle();
-  assert.equal(view.find('button').props.disabled, false); assert.equal(view.completed(), 0);
-  view.click('Retry Synthetic reset'); view.confirm();
-  assert.equal(JSON.parse(view.requests[2].body).operation_id, 'interrupted-native-job');
-  view.requests[2].resolve({ operation_id: 'interrupted-native-job', status: 'completed' }); await view.settle();
+  assert.doesNotMatch(view.markup(), /Retry/); assert.equal(view.completed(), 0);
+  view.poll(); view.requests[2].resolve({ operation_id: 'interrupted-native-job', status: 'completed' }); await view.settle();
   assert.equal(view.completed(), 1);
+});
+
+test('a recovered healthy poll cancels an unconfirmed retry without posting again', async t => {
+  const view = harness(t, { operation_id: 'recovering', status: 'error', revision: 2 });
+  view.click('Retry Synthetic reset');
+  const confirm = view.find('button', props => props.className === 'confirm-primary').props.onClick;
+  view.poll(); view.requests[0].resolve({ operation_id: 'recovering', status: 'pending', revision: 3 }); await view.settle();
+  assert.doesNotMatch(view.markup(), /Retry|confirm-primary/);
+  assert.equal(view.modal(), true); assert.equal(view.focused(), 'dialog');
+  confirm(); await view.settle();
+  assert.equal(view.requests.length, 1, 'The stale confirmation has no authority after recovery');
+  view.poll(); view.requests[1].resolve({ operation_id: 'recovering', status: 'completed', revision: 4 }); await view.settle();
+  assert.equal(view.completed(), 1); assert.equal(view.focused(), 'origin');
 });
 
 test('definite pre-operation rejection releases controls, while generic 503 retains the operation', async t => {
@@ -255,7 +271,7 @@ test('a newly observed remote reset closes an unconfirmed dialog without sending
   view.click('Delete Synthetic data'); assert.equal(view.modal(), true);
   view.status({ operation_id: 'another-admin', status: 'pending' });
   assert.equal(view.modal(), true); assert.equal(view.requests.length, 0);
-  assert.equal(view.find('button').props['aria-label'], 'Retry Synthetic reset');
+  assert.equal(view.find('button').props['aria-label'], 'Deleting Synthetic data');
 });
 
 test('persisted failures support same-ID retry and an aborted status read cannot undo completion', async t => {
@@ -362,6 +378,10 @@ test('reset progress is a focused modal outside hidden tabs, keeps pending Escap
   assert.match(view.markup(), /role="alert"/); assert.match(view.markup(), /Temporary status failure/);
   const retry = view.find('button', props => !props['aria-label'] && props.children?.join?.('') === 'Retry Synthetic reset').props.onClick;
   retry(); retry(); await view.settle();
+  assert.equal(view.requests.length, 1, 'Retry opens the destructive confirmation first');
+  assert.equal(view.focused(), 'Cancel'); view.click('Cancel');
+  assert.equal(view.requests.length, 1);
+  retry(); await view.settle(); view.confirm();
   assert.equal(view.requests.length, 2);
   assert.deepEqual(JSON.parse(view.requests[1].body), { operation_id: 'current', confirm: true });
   view.requests[1].resolve({ operation_id: 'current', status: 'completed' }); await view.settle();
@@ -397,4 +417,61 @@ test('verified configuration can finish a stalled POST without letting its late 
   assert.notEqual(view.state().operation_id, operation_id);
   view.requests[1].resolve({ operation_id: JSON.parse(view.requests[1].body).operation_id, status: 'completed' }); await view.settle();
   assert.equal(view.completed(), 2); assert.equal(view.modal(), false);
+});
+
+const allSensors = { type: 'all', label: 'Synthetic sensor', labels: { river_level: 'River Level', rainfall: 'Rainfall', temperature: 'Temperature', soil_moisture: 'Soil Moisture', wind_speed: 'Wind Speed' } };
+test('global sensor deletion confirms all five types, preserves other data and polls real progress to completion', async t => {
+  const view = harness(t, undefined, 'aidp', allSensors);
+  view.click('Delete Synthetic sensor data');
+  assert.match(view.markup(), /all five sensor types/);
+  assert.match(view.markup(), /Real readings, social network data, saved sensor locations and sensor configuration are kept/);
+  view.escape(); assert.equal(view.requests.length, 0);
+  view.click('Delete Synthetic sensor data');
+  const confirm = view.find('button', p => p.className === 'confirm-primary').props.onClick;
+  confirm(); confirm(); await view.settle();
+  assert.equal(view.requests.length, 1);
+  assert.equal(view.requests[0].url, '/api/admin/territorial/sensors/reset');
+  const { operation_id } = JSON.parse(view.requests[0].body);
+  const pending = { operation_id, sensor_type: 'all', status: 'pending', stage: 'history', revision: 2, replacements: { old: 'new' } };
+  view.requests[0].resolve(pending); await view.settle();
+  assert.match(view.markup(), /Historical publications rebuilt: 1/);
+  assert.match(view.markup(), /registration-progress-track territorial-reset-track/);
+  assert.doesNotMatch(view.markup(), /aria-valuenow|\d+%|Retry/);
+  view.poll(); view.requests[1].resolve({ ...pending, revision: 1, replacements: {} }); await view.settle();
+  assert.equal(view.state().revision, 2); assert.match(view.markup(), /Historical publications rebuilt: 1/);
+  view.poll(); view.requests[2].resolve({ ...pending, revision: 3, replacements: {}, counts: { history_rewritten: 2 } }); await view.settle();
+  assert.match(view.markup(), /Historical publications rebuilt: 2/);
+  view.poll(); view.requests[3].resolve({ ...pending, revision: 4, stage: 'waiting_for_sensor_stream' }); await view.settle();
+  assert.match(view.markup(), /Waiting for active sensor captures to finish/);
+  view.poll(); view.requests[4].resolve({ ...pending, status: 'completed', revision: 5, completed_at: '2026-10-06T10:00:00Z' }); await view.settle();
+  assert.equal(view.completed(), 1); assert.equal(view.state().completed_at, '2026-10-06T10:00:00Z');
+  assert.equal(view.modal(), false);
+});
+
+test('a global control resumes a legacy family only on its original endpoint after explicit retry confirmation', async t => {
+  const pending = { operation_id: 'legacy-family-reset', sensor_type: 'river_level', status: 'pending', stage: 'delta' };
+  const view = harness(t, pending, 'aidp', allSensors);
+  assert.equal(view.find('dialog').props['aria-label'], 'River Level reset');
+  assert.doesNotMatch(view.markup(), /all five|Retry/);
+  view.poll(); assert.equal(view.requests[0].url, '/api/admin/territorial/sensors/river_level/reset');
+  view.requests[0].resolve({ ...pending, status: 'error', error: 'Interrupted' }); await view.settle();
+  view.click('Retry River Level reset');
+  assert.match(view.markup(), /Other sensor types, real readings, social network data/);
+  assert.doesNotMatch(view.markup(), /all five/); view.click('Cancel'); assert.equal(view.requests.length, 1);
+  view.click('Retry River Level reset'); view.confirm();
+  assert.equal(view.requests[1].url, '/api/admin/territorial/sensors/river_level/reset');
+  assert.deepEqual(JSON.parse(view.requests[1].body), { operation_id: pending.operation_id, confirm: true });
+  view.requests[1].resolve({ ...pending, status: 'completed' }); await view.settle();
+  view.click('Delete Synthetic sensor data'); assert.match(view.markup(), /all five sensor types/); view.confirm();
+  assert.equal(view.requests[2].url, '/api/admin/territorial/sensors/reset');
+  assert.notEqual(JSON.parse(view.requests[2].body).operation_id, pending.operation_id);
+});
+
+test('global sensor state rejects social scope and never accepts widening a matching legacy operation ID', async t => {
+  const pending = { operation_id: 'legacy', sensor_type: 'rainfall', status: 'pending' };
+  const view = harness(t, pending, 'aidp', allSensors);
+  view.poll(); view.requests[0].resolve({ ...pending, sensor_type: 'all', status: 'completed' }); await view.settle();
+  assert.equal(view.completed(), 0); assert.equal(view.state().sensor_type, 'rainfall');
+  view.poll(); view.requests[1].resolve({ operation_id: pending.operation_id, status: 'completed' }); await view.settle();
+  assert.equal(view.completed(), 0); assert.equal(view.state().sensor_type, 'rainfall');
 });

@@ -2,12 +2,13 @@
 import copy
 import json
 import hashlib
+import threading
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
-from app.territorial import database, landing, pipeline, synthetic_reset as reset
+from app.territorial import database, landing, pipeline, sensors, synthetic_reset as reset
 from app.territorial.core import normalize_event, simulation_events, build_snapshot, default_source
 from test_territorial_pipeline import CONFIG, NOW, runtime, Lake
 
@@ -292,3 +293,123 @@ def test_unknown_and_mixed_review_provenance_is_preserved(resetting):
     docs["reviews"] = {"items": copy.deepcopy(reviews)}
     reset._clean_controls(object(), {synthetic["id"]}, set())
     assert docs["reviews"]["items"] == {key: value for key, value in reviews.items() if key != "synthetic-review"}
+
+
+@pytest.mark.parametrize("kind", ["all", *sensors.SENSOR_TYPES])
+def test_sensor_history_scopes_preserve_real_unknown_and_social_data(resetting, kind):
+    synthetic = [{**item, "id": item["sensor_id"]} for item in sensors.generate_batch(NOW, sensor_count=5)]
+    real = [{**item, "id": "real-" + item["id"], "mode": "real", "is_simulated": False} for item in synthetic]
+    unknown = [{**synthetic[0], "id": "unknown-provenance", "is_simulated": False},
+               {**synthetic[0], "id": "unknown-type", "sensor_type": "unrecognized"}]
+    snapshot = {**copy.deepcopy(resetting[-1]), "sensors": [*synthetic, *real, *unknown]}
+    original = copy.deepcopy(snapshot)
+    result = reset.prune_publication(snapshot, kind)
+    expected = [item for item in synthetic if kind != "all" and item["sensor_type"] != kind] + real + unknown
+    assert result["sensors"] == expected
+    assert all(result[key] == snapshot[key] for key in ("evidence", "event_posts", "published_at"))
+    assert [item for item in result["incidents"] if item["mode"] == "real"] == [
+        item for item in snapshot["incidents"] if item["mode"] == "real"]
+    assert snapshot == original
+    assert reset.prune_publication(result, kind) is None
+    assert reset.prune_publication({**snapshot, "sensors": [*real, *unknown]}, kind) is None
+    with pytest.raises(ValueError, match="Unknown sensor type"):
+        reset.prune_publication(snapshot, "unsupported")
+
+
+def test_global_sensor_reset_operation_cannot_be_reused_for_social_or_family_scope():
+    from fastapi import HTTPException
+    state = {"operation_id": "current", "sensor_type": "all", "completed_ids": ["previous"],
+             "operation_scopes": {"previous": "rainfall"}}
+    reset.check_scope(state, "current", "all")
+    reset.check_scope(state, "previous", "rainfall")
+    for operation, kind in (("current", None), ("current", "rainfall"), ("previous", "all")):
+        with pytest.raises(HTTPException) as error:
+            reset.check_scope(state, operation, kind)
+        assert error.value.status_code == 409
+
+
+def test_history_prefetch_is_bounded_and_keeps_all_store_mutations_on_writer_thread(resetting, monkeypatch):
+    _, docs, publications, lake, objects, *_ = resetting
+    snapshot = resetting[-1]
+    originals = [{**snapshot, "version": "gold-" + f"{index:032x}"} for index in range(8)]
+    publications.clear(); lake.data["gold"].clear()
+    objects.data = {reset.HISTORY_PREFIX + item["version"] + ".json": reset.encoded(item) for item in originals}
+    original_keys = set(objects.data)
+    writer = threading.get_ident()
+    for owner, name in ((lake, "put"), (lake, "delete_publication"), (database, "publish"),
+                        (database, "mutate_document"), (database, "replace_synthetic_publication"),
+                        (objects, "put_object"), (objects, "delete_object")):
+        operation = getattr(owner, name)
+        def serial(*args, _operation=operation, **kwargs):
+            assert threading.get_ident() == writer
+            return _operation(*args, **kwargs)
+        monkeypatch.setattr(owner, name, serial)
+    get = objects.get_object
+    barrier, lock = threading.Barrier(4), threading.Lock()
+    calls, active, peak = [], 0, 0
+    def concurrent_get(*args, **kwargs):
+        nonlocal active, peak
+        assert threading.get_ident() != writer
+        with lock:
+            calls.append(args[2]); active += 1; peak = max(peak, active)
+        try:
+            barrier.wait(timeout=5)
+            return get(*args, **kwargs)
+        finally:
+            with lock:
+                active -= 1
+    monkeypatch.setattr(objects, "get_object", concurrent_get)
+    reset.clean_history(object(), objects, lake, CONFIG, docs["checkpoint_reset"]["operation_id"])
+    assert peak == 4 and set(calls) == original_keys and len(calls) == 8
+    assert not original_keys.intersection(objects.data)
+    assert len(docs["checkpoint_reset"]["replacements"]) == docs["checkpoint_reset"]["counts"]["history_rewritten"] == 8
+
+
+def test_prefetched_history_etag_conflict_preserves_changed_object_and_durable_retry(resetting, monkeypatch):
+    _, docs, publications, lake, objects, *_ = resetting
+    snapshot = resetting[-1]
+    key = reset.HISTORY_PREFIX + snapshot["version"] + ".json"
+    publications.clear(); lake.data["gold"].clear()
+    objects.data = {key: reset.encoded(snapshot)}
+    get, delete = objects.get_object, objects.delete_object
+    changed = {**snapshot, "repaired": True}
+    def changed_after_read(*args):
+        response = get(*args)
+        if args[2] == key:
+            objects.data[key] = reset.encoded(changed)
+        return response
+    def conditional_delete(namespace, bucket, name, **kwargs):
+        if kwargs.get("if_match") != hashlib.sha256(objects.data[name]).hexdigest():
+            raise ObjectError(412)
+        return delete(namespace, bucket, name, **kwargs)
+    monkeypatch.setattr(objects, "get_object", changed_after_read)
+    monkeypatch.setattr(objects, "delete_object", conditional_delete)
+    operation = docs["checkpoint_reset"]["operation_id"]
+    with pytest.raises(ObjectError) as error:
+        reset.clean_history(object(), objects, lake, CONFIG, operation)
+    assert error.value.status == 412 and json.loads(objects.data[key]) == changed
+    assert docs["checkpoint_reset"]["replacements"][snapshot["version"]] in publications
+    assert docs["checkpoint_reset"]["counts"]["history_rewritten"] == 1
+    monkeypatch.setattr(objects, "get_object", get)
+    reset.clean_history(object(), objects, lake, CONFIG, operation)
+    assert key not in objects.data
+    assert docs["checkpoint_reset"]["counts"]["history_rewritten"] == 1
+
+
+def test_retry_after_completed_history_preserves_rewrite_count(resetting, monkeypatch):
+    _, docs, *_ = resetting
+    mutate, fail = database.mutate_document, [True]
+    def fail_completion(connection, name, change):
+        if name == "checkpoint_reset" and change(copy.deepcopy(docs[name])).get("status") == "completed" and fail[0]:
+            fail[0] = False
+            raise RuntimeError("Completion receipt interrupted")
+        return mutate(connection, name, change)
+    monkeypatch.setattr(database, "mutate_document", fail_completion)
+    with pytest.raises(RuntimeError, match="incomplete"):
+        run_reset(resetting)
+    rewritten = docs["checkpoint_reset"]["counts"]["history_rewritten"]
+    assert rewritten == len(docs["checkpoint_reset"]["replacements"]) > 0
+    docs["checkpoint_reset"]["status"] = "pending"
+    run_reset(resetting)
+    assert docs["checkpoint_reset"]["status"] == "completed"
+    assert docs["checkpoint_reset"]["counts"]["history_rewritten"] == rewritten

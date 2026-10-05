@@ -115,7 +115,7 @@ def test_sensor_entrypoint_owns_only_its_heartbeat_and_stops_failed_query(monkey
     writes = []
     monkeypatch.setattr(database, "mutate_document", lambda _connection, name, update: writes.append((name, update({}))))
     monkeypatch.setattr(database, "read_document", lambda *_: {})
-    monkeypatch.setattr(database, "sensor_reset_version", lambda _: 1)
+    monkeypatch.setattr(database, "sensor_reset_version", lambda _: 2)
     monkeypatch.setattr(landing, "ensure_volumes", lambda *_: None)
     monkeypatch.setattr(sensor_pipeline.time, "sleep", lambda _: None)
     config = {**CONFIG, "sensor_landing_volume_path": "/Volumes/oci_medallion/prisma_ingest/landing/sensors",
@@ -136,7 +136,7 @@ def test_restart_with_delete_receipt_does_not_restore_history_until_reset_comple
     state = {"operation_id": "selected-reset", "sensor_type": "rainfall", "status": "pending", "ready": True,
              "sensor_drained_operation_id": "selected-reset", "sensor_drained_revision": "revision"}
     monkeypatch.setattr(database, "read_document", lambda *_: copy.deepcopy(state))
-    monkeypatch.setattr(database, "sensor_reset_version", lambda _: 1)
+    monkeypatch.setattr(database, "sensor_reset_version", lambda _: 2)
     monkeypatch.setattr(database, "mutate_document", lambda _db, _name, update: update({}))
     monkeypatch.setattr(landing, "ensure_volumes", lambda *_: None)
     restored = []
@@ -288,13 +288,35 @@ def test_real_sensor_txt_stream_recovers_delta_commit_and_preserves_history(tmp_
         assert {item["format"] for item in progress["streams"]} == {"json", "csv"}
         assert spark.table(social.tables["bronze"]).count() == 2
         assert spark.table(lake.table).count() == 14002
+        # A synthetic latest reading can hide a real predecessor of the same station.
+        predecessor = {**sensors.generate_batch(now + 1200, sensor_count=1, families=["rainfall"])[0],
+                       "sensor_id": "reset-real-predecessor", "event_id": "real-before-reset"}
+        real = decode_batch([raw(predecessor)], now + 1200)[0]
+        real.update(mode="real", is_simulated=False,
+                    payload=json.dumps({**json.loads(real["payload"]), "mode": "real", "is_simulated": False}))
+        lake.put([real])
+        latest_synthetic = {**predecessor, "event_id": "synthetic-over-real", "observed_at": pipeline.utc_text(now + 1500),
+                            "event_date": pipeline.utc_text(now + 1500)[:10]}
+        lake.put(decode_batch([raw(latest_synthetic)], now + 1500))
+        assert next(row for row in lake.latest(now + 1500) if row["sensor_id"] == predecessor["sensor_id"])["id"] == "synthetic-over-real"
         # Delete clears legacy history too; a subsequent migration/restart cannot resurrect the family.
-        expected = spark.table(lake.table).where("sensor_type = 'rainfall'").count()
+        expected = spark.table(lake.table).where("sensor_type = 'rainfall' AND is_simulated = true").count()
         assert lake.delete_family("rainfall") == expected
+        assert next(row for row in lake.latest(now + 1500) if row["sensor_id"] == predecessor["sensor_id"])["id"] == "real-before-reset"
         lake.history_restored = False
         lake.restore_history()
         for table in (lake.table, lake.current_table, lake.legacy_table):
-            assert spark.table(table).where("sensor_type = 'rainfall'").count() == 0
+            assert spark.table(table).where("sensor_type = 'rainfall' AND is_simulated = true").count() == 0
             assert spark.table(table).where("sensor_type = 'temperature'").count() > 0
+        lake.put(decode_batch([raw(latest_synthetic)], now + 1500))
+        assert next(row for row in lake.latest(now + 1500) if row["sensor_id"] == predecessor["sensor_id"])["id"] == "synthetic-over-real"
+        expected = spark.table(lake.table).where("is_simulated = true").count()
+        assert lake.delete_family("all") == expected
+        assert [(row["id"], row["mode"]) for row in lake.latest(now + 1500)] == [("real-before-reset", "real")]
+        lake.history_restored = False
+        lake.restore_history()
+        assert [(row["id"], row["mode"]) for row in lake.latest(now + 1500)] == [("real-before-reset", "real")]
+        assert all(spark.table(table).where("is_simulated = true").count() == 0
+                   for table in (lake.table, lake.current_table, lake.legacy_table))
     finally:
         spark.stop()

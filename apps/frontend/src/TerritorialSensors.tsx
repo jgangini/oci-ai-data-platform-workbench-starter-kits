@@ -29,13 +29,13 @@ export function TerritorialSensors({ api, timeZone, active = true, searchIcon, r
   const [feedback, setFeedback] = useState<Record<string, { busy: string; error: string; message: string }>>({});
   const [loadError, setLoadError] = useState('');
   const [runtime, setRuntime] = useState(''), [resetRevision, setResetRevision] = useState(0);
-  const [resetViews, setResetViews] = useState<Record<string, { state: SyntheticReset; error: string }>>({});
+  const [reset, setReset] = useState<SyntheticReset>({});
+  const [resetView, setResetView] = useState<{ state: SyntheticReset; error: string } | null>(null);
   const mutations = useRef<Record<string, AbortController>>({});
   const revisions = useRef<Record<string, number>>({});
   const config = configs?.[selected], editor = editors[selected];
   const { busy = '', error = '', message = '' } = feedback[selected] || {};
-  const resetView = resetViews[selected] || { state: config?.reset || {}, error: '' };
-  const resetBlocked = ['pending', 'error'].includes(resetView.state.status || '');
+  const resetBlocked = [reset, resetView?.state].some(state => ['pending', 'error'].includes(state?.status || ''));
   const dirty = !!editor && sensorDirty(editor);
   const overdueSeconds = config?.capture_running && config.next_due ? Math.max(0, Math.floor((Date.now() - Date.parse(config.next_due)) / 1000)) : 0;
   const receive = (next: SensorConfig) => {
@@ -49,9 +49,10 @@ export function TerritorialSensors({ api, timeZone, active = true, searchIcon, r
       if (loading) return;
       loading = true; const sequence = { ...revisions.current }, pending = new Set(Object.keys(mutations.current));
       try {
-        const result = await api<{ configs: SensorConfig[]; runtime: string; sensor_schedule?: CaptureSchedule }>(endpoint, { signal: controller.signal });
+        const result = await api<{ configs: SensorConfig[]; runtime: string; sensor_schedule?: CaptureSchedule; reset?: SyntheticReset }>(endpoint, { signal: controller.signal });
         if (!controller.signal.aborted) {
           setRuntime(result.runtime);
+          setReset(result.reset?.operation_id ? result.reset : result.configs.find(item => ['pending', 'error'].includes(item.reset?.status || ''))?.reset || {});
           if (result.sensor_schedule) setSchedule(previous => previous && previous.config_version > result.sensor_schedule!.config_version ? previous : result.sensor_schedule!);
           for (const next of result.configs) if (!pending.has(next.sensor_type) && !mutations.current[next.sensor_type] && sequence[next.sensor_type] === revisions.current[next.sensor_type]) receive(next);
           setLoadError('');
@@ -100,7 +101,7 @@ export function TerritorialSensors({ api, timeZone, active = true, searchIcon, r
   return <section className="territorial-sensors" aria-label="Sensors configuration">
     <div className="territorial-sources-title"><h2>Sensors</h2></div>
     {schedule && <CaptureScheduleForm schedule={schedule} api={api} kind="sensor"
-      disabled={families.some(family => ['pending', 'error'].includes((resetViews[family]?.state || configs?.[family]?.reset)?.status || ''))}
+      disabled={resetBlocked}
       onUpdate={value => { setSchedule(value); setRefresh(previous => previous + 1); }} />}
     <div className="territorial-network-toolbar">
       <div className="settings-tabs territorial-network-tabs" role="tablist" aria-label="Sensor types">{families.map(family => {
@@ -114,12 +115,10 @@ export function TerritorialSensors({ api, timeZone, active = true, searchIcon, r
         <button type="button" className="secondary territorial-toolbar-button territorial-form-toggle" aria-expanded={!collapsed} aria-controls="territorial-sensor-configuration" aria-label={collapsed ? 'Expand sensor configuration' : 'Collapse sensor configuration'} title={collapsed ? 'Expand sensor configuration' : 'Collapse sensor configuration'} onClick={() => setCollapsed(value => !value)}>
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d={collapsed ? 'm6 9 6 6 6-6' : 'm6 15 6-6 6 6'} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
         <button type="button" className="secondary territorial-toolbar-button" disabled={!!busy} aria-label="Refresh sensor status" title="Refresh sensor status" onClick={() => setRefresh(value => value + 1)}>{refreshIcon}</button>
-        {families.map(family => <span key={family} hidden={selected !== family}>
-          <SyntheticDataReset api={api} runtime={runtime} sensor={{ type: family, label: sensorFamilies[family] }} status={configs?.[family]?.reset}
-            disabled={!configs?.[family] || !!feedback[family]?.busy}
-            onChange={(state, error) => setResetViews(previous => ({ ...previous, [family]: { state, error } }))}
-            onComplete={() => { setRefresh(value => value + 1); setResetRevision(value => value + 1); }} />
-        </span>)}
+        <SyntheticDataReset api={api} runtime={runtime} sensor={{ type: 'all', label: 'Synthetic sensor', labels: sensorFamilies }} status={reset}
+          disabled={!configs || Object.values(feedback).some(item => !!item.busy)}
+          onChange={(state, error) => setResetView({ state, error })}
+          onComplete={() => { setRefresh(value => value + 1); setResetRevision(value => value + 1); }} />
       </div>
     </div>
     {!config && !error && !loadError && <LoadingIndicator label="Loading sensor configuration…" />}

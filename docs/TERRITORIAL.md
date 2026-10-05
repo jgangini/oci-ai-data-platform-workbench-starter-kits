@@ -182,14 +182,15 @@ Opening or cancelling the dialog does not delete anything.
 Retries must reuse that ID, including after a lost response. Completed IDs
 cannot delete newer demo data. An unfinished reset blocks Synthetic production;
 failure is shown as an error until the same operation is retried.
-If a stopped process leaves the operation pending, the toolbar retry resumes
-that same operation instead of creating a second deletion request.
+Retries require a new confirmation explaining the original scope, and resume
+that same operation instead of creating a second deletion request. A healthy
+pending operation displays progress without offering a direct destructive retry.
 
 In local fixture mode, the reset cleans SQLite and verified Synthetic Landing
 CSV files. The confirmation and progress identify this local scope; a fast local
 completion does not indicate that an AIDP Job ran. The administration page
-shows an indeterminate progress bar and the persisted cleanup stage while the
-operation is pending. After confirmed completion, the progress and message
+uses the same progress dialog design as **Create account**, with an indeterminate
+bar and the persisted cleanup stage while the operation is pending. After confirmed completion, the progress and message
 disappear and the publications table refreshes. Verification errors remain visible.
 Stages describe work being performed, not an estimated percentage or duration.
 In AIDP, Python cleanup runs inside the existing native Job, after
@@ -208,6 +209,9 @@ not deleted, and Delta retention/time-travel policy is unchanged. Completion
 is reported only after all serving stores and the current publication agree.
 Existing cloud installations require the updated database package and native
 workflow; the API refuses the reset until the native runtime advertises support.
+Historical Object Storage reads use at most four concurrent requests. Database
+and Delta mutations retain a single writer and the durable replacement journal;
+this does not promise a fixed cleanup duration.
 Local tests do not certify live Oracle/Spark permissions or execution.
 
 Two permanent AIDP Jobs use the governed Landing and checkpoint Volumes with
@@ -607,10 +611,24 @@ location are retained. On restart, the sensor workflow idempotently copies its
 history into Bronze and rebuilds Silver current state before publishing its
 new readiness heartbeat. It reuses the existing file checkpoint, including
 already-consumed files. A reset drain receipt is issued only after this
-migration; an existing receipt prevents migration during deletion. Selected
-sensor Delete clears that family from all three tables so a restart cannot
-restore deleted readings. The ordinary social reset preserves sensor history,
-Landing files and checkpoints.
+migration; an existing receipt prevents migration during deletion. The sensor
+toolbar has one **Delete synthetic sensor data** action across river level,
+rainfall, temperature, soil moisture and wind speed. Its confirmation explains
+that captures pause and synthetic readings, generated files and publication
+history are removed. Real readings, social data, saved locations and sensor
+configuration remain. Only readings marked with a synthetic mode and
+`is_simulated: true` qualify; files containing real readings retain those rows.
+All three sensor tables are cleaned so a restart cannot restore deleted readings.
+The ordinary social reset preserves sensor history, Landing files and checkpoints.
+
+`GET/POST /api/admin/territorial/sensors/reset` uses the explicit sensor scope
+`all`. Existing `/sensors/{sensor_type}/reset` routes remain compatible. An
+unfinished family-scoped operation keeps its original scope and operation ID;
+the interface follows it before allowing a new global operation. The global
+action requires database `SENSOR_RESET_VERSION()` 2 and fresh version-2
+heartbeats from both workflows. Updating the web application alone cannot
+enable global cleanup on an older native workflow. Status includes the durable
+historical replacement count, revision and completion timestamp.
 
 Silver retains the latest state of every sensor identity without an implicit
 24-hour cutoff. Paused stations keep their last `observed_at`. Each Gold
@@ -815,3 +833,20 @@ and 8 mock Terraform tests with format/validate. Local administration container
 health and nginx syntax passed. Two authenticated read-only source requests
 averaged 6.036 seconds after connection reuse versus 11.576 seconds before;
 these small samples include network variability and are not a latency guarantee.
+
+Postflight for global synthetic sensor cleanup (2026-10-05): Graphify updated
+the AST graph. Sentrux session quality is 6590 → 6587, coupling 0.0698 → 0.0680,
+zero cycles/god files, and complex functions 62 → 63. The retained historical
+baseline reports 6595 → 6587 and 44 → 63 complex functions. This intentional
+gate exception retains scope validation, mixed-file preservation, conditional
+object writes, atomic local replacement and confirmation/recovery paths;
+dropping those branches would change the deletion contract. The gate did not
+pass, and the baseline was not reset. Custom Sentrux rules are not configured.
+Validation passed: 1627 Python tests (3 opt-in skips), 152 frontend tests,
+TypeScript/Vite, 8 mock Terraform tests with format/validate, administration
+container build/health, nginx validation and six browser DOM checks. All four
+browser deletion requests were mocked; no real deletion was used for validation.
+The Spark/Delta preservation regression is prepared but was not executed:
+the available local image lacks Spark and Java. The native workflow/database
+upgrade remains separate and must wait for the existing family-scoped cleanup
+to complete; its operation ID and scope are not changed by the UI update.

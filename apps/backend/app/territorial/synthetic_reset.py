@@ -2,6 +2,8 @@
 import hashlib
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
+from itertools import islice
 from uuid import UUID
 
 from . import database, landing
@@ -31,14 +33,14 @@ def prune_publication(snapshot, sensor_type=None):
     """Preserve real incident fields verbatim; never recalculate historical facts."""
     if sensor_type is not None:
         from .sensors import SENSOR_TYPES
-        if sensor_type not in SENSOR_TYPES:
+        if sensor_type != "all" and sensor_type not in SENSOR_TYPES:
             raise ValueError("Unknown sensor type")
-        selected = [item for item in snapshot.get("sensors", []) if item.get("sensor_type") == sensor_type]
-        if not selected:
+        retained = [item for item in snapshot.get("sensors", []) if not (
+            item.get("sensor_type") in SENSOR_TYPES and (sensor_type == "all" or item.get("sensor_type") == sensor_type)
+            and item.get("mode") in SYNTHETIC_MODES and item.get("is_simulated") is True)]
+        if len(retained) == len(snapshot.get("sensors", [])):
             return None
-        if any(item.get("mode") not in SYNTHETIC_MODES or item.get("is_simulated") is not True for item in selected):
-            raise ValueError("Sensor deletion requires synthetic provenance")
-        clean = {**snapshot, "sensors": [item for item in snapshot["sensors"] if item.get("sensor_type") != sensor_type]}
+        clean = {**snapshot, "sensors": retained}
         from .correlation import jurisdiction, sensor_context, sensor_index, timestamp
         readings = sensor_index(clean["sensors"])
         evidence = {item["id"]: item for item in snapshot["evidence"]}
@@ -147,7 +149,7 @@ def _clean_controls(connection, removed_posts, removed_events):
     database.mutate_document(connection, "status_synthetic", lambda doc: {"status": "idle", "landing_count": 0})
 
 
-def _save_clean_history(connection, objects, lake, config, snapshot, operation_id, sensor_type=None):
+def _save_clean_history(connection, objects, lake, config, snapshot, operation_id, sensor_type=None, object_etag=None):
     clean = prune_publication(snapshot, sensor_type)
     if clean is None:
         return
@@ -159,7 +161,8 @@ def _save_clean_history(connection, objects, lake, config, snapshot, operation_i
     objects.put_object(config["namespace"], config["bucket"], HISTORY_PREFIX + new + ".json", encoded(clean), content_type="application/json")
     # The cleanup journal survives failure between any two independent stores.
     database.mutate_document(connection, "checkpoint_reset", lambda doc: {**doc,
-        "replacements": {**doc.get("replacements", {}), old: new}})
+        "replacements": {**doc.get("replacements", {}), old: new},
+        "counts": {**doc.get("counts", {}), "history_rewritten": len(set(doc.get("replacements", {})) | {old})}})
     if sensor_type is None:
         _clean_controls(connection, _synthetic_ids(snapshot["evidence"]), _synthetic_ids(snapshot["incidents"]))
     lake.delete_publication(old)
@@ -167,11 +170,14 @@ def _save_clean_history(connection, objects, lake, config, snapshot, operation_i
         database.replace_synthetic_publication(connection, operation_id, old, new)
     else:
         database.replace_sensor_publication(connection, operation_id, sensor_type, old, new)
-    _delete_history_object(objects, config, snapshot)
+    _delete_history_object(objects, config, snapshot, object_etag)
 
 
-def _delete_history_object(objects, config, snapshot):
+def _delete_history_object(objects, config, snapshot, etag=None):
     key = HISTORY_PREFIX + snapshot["version"] + ".json"
+    if etag:
+        delete_object(objects, config, config["bucket"], key, etag)
+        return
     try:
         body, etag = object_body(objects, config, config["bucket"], key)
     except Exception as exc:
@@ -184,20 +190,30 @@ def _delete_history_object(objects, config, snapshot):
     delete_object(objects, config, config["bucket"], key, etag)
 
 
+def _history_objects(objects, config):
+    def read(key):
+        if not re.fullmatch(re.escape(HISTORY_PREFIX) + r"gold-[a-f0-9]{32}\.json", key):
+            raise ValueError("Invalid publication object during synthetic reset")
+        body, etag = object_body(objects, config, config["bucket"], key)
+        snapshot = json.loads(body)
+        if key != HISTORY_PREFIX + snapshot["version"] + ".json":
+            raise ValueError("Publication object identity mismatch")
+        return snapshot, etag
+    keys = object_keys(objects, config, config["bucket"], HISTORY_PREFIX)
+    # ponytail: prefetch at most four bounded objects; SQL/Spark mutations stay on the writer thread.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        while batch := list(islice(keys, 4)):
+            yield from pool.map(read, batch)
+
+
 def clean_history(connection, objects, lake, config, operation_id, sensor_type=None):
     # Each store is scanned: interrupted publication can exist in only one or two stores.
     for snapshot in lake.publications():
         _save_clean_history(connection, objects, lake, config, snapshot, operation_id, sensor_type)
     for snapshot in database.publications(connection):
         _save_clean_history(connection, objects, lake, config, snapshot, operation_id, sensor_type)
-    for key in object_keys(objects, config, config["bucket"], HISTORY_PREFIX):
-        if not re.fullmatch(re.escape(HISTORY_PREFIX) + r"gold-[a-f0-9]{32}\.json", key):
-            raise ValueError("Invalid publication object during synthetic reset")
-        body, _etag = object_body(objects, config, config["bucket"], key)
-        snapshot = json.loads(body)
-        if key != HISTORY_PREFIX + snapshot["version"] + ".json":
-            raise ValueError("Publication object identity mismatch")
-        _save_clean_history(connection, objects, lake, config, snapshot, operation_id, sensor_type)
+    for snapshot, etag in _history_objects(objects, config):
+        _save_clean_history(connection, objects, lake, config, snapshot, operation_id, sensor_type, etag)
 
 
 def execute(connection, objects, lake, config, now, command, publish_snapshot):
@@ -224,7 +240,7 @@ def execute(connection, objects, lake, config, now, command, publish_snapshot):
         database.mutate_document(connection, "checkpoint_reset", lambda doc: {**doc, "stage": "database"})
         counts.update(posts=database.purge_synthetic_posts(connection, operation_id), landing_files=landing_count)
         database.mutate_document(connection, "checkpoint_reset", lambda doc: {**doc, "stage": "publishing", "counts": {
-            key: doc.get("counts", {}).get(key, 0) + value for key, value in counts.items()}})
+            **doc.get("counts", {}), **{key: doc.get("counts", {}).get(key, 0) + value for key, value in counts.items()}}})
         sources = database.read_document(connection, "configuration").get("sources", {})
         reviews = database.read_document(connection, "reviews").get("items", {})
         state = simulation_state(database.read_document(connection, "simulation"), command["reset_at"])

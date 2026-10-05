@@ -413,8 +413,10 @@ def cloud_tick(runtime, force=False, sensor_type=None):
 
 def _capture_config(config, reset):
     kind = reset.get("sensor_type")
-    if kind in sensors.SENSOR_TYPES and reset.get("status") in {"pending", "error"}:
+    if (kind == "all" or kind in sensors.SENSOR_TYPES) and reset.get("status") in {"pending", "error"}:
         if "by_type" not in config:
             return {**config, "capture_running": False}
-        return {**config, "by_type": {**config["by_type"], kind: {**config["by_type"][kind], "capture_running": False}}}
+        return {**config, "capture_running": False if kind == "all" else config["capture_running"],
+                "by_type": {name: {**row, "capture_running": False} if kind in ("all", name) else row
+                            for name, row in config["by_type"].items()}}
     return config

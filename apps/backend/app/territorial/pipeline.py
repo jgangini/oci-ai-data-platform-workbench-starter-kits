@@ -480,7 +480,7 @@ def _tick(connection, objects, lake, config, secret_get, now, classifier, client
     mutate_document(connection, "status_pipeline", lambda current: {**current, **enrichment,
         "status": "needs_attention" if enrichment["needs_attention"] else "pending" if enrichment["pending_count"] else "ready", "last_run_at": utc_text(now),
         "pipeline_revision": config.get("pipeline_revision"),
-        "sensor_reset_version": 1,
+        "sensor_reset_version": 2,
         "configuration_revision": config["configuration_revision"], "version": snapshot["version"], "stream": progress})
     return snapshot
 
@@ -556,7 +556,7 @@ def run(spark, secret_get, config, *, clock=time.time, classifier=None, connecti
         lake = lake or DeltaLake(spark, config)
         if reset_version(connection) != 2:
             raise RuntimeError("Synthetic reset database contract is not installed")
-        if sensor_reset_version(connection) != 1:
+        if sensor_reset_version(connection) != 2:
             raise RuntimeError("Sensor reset database contract is not installed")
         if read_document(connection, "runtime").get("synthetic_reset_version") != 2:
             mutate_document(connection, "runtime", lambda doc: {**doc, "synthetic_reset_version": 2})
