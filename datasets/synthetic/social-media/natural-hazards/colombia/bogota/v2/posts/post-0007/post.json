@@ -1,0 +1,35 @@
+{
+  "fixture_id": "post-0007",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-bogota-v2-sara_esquina",
+    "username": "sara_esquina",
+    "display_name": "Sara Prieto"
+  },
+  "message": "Me llegó la imagen de @andres_sierra y la comparto tal cual; yo no estoy en Chapinero. ¿Es del puesto de comida detrás del muro? No tengo cómo confirmarlo. Es la misma foto que está circulando, aunque otros le hayan puesto un título más alarmante.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 175,
+  "available_offset_seconds": 175,
+  "attachments": [
+    {
+      "id": "post-0007-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/grill-smoke.png",
+      "sha256": "f0248c879ea13a1cfcce4d3381fdaf75e69a892e5157dda0a98b6684d01361ce",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: cooking smoke above a charcoal grill and intact surroundings; it does not depict a vegetation fire.",
+      "is_simulated": true,
+      "reused_from": "post-0005-image-01"
+    }
+  ]
+}

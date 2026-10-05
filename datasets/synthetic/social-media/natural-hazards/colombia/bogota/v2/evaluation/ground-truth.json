@@ -1,0 +1,166 @@
+{
+  "dataset_version": "bogota-v2",
+  "scope": "Evaluation only. Not copied into the runtime image or passed to capture, models or correlation.",
+  "posts": [
+    {
+      "fixture_id": "post-0001",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-doorway",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0002",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-doorway",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0001",
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0003",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-doorway",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0001",
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0004",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "kennedy-doorway",
+      "evidence_role": "qualifies",
+      "duplicate_of": null,
+      "is_late": true,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0005",
+      "scenario_assertion": "uncertain",
+      "expected_category": "incendio",
+      "event": "chapinero-smoke",
+      "evidence_role": "uncertain",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0006",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-smoke",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0005",
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0007",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-smoke",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0005",
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0008",
+      "scenario_assertion": "true",
+      "expected_category": "incendio",
+      "event": "chapinero-smoke",
+      "evidence_role": "contradicts",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0009",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "bolivar-roadside",
+      "evidence_role": "supports",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0010",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "bolivar-roadside",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0009",
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0011",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "bolivar-roadside",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0009",
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0012",
+      "scenario_assertion": "true",
+      "expected_category": "movimiento_masa",
+      "event": "bolivar-roadside",
+      "evidence_role": "qualifies",
+      "duplicate_of": null,
+      "is_late": true,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0013",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "suba-wet-street",
+      "evidence_role": "contradicts",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0014",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "suba-wet-street",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0013",
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0015",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "suba-wet-street",
+      "evidence_role": "duplicate",
+      "duplicate_of": "post-0013",
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    },
+    {
+      "fixture_id": "post-0016",
+      "scenario_assertion": "true",
+      "expected_category": "inundacion",
+      "event": "suba-wet-street",
+      "evidence_role": "qualifies",
+      "duplicate_of": null,
+      "is_late": false,
+      "reason": "The fictional report is scoped to its stated time, vantage point and attributed image. Reposted images are not independent witnesses."
+    }
+  ]
+}

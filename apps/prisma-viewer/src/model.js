@@ -110,21 +110,23 @@ export function safeSourceUrl(value) {
 
 export function photosFor(evidence, incident) {
   if (!incident?.evidence_ids?.includes(evidence?.id)) return [];
+  const datasetVersion = evidence.raw_metadata?.dataset_version;
+  const versionQuery = datasetVersion === 'bogota-v2' ? '?dataset_version=bogota-v2' : '';
   const originals = evidence.platform === 'x' && Array.isArray(evidence.media) ? evidence.media.filter((media) => {
     const safe = safeSourceUrl(media?.url);
     if (media?.type !== 'photo' || !safe) return false;
     const url = new URL(safe);
     return url.hostname === 'pbs.twimg.com' && !url.port && !url.hash && url.pathname.startsWith('/media/');
   }) : [];
-  const bundled = canonicalMode(evidence.mode) === 'Synthetic' && Array.isArray(evidence.attachments) ? evidence.attachments.flatMap((item) => {
+  const bundled = canonicalMode(evidence.mode) === 'Synthetic' && [undefined, 'bogota-v1', 'bogota-v2'].includes(datasetVersion) && Array.isArray(evidence.attachments) ? evidence.attachments.flatMap((item) => {
     if (item?.type !== 'image' || !/^[a-f0-9]{64}$/.test(item.sha256 || '')) return [];
     const legacy = /^posts\/(post-\d{4})\/media\/(image-\d{2}\.svg)$/.exec(item.dataset_path || '');
-    if (legacy && item.mime_type === 'image/svg+xml') return [{ ...item, url: `/api/gods-eye-view/media/${legacy[1]}/${legacy[2]}` }];
+    if (legacy && item.mime_type === 'image/svg+xml') return [{ ...item, url: `/api/gods-eye-view/media/${legacy[1]}/${legacy[2]}${versionQuery}` }];
     const asset = /^media\/[a-z0-9_-]+\.(png|jpg|jpeg|webp)$/.exec(item.dataset_path || '');
     const identifier = /^(post-\d{4})-(image-\d{2})$/.exec(item.id || '');
     const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
     if (!asset || !identifier || item.origin !== 'ai_generated' || item.mime_type !== mimeTypes[asset[1]]) return [];
-    return [{ ...item, url: `/api/gods-eye-view/media/${identifier[1]}/${identifier[2]}.${asset[1]}` }];
+    return [{ ...item, url: `/api/gods-eye-view/media/${identifier[1]}/${identifier[2]}.${asset[1]}${versionQuery}` }];
   }) : [];
   return [...new Map([...originals, ...bundled].map((item) => [item.url, item])).values()].slice(0, 4);
 }

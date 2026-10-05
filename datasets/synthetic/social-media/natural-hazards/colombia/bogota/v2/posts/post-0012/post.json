@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0012",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-bogota-v2-felipe_regreso",
+    "username": "felipe_regreso",
+    "display_name": "Felipe Naranjo"
+  },
+  "message": "Dejo esto tarde porque no tenía señal: cuando pasé por esa vía de Ciudad Bolívar vi tierra y unas piedras al costado, y la otra mitad estaba libre. Fue antes de salir del sector, no una actualización de este minuto. No miré la parte alta de la ladera.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 280,
+  "available_offset_seconds": 540,
+  "attachments": []
+}

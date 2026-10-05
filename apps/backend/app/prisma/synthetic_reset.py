@@ -39,6 +39,15 @@ def prune_publication(snapshot, sensor_type=None):
         if any(item.get("mode") not in SYNTHETIC_MODES or item.get("is_simulated") is not True for item in selected):
             raise ValueError("Sensor deletion requires synthetic provenance")
         clean = {**snapshot, "sensors": [item for item in snapshot["sensors"] if item.get("sensor_type") != sensor_type]}
+        from .correlation import jurisdiction, sensor_context, sensor_index, timestamp
+        readings = sensor_index(clean["sensors"])
+        evidence = {item["id"]: item for item in snapshot["evidence"]}
+        clean["incidents"] = [dict(item) for item in snapshot["incidents"]]
+        for incident in clean["incidents"]:
+            if incident.get("correlation_context") and incident.get("mode") in SYNTHETIC_MODES:
+                incident["correlation_context"] = {**incident["correlation_context"], "sensors": sensor_context(
+                    incident, readings[("Synthetic", incident["locality"])],
+                    jurisdiction([evidence[key] for key in incident["evidence_ids"]]), timestamp(snapshot["published_at"]))}
         return _versioned_replacement(clean, snapshot["version"])
     removed_posts = _synthetic_ids(snapshot["evidence"])
     removed_events = _synthetic_ids(snapshot["incidents"])

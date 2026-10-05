@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
-from .corpus import presentation
+from .corpus import VERSION, VERSIONS, presentation
 
 from .core import SYNTHETIC_MODES, canonical_mode
 
@@ -176,6 +176,7 @@ def original_url(value, simulated):
 def attachments_for(payload):
     """Expose only authenticated corpus objects or validated platform media."""
     simulated = payload.get("mode") in SYNTHETIC_MODES
+    version = (payload.get("raw_metadata") or {}).get("dataset_version", VERSION)
     attachments = []
     for item in payload.get("attachments", [])[:8]:
         path = str(item.get("dataset_path", ""))
@@ -183,10 +184,11 @@ def attachments_for(payload):
         shared = re.fullmatch(r"media/[a-z0-9_-]+\.(png|jpe?g|webp)", path)
         if shared:
             match = re.fullmatch(r"(post-\d{4})-(image-\d{2})", str(item.get("id", "")))
-        if simulated and match and re.fullmatch(r"[a-f0-9]{64}", str(item.get("sha256", ""))):
+        if simulated and isinstance(version, str) and version in VERSIONS and match and re.fullmatch(r"[a-f0-9]{64}", str(item.get("sha256", ""))):
             filename = match[2] + "." + shared[1] if shared else match[2]
             attachments.append({**{name: item.get(name) for name in ("id", "type", "mime_type", "alt_text", "origin")},
-                "url": f"/api/admin/prisma/media/{match[1]}/{filename}", "provenance": "synthetic"})
+                **({"reused_from": item["reused_from"]} if item.get("reused_from") else {}),
+                "url": f"/api/admin/prisma/media/{match[1]}/{filename}" + (f"?dataset_version={version}" if version != VERSION else ""), "provenance": "synthetic"})
     if not simulated:
         from .media import photos
         attachments.extend({**item, "id": str(index), "type": "image", "mime_type": "image/jpeg"}

@@ -1,0 +1,35 @@
+{
+  "fixture_id": "post-0003",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-bogota-v2-rocio_camino",
+    "username": "rocio_camino",
+    "display_name": "Rocío Melo"
+  },
+  "message": "Esta es la misma imagen de @lina_portal, la republico para que la vea mi hermana que vive en Kennedy. No tengo otra foto ni estoy allá. Por favor no la pasen como si fuera una calle distinta; tampoco sabemos qué ocurre fuera de ese encuadre.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 60,
+  "available_offset_seconds": 60,
+  "attachments": [
+    {
+      "id": "post-0003-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/flood-doorway.png",
+      "sha256": "46dedc386bc817073d466174fa6ff04bdebd224d2d18c93e1b2681e44e1b84d7",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: shallow muddy water beside a residential curb, viewed from a doorway; locality anchor only.",
+      "is_simulated": true,
+      "reused_from": "post-0001-image-01"
+    }
+  ]
+}

@@ -151,28 +151,39 @@ def normalize_event(event: dict) -> dict:
     }
 
 
+def image_hashes(event):
+    """Exact file fingerprints only; matching pixels do not verify an event or its location."""
+    return {item["sha256"].lower() for item in event.get("attachments", [])
+            if isinstance(item, dict) and item.get("type") == "image"
+            and isinstance(item.get("sha256"), str) and re.fullmatch(r"[a-fA-F0-9]{64}", item["sha256"])}
+
+
 def corroboration(evidence):
-    sources, distinct = set(), []
+    sources, distinct, images = set(), [], set()
     contradictions = set()
     for event in evidence:
         if (event.get("claim") or {}).get("relation") == "contradicts":
             contradictions.add(event["id"])
             continue
-        source = (event["platform"], event["raw_metadata"].get("author_id") or "unknown")
-        if source in sources:
+        mode = canonical_mode(event["mode"])
+        source = (mode, event["platform"], event["raw_metadata"].get("author_id") or "unknown")
+        fingerprints = {(mode, digest) for digest in image_hashes(event)}
+        copied_image = bool(fingerprints & images)
+        images.update(fingerprints)
+        if source in sources or copied_image:
             continue
         words = set(re.findall(r"\w+", folded(event["text"])))
         # ponytail: pairwise copy detection is bounded by the 5,000-event demo;
         # larger publications need an indexed similarity search before correlation.
-        if any(words and len(words & prior) / len(words | prior) >= 0.8 for prior in distinct):
+        if any(mode == prior_mode and words and len(words & prior) / len(words | prior) >= 0.8 for prior_mode, prior in distinct):
             continue
-        distinct.append(words)
+        distinct.append((mode, words))
         # Missing author IDs never turn two posts on one platform into two witnesses.
         sources.add(source)
     count = len(sources)
     return {"independent_source_count": count, "contradicting_report_count": len(contradictions), "corroboration_score": min(100, max(0, count - 1) * 25),
             "corroboration_status": {0: "no_supporting_sources", 1: "single_source"}.get(count, "multiple_sources"),
-            "corroboration_method": "independent_sources_text_similarity_v1"}
+            "corroboration_method": "independent_sources_text_image_sha256_v2"}
 
 
 def legacy_groups(events):
@@ -222,7 +233,7 @@ def incident_summary(first, evidence):
     return (first.get("claim") or {}).get("summary_en") or f"{count} reports of {category} in {location}. Human review required."
 
 
-def build_snapshot(events: list[dict], reviews: dict, version: str, published_at: str, *, rules=None, previous=None, now=None) -> dict:
+def build_snapshot(events: list[dict], reviews: dict, version: str, published_at: str, *, rules=None, previous=None, now=None, sensors=None) -> dict:
     events = [{**event, "mode": canonical_mode(event["mode"])} for event in events]
     groups = legacy_groups(events)
     if rules is not None:
@@ -251,12 +262,16 @@ def build_snapshot(events: list[dict], reviews: dict, version: str, published_at
         if rules is not None:
             incidents[-1].update(activity(evidence, rules, now))
             incidents[-1]["correlation_windows_minutes"] = {name: rules.get(name, {}).get("correlation_window_minutes", 30) for name in incidents[-1]["report_counts"]}
-        old = next((item for item in previous or [] if item["id"] == incident_id), {})
-        changed = any(old.get(key) != value for key, value in incidents[-1].items())
-        incidents[-1].update(revision=old.get("revision", 0) + int(changed),
+    from .correlation import add_context
+    add_context(incidents, groups, sensors or [], now)
+    for incident in incidents:
+        old = next((item for item in previous or [] if item["id"] == incident["id"]), {})
+        changed = any(old.get(key) != value for key, value in incident.items())
+        incident.update(revision=old.get("revision", 0) + int(changed),
             updated_at=utc_text(now) if changed and now is not None else old.get("updated_at", published_at))
     return {"version": version, "published_at": published_at, "incidents": incidents, "event_posts": event_posts,
-            "evidence": sorted(events, key=lambda item: (item["created_at"], item["id"]))}
+            "evidence": sorted(events, key=lambda item: (item["created_at"], item["id"])),
+            **({"sensors": sensors} if sensors is not None else {})}
 
 
 def simulation_events(elapsed_seconds: float, anchor_at: float | None = None) -> list[dict]:

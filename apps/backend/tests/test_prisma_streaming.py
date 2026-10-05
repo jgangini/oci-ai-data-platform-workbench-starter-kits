@@ -180,6 +180,10 @@ def test_real_stream_resumes_after_bronze_commit_without_duplicate_events(tmp_pa
         assert spark.table("oci_gold.event_posts").count() == len(activity_snapshot["event_posts"])
         assert spark.table("oci_silver.events").count() == len(activity_snapshot["incidents"])
         assert spark.table("oci_silver.event_posts").count() == len(activity_snapshot["event_posts"])
+        for name in ("oci_silver.event_posts", "oci_gold.event_posts"):
+            projected = [row.asDict() for row in spark.table(name).select("event_id", "post_key", "relation", "claim_relation", "duplicate_of").collect()]
+            expected_links = [{key: item[key] for key in ("event_id", "post_key", "relation", "claim_relation", "duplicate_of")} for item in activity_snapshot["event_posts"]]
+            assert sorted(projected, key=lambda item: (item["event_id"], item["post_key"])) == sorted(expected_links, key=lambda item: (item["event_id"], item["post_key"]))
         next_state = {**activity_snapshot, "version": "next-state", "incidents": [], "event_posts": []}
         assert lake.stage_snapshot(next_state) == next_state
         assert spark.table("oci_silver.events").count() == spark.table("oci_silver.event_posts").count() == 0

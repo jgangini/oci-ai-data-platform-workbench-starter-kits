@@ -212,7 +212,7 @@ def install_post_views(spark, catalog, tables):
     spark.sql(f"""CREATE OR REPLACE VIEW {catalog}.oci_gold.events AS
       SELECT p.id AS publication_version,event.id AS event_id,event.* FROM {tables['gold']} p
       LATERAL VIEW explode(from_json(get_json_object(payload,'$.incidents'),'{event_schema}')) records AS event""")
-    relation_schema = 'ARRAY<STRUCT<event_id:STRING,post_key:STRING,relation:STRING,explanation:STRING,analysis_version:STRING>>'
+    relation_schema = 'ARRAY<STRUCT<event_id:STRING,post_key:STRING,relation:STRING,explanation:STRING,analysis_version:STRING,claim_relation:STRING,duplicate_of:STRING>>'
     spark.sql(f"""CREATE OR REPLACE VIEW {catalog}.oci_gold.event_posts AS
       SELECT p.id AS publication_version,relation.* FROM {tables['gold']} p
       LATERAL VIEW explode(from_json(get_json_object(payload,'$.event_posts'),'{relation_schema}')) records AS relation""")
@@ -377,10 +377,11 @@ def publish_snapshot(connection, objects, lake, config, events, reviews, simulat
                 if published.get("version") != pointer["version"]:
                     raise ValueError("Previous publication version does not match its pointer")
                 previous = published["incidents"]
-    snapshot = build_snapshot(events, reviews, "", "", rules=rules, previous=previous, now=now)
+    sensors = None
     if getattr(lake, "sensors", None) is not None:
         from .sensors import apply_locations
-        snapshot["sensors"] = apply_locations(lake.sensors.latest(now), read_document(connection, "reviews").get("sensor_locations", {}))
+        sensors = apply_locations(lake.sensors.latest(now), read_document(connection, "reviews").get("sensor_locations", {}))
+    snapshot = build_snapshot(events, reviews, "", "", rules=rules, previous=previous, now=now, sensors=sensors)
     if rules is not None and hasattr(lake, "apply_activity"):
         lake.apply_activity(snapshot, rules, now)
     snapshot.update(runtime="aidp", simulation=simulation)

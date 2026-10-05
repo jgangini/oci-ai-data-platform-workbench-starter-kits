@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+from uuid import uuid4
 
 import pytest
 
@@ -80,7 +81,7 @@ def test_multiline_searches_are_independent_and_union_deduplicates():
         capture.query_lines("\n".join(str(value) for value in range(11)))
 
 
-def test_continuous_per_source_restart_interval_cycles_and_stop(tmp_path):
+def test_per_source_run_survives_restart_and_stops_after_one_finite_scenario(tmp_path):
     now = [NOW]
     runtime = LocalPrismaRuntime(tmp_path, clock=lambda: now[0])
     asyncio.run(runtime.tick())
@@ -97,12 +98,16 @@ def test_continuous_per_source_restart_interval_cycles_and_stop(tmp_path):
     asyncio.run(restarted.tick())
     events = restarted.store.snapshot()["evidence"]
     assert {"sensor", "sire", "linea123"} <= {item["platform"] for item in events}
-    assert len([item for item in events if item["platform"] == "x" and item["source_id"].endswith(":post-0001")]) == 2
+    assert len([item for item in events if item["platform"] == "x" and item["source_id"].endswith(":post-0001")]) == 1
     assert original_ids <= {item["id"] for item in events}
+    assert restarted.store.source("x")["capture_running"] is False
+    assert restarted.store.source("x")["next_due"] is None
+    finished = copy.deepcopy(events)
     asyncio.run(restarted.update_source("x", {"interval_minutes": 2}))
     now[0] += 60
     asyncio.run(restarted.tick())
-    assert restarted.store.source("x")["next_due"].endswith("14:18:00Z")
+    assert restarted.store.source("x")["next_due"] is None
+    assert restarted.store.snapshot()["evidence"] == finished
     before = restarted.store.snapshot()["evidence"]
     file_count = len(list((tmp_path / "prisma-landing").glob("*.csv")))
     stopped = asyncio.run(restarted.update_source("x", {"enabled": False}))
@@ -113,17 +118,18 @@ def test_continuous_per_source_restart_interval_cycles_and_stop(tmp_path):
     assert len(list((tmp_path / "prisma-landing").glob("*.csv"))) == file_count
 
 
-def test_continuous_catchup_retains_windows_instead_of_skipping_a_day():
+def test_overdue_synthetic_run_catches_up_once_without_republishing_a_days_cycles():
     source = default_source("x")
     control = {"run_id": "continuous", "anchor_at": NOW}
     first, cursor = capture.continuous_batch(source, control, {}, NOW)
     ids = {item["source_id"] for item in first}
-    for _ in range(24):
-        events, cursor = capture.continuous_batch(source, control, cursor, NOW + 86400, True)
-        assert not ids.intersection(item["source_id"] for item in events)
-        ids.update(item["source_id"] for item in events)
-    assert cursor["elapsed"] == 86400
-    assert len([identifier for identifier in ids if identifier.endswith(":post-0001")]) == 145
+    events, cursor = capture.continuous_batch(source, control, cursor, NOW + 86400, True)
+    assert not ids.intersection(item["source_id"] for item in events)
+    ids.update(item["source_id"] for item in events)
+    assert cursor["elapsed"] == 600 and cursor["next_due"] is None
+    assert len([identifier for identifier in ids if identifier.endswith(":post-0001")]) == 1
+    assert all(identifier.startswith("continuous:0:") for identifier in ids)
+    assert capture.continuous_batch(source, control, cursor, NOW + 172800, True) is None
 
 
 def test_existing_unversioned_continuous_cursor_keeps_legacy_generator():
@@ -132,9 +138,40 @@ def test_existing_unversioned_continuous_cursor_keeps_legacy_generator():
     cursor = {"run_id": "existing", "query": source["query"], "elapsed": 0,
               "interval_minutes": 5, "next_due": NOW + 300}
     events, resumed = capture.continuous_batch(source, control, cursor, NOW + 600)
-    assert any(event["source_id"] == "existing:1:lluvia-1" for event in events)
+    assert events and all(event["source_id"].startswith("existing:0:") for event in events)
     assert all("dataset_version" not in event["raw_metadata"] for event in events)
     assert "dataset_version" not in resumed and "dataset_version" not in resumed["batch_key"]
+    assert resumed["elapsed"] == 600 and resumed["next_due"] is None
+
+
+@pytest.mark.parametrize("elapsed", [600, 86400])
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("changed_query", [False, True])
+def test_exhausted_run_cannot_make_new_ids_or_dates_even_after_query_change_or_force(elapsed, force, changed_query):
+    source = default_source("x")
+    control = {"run_id": "finished", "anchor_at": NOW}
+    cursor = {"run_id": "finished", "query": source["query"], "elapsed": elapsed,
+        "interval_minutes": 5, "next_due": NOW + 300, "dataset_version": "bogota-v1", "dataset_seed": 0}
+    before = copy.deepcopy(cursor)
+    if changed_query:
+        source["query"] = "Kennedy"
+    assert capture.is_complete(control, cursor)
+    assert capture.continuous_batch(source, control, cursor, NOW + 172800, force) is None
+    assert cursor == before
+
+
+def test_explicit_new_run_uses_selected_version_new_anchor_and_new_ids():
+    source = {**default_source("x"), "query": ""}
+    previous = {"run_id": str(uuid4()), "anchor_at": NOW, "dataset_version": "bogota-v1", "seed": 17}
+    old_events, cursor = capture.continuous_batch(source, previous, {}, NOW + 600)
+    control = {"run_id": str(uuid4()), "anchor_at": NOW + 3600, "dataset_version": "bogota-v2", "seed": 23}
+    assert not capture.is_complete(control, cursor)
+    new_events, restarted = capture.continuous_batch(source, control, cursor, control["anchor_at"])
+    assert new_events and not {event["source_id"] for event in new_events} & {event["source_id"] for event in old_events}
+    assert all(event["source_id"].startswith(control["run_id"] + ":0:bogota-v2:") for event in new_events)
+    assert all(event["raw_metadata"]["dataset_version"] == "bogota-v2" and event["raw_metadata"]["dataset_seed"] == 23 for event in new_events)
+    assert restarted["batch_key"]["from_seconds"] == -1 and restarted["elapsed"] == 0
+    assert restarted["dataset_version"] == "bogota-v2" and restarted["run_id"] == control["run_id"]
 
 
 def test_x_queries_keep_separate_cursors_stop_on_429_and_reuse_unchanged_query(monkeypatch):

@@ -95,7 +95,15 @@ class PrismaStore:
             return source
         with self.connection() as db:
             controls = self._get(db, "capture_controls", {})
-            control = controls.get(platform) if source.get("capture_paused") else None
+            saved = controls.get(platform, {})
+            completed = source["mode"] in SYNTHETIC_MODES and capture.is_complete(saved, self._get(db, "synthetic:" + platform, {}))
+            pending = completed and capture.institutional_pending(saved, controls.get("institutional", {}),
+                {name: self._get(db, "synthetic:" + name, {}) for name in capture.INSTITUTIONAL})
+            if completed and not pending:
+                source.update(capture_running=False, capture_paused=True, status="completed", next_due=None, last_error=None)
+                self._put(db, "source:" + platform, source)
+                return source
+            control = saved if source.get("capture_paused") or pending else None
             control = control or {"run_id": str(uuid4()), "anchor_at": self.clock(), "seed": 0}
             if not any(item.get("capture_running") and item["enabled"] and item["mode"] in SYNTHETIC_MODES for item in self.sources()):
                 controls["institutional"] = control
@@ -355,12 +363,17 @@ class PrismaStore:
         state = self.simulation_state()
         with self.connection() as db:
             controls = self._get(db, "capture_controls", {})
+        finished = []
         for source, control, continuous in capture.inputs(self.sources(), controls, state):
             with self.connection() as db:
                 name = source["platform"]
                 if platform and name in PLATFORMS and name != platform:
                     continue
                 cursor = self._get(db, "synthetic:" + name, {})
+                if continuous and capture.is_complete(control, cursor):
+                    if name in PLATFORMS:
+                        finished.append(name)
+                    continue
                 result = (capture.continuous_batch if continuous else capture.batch)(source, control, cursor, self.clock(), force)
                 if result is None:
                     continue
@@ -374,7 +387,13 @@ class PrismaStore:
                     "last_landing_key": key or summary.get("last_landing_key"), "last_run_at": utc_text(self.clock())})
                 if name in PLATFORMS:
                     self._put(db, "source:" + name, {**source, "mode": canonical_mode(source["mode"]), "status": "simulation", "last_received_count": len(events),
-                        "last_run_at": utc_text(self.clock()), "next_due": utc_text(cursor["next_due"]), "last_error": None})
+                        "last_run_at": utc_text(self.clock()), "next_due": utc_text(cursor["next_due"]) if cursor["next_due"] is not None else None, "last_error": None})
+                    if continuous and capture.is_complete(control, cursor):
+                        finished.append(name)
+        with self.connection() as db:
+            for name in finished:
+                self._put(db, "source:" + name, {**self._get(db, "source:" + name, {}), "capture_running": False,
+                    "capture_paused": True, "status": "completed", "next_due": None, "last_error": None})
 
     def capture_summary(self):
         with self.connection() as db:
@@ -389,10 +408,9 @@ class PrismaStore:
             registry = self._get(db, "event_registry", None)
         events = [item for item in events if not item.get("raw_metadata", {}).get("capture_run_id") or item["created_at"] >= utc_text(self.clock() - 86400)]
         rules = {source["platform"]: source for source in self.sources()}
-        result = build_snapshot(events, reviews, f"local-v3-{publication['revision']}", publication["published_at"],
-                                rules=rules, previous=registry, now=self.clock())
         from .sensor_capture import local_latest
-        result["sensors"] = local_latest(self)
+        result = build_snapshot(events, reviews, f"local-v3-{publication['revision']}", publication["published_at"],
+                                rules=rules, previous=registry, now=self.clock(), sensors=local_latest(self))
         digest = hashlib.sha256(json.dumps({name: result[name] for name in ("incidents", "evidence", "event_posts", "sensors")}, sort_keys=True).encode()).hexdigest()[:16]
         result["version"] += "-" + digest
         with self.connection() as db:

@@ -1,4 +1,7 @@
 import json
+import re
+import sqlite3
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -24,12 +27,96 @@ def test_incident_period_and_network_match_the_same_publication():
     sql, values = incident_query("publication-1")
     predicates = sql.split("ORDER BY", 1)[0]
     evidence_scope = predicates.split("OR EXISTS (", 1)[1]
-    assert "(:platform IS NULL AND :date_from IS NULL AND :date_to IS NULL)" in predicates
-    assert all(values[key] is None for key in ("platform", "date_from", "date_to"))
+    assert "(:platform IS NULL AND :date_from IS NULL AND :date_to IS NULL AND :country IS NULL AND :city IS NULL)" in predicates
+    assert all(values[key] is None for key in ("platform", "date_from", "date_to", "country", "city"))
     assert "WHERE (:platform IS NULL OR e.platform=:platform)" in evidence_scope
     assert "JSON_VALUE(e.evidence_json,'$.created_at' RETURNING TIMESTAMP WITH TIME ZONE) >= TO_UTC_TIMESTAMP_TZ(:date_from)" in evidence_scope
     assert "JSON_VALUE(e.evidence_json,'$.created_at' RETURNING TIMESTAMP WITH TIME ZONE) <= TO_UTC_TIMESTAMP_TZ(:date_to)" in evidence_scope
     assert "JSON_VALUE(i.incident_json,'$.created_at'" not in predicates
+
+
+@pytest.fixture
+def incident_database():
+    connection = sqlite3.connect(":memory:")
+    connection.execute("ATTACH DATABASE ':memory:' AS ADMIN")
+    connection.execute("CREATE TABLE ADMIN.PRISMA_V_INCIDENTS(version, incident_id, locality, category, severity, source_mode, incident_json)")
+    connection.execute("CREATE TABLE ADMIN.PRISMA_V_EVIDENCE(version, evidence_id, platform, evidence_json)")
+    connection.create_function("TO_UTC_TIMESTAMP_TZ", 1,
+        lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat() if value else None)
+    # Each tuple is one linked publication; differing geography/network/time must not be combined.
+    cases = [
+        ("co-high", "Kennedy", "inundacion", "high", [("Colombia", "Bogotá", "x", "14:00:00")]),
+        ("co-low", "Bosa", "lluvia", "low", [("Colombia", "Bogotá", "x", "14:00:00")]),
+        ("co-cali", "Comuna 20", "incendio", "medium", [("Colombia", "Cali", "facebook", "14:00:00")]),
+        ("pe-high", "Miraflores", "incendio", "high", [("Perú", "Lima", "x", "14:00:00")]),
+        ("unknown-country", "Kennedy", "inundacion", "high", [(None, "Bogotá", "x", "14:00:00")]),
+        ("different-publications", "Sin localizar", "inundacion", "high",
+            [("Colombia", "Bogotá", "facebook", "13:00:00"), ("Perú", "Lima", "x", "14:00:00")]),
+    ]
+    for identifier, locality, category, severity, publications in cases:
+        refs = [f"{identifier}-{index}" for index in range(len(publications))]
+        incident = dict(id=identifier, locality=locality, category=category, severity=severity,
+            evidence_ids=refs, lat=4.62, lon=-74.15, created_at="2020-01-01T00:00:00Z")
+        connection.execute("INSERT INTO ADMIN.PRISMA_V_INCIDENTS VALUES (?,?,?,?,?,?,?)",
+            ("v1", identifier, locality, category, severity, "Synthetic", json.dumps(incident)))
+        for ref, (country, city, platform, at) in zip(refs, publications):
+            evidence = dict(id=ref, country=country, city=city, created_at=f"2026-10-05T{at}Z")
+            connection.execute("INSERT INTO ADMIN.PRISMA_V_EVIDENCE VALUES (?,?,?,?)",
+                ("v1", ref, platform, json.dumps(evidence)))
+    connection.execute("INSERT INTO ADMIN.PRISMA_V_INCIDENTS SELECT 'v2', incident_id, locality, category, severity, source_mode, incident_json FROM ADMIN.PRISMA_V_INCIDENTS")
+    connection.execute("INSERT INTO ADMIN.PRISMA_V_EVIDENCE VALUES ('v2','unknown-country-0','x',?)",
+        (json.dumps({"country": "Colombia", "city": "Bogotá", "created_at": "2026-10-05T14:00:00Z"}),))
+
+    yield connection
+    connection.close()
+
+
+def sqlite_rows(connection, sql, binds):
+    """Execute production predicates; translate only Oracle JSON/limit syntax for SQLite."""
+    sql = sql.replace("JSON_TABLE(i.incident_json,'$.evidence_ids[*]' COLUMNS (eid VARCHAR2(200) PATH '$')) ids",
+        "json_each(i.incident_json,'$.evidence_ids') ids").replace("e.evidence_id=ids.eid", "e.evidence_id=ids.value")
+    sql = re.sub(r"JSON_VALUE\(([^,]+),('[^']+') RETURNING TIMESTAMP WITH TIME ZONE\)",
+        r"TO_UTC_TIMESTAMP_TZ(json_extract(\1,\2))", sql)
+    sql = sql.replace(" RETURNING NUMBER", "").replace("JSON_VALUE(", "json_extract(")
+    sql = re.sub(r"FETCH FIRST (\d+) ROWS ONLY", r"LIMIT \1", sql)
+    return connection.execute(sql, binds).fetchall()
+
+
+@pytest.fixture
+def incident_rows(incident_database):
+    return lambda **filters: {json.loads(row[0])["id"] for row in sqlite_rows(incident_database, *incident_query("v1", **filters))}
+
+
+@pytest.mark.parametrize("question,filters,expected", [
+    ("¿Qué eventos hay en Colombia?", {"country": "Colombia"}, {"co-high", "co-low", "co-cali", "different-publications"}),
+    ("¿Hay algún evento crítico en Colombia?", {"country": "colombia", "severity": "high"}, {"co-high", "different-publications"}),
+    ("¿Qué eventos hay en Bogotá?", {"country": "Colombia", "city": "Bogotá"}, {"co-high", "co-low", "different-publications"}),
+    ("¿Qué eventos hay en Cali?", {"country": "Colombia", "city": "Cali", "locality": "Comuna 20"}, {"co-cali"}),
+    ("¿Qué eventos hay en Perú?", {"country": "Perú"}, {"pe-high", "different-publications"}),
+    ("¿Qué eventos hay en Ecuador?", {"country": "Ecuador"}, set()),
+    ("¿Qué eventos hay sin filtrar país?", {}, {"co-high", "co-low", "co-cali", "pe-high", "unknown-country", "different-publications"}),
+])
+def test_national_question_filter_contract_executes_actual_predicates(incident_rows, question, filters, expected):
+    # These are tool arguments for the question, not a mock claim that an LLM chose them.
+    assert incident_rows(**filters) == expected, question
+
+
+def test_country_city_network_period_share_evidence_and_preserve_incident_context(incident_rows):
+    scope = dict(country="Colombia", platform="x", date_from="2026-10-05T09:00:00-05:00", date_to="2026-10-05T14:00:00Z")
+    assert incident_rows(**scope) == {"co-high", "co-low"}
+    assert incident_rows(**scope, locality="Kennedy", severity="high", category="inundacion",
+        mode="simulation", incident_id="co-high", bbox="-74.2,4.5,-74.1,4.7") == {"co-high"}
+    assert incident_rows(**scope, bbox="-75,5,-74,6") == set()
+    assert incident_rows(**scope, mode="real") == set()
+    assert incident_rows(country="Colombia", city="Lima") == set()
+    assert incident_rows(country="Colombia", incident_id="unknown-country") == set()
+    assert incident_rows(country="Colombia' OR 1=1 --") == set()
+
+
+@pytest.mark.parametrize("filters", [{"category": "flood"}, {"severity": "critical"}, {"severity": "crítico"}])
+def test_invalid_incident_vocabulary_is_an_error_not_an_empty_result(filters):
+    with pytest.raises(ValueError, match="category and severity enums"):
+        incident_query("v1", **filters)
 
 
 @pytest.mark.parametrize("mode,expected", [("", None), ("simulation", "Synthetic"), ("Synthetic", "Synthetic"), ("real", "real"), ("real' OR 1=1 --", "real' OR 1=1 --")])
@@ -66,7 +153,7 @@ def test_sensor_query_is_versioned_bounded_and_binds_spatiotemporal_filters():
     assert binds["sensor_id"] not in sql and binds["locality"] not in sql and binds["sensor_type"] not in sql
     assert binds["date_from"] == "2026-10-03T14:00:00+00:00" and binds["west"] == -74.2
     assert "TO_UTC_TIMESTAMP_TZ(observed_at)" in sql and "sensor_event_id" in sql
-    assert "100% Synthetic" in PROMPT and "no valida incidentes ni cambia su estado" in PROMPT
+    assert "is_simulated=true" in PROMPT and "no valida incidentes ni cambia su estado" in PROMPT
     with pytest.raises(ValueError):
         sensor_query("v1", date_from="2026-10-03T14:00:00")
 
@@ -109,8 +196,9 @@ def test_gateway_accepts_only_one_complete_final_json_envelope(template, accepte
     if accepted:
         assert invoke(*args) == expected
     else:
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(HTTPException) as error:
             invoke(*args)
+        assert error.value.status_code == 502
 
 
 @pytest.mark.parametrize("changes", [

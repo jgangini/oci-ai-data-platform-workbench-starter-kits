@@ -34,8 +34,8 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
     useEffect(callback, deps) { const id = cursor++, old = slots[id]; if (!old || deps.some((value, index) => value !== old.deps[index])) effects.push(() => { old?.cleanup?.(); slots[id] = { deps, cleanup: callback() }; }); },
   };
   const module = {};
-  new Function('exports', 'require', compiled + '\nexports.GovernanceModuleManager = GovernanceModuleManager;')(module, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === 'react-dom' ? { createPortal: node => node } : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './registrationPoll' ? { ...poll, pollRegistration: options => managerProps ? poll.pollRegistration({ ...options, sleep: async () => {} }) : options.request(options.signal) } : {});
-  const component = managerProps ? () => module.GovernanceModuleManager({ ...managerProps, onClose: () => { closed++; }, onChanged: () => { changed++; } }) : module.App().type;
+  new Function('exports', 'require', compiled + '\nexports.GovernanceModuleManager = GovernanceModuleManager; exports.AdminLoginCard = AdminLoginCard;')(module, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === 'react-dom' ? { createPortal: node => node } : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './registrationPoll' ? { ...poll, pollRegistration: options => managerProps ? poll.pollRegistration({ ...options, sleep: async () => {} }) : options.request(options.signal) } : {});
+  const component = managerProps ? () => module.GovernanceModuleManager({ ...managerProps, onClose: () => { closed++; }, onChanged: () => { changed++; } }) : location.pathname === '/admin/login' ? module.AdminLoginCard : module.App().type;
   function render() { for (let n = 0; dirty && n < 20; n++) {
     cursor = 0; dirty = false; effects = []; tree = component();
     const elements = nodes(tree).filter(node => node?.props).map(node => Object.assign(node.props.ref?.current instanceof Element ? node.props.ref.current : new Element(), { node, props: node.props }));
@@ -56,6 +56,35 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
     dialog: () => find('ConfirmModal', props => props.title === 'Update application?'),
     update: () => act(() => { const button = find('button', props => props.className === 'settings-save application-update'); assert.ok(!button.props.disabled); button.props.onClick(); }) };
 }
+
+for (const next of ['/gods-eye-view/', 'https://outside.test/', '//outside.test/', '/gods-eye-view/../api/', '', '/admin/settings']) {
+  test(`login accepts only the fixed viewer return target: ${next || '(none)'}`, async t => {
+    const h = await harness(t, release, '/admin/login?next=' + encodeURIComponent(next));
+    const view = '#v=2&lat=4.6&lon=-74.1&style=normal';
+    window.location.hash = view;
+    h.act(() => h.find('input', props => props.name === 'aidp-admin-username').props.onChange({ target: { value: 'admin' } }));
+    h.act(() => h.find('input', props => props.name === 'aidp-admin-password').props.onChange({ target: { value: 'test-login' } }));
+    const pending = h.find('form').props.onSubmit({ preventDefault() {} });
+    assert.equal(h.navigations.length, 0);
+    const request = h.mutations()[0];
+    assert.equal(request.path, '/api/admin/login');
+    assert.equal(request.options.credentials, 'include');
+    request.resolve({}, 204); await pending; await h.settle();
+    assert.deepEqual(h.navigations, [next === '/gods-eye-view/' ? '/gods-eye-view/' + view : '/admin/users']);
+    assert.equal(h.find('input', props => props.name === 'aidp-admin-password').props.value, '');
+  });
+}
+
+test('failed viewer login stays on the form and preserves the map fragment for retry', async t => {
+  const h = await harness(t, release, '/admin/login?next=/gods-eye-view/');
+  window.location.hash = '#v=2&lat=4.6';
+  const pending = h.find('form').props.onSubmit({ preventDefault() {} });
+  h.mutations()[0].resolve({ detail: 'Invalid administrator credentials' }, 401);
+  await pending; await h.settle();
+  assert.deepEqual(h.navigations, []);
+  assert.equal(window.location.hash, '#v=2&lat=4.6');
+  assert.equal(h.find('p', props => props.role === 'alert').props.children, 'Invalid administrator credentials');
+});
 
 for (const failed of [false, true]) test(`Workbench configuration loader ends on ${failed ? 'failure' : 'empty success'}`, async t => {
   const h = await harness(t, release, '/admin/settings', { '/api/admin/settings': null });

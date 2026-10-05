@@ -1,0 +1,35 @@
+{
+  "fixture_id": "post-0010",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-bogota-v2-julian_arriba",
+    "username": "julian_arriba",
+    "display_name": "Julián Leal"
+  },
+  "message": "La foto es de @elena_ladera en Ciudad Bolívar y la vuelvo a compartir porque mi familia pasa por esa vía. Yo no la tomé ni he ido hoy. Qué susto ese borde lleno de tierra; no sé si ya lo retiraron o si el terreno sigue cediendo.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 285,
+  "available_offset_seconds": 285,
+  "attachments": [
+    {
+      "id": "post-0010-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/slope-debris.png",
+      "sha256": "1a6ccf47bae6504459f953e0d542e31461f413ca2759626a5f81dc77510c72a8",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a small soil slip partly covers a road edge; intact homes and a limited view do not establish ongoing movement.",
+      "is_simulated": true,
+      "reused_from": "post-0009-image-01"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "fixture_id": "post-0015",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-bogota-v2-valeria_ventana",
+    "username": "valeria_ventana",
+    "display_name": "Valeria Castro"
+  },
+  "message": "Republico la imagen de @ines_balcon, no es mía. En otro grupo la ubicaron en Kennedy, pero la autora dice Suba. Me preocupa que una ubicación equivocada haga ir a la gente al lugar incorrecto. Es la misma foto y no tengo un reporte independiente de inundación.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Suba",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.741,
+    "lon": -74.084
+  },
+  "published_offset_seconds": 420,
+  "available_offset_seconds": 420,
+  "attachments": [
+    {
+      "id": "post-0015-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/wet-passable-street.png",
+      "sha256": "f04fadeb3f0f2b219267797e4f492240e42a3622e5c8c3e9bd35225484798d9f",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a passable wet street with small puddles, viewed from a balcony; it cannot establish conditions across the locality.",
+      "is_simulated": true,
+      "reused_from": "post-0013-image-01"
+    }
+  ]
+}

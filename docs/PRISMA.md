@@ -74,13 +74,19 @@ X checkpoints preserve continuation while original platform IDs deduplicate
 overlapping results. A successful empty search produces a header-only CSV;
 upstream failures remain errors, never fabricated empty results.
 
-“Run now” activates and starts continuous capture for that source, including
-previously disabled configurations. “Pause” stops capture without deleting
+“Run now” activates capture for that source, including previously disabled
+configurations. Real X capture continues until paused; a Synthetic run consumes
+its 600-second corpus once, then reports completed and pauses automatically.
+“Pause” stops capture without deleting
 publications or checkpoints. The interface shows only Running or Paused;
 capture errors remain visible separately. “Save” only updates configuration
-and “Test” checks it without starting capture. Synthetic input repeats the
-Bogotá scenario with distinct cycle IDs; ordinary service restarts preserve its
-progress. The legacy finite replay API remains available for reproducible tests.
+and “Test” checks it without starting capture. An exhausted Synthetic cursor stays
+exhausted after Run, query changes and service restarts; articles are not repeated
+with newer timestamps. Existing multi-cycle cursors stop without deleting their
+prior records. A separately selected new run is required for new Synthetic input.
+Run can still retry unfinished processing of already captured data, including an
+open enrichment circuit or the last pending upload, without regenerating articles.
+The legacy explicit finite replay API remains available for reproducible tests.
 
 The trash button beside the source toolbar opens **Delete all Synthetic data?**.
 Confirmation applies to all networks, independently of publication search or
@@ -248,7 +254,7 @@ new first-page snapshot; expired cursors require Reload latest. Autonomous track
 `captured`, `ingested`, and `processed` monotonically. The local fixture marks its
 synchronous local processing separately from the native deployment context.
 
-The versioned corpus contains 120 posts, 30 per network, with 24 distinct main-case
+The default `bogota-v1` corpus contains 120 posts, 30 per network, with 24 distinct main-case
 reports per network, late posts, copies, ambiguous reports and contradictions.
 Messages use distinct fictional voices: worried residents, shopkeepers, commuters,
 community alerts, requests to authorities and cautious updates. Length, punctuation,
@@ -277,6 +283,20 @@ Images are served through authenticated routes with
 checksums and a sandboxed response policy. The eight false-claim labels remain exclusively in
 `datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1/evaluation/`;
 Docker images and the native bundle exclude evaluation data.
+
+The separate `bogota-v2` corpus adds 16 posts, four per network, with four new
+AI-generated PNGs preserved byte-for-byte. Twelve posts carry images: each scene
+has one original image and two explicitly attributed republications, plus a
+text-only clarification or limited observation. Shared hashes and `reused_from`
+retain provenance; different captions do not turn one image into independent
+visual witnesses. Human messages include uncertainty, emotional reactions,
+corrections and a delayed report without revealing evaluation labels. Synthetic
+metadata remains explicit, and representative locality anchors are not precise
+incident coordinates. V2 is selected explicitly for a new run; v1 files, existing
+cursors and captured wording remain unchanged. Both authenticated media routes
+include the v2 version in their URL. The classifier currently reads text only;
+these photographs are displayed as attachments and support duplicate detection,
+not image interpretation. The 600-second corpus does not simulate a 24-hour delay.
 
 Run `python scripts/evaluate_prisma_corpus.py --predictions predictions.json` for
 offline category/stance precision and recall over one run/cycle. Without actual
@@ -525,6 +545,47 @@ on independent author/platform sources after near-copy suppression, not a
 probability or automatic confirmation. Classification confidence remains separate.
 Publication images retain their source restrictions and Synthetic provenance;
 displaying an attachment does not imply human validation of the incident.
+The Social networks map layer checks for a publication every 60 seconds.
+Background checks retain the existing publication without a repeated refreshing
+message; initial loading and real retrieval errors remain visible. Polling reads
+published state and does not start capture or reinterpret an article's timestamp.
+
+Each incident also publishes `correlation_context`, an explained, bounded set of
+relationships over the existing evidence and sensor payloads. Report activity
+continues to use each network's configured window and thresholds. Separate
+historical candidates share category, locality and provenance within 24 hours
+of the incident's last report, with compatible known country/city. They do not
+merge incidents or change confidence, severity or human review. Account counts
+are not counts of independent people; copied reports and supporting,
+contradicting or unclassified claims remain distinguishable.
+
+Sensor associations require precise incident coordinates, matching provenance
+and locality, compatible jurisdiction, at most 2 km distance and a reading within
+24 hours of the last report. Future readings are excluded. Missing compatible
+readings mean only absence in the current publication, not absence of sensor
+coverage or evidence against the social report. Context includes the criteria,
+counts and up to five sample links; sensor-family deletion recomputes those
+links without altering facts or analyst review. This is a logical graph over
+existing records, not a new graph database or a calibrated predictive model.
+Larger histories would require indexed temporal/spatial queries; a native SQL
+property graph can be considered when multi-hop questions justify it.
+
+The assistant queries the requested publication on every turn, separates
+country/city/locality and maps critical incident severity to `high`. Its final
+structured response is generated separately from tool calls, with short internal
+citation tokens resolved back to queried source IDs. Empty or failed queries
+cannot be presented as proof that no events exist in the real world. Synthetic
+test provenance is preserved; the assistant does not send operational reports.
+
+Postflight for the query-grounding and correlation increment (2026-10-05):
+quality 6595 → 6586, coupling 0.08 unchanged, zero cycles and god files; complex
+functions 44 → 49. This is an intentional gate exception, not a passing gate:
+the agent retains current-turn query validation, same-version citations,
+provider-compatible formatting and explicit failure handling for errors observed
+in native AIDP runs. Finite capture also preserves exhausted cursors and retries
+unfinished institutional/downstream processing without replaying social posts.
+Splitting these guards solely to lower the aggregate would obscure their state
+and trust boundaries. The baseline was not reset.
 
 Selecting a located event opens its consolidated summary and publication carousel
 at the map point. Each distinct captured ID remains a carousel slide, even when

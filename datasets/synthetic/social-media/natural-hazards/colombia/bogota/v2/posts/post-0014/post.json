@@ -1,0 +1,35 @@
+{
+  "fixture_id": "post-0014",
+  "platform": "x",
+  "author": {
+    "id": "fictional-bogota-v2-tomas_lluvia",
+    "username": "tomas_lluvia",
+    "display_name": "Tomás Luna"
+  },
+  "message": "Me pasaron esta misma foto de @ines_balcon con el texto de que toda Suba estaba inundada. La comparto con su explicación: se ve su cuadra mojada y ella vio pasar un carro. No estoy allí para confirmar otras calles, así que no le agreguemos más de lo que dice.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Suba",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.741,
+    "lon": -74.084
+  },
+  "published_offset_seconds": 390,
+  "available_offset_seconds": 390,
+  "attachments": [
+    {
+      "id": "post-0014-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/wet-passable-street.png",
+      "sha256": "f04fadeb3f0f2b219267797e4f492240e42a3622e5c8c3e9bd35225484798d9f",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a passable wet street with small puddles, viewed from a balcony; it cannot establish conditions across the locality.",
+      "is_simulated": true,
+      "reused_from": "post-0013-image-01"
+    }
+  ]
+}

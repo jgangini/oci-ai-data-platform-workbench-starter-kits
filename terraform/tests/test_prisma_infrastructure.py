@@ -118,12 +118,20 @@ def test_both_reverse_proxies_authenticate_and_overwrite_viewer_identity():
         assert "location = /_prisma_session" in proxy and "internal;" in proxy
         assert "http://127.0.0.1:8000/api/prisma/session" in proxy
         blocks = [block for block in proxy.split("location ") if "proxy_pass http://127.0.0.1:8081" in block]
-        assert len(blocks) == 4
+        assert len(blocks) == 5
         for block in blocks:
             assert "auth_request /_prisma_session;" in block
             assert "proxy_set_header X-PRISMA-User $prisma_user;" in block
             assert 'proxy_set_header X-GEV-Origin "$scheme://$http_host";' in block
+            assert ("error_page 401 = @prisma_login;" in block) == block.startswith("= /gods-eye-view/ {")
+            if not block.startswith("= /gods-eye-view/ {"):
+                assert "error_page 401 = @prisma_unauthorized;" in block
         assert "$http_x_prisma_user" not in proxy
+        login = next(block for block in proxy.split("location ") if block.startswith("@prisma_login"))
+        assert "return 302 /admin/login?next=/gods-eye-view/;" in login
+        unauthorized = next(block for block in proxy.split("location ") if block.startswith("@prisma_unauthorized"))
+        assert "default_type application/json;" in unauthorized
+        assert 'return 401 \'{"detail":"Viewer session required"}\';' in unauthorized
         audio = next(block for block in blocks if "= /api/prisma/oci-voice/turn" in block)
         assert "client_max_body_size 3m;" in audio
         ordinary = next(block for block in blocks if block.startswith("/api/prisma/"))

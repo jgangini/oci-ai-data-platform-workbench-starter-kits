@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0016",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-bogota-v2-ines_balcon",
+    "username": "ines_balcon",
+    "display_name": "Inés Duarte"
+  },
+  "message": "Aclaro dos cosas de mi foto: la tomé en Suba, no en Kennedy, y cuando la publiqué esta cuadra permitía el paso. No puedo asegurar que esté igual a esta hora ni que las calles de alrededor no tengan problemas. Mi comentario era sobre lo que veía desde el balcón.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Suba",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.741,
+    "lon": -74.084
+  },
+  "published_offset_seconds": 465,
+  "available_offset_seconds": 465,
+  "attachments": []
+}

@@ -312,10 +312,10 @@ def mount_prisma(app, require_admin, require_viewer=None):
 
     @router.get("/api/admin/prisma/media/{fixture_id}/{filename}")
     @viewer.get("/api/gods-eye-view/media/{fixture_id}/{filename}")
-    async def fixture_media(fixture_id: str, filename: str):
+    async def fixture_media(fixture_id: str, filename: str, dataset_version: str = "bogota-v1"):
         from .corpus import media_file
         try:
-            path, metadata = media_file(fixture_id, filename)
+            path, metadata = media_file(fixture_id, filename, dataset_version)
         except (ValueError, KeyError, FileNotFoundError):
             raise HTTPException(404, "Media not found") from None
         return FileResponse(path, media_type=metadata["mime_type"], headers={

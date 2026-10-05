@@ -370,5 +370,5 @@ $('terrain').addEventListener('change', async () => {
 });
 void refresh();
 void loadContext(request);
-const polling = setInterval(() => { if (!document.hidden) void refresh(); }, 10000);
+const polling = setInterval(() => { if (!document.hidden) void refresh(); }, 60000);
 window.addEventListener('pagehide', () => { clearInterval(polling); session.destroy(); }, { once: true });

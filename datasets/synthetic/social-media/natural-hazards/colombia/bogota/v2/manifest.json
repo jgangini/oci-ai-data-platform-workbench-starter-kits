@@ -1,0 +1,236 @@
+{
+  "dataset_id": "natural-hazards-colombia-bogota",
+  "version": "bogota-v2",
+  "schema_version": 1,
+  "post_count": 16,
+  "duration_seconds": 600,
+  "seed_default": 0,
+  "license": "CC0-1.0",
+  "provenance": "Synthetic fictional accounts, posts and AI-generated images created on 2026-10-05. No actual incident, person or real social account is represented. Name coincidences are accidental.",
+  "location_provenance": "Representative locality anchors from core.LOCALITIES; no exact incident coordinates are asserted.",
+  "posts": [
+    {
+      "fixture_id": "post-0001",
+      "path": "posts/post-0001/post.json",
+      "sha256": "4da107fdf42ccf6e94a10b51f2f893fb2df7d8985f298843e57ad126daaeb2b3"
+    },
+    {
+      "fixture_id": "post-0002",
+      "path": "posts/post-0002/post.json",
+      "sha256": "5e713c4d9a34f28fac8fed37ef4dcfe62709e8dff89a64f3ac669674790c78f1"
+    },
+    {
+      "fixture_id": "post-0003",
+      "path": "posts/post-0003/post.json",
+      "sha256": "de3d31a698865880a20f279e9bfb8f0cdff715616a55e5963cb735a8a05dc625"
+    },
+    {
+      "fixture_id": "post-0004",
+      "path": "posts/post-0004/post.json",
+      "sha256": "1bd6ba9b1e6c6c7fe4cd1eb9e71d0319ff02627bfbe2abd6646976396bb4a962"
+    },
+    {
+      "fixture_id": "post-0005",
+      "path": "posts/post-0005/post.json",
+      "sha256": "6d2ed6c0f3a16dbde952c2a0d432e3b33768d6ec1bce403c4b4afee20a133730"
+    },
+    {
+      "fixture_id": "post-0006",
+      "path": "posts/post-0006/post.json",
+      "sha256": "5cb8434669711bd0ffd5b5ee2da560c552f9074a3c05df6fd75019cd411ac03d"
+    },
+    {
+      "fixture_id": "post-0007",
+      "path": "posts/post-0007/post.json",
+      "sha256": "8748eed08d5ca6fc56d7f52c94862f62a32120c045476055a34f01e5dfb08106"
+    },
+    {
+      "fixture_id": "post-0008",
+      "path": "posts/post-0008/post.json",
+      "sha256": "a522637ced7063be0bb18a63b822570eb92e452c92f6597d44d656ef4cae2f48"
+    },
+    {
+      "fixture_id": "post-0009",
+      "path": "posts/post-0009/post.json",
+      "sha256": "8b3ea98072d2124a28f06b8c7e750a8e89d7377d7be7d71d0615de150e5050e5"
+    },
+    {
+      "fixture_id": "post-0010",
+      "path": "posts/post-0010/post.json",
+      "sha256": "bc264a621ee66d3e7b4541055a2b35837b4a3d30bd610f7b081cd50d090d3829"
+    },
+    {
+      "fixture_id": "post-0011",
+      "path": "posts/post-0011/post.json",
+      "sha256": "4a8e33cb4611c8aa41d5054dc9256d3b054c7f019caeb9ff926ab4032eee6b49"
+    },
+    {
+      "fixture_id": "post-0012",
+      "path": "posts/post-0012/post.json",
+      "sha256": "36b9c3981d1cdbe19948d4e4fdda569100618c54dcbc276edabd521310f7a9dd"
+    },
+    {
+      "fixture_id": "post-0013",
+      "path": "posts/post-0013/post.json",
+      "sha256": "094a8e40267a6eceefde7f8dc34bb54ff1635cf0f618c9663580cdb45b244a9e"
+    },
+    {
+      "fixture_id": "post-0014",
+      "path": "posts/post-0014/post.json",
+      "sha256": "a7aecceadfb8a16ffb2af7685965e28c2f5a5f04daf5afbef6b1fc64326fc727"
+    },
+    {
+      "fixture_id": "post-0015",
+      "path": "posts/post-0015/post.json",
+      "sha256": "f5f80092f35a9cc395f8114afd306dc02632e4c860f4eac14f444c7451c01335"
+    },
+    {
+      "fixture_id": "post-0016",
+      "path": "posts/post-0016/post.json",
+      "sha256": "d03f7655f7393e64696dcb3b72b2512a226e1224690c68f6bd83835f5ee742e2"
+    }
+  ],
+  "media": [
+    {
+      "id": "post-0001-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/flood-doorway.png",
+      "sha256": "46dedc386bc817073d466174fa6ff04bdebd224d2d18c93e1b2681e44e1b84d7",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: shallow muddy water beside a residential curb, viewed from a doorway; locality anchor only.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0002-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/flood-doorway.png",
+      "sha256": "46dedc386bc817073d466174fa6ff04bdebd224d2d18c93e1b2681e44e1b84d7",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: shallow muddy water beside a residential curb, viewed from a doorway; locality anchor only.",
+      "is_simulated": true,
+      "reused_from": "post-0001-image-01"
+    },
+    {
+      "id": "post-0003-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/flood-doorway.png",
+      "sha256": "46dedc386bc817073d466174fa6ff04bdebd224d2d18c93e1b2681e44e1b84d7",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: shallow muddy water beside a residential curb, viewed from a doorway; locality anchor only.",
+      "is_simulated": true,
+      "reused_from": "post-0001-image-01"
+    },
+    {
+      "id": "post-0005-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/grill-smoke.png",
+      "sha256": "f0248c879ea13a1cfcce4d3381fdaf75e69a892e5157dda0a98b6684d01361ce",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: cooking smoke above a charcoal grill and intact surroundings; it does not depict a vegetation fire.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0006-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/grill-smoke.png",
+      "sha256": "f0248c879ea13a1cfcce4d3381fdaf75e69a892e5157dda0a98b6684d01361ce",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: cooking smoke above a charcoal grill and intact surroundings; it does not depict a vegetation fire.",
+      "is_simulated": true,
+      "reused_from": "post-0005-image-01"
+    },
+    {
+      "id": "post-0007-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/grill-smoke.png",
+      "sha256": "f0248c879ea13a1cfcce4d3381fdaf75e69a892e5157dda0a98b6684d01361ce",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: cooking smoke above a charcoal grill and intact surroundings; it does not depict a vegetation fire.",
+      "is_simulated": true,
+      "reused_from": "post-0005-image-01"
+    },
+    {
+      "id": "post-0009-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/slope-debris.png",
+      "sha256": "1a6ccf47bae6504459f953e0d542e31461f413ca2759626a5f81dc77510c72a8",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a small soil slip partly covers a road edge; intact homes and a limited view do not establish ongoing movement.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0010-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/slope-debris.png",
+      "sha256": "1a6ccf47bae6504459f953e0d542e31461f413ca2759626a5f81dc77510c72a8",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a small soil slip partly covers a road edge; intact homes and a limited view do not establish ongoing movement.",
+      "is_simulated": true,
+      "reused_from": "post-0009-image-01"
+    },
+    {
+      "id": "post-0011-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/slope-debris.png",
+      "sha256": "1a6ccf47bae6504459f953e0d542e31461f413ca2759626a5f81dc77510c72a8",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a small soil slip partly covers a road edge; intact homes and a limited view do not establish ongoing movement.",
+      "is_simulated": true,
+      "reused_from": "post-0009-image-01"
+    },
+    {
+      "id": "post-0013-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/wet-passable-street.png",
+      "sha256": "f04fadeb3f0f2b219267797e4f492240e42a3622e5c8c3e9bd35225484798d9f",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a passable wet street with small puddles, viewed from a balcony; it cannot establish conditions across the locality.",
+      "is_simulated": true
+    },
+    {
+      "id": "post-0014-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/wet-passable-street.png",
+      "sha256": "f04fadeb3f0f2b219267797e4f492240e42a3622e5c8c3e9bd35225484798d9f",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a passable wet street with small puddles, viewed from a balcony; it cannot establish conditions across the locality.",
+      "is_simulated": true,
+      "reused_from": "post-0013-image-01"
+    },
+    {
+      "id": "post-0015-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/wet-passable-street.png",
+      "sha256": "f04fadeb3f0f2b219267797e4f492240e42a3622e5c8c3e9bd35225484798d9f",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a passable wet street with small puddles, viewed from a balcony; it cannot establish conditions across the locality.",
+      "is_simulated": true,
+      "reused_from": "post-0013-image-01"
+    }
+  ],
+  "media_provenance": "media/generation.json"
+}

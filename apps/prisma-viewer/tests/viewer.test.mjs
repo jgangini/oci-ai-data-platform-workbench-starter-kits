@@ -167,6 +167,23 @@ test('AI-generated raster attachments retain provenance and use only authenticat
   assert.equal(attachment.origin, 'ai_generated'); assert.equal(attachment.is_simulated, true); assert.equal('url' in attachment, false);
 });
 
+test('captured v2 images retain their dataset version instead of resolving the same fixture in v1', () => {
+  const attachment = { id: 'post-0001-image-01', type: 'image', mime_type: 'image/png', dataset_path: 'media/flood-doorway.png',
+    origin: 'ai_generated', sha256: 'c'.repeat(64), is_simulated: true };
+  const evidence = { id: 'captured-v2', platform: 'x', mode: 'Synthetic', attachments: [attachment],
+    raw_metadata: { dataset_version: 'bogota-v2' } };
+  const incident = { evidence_ids: [evidence.id] };
+  const before = JSON.stringify(evidence);
+  assert.deepEqual(photosFor(evidence, incident), [{ ...attachment,
+    url: '/api/gods-eye-view/media/post-0001/image-01.png?dataset_version=bogota-v2' }]);
+  for (const version of [undefined, 'bogota-v1']) assert.equal(
+    photosFor({ ...evidence, raw_metadata: { dataset_version: version } }, incident)[0].url,
+    '/api/gods-eye-view/media/post-0001/image-01.png');
+  for (const version of ['bogota-v3', '../v1', 'bogota-v2&other=1', null, {}, []]) assert.deepEqual(
+    photosFor({ ...evidence, raw_metadata: { dataset_version: version } }, incident), []);
+  assert.equal(JSON.stringify(evidence), before);
+});
+
 test('report activity displays published network counts without deriving severity or confirmation', () => {
   const incident = { severity: 'high', review_status: 'validated', report_activity: 'medium',
     report_counts: { x: 10, facebook: 0, instagram: -1, tiktok: '20' },

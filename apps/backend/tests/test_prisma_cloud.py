@@ -54,6 +54,29 @@ class Runtime(CloudRuntime):
         self.projected = (events, now, key)
 
 
+def test_completed_run_retries_processing_without_regenerating_capture(monkeypatch):
+    runtime = Runtime()
+    runtime.documents.update({
+        "configuration": {"sources": {"x": {**default_source("x"), "capture_running": False, "capture_paused": True}}},
+        "status_x": {"status": "completed", "next_due": None},
+        "checkpoint_controls": {"x": {"run_id": "finished", "anchor_at": 1000}},
+        "checkpoint_synthetic": {"sources": {"x": {"run_id": "finished", "elapsed": 600, "next_due": None}}},
+        "checkpoint_enrichment": {"pending_ids": ["x:1", "x:2", "x:3"], "attempts": 3,
+            "retry_at": 9000, "last_error": "service_unavailable", "circuit_open": True},
+        "status_pipeline": {"pending_count": 3, "needs_attention": True},
+    })
+    before = copy.deepcopy(runtime.documents)
+    monkeypatch.setattr(runtime, "_produce", lambda **_: pytest.fail("An exhausted Run must not regenerate Landing"))
+    result = asyncio.run(runtime.run_source("x"))
+    assert result["status"] == "completed" and not result["source"]["capture_running"]
+    assert runtime.documents["checkpoint_enrichment"] == {
+        "revision": 1, "pending_ids": ["x:1", "x:2", "x:3"], "attempts": 0,
+        "retry_at": 0, "last_error": None, "circuit_open": False}
+    assert [call[0] for call in runtime.client.calls] == ["GET", "PUT", "POST"]
+    for name in ("configuration", "checkpoint_controls", "checkpoint_synthetic", "status_x"):
+        assert runtime.documents[name] == before[name]
+
+
 def test_review_note_limit_is_enforced_before_cloud_io(monkeypatch):
     runtime = Runtime()
     calls = []

@@ -243,6 +243,10 @@ test('social panel belongs below Context, follows its layer and reuses native di
     assert.equal(status.textContent, 'Loading publications…'); assert.equal(status.hidden, false);
     await refresh; assert.equal(panel.classList.contains('collapsed'), true);
     assert.equal(status.textContent, ''); assert.equal(status.hidden, true);
+    assert.equal(layer.updateInterval, 60000);
+    const backgroundRefresh = layer.update();
+    assert.equal(status.hidden, true, 'Background polling retains the published view without a loading message');
+    await backgroundRefresh;
     const network = panel.querySelector('form').elements.namedItem('platform');
     assert.deepEqual(network.children.map(option => [option.value, option.textContent]), [['', 'All'], ['facebook', 'Facebook'], ['instagram', 'Instagram'], ['tiktok', 'TikTok'], ['x', 'X']]);
     assert.equal(layer.state().snapshot.evidence.some(item => item.platform === 'sensor'), true, 'Only the filter choices exclude non-social evidence');
@@ -297,7 +301,7 @@ test('map popup navigates every captured ID, including repeated text, preserving
   assert.equal(popup.hidden, false); assert.equal(popup.focused, true); assert.equal(viewer.container.children[0], popup);
   assert.equal(cards().length, 1); assert.equal(cards()[0].id, 'tc-evidence-post-1'); assert.equal(pager('Previous').disabled, true);
   assert.equal(detail.querySelectorAll('article').length, 0, 'Publications are not repeated in the sidebar');
-  assert.match(contents(cards()[0]), /X · @person1/); assert.doesNotMatch(contents(cards()[0]), /Synthetic|Bogotá time/);
+  assert.match(contents(cards()[0]), /X · @person1/); assert.match(contents(cards()[0]), /Synthetic/); assert.doesNotMatch(contents(cards()[0]), /Bogotá time/);
   assert.match(contents(cards()[0]), /2026-10-02 19:00:00/); assert.doesNotMatch(contents(cards()[0]), /21:00:00/);
   assert.equal(display.querySelector('.tc-evidence-page').querySelector('h4').textContent, 'Publications (1/21)');
   const image = cards()[0].querySelector('img');

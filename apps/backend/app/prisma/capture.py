@@ -3,6 +3,8 @@ import re
 
 from .core import SYNTHETIC_MODES, PLATFORMS, folded, simulation_events
 
+INSTITUTIONAL = ("sensor", "sire", "linea123")
+
 
 def query_lines(value):
     """Each nonempty line is an independent search; preserve its operators and spelling."""
@@ -119,7 +121,7 @@ def window_events(source, run_id, anchor_at, start, end):
 
 def sources(configured):
     return [source for source in configured if source["enabled"] and source["mode"] in SYNTHETIC_MODES] + [
-        {"platform": name, "query": "", "interval_minutes": 1} for name in ("sensor", "sire", "linea123")]
+        {"platform": name, "query": "", "interval_minutes": 1} for name in INSTITUTIONAL]
 
 
 def inputs(configured, controls, legacy):
@@ -137,27 +139,31 @@ def inputs(configured, controls, legacy):
             yield source, legacy, False
 
 
+def is_complete(control, cursor):
+    return bool(control.get("run_id")) and cursor.get("run_id") == control["run_id"] and cursor.get("elapsed", -1) >= 600
+
+
+def institutional_pending(control, institutional, cursors):
+    return (bool(control.get("run_id")) and institutional.get("run_id") == control["run_id"]
+            and any(not is_complete(institutional, cursors.get(name, {})) for name in INSTITUTIONAL))
+
+
 def continuous_batch(source, control, cursor, now, force=False):
-    """Repeat the scenario with unique cycle IDs; a saved cursor never skips an overdue window."""
+    """Capture one finite scenario; an exhausted run never republishes later cycles."""
+    if is_complete(control, cursor):
+        return None
     same = cursor.get("run_id") == control["run_id"] and cursor.get("query") == source["query"]
     start = cursor.get("elapsed", -1) if same else -1
-    elapsed = max(0, now - control["anchor_at"])
-    if same and not force and (elapsed <= start or (cursor.get("interval_minutes") == source["interval_minutes"] and now < cursor.get("next_due", 0))):
+    end = min(600, max(0, now - control["anchor_at"]))
+    final = end == 600
+    if same and not force and (end <= start or (not final and cursor.get("interval_minutes") == source["interval_minutes"] and now < cursor.get("next_due", 0))):
         return None
-    # ponytail: catch up at most one hour per VM tick, retaining the rest in the cursor instead of dropping records.
-    end = min(elapsed, max(0, start) + 3600)
     generation = continuous_generation(source, control, cursor)
-    events = []
-    for cycle in range(max(0, int(max(0, start) // 600) - 1), int(end // 600) + 1):
-        cycle_start = cycle * 600
-        part = continuous_window(source, control, generation, cycle, start - cycle_start, min(600, end - cycle_start))
-        for event in part:
-            event["raw_metadata"]["capture_run_id"] = control["run_id"]
-        events.extend(part)
+    events = continuous_window(source, control, generation, 0, start, end)
     return events, {"run_id": control["run_id"], "query": source["query"], "elapsed": end, **generation,
         "interval_minutes": source["interval_minutes"],
         "batch_key": {"platform": source["platform"], "run_id": control["run_id"], "query": source["query"], "from_seconds": start, "to_seconds": end, **generation},
-        "next_due": now + (1 if end < elapsed else source["interval_minutes"] * 60)}
+        "next_due": None if final else now + source["interval_minutes"] * 60}
 
 
 def continuous_generation(source, control, cursor):
@@ -172,7 +178,10 @@ def continuous_generation(source, control, cursor):
 def continuous_window(source, control, generation, cycle, start, end):
     anchor = control["anchor_at"] + cycle * 600
     if not generation.get("dataset_version"):
-        return window_events(source, f"{control['run_id']}:{cycle}", anchor, start, end)
+        events = window_events(source, f"{control['run_id']}:{cycle}", anchor, start, end)
+        for event in events:
+            event["raw_metadata"]["capture_run_id"] = control["run_id"]
+        return events
     # Corpus files live on the capture VM; importing query_lines in an AIDP X worker never loads them.
     from .corpus import events
     expressions = [(query, search_terms(query)) for query in query_lines(source["query"])]

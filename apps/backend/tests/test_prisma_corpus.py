@@ -8,7 +8,7 @@ import shutil
 import pytest
 
 from app.prisma import capture, corpus, landing
-from app.prisma.core import PLATFORMS, corroboration, default_source
+from app.prisma.core import CATEGORIES, PLATFORMS, corroboration, default_source
 from app.prisma.posts import attachments_for, post_view
 
 NOW = 1791209100.0
@@ -95,7 +95,7 @@ def test_shared_raster_manifest_and_fixture_url_allowlists(tmp_path, monkeypatch
              "sha256": hashlib.sha256(record.read_bytes()).hexdigest()}
     assert corpus._load_post(tmp_path, entry, [attachment]) == post
     monkeypatch.setenv("GODS_EYE_DATASET_ROOT", str(tmp_path))
-    monkeypatch.setattr(corpus, "load", lambda _root: [post])
+    monkeypatch.setattr(corpus, "load", lambda _root, version=corpus.VERSION: [post])
     assert corpus.media_file("post-0001", "image-01.svg") == (asset, attachment)
     assert corpus.media_file("post-0001", f"image-01.{extension}") == (asset, attachment)
     view = attachments_for({"mode": "Synthetic", "attachments": [attachment]})
@@ -171,7 +171,8 @@ def test_continuous_corpus_retry_filter_seed_and_legacy_checkpoint_compatibility
     assert capture.continuous_batch({**source, "query": "#not-present"}, control, {}, NOW + 300)[0] == []
     legacy = {"run_id": "new", "query": source["query"], "elapsed": 0, "interval_minutes": 5, "next_due": NOW + 300}
     old_events, old_cursor = capture.continuous_batch(source, control, legacy, NOW + 600)
-    assert any(item["source_id"].endswith(":lluvia-1") for item in old_events)
+    assert any(item["source_id"] == "new:0:ubicacion-1" for item in old_events)
+    assert not any(item["source_id"].endswith(":lluvia-1") for item in old_events)
     assert all("dataset_version" not in item["raw_metadata"] for item in old_events)
     assert "dataset_version" not in old_cursor and "dataset_version" not in old_cursor["batch_key"]
     assert not capture.matches("RT @mar_rojas: inundacion", capture.search_terms("inundacion -is:retweet"))
@@ -298,10 +299,103 @@ def test_presentation_refreshes_only_verified_simulated_fixtures_without_mutatin
 def test_runtime_docker_copies_only_posts_media_and_manifest():
     dockerfile = Path(__file__).resolve().parents[3] / "docker/Dockerfile"
     copies = [line for line in dockerfile.read_text().splitlines() if line.startswith("COPY datasets/")]
-    assert len(copies) == 3
+    assert len(copies) == 6
+    assert sum("/v1/" in line for line in copies) == sum("/v2/" in line for line in copies) == 3
     assert any("/posts " in line for line in copies) and any("/manifest.json " in line for line in copies)
     assert any("/media " in line for line in copies)
     assert all("evaluation" not in line for line in copies)
+
+
+def test_v2_has_twelve_attributed_images_and_keeps_evaluation_out_of_capture():
+    version = "bogota-v2"
+    posts = corpus.load(corpus.dataset_root(version), version)
+    truth = json.loads((corpus.dataset_root(version) / "evaluation/ground-truth.json").read_text(encoding="utf-8"))["posts"]
+    assert {item["fixture_id"] for item in truth} == {post["fixture_id"] for post in posts}
+    assert {item["expected_category"] for item in truth} <= set(CATEGORIES)
+    assert len(posts) == 16 and all(sum(post["platform"] == platform for post in posts) == 4 for platform in PLATFORMS)
+    images = [item for post in posts for item in post["attachments"]]
+    assert len(images) == 12 and len({item["sha256"] for item in images}) == 4
+    assert sum(bool(item.get("reused_from")) for item in images) == 8
+    events = {event["raw_metadata"]["fixture_id"]: event for platform in PLATFORMS
+              for event in corpus.events(platform, "human-v2", 0, NOW, -1, 600, version=version)}
+    for base in (1, 5, 9, 13):
+        original, *copies = [events[f"post-{number:04d}"] for number in range(base, base + 3)]
+        assert all(copy["attachments"][0]["reused_from"] == original["attachments"][0]["id"] for copy in copies)
+        assert corroboration([original, *copies])["independent_source_count"] == 1
+    for event in events.values():
+        assert event["mode"] == "Synthetic" and event["is_simulated"] is True
+        assert event["raw_metadata"]["dataset_version"] == version and event["raw_metadata"]["synthetic"] is True
+        assert not re.search(r"\b(?:prueba|simulad[oa]|sint[eé]tic[oa]|demo)\b", event["text"], re.I)
+        assert not {"expected_category", "scenario_assertion", "duplicate_of", "evidence_role"} & event.keys()
+        assert not {"expected_category", "scenario_assertion", "duplicate_of", "evidence_role"} & event["raw_metadata"].keys()
+    assert len(landing.records(landing.page(list(events.values()))[1])) == 16
+
+
+def test_v2_selection_keeps_an_existing_v1_cursor_and_never_refreshes_captured_v2_text():
+    source = {**default_source("x"), "query": ""}
+    control = {"run_id": "existing-v1", "anchor_at": NOW, "seed": 12}
+    _, cursor = capture.continuous_batch(source, control, {}, NOW)
+    retained, updated = capture.continuous_batch(source, {**control, "dataset_version": "bogota-v2"}, cursor, NOW + 300)
+    assert updated["dataset_version"] == "bogota-v1"
+    assert all(event["raw_metadata"]["dataset_version"] == "bogota-v1" for event in retained)
+    selected = {**control, "run_id": "new-v2", "dataset_version": "bogota-v2"}
+    events, next_cursor = capture.continuous_batch(source, selected, {}, NOW + 300)
+    assert next_cursor["dataset_version"] == "bogota-v2"
+    assert (events, next_cursor) == capture.continuous_batch(source, selected, {}, NOW + 300)
+    assert not {event["source_id"] for event in events} & {event["source_id"] for event in retained}
+    event = {**events[0], "text": "Original captured wording", "content_hash": "original-capture-hash"}
+    assert corpus.presentation(event) == {}
+    assert post_view(event)["text"] == "Original captured wording"
+    assert event["content_hash"] == "original-capture-hash"
+
+
+def test_v2_media_urls_are_versioned_and_use_the_same_authenticated_handler(tmp_path):
+    from fastapi.testclient import TestClient
+    from app.config import Settings
+    from app.main import LOCAL_COOKIE_NAME, create_app
+    from app.security import issue_session
+
+    event = corpus.events("x", "media-v2", 0, NOW, -1, 600, version="bogota-v2")[0]
+    url = post_view(event)["attachments"][0]["url"]
+    assert url == "/api/admin/prisma/media/post-0001/image-01.png?dataset_version=bogota-v2"
+    settings = Settings(local_development_mode=True, cookie_secure=False,
+        aidp_settings_file=str(tmp_path / "settings.json"), session_secret_file=str(tmp_path / "session.key"))
+    with TestClient(create_app(settings)) as client:
+        assert client.get(url).status_code == 401
+        client.cookies.set(LOCAL_COOKIE_NAME, issue_session(client.app.state.session_key, "admin"))
+        new_image = client.get(url)
+        old_image = client.get("/api/admin/prisma/media/post-0001/image-01.webp")
+        assert new_image.status_code == old_image.status_code == 200
+        assert new_image.headers["content-type"] == "image/png"
+        assert old_image.headers["content-type"] == "image/webp"
+        assert new_image.content != old_image.content
+        assert hashlib.sha256(new_image.content).hexdigest() == event["attachments"][0]["sha256"]
+        assert client.get(url.replace("bogota-v2", "bogota-v3")).status_code == 404
+        assert client.get(url.replace("bogota-v2", "../v1")).status_code == 404
+    for version in ("bogota-v3", {}, "../v1"):
+        assert attachments_for({**event, "raw_metadata": {**event["raw_metadata"], "dataset_version": version}}) == []
+
+
+def test_v2_reuse_requires_the_exact_original_and_v1_cannot_load_a_v2_manifest(tmp_path):
+    source = corpus.dataset_root("bogota-v2")
+    shutil.copytree(source, tmp_path / "v2")
+    root = tmp_path / "v2"
+    with pytest.raises(ValueError, match="version"):
+        corpus.load(root)
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    entry = manifest["posts"][1]
+    post = json.loads((root / entry["path"]).read_text(encoding="utf-8"))
+    previous = post["attachments"][0]
+    for reused_from in (None, "post-0005-image-01"):
+        attachment = {**previous, "reused_from": reused_from}
+        post["attachments"] = [attachment]
+        data = (json.dumps(post, ensure_ascii=False) + "\n").encode()
+        (root / entry["path"]).write_bytes(data)
+        entry["sha256"] = hashlib.sha256(data).hexdigest()
+        manifest["media"][1] = attachment
+        (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(ValueError, match="reused images"):
+            corpus.load(root, "bogota-v2")
 
 
 def test_explicitly_paused_source_never_falls_back_to_legacy_replay():

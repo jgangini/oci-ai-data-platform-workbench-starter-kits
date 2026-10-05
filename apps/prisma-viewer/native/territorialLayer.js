@@ -1,4 +1,4 @@
-import { bogotaToUtc, displayLocality, displaySeverity, evidenceFor, filteredIncidents, parseBbox, photosFor, safeSourceUrl, utcToBogota, validPeriod, validateSnapshot } from '../src/model.js';
+import { bogotaToUtc, displayLocality, displaySeverity, evidenceFor, filteredIncidents, modeLabel, parseBbox, photosFor, safeSourceUrl, utcToBogota, validPeriod, validateSnapshot } from '../src/model.js';
 import { bindPanelDisclosure, collapsePanelOnEscape } from '../.upstream/src/ui/panelDisclosure.js';
 import { createSceneDialog } from '../.upstream/src/ui/sceneSharing.js';
 import { isOverlayPointVisible } from '../.upstream/src/overlays/worldOverlay.js';
@@ -151,7 +151,7 @@ export function createTerritorialLayer({ Cesium, request, signal }) {
   }
 
   const layer = {
-    id: TERRITORIAL_LAYER_ID, name: 'Social networks', icon: '◉', source: 'OCI AIDP · Workflow', updateInterval: 10000,
+    id: TERRITORIAL_LAYER_ID, name: 'Social networks', icon: '◉', source: 'OCI AIDP · Workflow', updateInterval: 60000,
     init(target) {
       viewer = target;
       dataSource = new Cesium.CustomDataSource(TERRITORIAL_LAYER_ID);
@@ -237,6 +237,7 @@ function appendEvidence(parent, evidence, incident) {
   const card = text('article', '', 'tc-evidence'); card.id = `tc-evidence-${evidence.id}`;
   const author = evidence.username ? ` · @${evidence.username.replace(/^@/, '')}` : '';
   card.append(text('strong', `${platformName(evidence.platform)}${author}`));
+  if (modeLabel(evidence.mode) === 'Synthetic') card.append(text('small', 'Synthetic'));
   const content = text('div', '', 'tc-evidence-content');
   content.append(text('p', evidence.text, 'tc-evidence-text'));
   const media = photosFor(evidence, incident)[0];
@@ -522,7 +523,7 @@ export function mountTerritorialPanel({ layer, request, signal, setPanelCollapse
     if (previousEnabled && !state.enabled) onChange(true);
     previousSelection = state.selectedId; previousEnabled = state.enabled;
     const status = panel.querySelector('[data-status]');
-    status.textContent = state.isRefreshing ? 'Loading publications…' : state.lastError ? `Publication unavailable: ${state.lastError}${state.snapshot.version ? ' Showing the last successful publication.' : ''}` : state.snapshot.version ? '' : 'Waiting for a publication…';
+    status.textContent = state.isRefreshing && !state.snapshot.version ? 'Loading publications…' : state.lastError ? `Publication unavailable: ${state.lastError}${state.snapshot.version ? ' Showing the last successful publication.' : ''}` : state.snapshot.version ? '' : 'Waiting for a publication…';
     status.hidden = !status.textContent;
     renderEventFilters(form, state);
     panel.querySelector('[data-area]').textContent = state.filters.bbox ? 'Clear map area' : 'Filter';

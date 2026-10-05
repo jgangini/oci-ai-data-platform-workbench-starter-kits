@@ -23,6 +23,9 @@ COPY apps/backend/app ./app
 COPY datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1/manifest.json ./datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1/manifest.json
 COPY datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1/posts ./datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1/posts
 COPY datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1/media ./datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1/media
+COPY datasets/synthetic/social-media/natural-hazards/colombia/bogota/v2/manifest.json ./datasets/synthetic/social-media/natural-hazards/colombia/bogota/v2/manifest.json
+COPY datasets/synthetic/social-media/natural-hazards/colombia/bogota/v2/posts ./datasets/synthetic/social-media/natural-hazards/colombia/bogota/v2/posts
+COPY datasets/synthetic/social-media/natural-hazards/colombia/bogota/v2/media ./datasets/synthetic/social-media/natural-hazards/colombia/bogota/v2/media
 ENV GODS_EYE_DATASET_ROOT=/opt/aidp-lab/datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1
 COPY --from=frontend /src/apps/frontend/dist /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/nginx.conf

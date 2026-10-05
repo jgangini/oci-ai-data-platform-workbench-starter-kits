@@ -127,7 +127,11 @@ class LocalPrismaRuntime:
             if source["mode"] in SYNTHETIC_MODES:
                 if not test:
                     self.store.advance_simulation(force=True, platform=platform)
-                return {"status": "simulation", "message": "Synthetic query validated" if test else "Continuous capture started", "source": source_view(self.store.source(platform))}
+                source = self.store.source(platform)
+                completed = not test and source["status"] == "completed"
+                return {"status": "completed" if completed else "simulation",
+                    "message": "Synthetic query validated" if test else "Synthetic capture completed" if completed else "Synthetic capture started",
+                    "source": source_view(source)}
             result = await asyncio.to_thread(self._poll, source, test)
             return {"status": result["status"], "message": "Connection test completed" if test else "Capture processed", "source": source_view(result)}
 

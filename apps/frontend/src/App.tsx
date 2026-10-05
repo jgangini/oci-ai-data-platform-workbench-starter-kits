@@ -1757,7 +1757,11 @@ function AdminLoginCard() {
         body: JSON.stringify({ username, password }),
       });
       setPassword("");
-      window.location.assign("/admin/users");
+      window.location.assign(
+        new URLSearchParams(window.location.search).get("next") === "/gods-eye-view/"
+          ? "/gods-eye-view/" + window.location.hash
+          : "/admin/users",
+      );
     } catch (reason) {
       setPassword("");
       setError(reason instanceof Error ? reason.message : "Login failed");

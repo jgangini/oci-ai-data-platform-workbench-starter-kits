@@ -167,9 +167,12 @@ class CloudRuntime:
         if source["mode"] == "real" and (platform != "x" or not source["credential_configured"]):
             raise HTTPException(409, "Real capture requires a validated connector and credential")
         if action == "run":
+            source = self._start_capture(source)
             self._change("checkpoint_enrichment", lambda doc: {**doc, "attempts": 0, "retry_at": 0,
                 "last_error": None, "circuit_open": False})
-            source = self._start_capture(source)
+            if source["mode"] in SYNTHETIC_MODES and source["status"] == "completed" and not source.get("capture_running"):
+                self._wake(str(uuid4()))
+                return {"status": "completed", "message": "Synthetic capture completed; pending processing retried", "source": source}
         if source["mode"] in SYNTHETIC_MODES:
             for query in capture.query_lines(source["query"]):
                 capture.search_terms(query)
@@ -177,6 +180,8 @@ class CloudRuntime:
                 self._produce(force=True, platform=platform)
                 self._wake(str(uuid4()))
             source = next(item for item in self._sources()["sources"] if item["platform"] == platform)
+            if action == "run" and source["status"] == "completed":
+                return {"status": "completed", "message": "Synthetic capture completed", "source": source}
             return {"status": "simulation", "message": "Synthetic query validated on the VM producer", "source": source}
         request_id = str(uuid4())
         self._change("status_" + platform, lambda doc: {**doc, "status": "queued", "requested_action": action,
@@ -190,13 +195,32 @@ class CloudRuntime:
                 return source
             configured = self._doc("configuration").get("sources", {})
             institutional = not any(item.get("capture_running") and item.get("enabled") and item.get("mode") in SYNTHETIC_MODES for item in configured.values())
-            control = self._doc("checkpoint_controls").get(source["platform"]) if source.get("capture_paused") else None
+            controls = self._doc("checkpoint_controls")
+            saved = controls.get(source["platform"], {})
+            cursors = self._doc("checkpoint_synthetic").get("sources", {})
+            completed = source["mode"] in SYNTHETIC_MODES and capture.is_complete(saved, cursors.get(source["platform"], {}))
+            pending = completed and capture.institutional_pending(saved, controls.get("institutional", {}), cursors)
+            if completed and not pending:
+                if source["status"] != "completed":
+                    self._complete_capture(source["platform"], saved)
+                return {**source, "capture_running": False, "capture_paused": True, "status": "completed", "next_due": None, "last_error": None}
+            control = saved if source.get("capture_paused") or pending else None
             control = control or {"run_id": str(uuid4()), "anchor_at": time.time(), "seed": 0}
             self._change("checkpoint_controls", lambda doc: {**doc, source["platform"]: control,
                 **({"institutional": control} if institutional else {})})
             self._change("configuration", lambda doc: {**doc, "sources": {**doc.get("sources", {}),
                 source["platform"]: {**doc.get("sources", {}).get(source["platform"], source), "enabled": True, "capture_running": True, "capture_paused": False}}})
             return {**source, "enabled": True, "capture_running": True, "capture_paused": False}
+
+    def _complete_capture(self, platform, control):
+        # Persist the final drain before stopping capture; a failed native trigger is retried by tick.
+        self._change("status_synthetic", lambda doc: {**doc, "final_job_pending": True,
+            "final_request_id": control["run_id"] + "-" + platform + "-complete"})
+        self._change("status_" + platform, lambda doc: {**doc, "status": "completed", "next_due": None,
+            "last_error": None, "requested_action": None})
+        self._change("configuration", lambda doc: {**doc, "sources": {**doc.get("sources", {}),
+            platform: {**default_source(platform), **doc.get("sources", {}).get(platform, {}),
+                "capture_running": False, "capture_paused": True}}})
 
     async def test_source(self, platform):
         return await self._io(self._request_source, platform, "test")
@@ -332,11 +356,16 @@ class CloudRuntime:
             config = self._doc("configuration")
             sources = [{**default_source(name), **config.get("sources", {}).get(name, {})} for name in PLATFORMS]
             runtime, client = self._doc("runtime"), self.aidp_factory()
+            finished = []
             for source, source_control, continuous in capture.inputs(sources, self._doc("checkpoint_controls"), state):
                 name = source["platform"]
                 if (platform and name in PLATFORMS and name != platform) or (not continuous and state["capture_complete"] and not force):
                     continue
                 saved = self._doc("checkpoint_synthetic").get("sources", {}).get(name, {})
+                if continuous and capture.is_complete(source_control, saved):
+                    if name in PLATFORMS:
+                        finished.append((name, source_control))
+                    continue
                 result = (capture.continuous_batch if continuous else capture.batch)(source, source_control, saved, now, force)
                 if result is None:
                     continue
@@ -352,13 +381,17 @@ class CloudRuntime:
                         "last_landing_key": key or doc.get("last_landing_key")})
                     if name in PLATFORMS:
                         self._change("status_" + name, lambda doc: {**doc, "status": "simulation", "last_error": None,
-                            "last_run_at": utc_text(now), "next_due": utc_text(cursor["next_due"]),
+                            "last_run_at": utc_text(now), "next_due": utc_text(cursor["next_due"]) if cursor["next_due"] is not None else None,
                             "last_received_count": len(events), "configuration_revision": config.get("revision", 0)})
+                        if continuous and capture.is_complete(source_control, cursor):
+                            finished.append((name, source_control))
                 except Exception as exc:
                     self._change("status_synthetic", lambda doc: {**doc, "status": "error", "last_error": type(exc).__name__})
                     if name in PLATFORMS:
                         self._change("status_" + name, lambda doc: {**doc, "status": "error", "last_error": type(exc).__name__})
                     raise
+            for name, source_control in finished:
+                self._complete_capture(name, source_control)
             completed = state["elapsed_seconds"] >= 600 and not state["capture_complete"]
             if completed:
                 self._change("simulation", lambda doc: {**doc, "capture_complete": True, "final_job_pending": True}
@@ -379,6 +412,12 @@ class CloudRuntime:
             await self._io(self._wake, str(run_id) + "-final")
             await self._io(self._change, "simulation", lambda doc: {**doc, "final_job_pending": False}
                            if doc.get("run_id") == run_id else doc)
+        pending = await self._io(self._doc, "status_synthetic")
+        if pending.get("final_job_pending"):
+            request_id = pending["final_request_id"]
+            await self._io(self._wake, request_id)
+            await self._io(self._change, "status_synthetic", lambda doc: {**doc, "final_job_pending": False}
+                if doc.get("final_request_id") == request_id else doc)
         for result in results:
             if isinstance(result, Exception):
                 raise result

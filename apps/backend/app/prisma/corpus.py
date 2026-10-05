@@ -9,13 +9,17 @@ import re
 from .core import SYNTHETIC_MODES, PLATFORMS, utc_text
 
 VERSION = "bogota-v1"
+VERSIONS = {"bogota-v1": "v1", "bogota-v2": "v2"}
 DIRECTORY = "datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1"
 MEDIA_TYPES = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
 
 
-def dataset_root():
+def dataset_root(version=VERSION):
+    if not isinstance(version, str) or version not in VERSIONS:
+        raise ValueError("Unsupported synthetic dataset version")
     configured = os.getenv("GODS_EYE_DATASET_ROOT")
-    return Path(configured).resolve() if configured else Path(__file__).resolve().parents[4] / DIRECTORY
+    root = Path(configured).resolve() if configured else Path(__file__).resolve().parents[4] / DIRECTORY
+    return root if version == VERSION else root.parent / VERSIONS[version]
 
 
 def checked_file(root, relative, digest):
@@ -56,10 +60,10 @@ def _load_post(root, entry, media):
 
 
 @lru_cache(maxsize=2)
-def load(root):
+def load(root, version=VERSION):
     root = Path(root)
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    if manifest.get("version") != VERSION or manifest.get("schema_version") != 1 or manifest.get("duration_seconds") != 600:
+    if not isinstance(version, str) or version not in VERSIONS or manifest.get("version") != version or manifest.get("schema_version") != 1 or manifest.get("duration_seconds") != 600:
         raise ValueError("Unsupported synthetic dataset version")
     posts, identifiers = [], set()
     for entry in manifest["posts"]:
@@ -69,20 +73,28 @@ def load(root):
             raise ValueError("Invalid synthetic fixture identifier")
         identifiers.add(identifier)
         posts.append(post)
-    if len(posts) != manifest["post_count"] or len(posts) < 100:
+    # The original 100-post minimum is a v1 fixture contract, not a capture requirement.
+    if type(manifest["post_count"]) is not int or len(posts) != manifest["post_count"] or len(posts) < (100 if version == VERSION else 1):
         raise ValueError("Synthetic manifest post count mismatch")
-    image_hashes = [item["sha256"] for item in manifest["media"]]
-    if len(image_hashes) != len(set(image_hashes)):
-        raise ValueError("Synthetic publications must not reuse another publication's image")
+    originals = {}
+    for item in manifest["media"]:
+        original = originals.get(item["sha256"])
+        if original:
+            if version == VERSION or item.get("reused_from") != original["id"] or item["dataset_path"] != original["dataset_path"]:
+                raise ValueError("Synthetic publications must identify reused images")
+        elif item.get("reused_from"):
+            raise ValueError("Synthetic image reuse must reference its original")
+        else:
+            originals[item["sha256"]] = item
     return tuple(posts)
 
 
-def media_file(fixture_id, filename):
+def media_file(fixture_id, filename, version=VERSION):
     """Resolve the fixture allowlist, including old SVG/PNG URLs for captured records."""
     if not re.fullmatch(r"post-\d{4}", fixture_id) or not re.fullmatch(r"image-\d{2}\.(?:svg|png|jpe?g|webp)", filename):
         raise ValueError("Invalid synthetic media identifier")
-    root = dataset_root()
-    posts = load(root)
+    root = dataset_root(version)
+    posts = load(root, version)
     matches = [item for post in posts if post["fixture_id"] == fixture_id for item in post["attachments"]
                if item["id"] == f"{fixture_id}-{filename.rpartition('.')[0]}"
                and (filename.endswith((".svg", ".png")) or filename.rpartition(".")[2] == item["dataset_path"].rpartition(".")[2])]
@@ -110,10 +122,10 @@ def presentation(payload):
 
 def events(platform, run_id, cycle, anchor_at, start, end, seed=0, version=VERSION):
     """Jitter stays below each causal gap; late availability never rewrites publication time."""
-    if version != VERSION or type(seed) is not int or not 0 <= seed < 2 ** 31:
+    if not isinstance(version, str) or version not in VERSIONS or type(seed) is not int or not 0 <= seed < 2 ** 31:
         raise ValueError("Unsupported synthetic dataset version or seed")
     result = []
-    for post in load(dataset_root()):
+    for post in load(dataset_root(version), version):
         if post["platform"] != platform:
             continue
         identity = f"{version}:{seed}:{run_id}:{post['fixture_id']}"

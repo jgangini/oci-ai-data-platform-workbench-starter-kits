@@ -97,7 +97,10 @@ def invoke(client, endpoint, payload, cookie, key, snapshot):
     if not texts:
         raise HTTPException(502, "The agent did not return a response")
     fenced = re.fullmatch(r"(?:\.[ \t]*\r?\n)?```(?:json)?[ \t]*\r?\n(.*?)\r?\n```", texts[-1].strip(), flags=re.DOTALL | re.IGNORECASE)
-    result = json.loads(fenced[1] if fenced else texts[-1])
+    try:
+        result = json.loads(fenced[1] if fenced else texts[-1])
+    except json.JSONDecodeError as exc:
+        raise HTTPException(502, "The agent returned an invalid structured response; retry the question") from exc
     evidence = {item["id"] for item in snapshot.get("evidence", [])}
     if (not isinstance(result, dict) or result.get("version") != snapshot["version"]
         or not isinstance(result.get("evidence_ids"), list)
