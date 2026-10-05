@@ -577,7 +577,9 @@ citation tokens resolved back to queried source IDs. Empty or failed queries
 cannot be presented as proof that no events exist in the real world. Synthetic
 test provenance is preserved; the assistant does not send operational reports.
 
-For event inventories, the model selects up to five queried incident references.
+Without an explicit event or sensor selection, the model can select up to five
+queried incident references for an event inventory. A selected event or sensor
+keeps the explanatory format for source comparison and verification questions.
 The application renders each selected row's category, locality, severity, review,
 last report timestamp and provenance together with that row's citation. It labels
 the subset size against the number of queried incidents, not a universal total.

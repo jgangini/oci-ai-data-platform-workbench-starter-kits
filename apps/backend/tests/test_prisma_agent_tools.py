@@ -699,6 +699,15 @@ def test_inventory_rejects_unknown_duplicate_or_excess_incident_selection(monkey
     assert fake.llm.with_structured_output.call_args.args[0]["properties"]["incident_refs"]["maxItems"] == 5
 
 
+def test_general_response_requires_explicit_incident_selection(monkeypatch):
+    fake = runtime(monkeypatch)
+    state = [fake.messages.HumanMessage(content='{"question":"Enumera","context":{"version":"v1"}}')]
+    state += completed_query(fake)
+    fake.formatter.ainvoke.return_value.pop("incident_refs")
+    with pytest.raises(RuntimeError, match="Invalid incident selection"):
+        asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))
+
+
 @pytest.mark.parametrize("change,error", [
     ({"evidence_ids": []}, "no queried evidence"),
     ({"last_observed_at": "2026-10-05T03:00:00"}, "requires a timezone"),
@@ -746,6 +755,48 @@ def test_empty_incident_selection_allows_verification_explanation_even_with_quer
     reply = json.loads(asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))["messages"][0].content)
     assert reply == {"answer": "Falta contrastar el lugar y la hora del reporte.", "version": "v1",
         "evidence_ids": ["post-1"], "sensor_evidence_ids": [], "actions": []}
+
+
+@pytest.mark.parametrize("selection", [{"incident_id": "incident-1"}, {"sensor_id": "sensor-1"},
+    {"incident_id": "incident-1", "sensor_id": "sensor-1"}])
+def test_selected_context_keeps_source_comparison_and_sensor_analysis_without_inventory_schema(monkeypatch, selection):
+    fake = runtime(monkeypatch)
+    request = {"question": "Compara las dos redes y la lectura disponible antes de reportarlo.",
+        "context": {"version": "v1", **selection}}
+    state = [fake.messages.HumanMessage(content=json.dumps(request))]
+    state += completed_query(fake, rows=[{"id": "incident-1", "evidence_ids": ["post-1", "post-2"],
+        "category": "inundacion", "locality": "Bosa", "severity": "high", "review_status": "pending"}])
+    state += completed_query(fake, "consultar_evidencia", rows=[{"id": "post-1", "platform": "facebook"},
+        {"id": "post-2", "platform": "x"}], call_id="evidence")
+    state += completed_query(fake, "consultar_sensores", rows=[{"id": "reading-1", "sensor_id": "sensor-1",
+        "value": 3.92, "unit": "m", "status": "warning"}], call_id="sensor")
+    answer = "Facebook y X reportan inundación en Bosa, pendiente de revisión. El sensor marca 3.92 m, warning; no confirma el reporte."
+    fake.formatter.ainvoke.return_value = {"answer": answer, "version": "v1", "evidence_ids": ["E1", "E2"],
+        "sensor_evidence_ids": ["S1"], "actions": []}
+    reply = json.loads(asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))["messages"][0].content)
+    assert reply == {"answer": answer, "version": "v1", "evidence_ids": ["post-1", "post-2"],
+        "sensor_evidence_ids": ["reading-1"], "actions": []}
+    schema = fake.llm.with_structured_output.call_args.args[0]
+    assert "incident_refs" not in schema["properties"] and "incident_refs" not in schema["required"]
+    assert schema["additionalProperties"] is False
+    messages = fake.formatter.ainvoke.call_args.args[0]
+    assert "selecciona hasta cinco incident_refs" not in messages[0].content
+    source = json.loads(messages[1].content)
+    assert source["request"] == request
+    assert all("incident_ref" not in row for query in source["queries"] for row in query["rows"])
+    fake.formatter.ainvoke.assert_awaited_once()
+
+
+@pytest.mark.parametrize("selection", [{"incident_id": "incident-1"}, {"sensor_id": "sensor-1"},
+    {"incident_id": "incident-1", "sensor_id": "sensor-1"}])
+def test_selected_context_rejects_unexpected_inventory_references(monkeypatch, selection):
+    fake = runtime(monkeypatch)
+    state = [fake.messages.HumanMessage(content=json.dumps({"question": "¿Qué falta verificar?",
+        "context": {"version": "v1", **selection}}))]
+    state += completed_query(fake, rows=[{"id": "incident-1", "evidence_ids": ["post-1"]}])
+    fake.formatter.ainvoke.return_value.update(incident_refs=["I1"])
+    with pytest.raises(RuntimeError, match="Invalid incident selection"):
+        asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))
 
 
 def test_inventory_missing_report_date_does_not_use_record_creation_date(monkeypatch):
