@@ -54,6 +54,8 @@
 .tc-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .tc-filters .tc-actions { grid-column: 1 / -1; }
 .tc-event-list { display: grid; gap: 6px; max-height: 200px; overflow: auto; margin-block: 10px; scrollbar-width: auto; scrollbar-color: auto; }
+:is(.tc-event-list, .sensors-list) { min-height: 0; align-content: start; }
+:is(.tc-event-list, .sensors-list) .scene-shot-meta { margin-top: 0; }
 .tc-event { text-align: left; display: grid; gap: 3px; }
 #territorial-panel .tc-event { border: 1px solid rgba(255, 255, 255, .12); border-radius: 9px; padding: 7px 8px; background: rgba(255, 255, 255, .03); }
 #territorial-panel .tc-event[aria-pressed="true"] { border-color: var(--accent); background: rgba(0, 212, 255, .08); }
