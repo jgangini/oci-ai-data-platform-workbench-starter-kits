@@ -5,7 +5,7 @@ import re
 
 from .core import CATEGORIES, LOCALITIES, SEVERITIES, normalize_event
 
-PROMPT_VERSION = "territorial-control-claims-v3"
+PROMPT_VERSION = "territorial-control-claims-v4"
 _NON_LITERAL_QUOTE = "Claim evidence must quote the original post literally"
 
 _LABEL_PROPERTIES = {
@@ -87,11 +87,18 @@ def classify(events, config, signed=None, client=None):
                   "Extrae claims, hasta ocho afirmaciones por publicación; una publicación puede referirse a varios riesgos o localidades "
                   "cuando cada afirmación lo expresa explícitamente. No dupliques el post. Para cada claim devuelve category, locality, "
                   "severity, confidence, relation, evidence_text y summary_en. relation=supports cuando el autor afirma que ocurre el riesgo; "
-                  "relation=contradicts cuando niega o rebate explícitamente esa afirmación. Ambas relaciones describen la postura textual, "
-                  "nunca verdad verificada ni confirmación humana. No atribuyas contradicción sólo por incertidumbre. "
+                  "relation=contradicts sólo cuando niega explícitamente la existencia del riesgo definido por category y locality. "
+                  "Evalúa relation frente a la existencia del riesgo, no frente a su intensidad, severidad o visibilidad. "
+                  "Menor intensidad, menos humo o no ver una llama no niegan por sí solos la existencia del riesgo. "
+                  "Negar que el riesgo haya terminado o rechazar su extinción no contradice su existencia; resuelve la doble negación. "
+                  "Agrupa en un solo claim del mismo riesgo y localidad las observaciones del post que sólo varían en intensidad o severidad; "
+                  "no generes supports y contradicts artificiales por esos cambios. Conserva riesgos o localidades diferentes como claims separados. "
+                  "Ambas relaciones describen la postura textual, nunca verdad verificada ni confirmación humana. "
+                  "No atribuyas contradicción sólo por incertidumbre. "
                   "evidence_text debe ser una cita literal breve del mensaje, suficiente para justificar categoría, ubicación y relación; "
                   "copia un único fragmento contiguo, sin unir frases separadas, omitir palabras internas ni añadir puntos suspensivos. "
-                  "summary_en es un resumen conciso en inglés de máximo 400 caracteres, sin presentar alegaciones como hechos verificados. "
+                  "summary_en es un resumen conciso en inglés de máximo 400 caracteres que atribuye explícitamente lo dicho al autor; "
+                  "preserva rumores, incertidumbre y límites de observación, sin presentar alegaciones como hechos verificados. "
                   "Devuelve claims=[] si no hay una afirmación relevante. Nunca inventes citas, hechos, autores, IDs ni versiones. "
                   "Devuelve únicamente JSON {\"items\":[{\"id\":\"identificador original\",\"category\":\"...\",\"locality\":\"...\","
                   "\"severity\":\"...\",\"confidence\":0.5,\"claims\":[{\"category\":\"...\",\"locality\":\"...\",\"severity\":\"...\","

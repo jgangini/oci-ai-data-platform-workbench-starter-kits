@@ -150,7 +150,28 @@ def test_classifier_requests_a_strict_schema_for_one_post_and_grounded_claims():
         assert properties["severity"]["enum"] == list(SEVERITIES)
         assert properties["confidence"] == {"type": "number", "minimum": 0, "maximum": 1}
     assert claims["items"]["properties"]["relation"]["enum"] == ["supports", "contradicts"]
-    assert result["prompt_version"] == "territorial-control-claims-v3"
+    assert result["prompt_version"] == "territorial-control-claims-v4"
+
+
+def test_stance_request_distinguishes_risk_existence_from_intensity_and_attributes_summaries():
+    text = ("La columna de humo está más bajita en Chapinero. "
+            "Sería apresurado decir que el incendio terminó solo por eso. Bogotá, Colombia.")
+    event = normalize_event({"platform": "instagram", "source_id": "stance-regression", "mode": "simulation",
+        "text": text, "created_at": "2026-10-05T14:00:00Z"})
+    label = {"id": event["id"], "category": "incendio", "locality": "Chapinero", "severity": "medium", "confidence": 0.7,
+        "claims": [claim("incendio", "Chapinero", evidence_text=text,
+            summary_en="The author reports less smoke in Chapinero but warns that this does not establish that the fire has ended.")]}
+    client = ClaimsModel([label])
+    result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
+    request = client.requests[0].chat_request
+    prompt = request.messages[0].content[0].text
+    for instruction in ("existencia del riesgo definido por category y locality", "resuelve la doble negación",
+                        "no generes supports y contradicts artificiales", "No atribuyas contradicción sólo por incertidumbre",
+                        "atribuye explícitamente lo dicho al autor", "preserva rumores, incertidumbre y límites de observación"):
+        assert instruction in prompt
+    assert json.loads(prompt.rsplit("Reportes:\n", 1)[1]) == [{"id": event["id"], "text": text}]
+    assert len(client.requests) == 1 and request.max_tokens == 2048 and request.temperature == 0
+    assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v4"
 
 
 @pytest.mark.parametrize("claims", [
@@ -188,7 +209,7 @@ def test_noncontiguous_native_quote_gets_one_strict_correction_per_post(correcte
     if corrected:
         result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
         assert result["claims"][0]["evidence_text"] == first
-        assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v3"
+        assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v4"
         assert event["text"] == first + " ¿Nos pueden orientar las autoridades sobre ese tramo? " + third + " #Colombia #Bogota #incendio"
     else:
         with pytest.raises(ValueError, match="quote the original post literally"):
