@@ -4,6 +4,7 @@ import { text } from './territorialLayer.js';
 import { bindPanelDisclosure, collapsePanelOnEscape } from '../.upstream/src/ui/panelDisclosure.js';
 
 const messageTime = new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true });
+const questionLimit = 500;
 const sendIcon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10.3009 13.6949L20.102 3.89742M10.5795 14.1355L12.8019 18.5804C13.339 19.6545 13.6075 20.1916 13.9458 20.3356C14.2394 20.4606 14.575 20.4379 14.8492 20.2747C15.1651 20.0866 15.3591 19.5183 15.7472 18.3818L19.9463 6.08434C20.2845 5.09409 20.4535 4.59896 20.3378 4.27142C20.2371 3.98648 20.013 3.76234 19.7281 3.66167C19.4005 3.54595 18.9054 3.71502 17.9151 4.05315L5.61763 8.2523C4.48114 8.64037 3.91289 8.83441 3.72478 9.15032C3.56153 9.42447 3.53891 9.76007 3.66389 10.0536C3.80791 10.3919 4.34498 10.6605 5.41912 11.1975L9.86397 13.42C10.041 13.5085 10.1295 13.5527 10.2061 13.6118C10.2742 13.6643 10.3352 13.7253 10.3876 13.7933C10.4468 13.87 10.491 13.9585 10.5795 14.1355Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const stopIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM8.58579 8.58579C8 9.17157 8 10.1144 8 12C8 13.8856 8 14.8284 8.58579 15.4142C9.17157 16 10.1144 16 12 16C13.8856 16 14.8284 16 15.4142 15.4142C16 14.8284 16 13.8856 16 12C16 10.1144 16 9.17157 15.4142 8.58579C14.8284 8 13.8856 8 12 8C10.1144 8 9.17157 8 8.58579 8.58579Z" fill="currentColor"/></svg>';
 
@@ -60,12 +61,15 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
     </div><div class="tc-panel-body data-toggle-list" data-rail-scroller>
     <div id="tc-aidp-log" class="tc-chat-log scene-shot-list" role="log" aria-label="AI Assistant conversation" tabindex="0" data-rail-scroller></div>
     <p data-chat-status role="status" aria-live="polite"></p>
-    <form class="tc-composer"><label class="tc-sr-only" for="tc-question">Ask AI Assistant</label><textarea id="tc-question" maxlength="2000" rows="3" placeholder="Ask AI Assistant…" required></textarea><span data-turns aria-label="Submitted questions">0 questions</span><button type="submit" class="tc-send" aria-label="Send question" title="Send question">${sendIcon}</button></form></div></div>`;
+    <form class="tc-composer"><label class="tc-sr-only" for="tc-question">Ask AI Assistant</label><textarea id="tc-question" maxlength="${questionLimit}" rows="3" placeholder="Ask AI Assistant…" aria-describedby="tc-question-count" required></textarea><span id="tc-question-count" aria-live="polite">0/${questionLimit}</span><button type="submit" class="tc-send" aria-label="Send question" title="Send question">${sendIcon}</button></form></div></div>`;
   document.getElementById('global-context-panel').after(panel);
   const onChange = (collapsed) => setPanelCollapsed(panel.id, collapsed, { explicit: true, persist: false, syncShare: false });
   const disclosure = bindPanelDisclosure({ panel, buttons: [panel.querySelector('.panel-collapse-btn')], onChange, onEscape: (event) => collapsePanelOnEscape(event, { panel, onChange }) });
   const form = panel.querySelector('form'); const textarea = form.querySelector('textarea'); const send = form.querySelector('button'); const status = panel.querySelector('[data-chat-status]');
   const log = panel.querySelector('#tc-aidp-log');
+  const count = panel.querySelector('#tc-question-count');
+  const updateCount = () => { count.textContent = `${textarea.value.length}/${questionLimit}`; };
+  updateCount();
   let busy = false, aidpSnapshot, aidpSession, lastReply, lastError, chatSnapshot, publicationRequest, questionGeneration = 0, draftRevision = 0;
   const setBusy = (value) => {
     busy = value; send.type = value ? 'button' : 'submit'; send.title = value ? 'Stop request' : 'Send question';
@@ -91,7 +95,7 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
 
   function newAidpSession() {
     return createPrismaSession({ request, context: () => { const state = contextState(); aidpSnapshot = state.snapshot; return chatContext(state, sensorContext()); },
-      onReply: (reply) => { lastReply = reply; renderAidpReply(reply, aidpSnapshot, { message, layer, state: contextState, status, showEvidence, showSensor, onChange }); }, onBusy: setBusy, onSubmitted: (value) => { panel.querySelector('[data-turns]').textContent = `${value} ${value === 1 ? 'question' : 'questions'}`; },
+      onReply: (reply) => { lastReply = reply; renderAidpReply(reply, aidpSnapshot, { message, layer, state: contextState, status, showEvidence, showSensor, onChange }); }, onBusy: setBusy,
       onError: (error) => { lastError = error; status.textContent = error.status === 409 ? 'The publication changed. Your question is preserved; review the refreshed data and send it again.' : error.message; if (error.status === 409) void Promise.allSettled([layer.update(), refreshSensors?.()]); },
     });
   }
@@ -127,8 +131,8 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
     } finally { turnSignal?.removeEventListener('abort', cancel); if (generation === questionGeneration) { publicationRequest = undefined; setBusy(false); } }
   }
   send.addEventListener('click', (event) => { if (busy) { event.preventDefault(); cancel(); status.textContent = 'Request cancelled.'; } }, { signal });
-  panel.querySelector('[data-new]').addEventListener('click', () => { cancel(); log.replaceChildren(); status.textContent = ''; textarea.value = ''; aidpSession.destroy(); aidpSession = newAidpSession(); void aidpSession.start(); textarea.focus(); }, { signal });
-  textarea.addEventListener('input', () => { draftRevision++; }, { signal });
+  panel.querySelector('[data-new]').addEventListener('click', () => { cancel(); log.replaceChildren(); status.textContent = ''; textarea.value = ''; updateCount(); aidpSession.destroy(); aidpSession = newAidpSession(); void aidpSession.start(); textarea.focus(); }, { signal });
+  textarea.addEventListener('input', () => { draftRevision++; updateCount(); }, { signal });
   textarea.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
     event.preventDefault();
@@ -136,11 +140,12 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
   }, { signal });
   form.addEventListener('submit', (event) => {
     event.preventDefault(); const draft = textarea.value, question = draft.trim(); if (!question || busy) return;
+    if (draft.length > questionLimit) { status.textContent = `Keep your question within ${questionLimit} characters.`; return; }
     const pending = ask(question), generation = questionGeneration, revision = draftRevision;
-    textarea.value = '';
+    textarea.value = ''; updateCount();
     void pending.catch((error) => {
       if (signal.aborted || error.name === 'AbortError' || generation !== questionGeneration) return;
-      if (revision === draftRevision && !textarea.value) textarea.value = draft;
+      if (revision === draftRevision && !textarea.value) { textarea.value = draft; updateCount(); }
       if (!lastError) status.textContent = error.message;
     });
   }, { signal });

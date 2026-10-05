@@ -140,7 +140,7 @@
 .tc-message button { margin: 4px 4px 0 0; font-size: 11px; }
 .tc-composer { position: relative; }
 #territorial-analyst .tc-composer textarea { display: block; height: 104px; min-height: 104px; padding: 10px 12px 48px; resize: vertical; }
-.tc-composer [data-turns] { position: absolute; bottom: 17px; left: 12px; color: var(--text-secondary); font-size: 11px; }
+.tc-composer #tc-question-count { position: absolute; bottom: 17px; left: 12px; color: var(--text-secondary); font-size: 11px; }
 .tc-composer .tc-send { position: absolute; bottom: 12px; right: 10px; border-radius: 50%; width: 32px; height: 32px; padding: 6px; }
 .tc-send svg { display: block; width: 100%; height: 100%; }
 .tc-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

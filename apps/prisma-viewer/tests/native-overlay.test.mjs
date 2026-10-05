@@ -146,7 +146,7 @@ const publication = (version = 'v1') => ({ version, published_at: '2026-10-03T00
 class PanelElement extends EventTarget {
   constructor(tag = 'div') {
     super(); this.tagName = tag.toUpperCase(); this.dataset = {}; this.style = { setProperty(name, value) { this[name] = value; }, getPropertyValue(name) { return this[name] || ''; }, removeProperty(name) { delete this[name]; } }; this.nodes = new Map(); this.children = []; this.classes = new Set();
-    this.clientWidth = 1200; this.clientHeight = 800; this.offsetWidth = 360; this.offsetHeight = 300;
+    this.clientWidth = 1200; this.clientHeight = 800; this.offsetWidth = 360; this.offsetHeight = 300; this.value = '';
     this.classList = { contains: (name) => this.classes.has(name), add: (...names) => names.forEach(name => this.classes.add(name)), remove: (...names) => names.forEach(name => this.classes.delete(name)), toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name) };
     this.elements = { namedItem: (name) => this.querySelector(`[name="${name}"]`) };
     Object.defineProperty(this.elements, 'bbox', { get: () => this.elements.namedItem('bbox') });
@@ -737,7 +737,7 @@ function analystHarness(t, request, options = {}) {
   if (startEnabled) agentFlow.enable();
   const form = panel.querySelector('form');
   return { panel, form, textarea: form.querySelector('textarea'), log: panel.querySelector('#tc-aidp-log'),
-    status: panel.querySelector('[data-chat-status]'), count: panel.querySelector('[data-turns]'),
+    status: panel.querySelector('[data-chat-status]'), count: panel.querySelector('#tc-question-count'),
     rail, context, social, sensors, changes, lifetime, ask, agentFlow };
 }
 
@@ -864,10 +864,37 @@ test('Agent Flow is one native Context panel and Enter submits without taking Sh
   await new Promise(setImmediate);
   assert.equal(form.submitRequests, 1); assert.equal(requests.length, 1);
   assert.deepEqual(requests[0], { path: '/api/prisma/chat', body: { question: 'What happened in Kennedy?', version: 'v1', filters: { locality: 'Kennedy' }, incident_id: 'flood' } });
-  assert.match(view.count.textContent, /^1 questions?$/); assert.equal(view.log.children.length, 2);
+  assert.equal(view.count.textContent, '0/500'); assert.equal(view.log.children.length, 2);
   assert.equal(textarea.value, '');
   const changesBefore = changes.length; lifetime.abort(); disclosure.dispatchEvent(new Event('click'));
   assert.equal(changes.length, changesBefore); assert.deepEqual(rail.children, [context, social, sensors]);
+});
+
+test('composer counts the draft, accepts 500 characters and preserves over-limit input without sending', async (t) => {
+  const requests = [];
+  const view = analystHarness(t, async (_path, options) => {
+    requests.push(JSON.parse(options.body));
+    return { answer: 'Current evidence.', version: 'v1', runtime: 'aidp', evidence_ids: [], actions: [] };
+  });
+  assert.match(view.panel.innerHTML, /maxlength="500"/);
+  assert.match(view.panel.innerHTML, /aria-describedby="tc-question-count"/);
+  assert.doesNotMatch(view.panel.innerHTML, /Submitted questions|data-turns/);
+  assert.equal(view.count.textContent, '0/500');
+  view.textarea.value = 'hola 👋\n'; view.textarea.dispatchEvent(new Event('input'));
+  assert.equal(view.count.textContent, '8/500');
+  view.textarea.value = '?'.repeat(500); view.textarea.dispatchEvent(new Event('input'));
+  assert.equal(view.count.textContent, '500/500');
+  view.form.requestSubmit(); assert.equal(view.count.textContent, '0/500'); await new Promise(setImmediate);
+  assert.equal(requests.length, 1); assert.equal(requests[0].question.length, 500);
+  view.textarea.value = '?'.repeat(501); view.textarea.dispatchEvent(new Event('input')); view.form.requestSubmit();
+  await new Promise(setImmediate);
+  assert.equal(requests.length, 1); assert.equal(view.textarea.value.length, 501);
+  assert.equal(view.count.textContent, '501/500'); assert.match(view.status.textContent, /500 characters/);
+  view.textarea.value = 'Otra pregunta'; view.textarea.dispatchEvent(new Event('input'));
+  await view.ask('v'.repeat(501)); // Voice keeps its existing contract and never owns the text draft.
+  assert.equal(view.textarea.value, 'Otra pregunta'); assert.equal(view.count.textContent, '13/500');
+  view.panel.querySelector('[data-new]').dispatchEvent(new Event('click'));
+  assert.equal(view.textarea.value, ''); assert.equal(view.count.textContent, '0/500');
 });
 
 for (const [phase, errorStatus, edit] of [
@@ -892,6 +919,7 @@ for (const [phase, errorStatus, edit] of [
   }
   reject(Object.assign(new Error('Request failed'), { status: errorStatus })); await new Promise(setImmediate);
   assert.equal(view.textarea.value, edit === 'untouched' ? original : edit === 'cleared' ? '' : 'Next question');
+  assert.equal(view.count.textContent, `${view.textarea.value.length}/500`);
   assert.equal(view.form['aria-busy'], 'false'); assert.equal(view.form.querySelector('button')['aria-label'], 'Send question');
   assert.equal(requests.length, 1, 'An error never resubmits automatically');
 });
@@ -921,6 +949,7 @@ test('chat timestamps record send and reply time locally, preserve a new draft a
   t.mock.timers.tick(65_000); const receivedAt = new Date();
   resolve({ answer: 'Current evidence.', version: 'v1', runtime: 'aidp', evidence_ids: [], actions: [] }); await new Promise(setImmediate);
   assert.equal(view.textarea.value, 'My next question'); assert.equal(view.log.children.length, 2);
+  assert.equal(view.count.textContent, '16/500');
   const formatter = new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true });
   for (const [index, at] of [sentAt, receivedAt].entries()) {
     const entry = view.log.children[index], times = entry.querySelectorAll('time');
@@ -977,7 +1006,7 @@ test('Agent Flow toggles one Send/Stop button, cancels with an empty draft and i
   assert.match(sendIcon, /M10\.3009 13\.6949L20\.102 3\.89742/); assert.match(sendIcon, /stroke="currentColor"/);
   textarea.value = 'First question'; form.requestSubmit(); await finish('first-session');
   textarea.value = 'Follow up'; form.requestSubmit(); await new Promise(setImmediate);
-  assert.equal(requests[1].body.session_id, 'first-session'); assert.match(count.textContent, /^2 questions$/);
+  assert.equal(requests[1].body.session_id, 'first-session'); assert.equal(count.textContent, '0/500');
   assert.equal(form['aria-busy'], 'true'); assert.equal(form.querySelector('button'), send);
   assert.equal(send.type, 'button'); assert.notEqual(send.disabled, true); assert.equal(send['aria-label'], 'Stop request'); assert.equal(send.title, 'Stop request');
   assert.match(send.innerHTML, /fill-rule="evenodd"/); assert.match(send.innerHTML, /fill="currentColor"/); assert.notEqual(send.innerHTML, sendIcon);
@@ -991,15 +1020,15 @@ test('Agent Flow toggles one Send/Stop button, cancels with an empty draft and i
   const messagesBefore = log.children.length; await finish('cancelled-session');
   assert.equal(log.children.length, messagesBefore);
   panel.querySelector('[data-new]').dispatchEvent(new Event('click'));
-  assert.equal(count.textContent, '0 questions'); assert.equal(log.children.length, 0); assert.equal(textarea.value, ''); assert.equal(status.textContent, '');
+  assert.equal(count.textContent, '0/500'); assert.equal(log.children.length, 0); assert.equal(textarea.value, ''); assert.equal(status.textContent, '');
   textarea.value = 'New question'; form.requestSubmit(); await new Promise(setImmediate);
-  assert.equal(requests[2].body.session_id, undefined); assert.match(count.textContent, /^1 questions?$/);
+  assert.equal(requests[2].body.session_id, undefined); assert.equal(count.textContent, '0/500');
   panel.querySelector('[data-new]').dispatchEvent(new Event('click'));
   assert.equal(requests[2].signal.aborted, true); await finish('abandoned-session');
-  assert.equal(count.textContent, '0 questions'); assert.equal(log.children.length, 0);
+  assert.equal(count.textContent, '0/500'); assert.equal(log.children.length, 0);
   textarea.value = 'Fresh question'; form.requestSubmit(); await new Promise(setImmediate);
   assert.equal(requests[3].body.session_id, undefined); await finish('fresh-session');
-  assert.equal(log.children.length, 2); assert.match(count.textContent, /^1 questions?$/);
+  assert.equal(log.children.length, 2); assert.equal(count.textContent, '0/500');
 });
 
 test('voice questions keep sensor context and valid citations leave exclusive chat while stale citations keep focus', async (t) => {
@@ -1098,7 +1127,7 @@ for (const cancellation of ['button', 'voice']) test(`Agent Flow ${cancellation}
   resolve(publication());
   await assert.rejects(pending, { name: 'AbortError' });
   assert.deepEqual(requests.map(item => item.path), ['/api/prisma/snapshot']);
-  assert.equal(view.count.textContent, '0 questions'); assert.equal(view.log.children.length, 1);
+  assert.equal(view.count.textContent, '0/500'); assert.equal(view.log.children.length, 1);
 });
 
 test('external voice cancellation aborts Agent Flow and ignores a late response', async (t) => {
