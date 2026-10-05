@@ -66,6 +66,43 @@ test('capture metadata waits briefly for asynchronous publication then backs off
   }
 });
 
+test('a paused daily capture discovers reprogramming and Run without refreshing before start or on routine backlog revisions', async t => {
+  const h = captureRefreshHarness(t, 'sensors');
+  const daily = { start_at: '2035-01-01T10:00:00Z', interval_minutes: 1440, config_version: 1 };
+  async function reply(server_now, changes = {}, elapsed = 300000) {
+    h.advance(elapsed);
+    h.requests.at(-1).resolve(captureStatus({ server_now, schedule: daily, next_capture_at: null, ...changes }));
+    await h.settle();
+  }
+  async function applied(index, version) {
+    h.state.snapshot = { version: `v${version}`, sensor_revision: `kind${version}` };
+    h.refreshes[index].resolve(true); await h.settle();
+  }
+  await reply('2035-01-01T10:00:00Z', {}, 0);
+  assert.equal(h.delay(), 300000, 'Even a paused daily capture checks metadata within five minutes');
+  await reply('2035-01-01T10:05:00Z', { publication_revision: 'kind2', publication_version: 'v2' });
+  assert.equal(h.refreshes.length, 0, 'Metadata polling does not reopen the daily snapshot window');
+  daily.start_at = '2035-01-01T10:20:00Z'; daily.config_version = 2;
+  await reply('2035-01-01T10:10:00Z', { next_capture_at: daily.start_at, publication_revision: 'kind3', publication_version: 'v3' });
+  await reply('2035-01-01T10:15:00Z', { next_capture_at: daily.start_at, publication_revision: 'kind4', publication_version: 'v4', capture_revision: 'capture4' });
+  assert.equal(h.refreshes.length, 0, 'Reprogramming and routine revisions cannot fetch before the future start');
+  h.enabled(false); h.enabled(true);
+  await reply('2035-01-01T10:16:00Z', { next_capture_at: daily.start_at, publication_revision: 'kind4', publication_version: 'v4' }, 0);
+  assert.equal(h.refreshes.length, 0, 'Re-enabling reapplies the same future anchor before considering a changed digest');
+  await reply('2035-01-01T10:20:00Z', { next_capture_at: '2035-01-02T10:20:00Z', publication_revision: 'kind5', publication_version: 'v5' });
+  assert.equal(h.refreshes.length, 1); await applied(0, 5);
+  await reply('2035-01-01T10:25:00Z', { publication_revision: 'kind6', publication_version: 'v6' });
+  assert.equal(h.refreshes.length, 1, 'Pausing again preserves the full-snapshot limit');
+  await reply('2035-01-02T10:20:00Z', { publication_revision: 'kind6', publication_version: 'v6' }, 86100000);
+  assert.equal(h.refreshes.length, 2); await applied(1, 6);
+  await reply('2035-01-02T10:25:00Z', { next_capture_at: '2035-01-03T10:20:00Z', publication_revision: 'kind7', publication_version: 'v7' });
+  assert.equal(h.refreshes.length, 3, 'Run can publish the missed current slot even when next_capture_at is tomorrow');
+  await applied(2, 7);
+  await reply('2035-01-02T10:30:00Z', { next_capture_at: '2035-01-03T10:20:00Z', publication_revision: 'kind8', publication_version: 'v8', capture_revision: 'capture8' });
+  assert.equal(h.refreshes.length, 3, 'Subsequent capture and publication revisions cannot reopen this slot');
+  assert.equal(h.delay(), 300000);
+});
+
 test('capture refresh aborts disable/destroy and discards old replies after re-enable', async t => {
   const h = captureRefreshHarness(t); h.advance(0); h.enabled(false);
   assert.equal(h.requests[0].signal.aborted, true); assert.equal(h.timers.size, 0);
