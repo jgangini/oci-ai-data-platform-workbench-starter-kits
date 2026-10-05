@@ -1,12 +1,13 @@
 """Rainfall is a separate review category, never sufficient evidence of flooding."""
 import json
 import importlib.util
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from app.prisma.classification import PROMPT_VERSION, classify
+from app.prisma.classification import PROMPT_VERSION, _CLASSIFICATION_SCHEMA, _claims, classify
 from app.prisma.core import CATEGORIES, LOCALITIES, SEVERITIES, build_snapshot, default_source, normalize_event
 
 
@@ -58,7 +59,7 @@ def test_classifier_accepts_rainfall_and_retains_the_separate_taxonomy_contract(
 
 def claim(category="inundacion", locality="Kennedy", **changes):
     return {"category": category, "locality": locality, "severity": "medium", "confidence": 0.7,
-            "relation": "supports", "evidence_text": "Hay inundación en Kennedy, Bogotá.",
+            "relation": "supports", "evidence_span_id": "S1",
             "summary_en": "The author reports flooding in Kennedy, Bogotá.", **changes}
 
 
@@ -99,7 +100,7 @@ def test_classifier_accepts_only_plain_json_or_one_complete_json_fence(template,
     assert result["claims"][0]["evidence_text"] == event["text"]
     label["claims"][0]["evidence_text"] = "Invented quotation"
     client.response_text = template.replace("<json>", json.dumps({"items": [label]}))
-    with pytest.raises(ValueError, match="quote the original"):
+    with pytest.raises(ValueError, match="invalid evidence span reference"):
         classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
 
 
@@ -109,7 +110,7 @@ def test_multiple_grounded_claims_preserve_one_post_and_ignore_model_provenance_
         "created_at": "2026-10-05T14:00:00Z", "raw_metadata": {"evaluation_secret": "NOT-FOR-THE-MODEL"}})
     labels = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium", "confidence": 0.7,
         "mode": "real", "model_version": "forged", "prompt_version": "forged", "claims": [claim(),
-            claim("incendio", "Bosa", relation="contradicts", evidence_text="No hay incendio en Bosa, Bogotá.",
+            claim("incendio", "Bosa", relation="contradicts",
                   summary_en="The author denies a fire in Bosa, Bogotá.")]}
     client = ClaimsModel([labels])
     results = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
@@ -150,7 +151,11 @@ def test_classifier_requests_a_strict_schema_for_one_post_and_grounded_claims():
         assert properties["severity"]["enum"] == list(SEVERITIES)
         assert properties["confidence"] == {"type": "number", "minimum": 0, "maximum": 1}
     assert claims["items"]["properties"]["relation"]["enum"] == ["supports", "contradicts"]
-    assert result["prompt_version"] == "territorial-control-claims-v5"
+    assert claims["items"]["properties"]["evidence_span_id"] == {"type": "string", "enum": ["S1"]}
+    assert "evidence_text" not in claims["items"]["properties"]
+    assert result["claims"][0]["evidence_text"] == event["text"]
+    assert "evidence_span_id" not in result["claims"][0]
+    assert result["prompt_version"] == "territorial-control-claims-v6"
 
 
 def test_stance_request_distinguishes_risk_existence_from_intensity_and_attributes_summaries():
@@ -159,7 +164,7 @@ def test_stance_request_distinguishes_risk_existence_from_intensity_and_attribut
     event = normalize_event({"platform": "instagram", "source_id": "stance-regression", "mode": "simulation",
         "text": text, "created_at": "2026-10-05T14:00:00Z"})
     label = {"id": event["id"], "category": "incendio", "locality": "Chapinero", "severity": "medium", "confidence": 0.7,
-        "claims": [claim("incendio", "Chapinero", evidence_text=text,
+        "claims": [claim("incendio", "Chapinero",
             summary_en="The author reports less smoke in Chapinero but warns that this does not establish that the fire has ended.")]}
     client = ClaimsModel([label])
     result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
@@ -171,9 +176,9 @@ def test_stance_request_distinguishes_risk_existence_from_intensity_and_attribut
                         "exactamente una postura global del AUTOR", "nunca repitas un par",
                         "category=por_clasificar y claims=[]", "Ejemplo 1, prudencia", "Ejemplo 2, intensidad", "Ejemplo 3, negación"):
         assert instruction in prompt
-    assert json.loads(prompt.rsplit("Reportes:\n", 1)[1]) == [{"id": event["id"], "text": text}]
+    assert json.loads(prompt.rsplit("Reportes:\n", 1)[1]) == [{"id": event["id"], "text": text, "evidence_spans": {"S1": text}}]
     assert len(client.requests) == 1 and request.max_tokens == 2048 and request.temperature == 0
-    assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v5"
+    assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v6"
 
 
 @pytest.mark.parametrize("claims", [
@@ -188,56 +193,140 @@ def test_claims_fail_closed_on_ungrounded_or_invalid_model_output(claims):
     client = ClaimsModel([labels])
     with pytest.raises(ValueError):
         classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
-    assert len(client.requests) == (2 if claims == [claim(evidence_text="Invented quotation")] else 1)
+    assert len(client.requests) == 1
 
 
-@pytest.mark.parametrize("corrected", [True, False])
-def test_noncontiguous_native_quote_gets_one_strict_correction_per_post(corrected):
-    first = "El pasto junto al foco está oscuro y todavía humea, acá en Chapinero."
-    third = "El humo no ha parado."
-    event = normalize_event({"platform": "instagram", "source_id": "noncontiguous", "mode": "simulation",
-        "text": first + " ¿Nos pueden orientar las autoridades sobre ese tramo? " + third + " #Colombia #Bogota #incendio",
-        "created_at": "2026-10-05T14:00:00Z"})
+def test_native_post_0062_selects_complete_literal_span_without_reproducing_the_failed_quote():
+    fixture = Path(__file__).resolve().parents[3] / "datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1/posts/post-0062/post.json"
+    text = json.loads(fixture.read_text(encoding="utf-8"))["message"]
+    event = normalize_event({"platform": "instagram", "source_id": "cycle-11:bogota-v1:post-0062", "mode": "simulation",
+        "text": text, "created_at": "2026-10-05T14:00:00Z"})
     label = {"id": event["id"], "category": "incendio", "locality": "Chapinero", "severity": "medium", "confidence": 0.7,
-             "claims": [claim("incendio", "Chapinero", evidence_text=first + " " + third)]}
+             "claims": [claim("incendio", "Chapinero", summary_en="The author reports continued smoke in Chapinero and asks for official guidance.")]}
+    client = ClaimsModel([label])
+    result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
+    assert result["claims"][0]["evidence_text"] == text and "evidence_span_id" not in result["claims"][0]
+    assert result["text"] == text and result["mode"] == "Synthetic" and len(client.requests) == 1
+    payload = json.loads(client.requests[0].chat_request.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1])[0]
+    assert payload == {"id": event["id"], "text": text, "evidence_spans": {"S1": text}}
+    invalid_quote = text.split(" ¿Nos pueden orientar", 1)[0] + " El humo no ha parado."
+    with pytest.raises(ValueError, match="quote the original post literally"):
+        _claims([{**result["claims"][0], "evidence_text": invalid_quote}], text)
 
-    class CorrectionModel(ClaimsModel):
+
+@pytest.mark.parametrize("selection", [{}, {"evidence_span_id": "S0"}, {"evidence_span_id": "S2"},
+    {"evidence_span_id": 1}, {"evidence_span_id": None}, {"evidence_span_id": ["S1"]},
+    {"evidence_span_id": "s1"}, {"evidence_span_id": " S1"},
+    {"evidence_text": "Hay inundación en Kennedy, Bogotá."},
+    {"evidence_span_id": "S1", "evidence_text": "Hay inundación en Kennedy, Bogotá."},
+    {"evidence_span_id": "S1", "evidence_text": "Invented quote"}])
+def test_invalid_span_selection_or_free_quote_is_never_repaired_or_accepted(selection):
+    event = normalize_event({"platform": "x", "source_id": "selection", "mode": "real",
+        "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"})
+    selected = claim()
+    selected.pop("evidence_span_id")
+    label = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium", "confidence": 0.7,
+             "claims": [{**selected, **selection}]}
+    client = ClaimsModel([label])
+    with pytest.raises(ValueError, match="invalid evidence span reference"):
+        classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
+    assert len(client.requests) == 1
+
+
+@pytest.mark.parametrize("length", [1, 999, 1000, 1001, 1499, 1500, 1501, 12000, 12001])
+def test_literal_spans_cover_bounded_input_with_overlap_and_preserve_selected_bytes(length):
+    text = "".join(chr(0x4E00 + index) for index in range(length))
+    event = normalize_event({"platform": "x", "source_id": "long-spans", "mode": "real",
+        "text": text, "created_at": "2026-10-05T14:00:00Z"})
+    event["text"] = text  # Exercise the request boundary independently of normalize_event's own cap.
+
+    class SelectingModel(ClaimsModel):
         def chat(self, request):
-            if self.requests and corrected:
-                self.labels = [{**label, "claims": [claim("incendio", "Chapinero", evidence_text=first)]}]
+            payload = json.loads(request.chat_request.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1])[0]
+            self.labels = [{"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium",
+                "confidence": 0.7, "claims": [claim(evidence_span_id=list(payload["evidence_spans"])[-1])]}]
             return super().chat(request)
 
-    client = CorrectionModel([label])
-    if corrected:
-        result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
-        assert result["claims"][0]["evidence_text"] == first
-        assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v5"
-        assert event["text"] == first + " ¿Nos pueden orientar las autoridades sobre ese tramo? " + third + " #Colombia #Bogota #incendio"
-    else:
-        with pytest.raises(ValueError, match="quote the original post literally"):
-            classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
-    assert len(client.requests) == 2
-    first_request, correction = client.requests
-    original = first_request.chat_request.messages[0].content[0].text
-    repaired = correction.chat_request.messages[0].content[0].text
-    assert "único fragmento contiguo" in original and repaired.startswith("Corrección:")
-    assert repaired.endswith(original)
-    assert json.loads(repaired.rsplit("Reportes:\n", 1)[1]) == [{"id": event["id"], "text": event["text"]}]
-    assert first + " " + third not in repaired  # Never inject the faulty quote as source evidence.
-    for request in client.requests:
-        assert request.compartment_id == "compartment" and request.serving_mode.model_id == "model"
-        assert request.chat_request.max_tokens == 2048 and request.chat_request.temperature == 0
-        assert request.chat_request.response_format == first_request.chat_request.response_format
-        assert request.chat_request.response_format.json_schema.is_strict is True
+    client = SelectingModel([])
+    result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
+    request = client.requests[0].chat_request
+    payload = json.loads(request.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1])[0]
+    bounded = text[:12000]
+    spans = payload["evidence_spans"]
+    assert payload["text"] == bounded and 1 <= len(spans) <= 23
+    assert list(spans) == [f"S{index + 1}" for index in range(len(spans))]
+    offsets = [bounded.index(span) for span in spans.values()]
+    assert offsets[0] == 0 and offsets[-1] + len(list(spans.values())[-1]) == len(bounded)
+    assert all(0 < right - left <= 500 for left, right in zip(offsets, offsets[1:]))
+    assert all(1 <= len(span) <= 1000 and span in bounded for span in spans.values())
+    assert len(spans) == (1 if length <= 1000 else 23 if length >= 12000 else 2 if length <= 1500 else 3)
+    assert request.response_format.json_schema.schema["properties"]["items"]["items"]["properties"]["claims"]["items"]["properties"]["evidence_span_id"]["enum"] == list(spans)
+    assert result["claims"][0]["evidence_text"] == list(spans.values())[-1]
+    assert result["text"] == bounded and request.max_tokens == 2048
+
+
+@pytest.mark.parametrize("text", ["", " ", "\r\n\t ", " " * 12000 + "outside bounded input"])
+def test_empty_bounded_post_fails_before_model_request(text):
+    client = ClaimsModel([])
+    with pytest.raises(ValueError, match="non-empty post text"):
+        classify([{"id": "x:empty", "text": text}], {"model_id": "model", "compartment_id": "compartment"}, client=client)
+    assert client.requests == []
+
+
+def test_whitespace_only_windows_are_not_selectable_and_unicode_bytes_are_preserved():
+    text = " " * 11000 + "\r\n¿Hay inundación en Bogotá? 🌧️  "
+    event = normalize_event({"platform": "x", "source_id": "spaced", "mode": "real",
+        "text": text, "created_at": "2026-10-05T14:00:00Z"})
+
+    class SelectingModel(ClaimsModel):
+        def chat(self, request):
+            payload = json.loads(request.chat_request.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1])[0]
+            self.labels = [{"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium",
+                "confidence": 0.7, "claims": [claim(evidence_span_id=list(payload["evidence_spans"])[-1])]}]
+            assert payload["text"] == text and all(span.strip() for span in payload["evidence_spans"].values())
+            return super().chat(request)
+
+    client = SelectingModel([])
+    result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
+    assert result["claims"][0]["evidence_text"] == text[-1000:]
+
+
+def test_each_post_has_an_isolated_schema_and_eight_claims_return_only_short_references():
+    original_schema = deepcopy(_CLASSIFICATION_SCHEMA)
+    events = [normalize_event({"platform": "x", "source_id": f"isolated-{index}", "mode": "real",
+        "text": "".join(chr(0x4E00 + index * 2000 + offset) for offset in range(length)),
+        "created_at": "2026-10-05T14:00:00Z"}) for index, length in enumerate((1000, 1001))]
+
+    class EightClaimsModel(ClaimsModel):
+        def chat(self, request):
+            payload = json.loads(request.chat_request.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1])[0]
+            self.labels = [{"id": payload["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium",
+                "confidence": 0.7, "claims": [claim(category=list(CATEGORIES)[index // len(LOCALITIES)],
+                    locality=list(LOCALITIES)[index % len(LOCALITIES)], evidence_span_id=list(payload["evidence_spans"])[-1])
+                    for index in range(8)]}]
+            assert "evidence_text" not in json.dumps(self.labels)
+            return super().chat(request)
+
+    client = EightClaimsModel([])
+    results = classify(events, {"model_id": "model", "compartment_id": "compartment"}, client=client)
+    assert len(client.requests) == 2 and _CLASSIFICATION_SCHEMA == original_schema
+    enums = [request.chat_request.response_format.json_schema.schema["properties"]["items"]["items"]["properties"]["claims"]["items"]["properties"]["evidence_span_id"]["enum"]
+             for request in client.requests]
+    assert enums == [["S1"], ["S1", "S2"]]
+    enums[0].append("not-shared")
+    assert enums[1] == ["S1", "S2"] and _CLASSIFICATION_SCHEMA == original_schema
+    for event, result in zip(events, results):
+        assert len(result["claims"]) == 8
+        assert all(row["evidence_text"] == event["text"][-1000:] and "evidence_span_id" not in row for row in result["claims"])
 
 
 @pytest.mark.parametrize("relation", ["supports", "contradicts"])
-@pytest.mark.parametrize("second", ["corrected", "duplicate", "nonliteral"])
-def test_duplicate_risk_claims_share_one_correction_budget_with_literal_quotes(relation, second):
+@pytest.mark.parametrize("second", ["corrected", "duplicate", "invalid-reference"])
+def test_duplicate_risk_claims_get_one_correction_with_the_same_span_contract(relation, second):
     text = "Dicen que hay inundación en Kennedy, Bogotá. Aclaro: no hay inundación en Kennedy, Bogotá."
     event = normalize_event({"platform": "x", "source_id": "duplicate-risk", "mode": "real",
         "text": text, "created_at": "2026-10-05T14:00:00Z"})
-    denied = claim(relation="contradicts", evidence_text="no hay inundación en Kennedy, Bogotá.",
+    denied = claim(relation="contradicts",
                    summary_en="The author corrects a rumor and denies flooding in Kennedy, Bogotá.")
     label = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium", "confidence": 0.7,
              "claims": [denied, {**denied, "relation": relation}]}
@@ -245,8 +334,8 @@ def test_duplicate_risk_claims_share_one_correction_budget_with_literal_quotes(r
     class CorrectingModel(ClaimsModel):
         def chat(self, request):
             if self.requests and second != "duplicate":
-                self.labels = [{**label, "claims": [{**denied, "evidence_text":
-                    denied["evidence_text"] if second == "corrected" else "Invented quote"}]}]
+                self.labels = [{**label, "claims": [{**denied, "evidence_span_id":
+                    "S1" if second == "corrected" else "unknown"}]}]
             return super().chat(request)
 
     client = CorrectingModel([label])
@@ -255,7 +344,7 @@ def test_duplicate_risk_claims_share_one_correction_budget_with_literal_quotes(r
         assert len(result["claims"]) == 1 and result["claims"][0]["relation"] == "contradicts"
         assert result["text"] == text and result["mode"] == "real"
     else:
-        reason = "duplicate risk-locality" if second == "duplicate" else "quote the original post literally"
+        reason = "duplicate risk-locality" if second == "duplicate" else "invalid evidence span reference"
         with pytest.raises(ValueError, match=reason):
             classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
     assert len(client.requests) == 2
@@ -263,7 +352,7 @@ def test_duplicate_risk_claims_share_one_correction_budget_with_literal_quotes(r
     assert correction.messages[0].content[0].text.startswith("Corrección: se repitió un par")
     assert correction.messages[0].content[0].text.endswith(first.messages[0].content[0].text)
     assert correction.response_format == first.response_format and correction.max_tokens == first.max_tokens == 2048
-    assert json.loads(correction.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1]) == [{"id": event["id"], "text": text}]
+    assert json.loads(correction.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1]) == [{"id": event["id"], "text": text, "evidence_spans": {"S1": text}}]
 
 
 @pytest.mark.parametrize("category,locality,quote", [
@@ -274,7 +363,7 @@ def test_unique_risk_contract_preserves_different_risks_or_localities(category, 
     event = normalize_event({"platform": "x", "source_id": "distinct-risks", "mode": "real",
         "text": "Hay inundación en Kennedy, Bogotá. " + quote, "created_at": "2026-10-05T14:00:00Z"})
     labels = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium", "confidence": 0.7,
-        "claims": [claim(), claim(category, locality, relation="contradicts", evidence_text=quote,
+        "claims": [claim(), claim(category, locality, relation="contradicts",
             summary_en="The author explicitly denies this risk in the named locality.")]}
     client = ClaimsModel([labels])
     result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
@@ -282,14 +371,14 @@ def test_unique_risk_contract_preserves_different_risks_or_localities(category, 
     assert {(row["category"], row["locality"]) for row in result["claims"]} == {("inundacion", "Kennedy"), (category, locality)}
 
 
-def test_quote_then_duplicate_failure_never_gets_a_third_response():
+def test_duplicate_failure_never_gets_a_third_response():
     event = normalize_event({"platform": "x", "source_id": "shared-budget", "mode": "real",
         "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"})
     label = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium", "confidence": 0.7}
 
     class CorrectingModel(ClaimsModel):
         def chat(self, request):
-            self.labels = [{**label, "claims": [claim(), claim()] if self.requests else [claim(evidence_text="Invented quote")]}]
+            self.labels = [{**label, "claims": [claim(), claim()]}]
             return super().chat(request)
 
     client = CorrectingModel([])
@@ -327,7 +416,7 @@ def test_response_contract_errors_never_trigger_quote_correction(response):
     assert len(client.requests) == 1
 
 
-def test_quote_correction_budget_resets_only_for_the_next_post():
+def test_duplicate_correction_budget_resets_only_for_the_next_post():
     events = [normalize_event({"platform": "x", "source_id": str(index), "mode": "simulation",
         "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"}) for index in range(2)]
 
@@ -335,7 +424,7 @@ def test_quote_correction_budget_resets_only_for_the_next_post():
         def chat(self, request):
             payload = json.loads(request.chat_request.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1])[0]
             self.labels = [{"id": payload["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium",
-                "confidence": 0.7, "claims": [claim(evidence_text=payload["text"] if len(self.requests) % 2 else "Not a literal quote")]}]
+                "confidence": 0.7, "claims": [claim()] if len(self.requests) % 2 else [claim(), claim()]}]
             return super().chat(request)
 
     client = TwoPostsModel([])

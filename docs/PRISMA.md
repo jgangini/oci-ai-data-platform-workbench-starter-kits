@@ -344,12 +344,19 @@ and rejecting a premature all-clear do not negate the risk. Summaries attribute
 allegations to their author. An irreconcilable stance can return `por_clasificar`
 with `claims=[]` for human review; the original report is preserved. These prompt
 instructions require native semantic acceptance and do not guarantee truth.
-A nonliteral quote or repeated risk/locality allows one corrective model response
-for that post, with the same strict schema, literal quote and unique-key checks.
-Both failures share the two-call total limit; persistent rejection stays pending.
-Other provider or validation failures do not receive this correction. `last_error_reason=nonliteral_claim`
-identifies this specific validation failure without saving arbitrary exception
-text or model output in operational status.
+The model selects an `evidence_span_id` from a per-post schema enum instead of
+rewriting a quotation. Short posts use the complete original text; longer posts
+offer at most 23 overlapping literal fragments of up to 1,000 characters from
+the bounded 12,000-character input. The selected fragment becomes `evidence_text`
+and still passes the existing literal-quote validator. Unknown references and
+free-form quotations are rejected, without approximate matching or lexical
+classification. Selection guarantees source wording, not semantic correctness;
+the full post remains available to evaluate the author's overall stance.
+A repeated risk/locality allows one corrective model response for that post,
+with the same schema and unique-key checks (two calls total). Other provider or
+validation failures stay pending without this correction. Operational status
+does not store arbitrary exception text or model output; the older
+`last_error_reason=nonliteral_claim` remains recognizable during recovery.
 
 The bootstrap sets `streaming_mode=persistent` for tasks with `isStreaming`
 and concurrency one. Permanent Job requests omit `timeoutSeconds`: the native
@@ -634,8 +641,8 @@ independent witnesses; the formatter receives that limit and labels the
 corroboration index as heuristic.
 
 Architecture comparison for the query-grounding and shared capture increment (2026-10-05):
-quality 6595 → 6579, coupling 0.08 unchanged, zero cycles and god files; complex
-functions 44 → 57. This is an intentional gate exception, not a passing gate:
+quality 6595 → 6580, coupling 0.08 unchanged, zero cycles and god files; complex
+functions 44 → 58. This is an intentional gate exception, not a passing gate:
 the agent retains current-turn query validation, same-version citations,
 provider-compatible formatting, row-bound inventories and explicit failure handling for errors observed
 in native AIDP runs. Finite capture also preserves exhausted cursors and retries
@@ -645,9 +652,9 @@ bounded-batch recovery, and per-layer publication coalescing. These guards share
 the existing capture/publication boundaries; no new services or dependencies
 were introduced. Source excerpts are rendered literally to prevent the observed
 cross-author attribution failure. Per-post enrichment journals preserve valid
-work across a later rejection, and one bounded model correction retains the
-strict literal-quote and unique-risk validators after observed quotation and
-claim-splitting failures.
+work across a later rejection. Bounded source-span selection avoids the observed
+model quotation-copying failure, while one corrective response addresses repeated
+risk/locality claims. Both retain the literal-quote and unique-risk validators.
 Splitting these guards solely to lower the aggregate would obscure their state
 and trust boundaries. The baseline was not reset.
 
