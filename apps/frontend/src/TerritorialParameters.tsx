@@ -1,6 +1,7 @@
 import { LoadingIndicator } from './LoadingIndicator';
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
-import { ParameterConfirmation, TerritorialOciParameters } from './TerritorialOciParameters';
+import { TerritorialOciParameters } from './TerritorialOciParameters';
+import { SettingsConfirmation } from './SettingsConfirmation';
 import { territorialEndpoint, territorialError, type TerritorialApi } from './territorialAdminState';
 
 type Provider = { id: string; label: string; configured: boolean; fields: { id: string; label: string; configured: boolean; secret: boolean; client_exposed?: boolean }[] };
@@ -53,7 +54,7 @@ export function TerritorialProviderParameters({ api, provider, revision, active,
         {dirty && <button type="button" className="secondary" onClick={() => setValues({})}>Discard changes</button>}</div>
     </fieldset>
     {message && <p role="status" className="territorial-success">{message}</p>}{error && <p role="alert" className="territorial-error">{error}</p>}
-    {confirm && <ParameterConfirmation title={provider.label} changes={provider.fields.filter(field => field.id in replacement).map(field => `${field.label}: replace value`)} onCancel={() => setConfirm(false)} onConfirm={() => void action('save')} />}
+    {confirm && <SettingsConfirmation title={`Save ${provider.label}?`} changes={provider.fields.filter(field => field.id in replacement).map(field => `${field.label}: replace value`)} onCancel={() => setConfirm(false)} onConfirm={() => void action('save')} />}
   </form>;
 }
 

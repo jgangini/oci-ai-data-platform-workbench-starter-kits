@@ -1,22 +1,10 @@
 import { LoadingIndicator } from './LoadingIndicator';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { territorialEndpoint, territorialError, type TerritorialApi } from './territorialAdminState';
+import { SettingsConfirmation } from './SettingsConfirmation';
 
 type OciStatus = { configured: boolean; available: boolean; region: string; model_id: string; model_name: string; voice?: string; voices?: string[]; tts_model?: string; last_test?: { status: string; error?: { message?: string } } };
 type Model = { id: string; name: string; vendor: string; selectable: boolean; reason?: string };
-
-export function ParameterConfirmation({ title, changes, onCancel, onConfirm }: { title: string; changes: string[]; onCancel: () => void; onConfirm: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const origin = document.activeElement, node = dialog.current;
-    node?.showModal();
-    return () => { node?.close(); if (origin instanceof HTMLElement && origin.isConnected) origin.focus(); };
-  }, []);
-  return <dialog ref={dialog} className="confirm-modal territorial-reset-dialog" aria-labelledby="territorial-parameter-confirm-title" onCancel={event => { event.preventDefault(); onCancel(); }} onClose={onCancel}>
-    <div className="confirm-content"><h2 id="territorial-parameter-confirm-title">Save {title}?</h2><p>The following settings will change:</p><ul>{changes.map(change => <li key={change}>{change}</li>)}</ul></div>
-    <footer><button type="button" onClick={onCancel} autoFocus>Cancel</button><button type="button" className="confirm-primary" onClick={onConfirm}>Save changes</button></footer>
-  </dialog>;
-}
 
 export function TerritorialOciParameters({ api, active, voice = false, onConfigured }: { api: TerritorialApi; active: boolean; voice?: boolean; onConfigured?: (configured: boolean) => void }) {
   const endpoint = `${territorialEndpoint}/${voice ? 'oci-voice' : 'oci-provider'}`;
@@ -96,6 +84,6 @@ export function TerritorialOciParameters({ api, active, voice = false, onConfigu
     </fieldset>
     {message && <p role="status" className="territorial-success">{message}</p>}{error && <p role="alert" className="territorial-error">{error}</p>}
     {!saved && error && <button type="button" className="secondary" disabled={!!busy || loading} onClick={() => setRetry(value => value + 1)}>Retry settings</button>}
-    {confirm && <ParameterConfirmation title={title} changes={[...(model !== saved?.model_id ? [`Model: ${models.find(item => item.id === model)?.name || model}`] : []), ...(voice && selectedVoice !== saved?.voice ? [`Voice: ${selectedVoice}`] : [])]} onCancel={() => setConfirm(false)} onConfirm={() => void action('save')} />}
+    {confirm && <SettingsConfirmation title={`Save ${title}?`} changes={[...(model !== saved?.model_id ? [`Model: ${models.find(item => item.id === model)?.name || model}`] : []), ...(voice && selectedVoice !== saved?.voice ? [`Voice: ${selectedVoice}`] : [])]} onCancel={() => setConfirm(false)} onConfirm={() => void action('save')} />}
   </form>;
 }

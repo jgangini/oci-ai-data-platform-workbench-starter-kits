@@ -41,12 +41,19 @@ class CloudRuntime:
         with self._connect() as connection:
             return read_document(connection, name)
 
+    def _documents(self, names):
+        # Reuse the authenticated connection for this response; never cache live controls.
+        with self._connect() as connection:
+            return {name: read_document(connection, name) for name in names}
+
     def _change(self, name, change):
         with self._connect() as connection:
             return mutate_document(connection, name, change)
 
     def _sources(self):
-        configuration = self._doc("configuration")
+        documents = self._documents(("configuration", *("status_" + name for name in PLATFORMS),
+            "simulation", "status_pipeline", "status_synthetic", "checkpoint_reset"))
+        configuration = documents["configuration"]
         def migrate(document):
             sources = dict(document.get("sources", {}))
             for platform in PLATFORMS:
@@ -61,7 +68,7 @@ class CloudRuntime:
         sources = []
         for platform in PLATFORMS:
             source = {**default_source(platform), **configuration.get("sources", {}).get(platform, {})}
-            status = self._doc("status_" + platform)
+            status = documents["status_" + platform]
             source.update({key: value for key, value in status.items() if key in
                 {"status", "last_run_at", "next_due", "last_error", "requested_action", "request_id", "last_received_count", "capture_slot"}})
             if not source["enabled"]:
@@ -69,10 +76,10 @@ class CloudRuntime:
             elif source["mode"] == "real" and status.get("configuration_revision") != configuration.get("revision", 0) and not status.get("requested_action"):
                 source.update(status="ready", last_error=None, next_due=None)
             sources.append(source_view(source))
-        return {"sources": sources, "simulation": self._simulation_state(), "runtime": "aidp",
+        return {"sources": sources, "simulation": simulation_state(documents["simulation"], time.time()), "runtime": "aidp",
                 "social_schedule": capture.schedule(configuration.get("social_schedule")),
-                "pipeline": self._doc("status_pipeline"), "capture_summary": self._doc("status_synthetic"),
-                "synthetic_reset": self._social_reset_status()}
+                "pipeline": documents["status_pipeline"], "capture_summary": documents["status_synthetic"],
+                "synthetic_reset": self._social_reset_status(documents["checkpoint_reset"])}
 
     async def sources(self):
         return await self._io(self._sources)
@@ -324,8 +331,8 @@ class CloudRuntime:
     async def synthetic_reset_status(self):
         return await self._io(self._social_reset_status)
 
-    def _social_reset_status(self):
-        state = self._doc("checkpoint_reset")
+    def _social_reset_status(self, state=None):
+        state = self._doc("checkpoint_reset") if state is None else state
         return {} if state.get("sensor_type") else state
 
     def _prepare_reset(self):

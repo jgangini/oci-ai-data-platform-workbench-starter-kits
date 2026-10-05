@@ -69,11 +69,18 @@ are persisted with the application settings. Empty fields restore `God's Eye Vie
 and `NO PLACE LEFT BEHIND`. The authenticated HTML response applies escaped text
 to the browser title, loading title and viewer header before scripts start;
 default branding retains the upstream markup. HTML is not cached across changes.
+**Save Name** previews the new name and description in a confirmation dialog;
+Cancel keeps the draft without saving. Reload the viewer after saving.
 
 Social and sensor schedules use the same heading spacing, with Save beside the
-capture interval on desktop and mobile. Publication loading is independent of
-source configuration loading. The Users table displays its spinner while a
-request is pending, then the actual results, empty state or error.
+capture interval on desktop and mobile. Saving either schedule first confirms
+the date, browser time zone, interval and affected source family; paused and
+completed captures remain stopped. Social tabs and fields appear immediately,
+empty and disabled until their persisted values arrive. Only the publication
+table displays a loading spinner. Source reads share one database connection
+per response without caching live controls. Producer mode remains in its select;
+the heading shows only the actual capture state. The Users table displays its
+spinner while a request is pending, then the actual results, empty state or error.
 
 Synthetic cleanup uses the standard modal progress indicator, reports historical
 publication progress, and closes only after the same operation and scope have
@@ -540,7 +547,10 @@ loopback; deployed OCI ingress keeps HTTPS. Application settings include the
 Territorial Control global module version and a gear link in the Configuration
 column. Its configuration replaces the release block within the Application tab;
 “Return” restores the versions table. Lab registration code lives at the bottom
-of the Workbench tab. Deployment is still owned by Deploy Studio, not a web form.
+of the Workbench tab, with **Save Code** beside its input. Saving requires a
+confirmation explaining that the previous code stops working for new
+registrations; existing participants keep their access. The dialog does not
+repeat the code. Deployment is still owned by Deploy Studio, not a web form.
 Source references use `gods-eye-view-{platform}`. Existing configured legacy
 credentials continue working until an explicit token update replaces their reference.
 
@@ -791,3 +801,17 @@ Browser DOM fixtures passed 7 groups without screenshots or real mutations;
 11 authenticated/anonymous API and initial-HTML checks passed on the final local
 containers. A separate real read verified the earlier cleanup completed with
 204 rewritten publications, no error, no progress popup and all sources paused.
+
+Postflight for save confirmations and immediate source controls (2026-10-05):
+Graphify updated the AST graph. Sentrux session quality improves 6582 → 6590,
+coupling falls 0.0712 → 0.0698 and cycles/god files remain zero. The complex
+function count rises 61 → 62 (historical baseline 44 → 62), so the gate reports
+degradation. This intentional exception preserves explicit unloaded, draft,
+confirmation and saving states without making extra framework abstractions or
+removing duplicate-request and revision guards. The baseline is unchanged;
+this is not a passing gate. There are no custom Sentrux rules. All 147 frontend
+and 1604 Python tests passed (3 opt-in skips), as did the TypeScript/Vite build
+and 8 mock Terraform tests with format/validate. Local administration container
+health and nginx syntax passed. Two authenticated read-only source requests
+averaged 6.036 seconds after connection reuse versus 11.576 seconds before;
+these small samples include network variability and are not a latency guarantee.

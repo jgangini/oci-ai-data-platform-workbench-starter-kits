@@ -97,6 +97,79 @@ for (const failed of [false, true]) test(`Workbench configuration loader ends on
   assert.equal(h.find('input', props => props['aria-label'] === 'AI Data Platform Workbench URL').props.placeholder, 'Not configured');
 });
 
+for (const configured of [false, true]) test(`registration code ${configured ? 'replacement' : 'activation'} requires confirmation and saves one captured draft`, async t => {
+  const h = await harness(t, release, '/admin/settings', { '/api/admin/settings': { ...settings, registration_code_configured: configured } });
+  const registration = () => h.find('RegistrationAccessSettings');
+  const field = () => registration().type(registration().props);
+  const dialog = () => h.find('ConfirmModal', props => props.title === 'Save registration code?');
+  assert.equal(field().props.action.props.children, 'Save Code');
+  assert.equal(field().props.action.props['aria-haspopup'], 'dialog');
+  assert.equal(field().props.action.props.disabled, true);
+  h.act(() => registration().props.onRegistrationCodeChange('DEMO-4321'));
+  assert.equal(field().props.action.props.disabled, false);
+  h.act(() => field().props.action.props.onClick());
+  assert.equal(dialog().props.open, true);
+  assert.match(dialog().props.description, configured ? /previous code will stop working.*Existing participants keep their access/ : /enable participant registration/);
+  assert.ok(!dialog().props.description.includes('DEMO-4321'));
+  assert.equal(h.mutations().length, 0);
+  const cancelledConfirm = dialog().props.onConfirm;
+  h.act(() => dialog().props.onClose());
+  h.act(cancelledConfirm);
+  assert.equal(h.mutations().length, 0);
+  assert.equal(registration().props.registrationCode, 'DEMO-4321');
+  h.act(() => field().props.action.props.onClick());
+  const confirm = dialog().props.onConfirm;
+  // A later state change must not replace the value approved by this dialog.
+  h.act(() => registration().props.onRegistrationCodeChange('NEXT-5678'));
+  h.act(() => { confirm(); confirm(); });
+  assert.equal(dialog().props.open, false);
+  assert.equal(h.mutations().length, 1);
+  const request = h.mutations()[0];
+  assert.equal(request.path, '/api/admin/settings');
+  assert.equal(request.options.method, 'PUT');
+  assert.deepEqual(JSON.parse(request.options.body), { registration_code: 'DEMO-4321' });
+  assert.equal(registration().props.busy, true);
+  assert.equal(field().props.action.props.disabled, true);
+  h.act(() => registration().props.onSave());
+  assert.equal(dialog().props.open, false);
+  request.resolve({ ...settings, registration_code_configured: true }); await h.settle();
+  assert.equal(registration().props.busy, false);
+  assert.equal(registration().props.registrationCode, 'NEXT-5678');
+  h.act(confirm);
+  assert.equal(h.mutations().length, 1);
+});
+
+test('registration code validates incomplete drafts and preserves a rejected draft for a confirmed retry', async t => {
+  const h = await harness(t);
+  const registration = () => h.find('RegistrationAccessSettings');
+  const dialog = () => h.find('ConfirmModal', props => props.title === 'Save registration code?');
+  h.act(() => registration().props.onRegistrationCodeChange('DEMO-43'));
+  h.act(() => registration().props.onSave());
+  assert.equal(dialog().props.open, false); assert.equal(h.mutations().length, 0);
+  h.act(() => registration().props.onRegistrationCodeChange('DEMO-4321'));
+  h.act(() => registration().props.onSave());
+  h.act(() => dialog().props.onConfirm());
+  h.mutations()[0].resolve({ detail: 'Settings unavailable' }, 503); await h.settle();
+  assert.equal(registration().props.busy, false);
+  assert.equal(registration().props.registrationCode, 'DEMO-4321');
+  assert.match(h.find('p', props => props.role === 'alert').props.children, /Settings unavailable/);
+  h.act(() => registration().props.onSave());
+  assert.equal(h.mutations().length, 1);
+  h.act(() => dialog().props.onConfirm());
+  h.mutations()[1].resolve({ ...settings, registration_code_configured: true }); await h.settle();
+  assert.equal(registration().props.registrationCode, '');
+  assert.equal(registration().props.busy, false);
+});
+
+test('production registration settings expose no code save action', async t => {
+  const h = await harness(t, release, '/admin/settings', { '/api/admin/settings': { ...settings, deployment_mode: 'production' } });
+  const registration = h.find('RegistrationAccessSettings');
+  assert.equal(registration.type(registration.props).type, 'p');
+  h.act(() => { registration.props.onRegistrationCodeChange('DEMO-4321'); registration.props.onSave(); });
+  assert.equal(h.mutations().length, 0);
+  assert.equal(h.find('ConfirmModal', props => props.title === 'Save registration code?').props.open, false);
+});
+
 test('application updates require confirmation, preserve the warning and cancel without dispatching', async t => {
   const h = await harness(t);
   assert.equal(h.dialog().props.open, false); h.update();

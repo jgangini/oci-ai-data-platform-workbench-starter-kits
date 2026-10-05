@@ -51,6 +51,7 @@ test('shared schedule converts browser wall time to UTC and rejects missing, inv
   for (const value of [0, 1.5, 1441, NaN]) assert.throws(() => schedulePayload('2026-10-05T11:30', value, 1), /whole number/);
 });
 
+function SettingsConfirmation() {}
 function sourceFormHarness(t, name, initial) {
   let cursor = 0, dirty = true, effects = [], tree; const slots = [], requests = [], updated = [];
   const hooks = {
@@ -62,7 +63,7 @@ function sourceFormHarness(t, name, initial) {
   const filename = name === 'SourceCard' ? 'TerritorialAdmin' : name;
   const source = readFileSync(new URL(`../src/${filename}.tsx`, import.meta.url), 'utf8') + (name === 'SourceCard' ? '\nexport { SourceCard };' : '');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  const component = {}; new Function('exports', 'require', compiled)(component, dependency => dependency === 'react' ? hooks : dependency === 'react/jsx-runtime' ? jsxRuntime : dependency === './territorialAdminState' ? exports : {});
+  const component = {}; new Function('exports', 'require', compiled)(component, dependency => dependency === 'react' ? hooks : dependency === 'react/jsx-runtime' ? jsxRuntime : dependency === './territorialAdminState' ? exports : dependency === './SettingsConfirmation' ? { SettingsConfirmation } : {});
   const props = { ...initial, api: (path, options) => new Promise((resolve, reject) => requests.push({ path, options, resolve, reject })), onUpdate: value => updated.push(value), disabled: false };
   function render() { for (let n = 0; dirty && n < 20; n++) { cursor = 0; dirty = false; effects = []; tree = component[name](props); effects.forEach(effect => effect()); } assert.equal(dirty, false); }
   const nodes = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? nodes(child) : [])];
@@ -73,6 +74,9 @@ function sourceFormHarness(t, name, initial) {
     receive: value => act(() => { Object.assign(props, value); dirty = true; }),
     change: (type, value) => act(() => find('input', p => p.type === type).props.onChange({ target: { value } })),
     submit: () => act(() => find('form').props.onSubmit({ preventDefault() {} })),
+    confirmation: () => find(SettingsConfirmation).props,
+    confirm: () => act(() => find(SettingsConfirmation).props.onConfirm()),
+    cancel: () => act(() => find(SettingsConfirmation).props.onCancel()),
     settle: async () => { await new Promise(setImmediate); render(); } };
 }
 
@@ -82,18 +86,24 @@ test('viewer identity loads independently, saves once, resets empty fields and p
   h.submit(); assert.equal(h.requests.length, 1, 'Cannot save defaults before loading');
   h.requests[0].resolve({ name: "God's Eye View", description: 'NO PLACE LEFT BEHIND' }); await h.settle();
   assert.equal(h.find('input', p => p.maxLength === 80).props.value, "God's Eye View");
+  assert.equal(h.find('button', p => p.type === 'submit').props.children, 'Save Name');
   h.act(() => h.find('input', p => p.maxLength === 80).props.onChange({ target: { value: 'Community <map>' } }));
   h.act(() => h.find('input', p => p.maxLength === 200).props.onChange({ target: { value: '' } }));
-  h.submit(); h.submit(); assert.equal(h.requests.length, 2);
+  h.submit(); h.submit(); assert.equal(h.requests.length, 1, 'Opening confirmation cannot save');
+  assert.equal(h.find('fieldset').props.disabled, false, 'The native modal blocks background interaction without disabling its focus-return target');
+  assert.match(h.confirmation().description, /browser tab title, loading page and viewer heading for everyone/);
+  assert.deepEqual(h.confirmation().changes, ['Name: Community <map>', 'Description: NO PLACE LEFT BEHIND (original)']);
+  h.cancel(); assert.equal(h.requests.length, 1); assert.equal(h.find('input', p => p.maxLength === 80).props.value, 'Community <map>');
+  h.submit(); const confirmation = h.confirmation(); h.act(() => { confirmation.onConfirm(); confirmation.onConfirm(); }); assert.equal(h.requests.length, 2);
   assert.equal(h.requests[1].options.method, 'PUT');
   assert.deepEqual(JSON.parse(h.requests[1].options.body), { name: 'Community <map>', description: '' });
   h.requests[1].reject(new Error('Saving unavailable')); await h.settle();
   assert.equal(h.find('input', p => p.maxLength === 80).props.value, 'Community <map>');
   assert.match(h.find('p', p => p.role === 'alert').props.children, /Saving unavailable/);
-  h.submit(); h.requests[2].resolve({ name: 'Community <map>', description: 'NO PLACE LEFT BEHIND' }); await h.settle();
+  h.submit(); h.confirm(); h.requests[2].resolve({ name: 'Community <map>', description: 'NO PLACE LEFT BEHIND' }); await h.settle();
   assert.equal(h.find('input', p => p.maxLength === 200).props.value, 'NO PLACE LEFT BEHIND');
   assert.match(h.find('p', p => p.role === 'status').props.children, /Reload the viewer/);
-  h.submit(); h.cleanup(); assert.equal(h.requests[3].options.signal.aborted, true);
+  h.submit(); h.confirm(); h.cleanup(); assert.equal(h.requests[3].options.signal.aborted, true);
   h.requests[3].resolve({ name: 'Ignored after unmount', description: '' }); await h.settle();
   assert.equal(h.find('input', p => p.maxLength === 80).props.value, 'Community <map>');
 });
@@ -117,20 +127,42 @@ test('shared schedule saves once without starting capture and preserves dirty dr
   h.change('datetime-local', '2026-10-06T11:30:00'); h.change('number', '7');
   const fresh = { start_at: '2026-10-07T16:00:00Z', interval_minutes: 9, config_version: 2 };
   h.receive({ schedule: fresh }); assert.equal(h.find('input', p => p.type === 'number').props.value, 7);
-  h.submit(); h.submit(); assert.equal(h.requests.length, 1); assert.equal(h.requests[0].path, '/api/admin/territorial/social-schedule');
+  h.submit(); h.submit(); assert.equal(h.requests.length, 0, 'Schedule confirmation precedes all writes');
+  assert.match(h.confirmation().description, /all four social networks.*Paused and completed captures remain stopped/);
+  assert.match(h.confirmation().changes[0], /2026-10-06 11:30:00/);
+  assert.equal(h.confirmation().changes[1], 'Capture interval: 7 minutes');
+  h.cancel(); assert.equal(h.requests.length, 0); assert.equal(h.find('input', p => p.type === 'number').props.value, 7);
+  h.submit(); h.receive({ schedule: { ...fresh, config_version: 3 } });
+  const confirmation = h.confirmation(); h.act(() => { confirmation.onConfirm(); confirmation.onConfirm(); });
+  assert.equal(h.requests.length, 1); assert.equal(h.requests[0].path, '/api/admin/territorial/social-schedule');
   assert.equal(h.requests[0].options.method, 'PUT');
   assert.deepEqual(JSON.parse(h.requests[0].options.body), schedulePayload('2026-10-06T11:30:00', 7, 1));
   h.requests[0].reject(Object.assign(new Error('Schedule conflict'), { status: 409 })); await h.settle();
   assert.equal(h.find('input', p => p.type === 'number').props.value, 7); assert.equal(h.updated.length, 0);
+  h.receive({ schedule: fresh });
   h.act(() => h.find('button', p => p.children === 'Discard schedule changes').props.onClick());
   assert.equal(h.find('input', p => p.type === 'datetime-local').props.value, scheduleLocalTime(fresh.start_at));
-  h.change('number', '10'); h.submit(); assert.equal(JSON.parse(h.requests[1].options.body).expected_revision, 2);
+  h.change('number', '10'); h.submit(); h.confirm(); assert.equal(JSON.parse(h.requests[1].options.body).expected_revision, 2);
   const saved = { ...fresh, interval_minutes: 10, config_version: 3 }; h.requests[1].resolve(saved); await h.settle();
   assert.deepEqual(h.updated, [saved]); h.receive({ schedule: initial }); assert.equal(h.find('input', p => p.type === 'number').props.value, 10);
   h.receive({ kind: 'sensor', schedule: saved }); h.change('number', '11'); h.submit();
+  assert.match(h.confirmation().description, /all sensor types/); h.confirm();
   assert.equal(h.requests[2].path, '/api/admin/territorial/sensor-schedule');
   h.cleanup(); assert.equal(h.requests[2].options.signal.aborted, true); h.requests[2].resolve({ ...saved, config_version: 4 }); await h.settle();
   assert.equal(h.updated.length, 1, 'Unmounted saves cannot update parent state');
+});
+
+test('shared schedules render blank disabled controls until authoritative configuration arrives', t => {
+  const h = sourceFormHarness(t, 'CaptureScheduleForm', { kind: 'social' });
+  assert.equal(h.find('form').props['aria-busy'], true);
+  assert.equal(h.find('fieldset').props.disabled, true);
+  assert.equal(h.find('input', p => p.type === 'number').props.value, '');
+  assert.equal(h.find('input', p => p.type === 'datetime-local').props.value, '');
+  assert.ok(!h.nodes().some(node => node.type === 'small' || node.type?.name === 'LoadingIndicator'));
+  h.submit(); assert.equal(h.requests.length, 0); assert.ok(!h.nodes().some(node => node.type === SettingsConfirmation));
+  h.receive({ schedule: { start_at: null, interval_minutes: 8, config_version: 4 } });
+  assert.equal(h.find('form').props['aria-busy'], false); assert.equal(h.find('fieldset').props.disabled, false);
+  assert.equal(h.find('input', p => p.type === 'number').props.value, 8);
 });
 
 test('both shared schedules place their submit beside the interval with controls disabled together', t => {
@@ -159,6 +191,23 @@ test('individual source limits apply only to Synthetic mode and never write the 
   assert.equal(h.nodes().some(node => node?.type === 'input' && node.props.max === '100'), false);
   h.submit(); assert.equal('synthetic_batch_max' in JSON.parse(h.requests[1].options.body), false);
   h.requests[1].resolve({ ...saved, mode: 'real', config_version: 9 }); await h.settle();
+});
+
+test('source controls appear immediately without inventing configuration or permitting writes before loading', t => {
+  const h = sourceFormHarness(t, 'SourceCard', { platform: 'x', timeZone: 'UTC' });
+  assert.equal(h.find('form').props['aria-busy'], true);
+  assert.equal(h.find('fieldset').props.disabled, true);
+  assert.equal(h.find('select').props.value, '');
+  assert.ok(h.nodes().filter(node => node.type === 'input' && node.props.type === 'number').every(node => node.props.value === ''));
+  assert.ok(!h.nodes().some(node => node.props?.role === 'status' || node.props?.className?.startsWith('territorial-mode')));
+  h.submit(); h.act(() => h.find('button', p => p.children === 'Run now').props.onClick()); assert.equal(h.requests.length, 0);
+  h.receive({ source: saved });
+  assert.equal(h.find('form').props['aria-busy'], false); assert.equal(h.find('fieldset').props.disabled, false);
+  assert.equal(h.find('select').props.value, 'Synthetic'); assert.equal(h.find('input', p => p.max === '100').props.value, 3);
+  assert.equal(h.find('span', p => p.role === 'status').props.title, 'Paused');
+  assert.ok(!h.nodes().some(node => node.type === 'span' && node.props.children === 'Synthetic'));
+  h.act(() => h.find('button', p => p.children === 'Run now').props.onClick());
+  assert.equal(h.requests[0].path, '/api/admin/territorial/sources/x/run');
 });
 
 test('searches accept 1000 characters and reject excess without truncating saved drafts', () => {
@@ -261,6 +310,13 @@ test('network tabs toggle configuration, retain mounted editors and follow captu
   assert.ok(!nodes(tree).some(node => node?.type?.name === 'LoadingIndicator'));
   const posts = nodes(tree).find(node => node?.type?.name === 'TerritorialPosts');
   assert.ok(posts, 'Publications load independently while source configuration is pending');
+  assert.equal(nodes(tree).filter(node => node?.props?.role === 'tab').length, 4, 'All network options render before configuration');
+  const initialSchedule = nodes(tree).find(node => node?.type?.name === 'CaptureScheduleForm');
+  assert.ok(initialSchedule); assert.equal(initialSchedule.props.schedule, undefined);
+  const initialCards = nodes(tree).filter(node => node?.type?.name === 'SourceCard');
+  assert.deepEqual(initialCards.map(node => node.props.platform), ['x', 'facebook', 'instagram', 'tiktok']);
+  assert.ok(initialCards.every(node => node.props.source === undefined));
+  assert.ok(!nodes(tree).some(node => node?.props?.['aria-label'] === 'Unavailable'));
   requests[0]({ sources, runtime: 'local_fixture', social_schedule: { start_at: null, interval_minutes: 5, config_version: 1 } }); await new Promise(setImmediate); render();
   assert.equal(nodes(tree).filter(node => node?.type?.name === 'CaptureScheduleForm').length, 1);
   assert.equal(find(props => props.kind === 'social').props.schedule.start_at, null);
@@ -340,7 +396,7 @@ test('network panels and preview retain keyboard, provenance and reduced-motion 
   assert.match(styles, /prefers-reduced-motion: reduce/);
   assert.equal((admin.match(/<TerritorialPosts\b/g) || []).length, 1);
   assert.match(admin, /aria-controls="territorial-source-forms"/);
-  assert.match(admin, /draft\.mode === 'real' && <fieldset className="territorial-credentials">[\s\S]*?<label>Credential reference[\s\S]*?<label>Update token[\s\S]*?<\/fieldset>/);
+  assert.match(admin, /draft\?\.mode === 'real' && <fieldset className="territorial-credentials">[\s\S]*?<label>Credential reference[\s\S]*?<label>Update token[\s\S]*?<\/fieldset>/);
   assert.match(posts, /new URLSearchParams\(\{ limit: String\(pageSize\)/);
   assert.doesNotMatch(posts, /Publications from|\['Attachments', 'Username', 'Display name'/);
   assert.match(posts, /timestamp\(post\.captured_at, timeZone\)/);

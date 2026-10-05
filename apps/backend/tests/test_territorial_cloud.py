@@ -38,6 +38,9 @@ class Runtime(CloudRuntime):
     def _doc(self, name):
         return copy.deepcopy(self.documents.get(name, {"revision": 0}))
 
+    def _documents(self, names):
+        return {name: self._doc(name) for name in names}
+
     def _change(self, name, change):
         old = self._doc(name)
         updated = {**change(old), "revision": old.get("revision", 0) + 1}

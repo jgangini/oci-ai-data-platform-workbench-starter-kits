@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import * as jsxRuntime from 'react/jsx-runtime';
 
-const compiled = Object.fromEntries(['TerritorialParameters', 'TerritorialOciParameters', 'LoadingIndicator'].map(name => [name, ts.transpileModule(readFileSync(new URL(`../src/${name}.tsx`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText]));
+const compiled = Object.fromEntries(['TerritorialParameters', 'TerritorialOciParameters', 'LoadingIndicator', 'SettingsConfirmation'].map(name => [name, ts.transpileModule(readFileSync(new URL(`../src/${name}.tsx`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText]));
 const provider = { id: 'google-maps', label: 'Google Maps', configured: true, fields: [{ id: 'GOOGLE_MAPS_API_KEY', label: 'API key', configured: true, secret: true, client_exposed: true }, { id: 'SECOND_KEY', label: 'Other key', configured: true, secret: true }] };
 const providerLinks = {
   'google-maps': 'https://developers.google.com/maps/documentation/tile/get-api-key', openai: 'https://platform.openai.com/api-keys',
@@ -14,6 +14,27 @@ const providerLinks = {
 };
 const providers = Object.keys(providerLinks).map((id, index) => ({ ...provider, id, label: id, configured: index % 2 === 0 }));
 const oci = { model_id: 'current', model_name: 'Current model', configured: true, available: true, region: 'us-chicago-1', voice: 'ara', voices: ['ara', 'eve'] };
+
+test('shared settings confirmation uses a native modal, labels its explanation and restores keyboard focus', t => {
+  const previousDocument = globalThis.document, previousElement = globalThis.HTMLElement;
+  let focused = 0, shown = 0, closed = 0, cancelled = 0, confirmed = 0, unique = 0;
+  globalThis.HTMLElement = class { isConnected = true; focus() { focused++; } };
+  globalThis.document = { activeElement: new HTMLElement() };
+  t.after(() => { globalThis.document = previousDocument; globalThis.HTMLElement = previousElement; });
+  const effects = [], component = {};
+  new Function('exports', 'require', compiled.SettingsConfirmation)(component, name => name === 'react/jsx-runtime' ? jsxRuntime : {
+    useRef: () => ({ current: { showModal() { shown++; }, close() { closed++; } } }), useId: () => `confirmation-${++unique}`, useEffect: callback => effects.push(callback),
+  });
+  const tree = component.SettingsConfirmation({ title: 'Save changes?', description: 'These changes apply to everyone.', changes: ['New setting'], onCancel: () => cancelled++, onConfirm: () => confirmed++ });
+  const cleanup = effects[0](); assert.equal(shown, 1);
+  const content = tree.props.children[0].props.children, buttons = tree.props.children[1].props.children;
+  assert.equal(tree.type, 'dialog'); assert.equal(tree.props['aria-labelledby'], content[0].props.id); assert.equal(tree.props['aria-describedby'], content[1].props.id);
+  assert.notEqual(content[0].props.id, content[1].props.id); assert.equal(content[1].props.children, 'These changes apply to everyone.');
+  assert.equal(buttons[0].props.autoFocus, true); assert.equal(buttons[0].props.children, 'Cancel'); assert.equal(buttons[1].props.type, 'button');
+  let prevented = false; tree.props.onCancel({ preventDefault() { prevented = true; } }); assert.equal(prevented, true); assert.equal(cancelled, 1); assert.equal(confirmed, 0);
+  buttons[1].props.onClick(); assert.equal(confirmed, 1); cleanup(); assert.equal(closed, 1); assert.equal(focused, 1);
+});
+
 function harness(t, componentName, props, tabList = null) {
   let cursor = 0, dirty = true, effects = [], tree, focused = ''; const slots = [], setters = [], requests = [], modules = {};
   const hooks = {
@@ -38,8 +59,8 @@ function harness(t, componentName, props, tabList = null) {
   return { requests, find, act, nodes: () => nodes(tree), focused: () => focused, advance: milliseconds => act(() => t.mock.timers.tick(milliseconds)), props: patch => act(() => { props = { ...props, ...patch }; dirty = true; }), settle: async () => { await new Promise(setImmediate); render(); },
     click: name => act(() => { const button = find('button', props => props.children === name); assert.ok(!button.props.disabled); button.props.onClick(); }),
     submit: () => act(() => find('form').props.onSubmit({ preventDefault() {} })),
-    confirm: () => act(() => find(function ParameterConfirmation() {}).props.onConfirm()),
-    cancel: () => act(() => find(function ParameterConfirmation() {}).props.onCancel()) };
+    confirm: () => act(() => find(function SettingsConfirmation() {}).props.onConfirm()),
+    cancel: () => act(() => find(function SettingsConfirmation() {}).props.onCancel()) };
 }
 
 test('provider replacement requires confirmation, omits blanks and never discloses the key in the confirmation', async t => {
@@ -47,7 +68,7 @@ test('provider replacement requires confirmation, omits blanks and never disclos
   assert.equal(h.find('input').props.value, ''); assert.equal(h.find('input').props.type, 'password'); assert.equal(h.find('input').props.maxLength, 512);
   h.act(() => h.find('input').props.onChange({ target: { value: 'secret-new-key' } })); h.submit();
   assert.equal(h.requests.length, 0);
-  const confirm = h.find(function ParameterConfirmation() {});
+  const confirm = h.find(function SettingsConfirmation() {});
   assert.deepEqual(confirm.props.changes, ['API key: replace value']); assert.ok(!JSON.stringify(confirm.props).includes('secret-new-key'));
   h.cancel(); assert.equal(h.find('input').props.value, 'secret-new-key'); h.submit(); h.act(() => { confirm.props.onConfirm(); confirm.props.onConfirm(); });
   assert.equal(h.requests.length, 1);

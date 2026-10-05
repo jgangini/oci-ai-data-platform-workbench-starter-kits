@@ -271,12 +271,12 @@ test('persisted failures support same-ID retry and an aborted status read cannot
 
 test('reset integration disables source actions and replaces stale publication pages without remounting source drafts', () => {
   const admin = readFileSync(new URL('../src/TerritorialAdmin.tsx', import.meta.url), 'utf8');
-  assert.match(admin, /if \(disabled \|\| controller\.current\) return/);
-  assert.match(admin, /<fieldset disabled=\{disabled \|\| !!busy\}/);
+  assert.match(admin, /if \([^\n]+disabled \|\| controller\.current\) return/);
+  assert.match(admin, /<fieldset disabled=\{[^\n]+disabled \|\| !!busy\}/);
   assert.match(admin, /<SourceCard[^>]+disabled=\{resetBlocked\}/);
   assert.doesNotMatch(admin, /<SourceCard[^>]+key=\{resetRevision\}/);
   assert.match(admin, /<TerritorialPosts key=\{resetRevision\}/);
-  assert.match(admin, /<SyntheticDataReset[^>]+runtime=\{config.runtime\}/);
+  assert.match(admin, /<SyntheticDataReset[^>]+runtime=\{config\?\.runtime \|\| ''\}/);
   assert.doesNotMatch(admin, /SyntheticDataResetStatus/);
 });
 

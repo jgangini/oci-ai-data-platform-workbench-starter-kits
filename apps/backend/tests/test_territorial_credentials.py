@@ -57,6 +57,7 @@ def test_cloud_reference_is_persisted_and_rotation_reuses_existing_credential():
     runtime = object.__new__(CloudRuntime)
     runtime.aidp_factory = Client
     runtime._doc = lambda name: copy.deepcopy(documents.get(name, {"revision": 0}))
+    runtime._documents = lambda names: {name: runtime._doc(name) for name in names}
     def change(name, mutate):
         documents[name] = {**mutate(runtime._doc(name)), "revision": documents.get(name, {}).get("revision", 0) + 1}
         return copy.deepcopy(documents[name])

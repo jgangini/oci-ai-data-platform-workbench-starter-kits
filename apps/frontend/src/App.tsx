@@ -2407,10 +2407,14 @@ function SettingsRegistrationCodeField({
   value,
   configured,
   onChange,
+  busy,
+  action,
 }: {
   value: string;
   configured: boolean;
   onChange: (value: string) => void;
+  busy: boolean;
+  action: ReactNode;
 }) {
   const inputs = useRef<Array<HTMLInputElement | null>>([]);
   const [letters = "", digits = ""] = value.split("-", 2);
@@ -2446,36 +2450,39 @@ function SettingsRegistrationCodeField({
   };
 
   return (
-    <fieldset className="registration-code settings-registration-code">
+    <fieldset className="registration-code settings-registration-code" disabled={busy} aria-busy={busy}>
       <legend>Lab registration code</legend>
-      <div
-        className="code-slots"
-        onPaste={(event) => {
-          event.preventDefault();
-          pasteCode(event.clipboardData.getData("text"));
-        }}
-      >
-        {slots.map((slot, index) => (
-          <span className="code-slot-wrap" key={index}>
-            {index === 4 && <span className="code-separator" aria-hidden="true">-</span>}
-            <input
-              ref={(element) => {
-                inputs.current[index] = element;
-              }}
-              className="code-slot"
-              aria-label={`Lab registration code character ${index + 1} of 8`}
-              aria-describedby="registration-code-settings-help"
-              autoComplete="off"
-              autoCapitalize="characters"
-              inputMode={index < 4 ? "text" : "numeric"}
-              maxLength={1}
-              value={slot}
-              onChange={(event) => setSlot(index, event.target.value)}
-              onKeyDown={(event) => handleKeyDown(index, event)}
-              onFocus={(event) => event.currentTarget.select()}
-            />
-          </span>
-        ))}
+      <div className="settings-registration-controls">
+        <div
+          className="code-slots"
+          onPaste={(event) => {
+            event.preventDefault();
+            pasteCode(event.clipboardData.getData("text"));
+          }}
+        >
+          {slots.map((slot, index) => (
+            <span className="code-slot-wrap" key={index}>
+              {index === 4 && <span className="code-separator" aria-hidden="true">-</span>}
+              <input
+                ref={(element) => {
+                  inputs.current[index] = element;
+                }}
+                className="code-slot"
+                aria-label={`Lab registration code character ${index + 1} of 8`}
+                aria-describedby="registration-code-settings-help"
+                autoComplete="off"
+                autoCapitalize="characters"
+                inputMode={index < 4 ? "text" : "numeric"}
+                maxLength={1}
+                value={slot}
+                onChange={(event) => setSlot(index, event.target.value)}
+                onKeyDown={(event) => handleKeyDown(index, event)}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            </span>
+          ))}
+        </div>
+        {action}
       </div>
       <span id="registration-code-settings-help" className="settings-help">
         {configured
@@ -2492,12 +2499,14 @@ function RegistrationAccessSettings({
   registrationCodeConfigured,
   onRegistrationCodeChange,
   onSave,
+  busy,
 }: {
   deploymentMode: "laboratory" | "production";
   registrationCode: string;
   registrationCodeConfigured: boolean;
   onRegistrationCodeChange: (value: string) => void;
   onSave: () => void;
+  busy: boolean;
 }) {
   if (deploymentMode === "production") {
     return (
@@ -2508,23 +2517,23 @@ function RegistrationAccessSettings({
   }
 
   return (
-    <>
-      <SettingsRegistrationCodeField
-        value={registrationCode}
-        configured={registrationCodeConfigured}
-        onChange={onRegistrationCodeChange}
-      />
-      <div className="settings-actions">
+    <SettingsRegistrationCodeField
+      value={registrationCode}
+      configured={registrationCodeConfigured}
+      onChange={onRegistrationCodeChange}
+      busy={busy}
+      action={
         <button
           type="button"
           className="settings-save"
           onClick={onSave}
-          disabled={!registrationCode}
+          disabled={busy || !/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)}
+          aria-haspopup="dialog"
         >
-          Save registration code
+          Save Code
         </button>
-      </div>
-    </>
+      }
+    />
   );
 }
 
@@ -2676,6 +2685,10 @@ function AdminSettings() {
   const [deploymentMode, setDeploymentMode] = useState<"laboratory" | "production">("laboratory");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
+  const [confirmRegistrationSave, setConfirmRegistrationSave] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const registrationCodeToSave = useRef<string | null>(null);
+  const settingsSaveRef = useRef(false);
   const [timeZone, setTimeZone] = useState('America/Bogota');
   const [savedTimeZone, setSavedTimeZone] = useState('America/Bogota');
   const [timeZones, setTimeZones] = useState<{ value: string; label: string }[]>([]);
@@ -2777,13 +2790,26 @@ function AdminSettings() {
     }
     setToast(`${label} copied.`);
   }
-  async function saveSettings(section: "registration" | "timezone") {
+  function requestRegistrationSave() {
+    if (settingsSaveRef.current || settingsLoading || deploymentMode !== "laboratory") return;
+    if (!/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)) {
+      setError("Enter four letters followed by four numbers.");
+      return;
+    }
     setError("");
-    const rotatesRegistrationCode = section === "registration" && Boolean(registrationCode);
+    registrationCodeToSave.current = registrationCode;
+    setConfirmRegistrationSave(true);
+  }
+  async function saveSettings(section: "registration" | "timezone", registrationCode = "") {
+    if (settingsSaveRef.current) return;
+    setError("");
+    const rotatesRegistrationCode = section === "registration";
     if (rotatesRegistrationCode && !/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)) {
       setError("Enter four letters followed by four numbers.");
       return;
     }
+    settingsSaveRef.current = true;
+    setSettingsSaving(true);
     try {
       const result = await api<AdminSettingsResponse>("/api/admin/settings", {
         method: "PUT",
@@ -2793,10 +2819,13 @@ function AdminSettings() {
         }),
       });
       applyAdminSettings(result, section);
-      if (rotatesRegistrationCode) setRegistrationCode("");
+      if (rotatesRegistrationCode) setRegistrationCode(current => current === registrationCode ? "" : current);
       setToast(section === "registration" ? "Registration code saved." : "Time zone saved.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save settings");
+    } finally {
+      settingsSaveRef.current = false;
+      setSettingsSaving(false);
     }
   }
   async function updateApplication() {
@@ -2987,7 +3016,8 @@ function AdminSettings() {
               registrationCode={registrationCode}
               registrationCodeConfigured={registrationCodeConfigured}
               onRegistrationCodeChange={setRegistrationCode}
-              onSave={() => void saveSettings("registration")}
+              onSave={requestRegistrationSave}
+              busy={settingsSaving}
             />
           </section>
           <section
@@ -3029,7 +3059,7 @@ function AdminSettings() {
             />
               <div className="settings-time-zone-controls">
                 <label className="settings-field">Display time zone<select value={timeZone} onChange={event => setTimeZone(event.target.value)}>{timeZones.map(zone => <option key={zone.value} value={zone.value}>{zone.label}</option>)}</select></label>
-                <button type="button" className="settings-save" disabled={timeZone === savedTimeZone} onClick={() => void saveSettings('timezone')}>Save time zone</button>
+                <button type="button" className="settings-save" disabled={settingsSaving || timeZone === savedTimeZone} onClick={() => void saveSettings('timezone')}>Save time zone</button>
               </div>
             </>}
           </section>
@@ -3043,6 +3073,25 @@ function AdminSettings() {
       <Toast message={toast} onDismiss={() => setToast("")} />
       {confirmGovernance && <GovernanceModuleManager onClose={() => setConfirmGovernance(false)} />}
       {confirmGodsEye && <GodsEyeModuleManager api={api} onClose={() => setConfirmGodsEye(false)} />}
+      <ConfirmModal
+        open={confirmRegistrationSave}
+        kind="question"
+        title="Save registration code?"
+        description={registrationCodeConfigured
+          ? "Replace the current registration code? The previous code will stop working for new registrations. Existing participants keep their access."
+          : "Save this code to enable participant registration? Share it only with the people you want to register for the lab."}
+        confirmLabel="Save Code"
+        onClose={() => {
+          registrationCodeToSave.current = null;
+          setConfirmRegistrationSave(false);
+        }}
+        onConfirm={() => {
+          const code = registrationCodeToSave.current;
+          registrationCodeToSave.current = null;
+          setConfirmRegistrationSave(false);
+          if (code) void saveSettings("registration", code);
+        }}
+      />
       <ConfirmModal
         open={confirmReleaseUpdate}
         kind="question"

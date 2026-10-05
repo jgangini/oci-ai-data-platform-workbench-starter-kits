@@ -55,6 +55,9 @@ class Producer(cloud.CloudRuntime):
         assert database.DOCUMENT_NAME.fullmatch(name), "Exercise the real ADB document name boundary"
         return copy.deepcopy(self.docs.get(name, {"revision": 0}))
 
+    def _documents(self, names):
+        return {name: self._doc(name) for name in names}
+
     def _change(self, name, change):
         old = self._doc(name)
         self.docs[name] = {**change(old), "revision": old.get("revision", 0) + 1}

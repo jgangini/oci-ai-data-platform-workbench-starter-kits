@@ -178,7 +178,7 @@ test("settings keep only Workbench and application details in accessible tabs", 
   assert.match(workbenchSource, /<RegistrationAccessSettings/);
   assert.doesNotMatch(applicationSource, /<RegistrationAccessSettings/);
   assert.match(source, /function RegistrationAccessSettings[\s\S]*<SettingsRegistrationCodeField/);
-  assert.match(source, /function RegistrationAccessSettings[\s\S]*>\s*Save registration code\s*</);
+  assert.match(source, /function RegistrationAccessSettings[\s\S]*>\s*Save Code\s*</);
   assert.doesNotMatch(source, /AI Data Governance Gateway|governance_gateway|JDBC|\bOKE\b/);
   assert.match(styles, /\.settings-tab\[aria-selected="true"\]/);
   assert.match(styles, /\.settings-panel\[hidden\] \{ display: none; \}/);
