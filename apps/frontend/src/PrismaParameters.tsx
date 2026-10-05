@@ -120,15 +120,18 @@ export function PrismaParameters({ api, active }: { api: PrismaApi; active: bool
   return <section className="prisma-module-content" aria-label="Parameters">
     <div className="prisma-sources-title"><h2>Power up the globe</h2></div>
     <div className="prisma-parameter-navigation">
+    <button type="button" className="secondary prisma-toolbar-button prisma-parameter-scroll" aria-label="Scroll providers left" aria-controls="prisma-provider-tabs" disabled={!scrollEdges[0]} onClick={() => { const list = tabList.current; if (list) list.scrollBy({ left: -list.clientWidth * .8 }); }}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </button>
     <div ref={tabList} id="prisma-provider-tabs" className="settings-tabs prisma-network-tabs prisma-parameter-tabs" role="tablist" aria-label="Providers" onScroll={updateScrollEdges} data-scroll-left={scrollEdges[0]} data-scroll-right={scrollEdges[1]}>{providers.map(provider => {
       const state = provider.configured === undefined ? 'Loading settings' : provider.configured ? 'Configured' : 'Not configured';
       return <button key={provider.id} ref={element => { tabs.current[provider.id] = element; }} id={`prisma-parameter-tab-${provider.id}`} className="settings-tab" type="button" role="tab"
         aria-selected={selectedId === provider.id} aria-expanded={selectedId === provider.id && !collapsed} aria-controls={`prisma-parameter-panel-${provider.id}`} tabIndex={selectedId === provider.id ? 0 : -1} onClick={() => { setCollapsed(value => selectedId === provider.id ? !value : false); setSelected(provider.id); }} onKeyDown={tabKey}>
         {provider.label}<span className={`prisma-capture-dot ${provider.configured === undefined ? 'unavailable' : provider.configured ? '' : 'unconfigured'}`} role="img" aria-label={state} title={state} /></button>;
     })}</div>
-    {[-1, 1].map((direction, index) => <button key={direction} type="button" className="secondary prisma-toolbar-button prisma-parameter-scroll" aria-label={`Scroll providers ${direction < 0 ? 'left' : 'right'}`} aria-controls="prisma-provider-tabs" disabled={!scrollEdges[index]} onClick={() => { const list = tabList.current; if (list) list.scrollBy({ left: direction * list.clientWidth * .8 }); }}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={direction < 0 ? 'm14 6-6 6 6 6' : 'm10 6 6 6-6 6'} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-    </button>)}
+    <button type="button" className="secondary prisma-toolbar-button prisma-parameter-scroll" aria-label="Scroll providers right" aria-controls="prisma-provider-tabs" disabled={!scrollEdges[1]} onClick={() => { const list = tabList.current; if (list) list.scrollBy({ left: list.clientWidth * .8 }); }}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </button>
     </div>
     {configuration?.runtime_status === 'pending' && <p role="status" className="prisma-reset-status">Provider settings are saved. Waiting for the globe service to apply them…</p>}
     {loading && !configuration && <LoadingIndicator label="Loading parameters…" />}{error && <p role="alert" className="prisma-error">{error}</p>}
