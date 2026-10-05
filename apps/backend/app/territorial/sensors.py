@@ -8,7 +8,7 @@ import random
 import re
 from datetime import datetime, timezone
 
-from .core import utc_text
+from .core import folded, utc_text
 
 # Approximate urban anchors for fictional stations, not a surveyed sensor inventory.
 CENTRES = (
@@ -62,6 +62,39 @@ SENSOR_TYPES = {
     "soil_moisture": {"unit": "%", "minimum": 0, "maximum": 100, "warning": 75, "critical": 90},
     "wind_speed": {"unit": "km/h", "minimum": 0, "maximum": 300, "warning": 40, "critical": 65},
 }
+
+
+def readings_page(snapshot, *, family=None, query="", status=None, order="desc", page=1, limit=20):
+    """Page only the sensor fields needed by the administration table."""
+    if (family is not None and family not in SENSOR_TYPES or status not in (None, "normal", "warning", "critical")
+            or order not in ("asc", "desc") or type(page) is not int or page < 1
+            or type(limit) is not int or not 1 <= limit <= 100 or not isinstance(query, str) or len(query) > 200):
+        raise ValueError("Invalid sensor reading filters")
+    def observed(reading):
+        try:
+            value = datetime.fromisoformat(reading.get("observed_at", "").replace("Z", "+00:00"))
+            return value.replace(tzinfo=value.tzinfo or timezone.utc).timestamp()
+        except (ValueError, TypeError, AttributeError, OverflowError):
+            return 0
+    latest = {}
+    for reading in snapshot.get("sensors", []):
+        if not reading.get("sensor_id") or not reading.get("id"):
+            continue
+        candidate = (observed(reading), reading)
+        previous = latest.get(reading["sensor_id"])
+        if previous is None or candidate[0] > previous[0] or candidate[0] == previous[0] and reading["id"] < previous[1]["id"]:
+            latest[reading["sensor_id"]] = candidate
+    match = folded(query.strip())
+    rows = [(stamp, row) for stamp, row in latest.values()
+            if (not family or row.get("sensor_type") == family) and (not status or row.get("status") == status)
+            and match in folded(" ".join(str(row.get(key) or "") for key in
+                ("sensor_id", "sensor_type", "department", "municipality", "locality", "status"))
+                + " " + str(row.get("sensor_type", "")).replace("_", " "))]
+    rows.sort(key=lambda item: (item[0] * (-1 if order == "desc" else 1), item[1]["id"]))
+    page = min(page, max(1, math.ceil(len(rows) / limit)))
+    fields = ("id", "sensor_id", "sensor_type", "observed_at", "department", "municipality", "locality", "value", "unit", "status")
+    return {"items": [{key: row.get(key) for key in fields} for _, row in rows[(page - 1) * limit:page * limit]],
+            "total": len(rows), "page": page, "version": snapshot.get("version")}
 
 
 def configuration(document=None, status=None):

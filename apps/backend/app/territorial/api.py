@@ -270,6 +270,14 @@ def mount_territorial(app, require_admin, require_viewer=None):
     async def sensors():
         return await invoke("sensors")
 
+    @router.get("/api/admin/territorial/sensors/readings")
+    async def sensor_readings(family: SensorType | None = None, q: str = Query(default="", max_length=200),
+                             status: Literal["normal", "warning", "critical"] | None = None,
+                             order: Literal["asc", "desc"] = "desc", page: int = Query(default=1, ge=1),
+                             limit: int = Query(default=20, ge=1, le=100)):
+        from .sensors import readings_page
+        return readings_page(await invoke("snapshot"), family=family, query=q, status=status, order=order, page=page, limit=limit)
+
     @router.put("/api/admin/territorial/sensors")
     async def update_sensors(payload: SensorUpdate):
         return await invoke("update_sensors", payload.model_dump(exclude_none=True))
@@ -337,7 +345,8 @@ def mount_territorial(app, require_admin, require_viewer=None):
         from .posts import cursor_values, page_result, search_page
         before, maximum = cursor_values(cursor, platform, app.state.session_key, q=q, sort=sort, order=order)
         page = await search_page(lambda size, before, maximum: invoke("posts", platform, size, before, maximum),
-                                 limit, before, maximum, q=q, sort=sort, order=order)
+                                 limit, before, maximum, q=q, sort=sort, order=order,
+                                 read_ordered=lambda size, before, maximum, sort, order: invoke("ordered_posts", platform, size, before, maximum, sort, order))
         return page_result(page, platform, app.state.session_key, q=q, sort=sort, order=order)
 
     @router.get("/api/admin/territorial/media/{fixture_id}/{filename}")

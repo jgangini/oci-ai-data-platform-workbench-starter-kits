@@ -475,3 +475,76 @@ test('global sensor state rejects social scope and never accepts widening a matc
   view.poll(); view.requests[1].resolve({ operation_id: pending.operation_id, status: 'completed' }); await view.settle();
   assert.equal(view.completed(), 0); assert.equal(view.state().sensor_type, 'rainfall');
 });
+
+test('an error can close without releasing controls or reopening from the same operation poll', async t => {
+  const failed = { operation_id: 'incomplete', status: 'error', stage: 'history', revision: 8, error: 'Cleanup interrupted' };
+  const view = harness(t, failed, 'aidp');
+  view.poll(); const inflight = view.requests[0];
+  view.click('Close'); assert.equal(view.modal(), false); assert.equal(view.focused(), 'origin');
+  assert.equal(view.state().status, 'error', 'Closing a popup must not release the backend or parent guard');
+  inflight.resolve({ ...failed, revision: 9 }); await view.settle();
+  view.status({ ...failed, revision: 8 }); assert.equal(view.modal(), false);
+  assert.equal(view.requests.filter(request => request.method === 'POST').length, 0);
+  view.click('Retry Synthetic reset'); assert.equal(view.modal(), true);
+  view.click('Cancel'); view.escape(); assert.equal(view.modal(), false);
+  assert.equal(view.state().operation_id, 'incomplete'); assert.equal(view.state().status, 'error');
+  view.poll(); view.requests[1].reject(new Error('Temporary status failure')); await view.settle();
+  assert.equal(view.modal(), false, 'A failed status check must not reopen a dismissed error');
+});
+
+test('confirmed cancellation closes legacy progress, rejects stale state and starts a fresh global reset only after confirmation', async t => {
+  const failed = { operation_id: 'cancelled-legacy', sensor_type: 'river_level', status: 'error', stage: 'history', revision: 8 };
+  const view = harness(t, failed, 'aidp', allSensors);
+  view.click('Retry River Level reset');
+  const staleConfirm = view.find('button', p => p.className === 'confirm-primary').props.onClick;
+  view.poll(); const inflight = view.requests[0];
+  const cancelled = { ...failed, status: 'cancelled', revision: 9, cancelled_at: '2026-10-05T18:49:41Z', replacements: { old: 'new' } };
+  view.status(cancelled);
+  assert.equal(view.modal(), false); assert.equal(view.progress(), ''); assert.equal(view.timers.size, 0);
+  assert.equal(view.completed(), 0, 'Cancellation does not claim completed deletion');
+  assert.equal(inflight.signal.aborted, true); assert.equal(view.state().cancelled_at, cancelled.cancelled_at);
+  staleConfirm(); await view.settle(); assert.equal(view.requests.length, 1);
+  inflight.resolve({ ...failed, revision: 8 }); await view.settle();
+  view.status(failed); assert.equal(view.modal(), false); assert.equal(view.state().status, 'cancelled');
+  assert.doesNotMatch(view.markup(), /Retry|progress-orbit|progressbar/);
+  view.click('Delete Synthetic sensor data'); assert.match(view.markup(), /all five sensor types/);
+  view.click('Cancel'); assert.equal(view.requests.length, 1);
+  view.click('Delete Synthetic sensor data'); view.confirm();
+  assert.equal(view.requests[1].url, '/api/admin/territorial/sensors/reset');
+  const body = JSON.parse(view.requests[1].body);
+  assert.notEqual(body.operation_id, cancelled.operation_id); assert.equal(body.confirm, true);
+});
+
+test('cancelled status is terminal on initial load and cancellation metadata alone does not release an error', t => {
+  const cancelled = { operation_id: 'cancelled', sensor_type: 'rainfall', status: 'cancelled', revision: 9, cancelled_at: '2026-10-05T18:49:41Z' };
+  const view = harness(t, cancelled, 'aidp', allSensors);
+  assert.equal(view.modal(), false); assert.equal(view.progress(), ''); assert.equal(view.timers.size, 0);
+  assert.equal(view.state().status, 'cancelled'); assert.equal(view.completed(), 0);
+  view.status({ ...cancelled, status: 'error', revision: 8 }); assert.equal(view.state().status, 'cancelled');
+});
+
+test('only a verified terminal cancellation of the same scope and current revision can stop a pending request', async t => {
+  const pending = { operation_id: 'own', sensor_type: 'river_level', status: 'pending', revision: 10 };
+  const view = harness(t, pending, 'aidp', allSensors);
+  view.poll(); const inflight = view.requests[0];
+  for (const next of [
+    { ...pending, status: 'cancelled', revision: 9 },
+    { ...pending, status: 'cancelled', revision: 11, operation_id: 'other' },
+    { ...pending, status: 'cancelled', revision: 11, sensor_type: 'all' },
+  ]) {
+    view.status(next); assert.equal(view.modal(), true); assert.equal(inflight.signal.aborted, false);
+    assert.equal(view.state().status, 'pending');
+  }
+  inflight.resolve({ ...pending, status: 'error', revision: 11, cancelled_at: '2026-10-05T18:49:41Z' }); await view.settle();
+  assert.equal(view.modal(), true); assert.equal(view.state().status, 'error');
+  view.escape(); assert.equal(view.modal(), false); assert.equal(view.state().status, 'error');
+});
+
+test('a cancellation received directly from status polling never offers retry of the cancelled operation', async t => {
+  const pending = { operation_id: 'own', status: 'pending', revision: 10 };
+  const view = harness(t, pending, 'aidp');
+  view.poll(); view.requests[0].resolve({ ...pending, status: 'cancelled', revision: 11 }); await view.settle();
+  assert.equal(view.modal(), false); assert.equal(view.timers.size, 0); assert.equal(view.state().status, 'cancelled');
+  view.click('Delete Synthetic data'); view.confirm();
+  assert.notEqual(JSON.parse(view.requests[1].body).operation_id, pending.operation_id);
+});

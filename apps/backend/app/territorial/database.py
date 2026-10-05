@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 
 from .core import canonical_mode
 
@@ -19,14 +20,21 @@ TABLES = (
        CONSTRAINT PRISMA_POST_STATUS CHECK (analysis_status IN ('captured','ingested','processed')))""",
     "CREATE INDEX ADMIN.PRISMA_POST_PLATFORM_SEQ ON ADMIN.PRISMA_SOCIAL_POSTS(platform,capture_seq)",
     "ALTER TABLE ADMIN.PRISMA_SOCIAL_POSTS ADD captured_at VARCHAR2(50)",
+    "ALTER TABLE ADMIN.PRISMA_SOCIAL_POSTS ADD listing_published_at VARCHAR2(40)",
+    "ALTER TABLE ADMIN.PRISMA_SOCIAL_POSTS ADD listing_revision NUMBER DEFAULT 0 NOT NULL",
+    "CREATE SEQUENCE ADMIN.PRISMA_POST_LIST_REVISION ORDER",
+    "CREATE INDEX ADMIN.PRISMA_POST_PUBLICATION_SEQ ON ADMIN.PRISMA_SOCIAL_POSTS(platform,listing_published_at,capture_seq)",
 )
 
 PACKAGE_SPEC = """CREATE OR REPLACE PACKAGE ADMIN.PRISMA_CONTROL AUTHID DEFINER AS
   FUNCTION READ_DOC(p_name VARCHAR2) RETURN CLOB;
+  FUNCTION READ_DOCS(p_names CLOB) RETURN CLOB;
   PROCEDURE WRITE_DOC(p_name VARCHAR2, p_document CLOB, p_expected NUMBER);
   PROCEDURE PUBLISH(p_version VARCHAR2, p_document CLOB);
   PROCEDURE UPSERT_POSTS(p_document CLOB, p_status VARCHAR2);
   FUNCTION LIST_POSTS(p_platform VARCHAR2, p_limit NUMBER, p_before NUMBER, p_max NUMBER) RETURN CLOB;
+  FUNCTION LIST_ORDERED_POSTS(p_platform VARCHAR2, p_limit NUMBER, p_before VARCHAR2, p_id VARCHAR2,
+    p_max NUMBER, p_sort VARCHAR2, p_order VARCHAR2) RETURN CLOB;
   FUNCTION RESET_VERSION RETURN NUMBER;
   FUNCTION SENSOR_RESET_VERSION RETURN NUMBER;
   FUNCTION PURGE_SYNTHETIC_POSTS(p_operation_id VARCHAR2) RETURN NUMBER;
@@ -103,6 +111,21 @@ PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
     RETURN v_doc;
   EXCEPTION WHEN NO_DATA_FOUND THEN RETURN NULL;
   END;
+  FUNCTION READ_DOCS(p_names CLOB) RETURN CLOB IS v_result CLOB; v_count NUMBER; v_unique NUMBER;
+  BEGIN
+    IF p_names IS NULL OR SUBSTR(TRIM(p_names),1,1)!='['
+    THEN RAISE_APPLICATION_ERROR(-20002,'Invalid Territorial documents'); END IF;
+    SELECT COUNT(*),COUNT(DISTINCT name) INTO v_count,v_unique
+      FROM JSON_TABLE(p_names,'$[*]' COLUMNS(name VARCHAR2(100) PATH '$' ERROR ON ERROR));
+    IF v_count<1 OR v_count>32 OR v_count!=v_unique
+    THEN RAISE_APPLICATION_ERROR(-20002,'Invalid Territorial documents'); END IF;
+    FOR item IN (SELECT name FROM JSON_TABLE(p_names,'$[*]' COLUMNS(name VARCHAR2(100) PATH '$' ERROR ON ERROR)))
+    LOOP valid_name(item.name); END LOOP;
+    SELECT COALESCE(JSON_OBJECTAGG(KEY d.name VALUE d.payload FORMAT JSON RETURNING CLOB),TO_CLOB('{}')) INTO v_result
+      FROM ADMIN.PRISMA_CONTROL_DOCS d JOIN
+        JSON_TABLE(p_names,'$[*]' COLUMNS(name VARCHAR2(100) PATH '$' ERROR ON ERROR)) n ON d.name=n.name;
+    RETURN v_result;
+  END;
   PROCEDURE WRITE_DOC(p_name VARCHAR2, p_document CLOB, p_expected NUMBER) IS v_revision NUMBER;
   BEGIN
     valid_name(p_name);
@@ -128,16 +151,21 @@ PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
         post_key VARCHAR2(200) PATH '$.id' ERROR ON ERROR,
         platform VARCHAR2(50) PATH '$.platform' ERROR ON ERROR,
         published_at VARCHAR2(50) PATH '$.created_at' ERROR ON ERROR,
+        listing_published_at VARCHAR2(40) PATH '$.listing_published_at' NULL ON ERROR,
+        listing_ready VARCHAR2(5) EXISTS PATH '$.listing_published_at',
         captured_at VARCHAR2(50) PATH '$.captured_at' NULL ON ERROR,
         payload CLOB FORMAT JSON PATH '$' ERROR ON ERROR)) j
     ) source ON (target.post_key=source.post_key)
     WHEN MATCHED THEN UPDATE SET target.payload=source.payload, target.analysis_status=p_status,
+      target.listing_published_at=CASE WHEN source.listing_ready='true' THEN source.listing_published_at ELSE '?' END,
+      target.listing_revision=ADMIN.PRISMA_POST_LIST_REVISION.NEXTVAL,
       target.captured_at=COALESCE(target.captured_at,
         CASE WHEN target.analysis_status='captured' THEN JSON_VALUE(target.payload,'$.ingested_at') END,source.captured_at)
       WHERE CASE p_status WHEN 'processed' THEN 3 WHEN 'ingested' THEN 2 ELSE 1 END >
             CASE target.analysis_status WHEN 'processed' THEN 3 WHEN 'ingested' THEN 2 ELSE 1 END
-    WHEN NOT MATCHED THEN INSERT(post_key,platform,published_at,analysis_status,payload,captured_at)
-      VALUES(source.post_key,source.platform,source.published_at,p_status,source.payload,source.captured_at);
+    WHEN NOT MATCHED THEN INSERT(post_key,platform,published_at,analysis_status,payload,captured_at,listing_published_at,listing_revision)
+      VALUES(source.post_key,source.platform,source.published_at,p_status,source.payload,source.captured_at,
+        CASE WHEN source.listing_ready='true' THEN source.listing_published_at ELSE '?' END,ADMIN.PRISMA_POST_LIST_REVISION.NEXTVAL);
     -- A VM capture may arrive after ingestion; fill its timestamp without replacing enriched content or status.
     MERGE INTO ADMIN.PRISMA_SOCIAL_POSTS target USING (
       SELECT j.* FROM JSON_TABLE(p_document, '$[*]' COLUMNS (
@@ -171,6 +199,46 @@ PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
         ORDER BY capture_seq DESC FETCH FIRST v_fetch ROWS ONLY);
     SELECT JSON_OBJECT('items' VALUE v_items FORMAT JSON,'max_seq' VALUE v_max,
       'total' VALUE v_total RETURNING CLOB) INTO v_result FROM DUAL;
+    RETURN v_result;
+  END;
+  FUNCTION LIST_ORDERED_POSTS(p_platform VARCHAR2, p_limit NUMBER, p_before VARCHAR2, p_id VARCHAR2,
+    p_max NUMBER, p_sort VARCHAR2, p_order VARCHAR2) RETURN CLOB
+  IS v_max NUMBER; v_result CLOB; v_fetch NUMBER;
+  BEGIN
+    IF (p_platform IS NOT NULL AND p_platform NOT IN ('x','facebook','instagram','tiktok'))
+       OR p_limit IS NULL OR p_limit<1 OR p_limit>100 OR p_limit!=TRUNC(p_limit)
+       OR (p_max IS NOT NULL AND (p_max<0 OR p_max!=TRUNC(p_max)))
+       OR p_sort IS NULL OR p_sort NOT IN ('captured_at','published_at')
+       OR p_order IS NULL OR p_order NOT IN ('asc','desc')
+       OR (p_before IS NULL AND p_id IS NOT NULL) OR (p_before IS NOT NULL AND p_id IS NULL)
+    THEN RAISE_APPLICATION_ERROR(-20002,'Invalid ordered post pagination'); END IF;
+    v_fetch := p_limit + 1;
+    SELECT COALESCE(p_max,MAX(capture_seq),0) INTO v_max FROM ADMIN.PRISMA_SOCIAL_POSTS
+      WHERE platform IN ('x','facebook','instagram','tiktok') AND (p_platform IS NULL OR platform=p_platform);
+    WITH candidates AS (
+      SELECT p.*,CASE WHEN p_sort='captured_at' THEN LPAD(TO_CHAR(capture_seq,'FM99999999999999999999'),20,'0')
+        ELSE COALESCE(listing_published_at,CASE WHEN p_order='asc' THEN '~' ELSE '!' END) END sort_key
+      FROM ADMIN.PRISMA_SOCIAL_POSTS p WHERE platform IN ('x','facebook','instagram','tiktok')
+        AND (p_platform IS NULL OR platform=p_platform) AND capture_seq<=v_max
+    )
+    SELECT JSON_OBJECT('max_seq' VALUE v_max,'total' VALUE (SELECT COUNT(*) FROM candidates),
+      'listing_revision' VALUE (SELECT COALESCE(SUM(listing_revision),0) FROM candidates),
+      'projection_pending' VALUE (SELECT COUNT(*) FROM candidates WHERE listing_revision=0 OR listing_published_at='?'),
+      'items' VALUE (SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT('payload' VALUE payload FORMAT JSON,
+      'capture_seq' VALUE capture_seq,'analysis_status' VALUE analysis_status,
+      'captured_at' VALUE COALESCE(captured_at,CASE WHEN analysis_status='captured' THEN JSON_VALUE(payload,'$.ingested_at') END)
+      RETURNING CLOB) ORDER BY ordinal RETURNING CLOB),TO_CLOB('[]')) FROM (
+      SELECT page_rows.*,ROW_NUMBER() OVER (ORDER BY
+        CASE WHEN p_order='asc' THEN sort_key END ASC,CASE WHEN p_order='desc' THEN sort_key END DESC,
+        CASE WHEN p_order='asc' THEN NLSSORT(post_key,'NLS_SORT=BINARY') END ASC,
+        CASE WHEN p_order='desc' THEN NLSSORT(post_key,'NLS_SORT=BINARY') END DESC) ordinal FROM (
+        SELECT candidates.* FROM candidates WHERE p_before IS NULL
+          OR (p_order='asc' AND (sort_key>p_before OR (sort_key=p_before AND NLSSORT(post_key,'NLS_SORT=BINARY')>NLSSORT(p_id,'NLS_SORT=BINARY'))))
+          OR (p_order='desc' AND (sort_key<p_before OR (sort_key=p_before AND NLSSORT(post_key,'NLS_SORT=BINARY')<NLSSORT(p_id,'NLS_SORT=BINARY'))))
+        ORDER BY CASE WHEN p_order='asc' THEN sort_key END ASC,CASE WHEN p_order='desc' THEN sort_key END DESC,
+          CASE WHEN p_order='asc' THEN NLSSORT(post_key,'NLS_SORT=BINARY') END ASC,
+          CASE WHEN p_order='desc' THEN NLSSORT(post_key,'NLS_SORT=BINARY') END DESC FETCH FIRST v_fetch ROWS ONLY
+      ) page_rows)) FORMAT JSON RETURNING CLOB) INTO v_result FROM DUAL;
     RETURN v_result;
   END;
   PROCEDURE PUBLISH(p_version VARCHAR2, p_document CLOB) IS v_old CLOB; v_version VARCHAR2(100);
@@ -231,8 +299,25 @@ def install_schema(connection):
     cursor.execute("SELECT COUNT(*) FROM ALL_ERRORS WHERE OWNER='ADMIN' AND NAME='PRISMA_CONTROL'")
     if cursor.fetchone()[0]:
         raise RuntimeError("Territorial database package compilation failed")
+    # Existing rows are normalized once during installation, never by a listing GET.
+    cursor.execute("SELECT post_key,payload FROM ADMIN.PRISMA_SOCIAL_POSTS WHERE listing_revision=0 OR listing_published_at='?'")
+    for key, payload in cursor.fetchall():
+        document = json.loads(payload.read() if hasattr(payload, "read") else payload)
+        connection.cursor().execute("UPDATE ADMIN.PRISMA_SOCIAL_POSTS SET listing_published_at=:published, "
+            "listing_revision=ADMIN.PRISMA_POST_LIST_REVISION.NEXTVAL WHERE post_key=:key AND (listing_revision=0 OR listing_published_at='?')",
+            published=published_time(document.get("created_at")), key=key)
     cursor.execute("GRANT EXECUTE ON ADMIN.PRISMA_CONTROL TO AIDP_LAB_OPERATOR")
     connection.commit()
+
+
+def published_time(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds") if parsed.tzinfo is not None else None
+    except (ValueError, OverflowError):
+        return None
 
 
 def read_document(connection, name: str) -> dict:
@@ -245,6 +330,28 @@ def read_document(connection, name: str) -> dict:
     if not isinstance(document, dict) or type(document.get("revision")) is not int or document["revision"] < 0:
         raise ValueError("Invalid Territorial document revision")
     return document
+
+
+def read_documents(connection, names) -> dict:
+    import oracledb
+    names = tuple(names)
+    if not names or len(names) > 32 or len(set(names)) != len(names):
+        raise ValueError("Invalid Territorial document batch")
+    for name in names:
+        _valid_name(name)
+    try:
+        result = connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.READ_DOCS", oracledb.DB_TYPE_CLOB, [json.dumps(names)])
+    except oracledb.DatabaseError as exc:
+        message = str(exc)
+        if "PLS-00302" not in message or "READ_DOCS" not in message:
+            raise
+        return {name: read_document(connection, name) for name in names}
+    documents = json.loads(result.read() if hasattr(result, "read") else result)
+    if (not isinstance(documents, dict) or set(documents) - set(names)
+            or any(not isinstance(doc, dict) or type(doc.get("revision")) is not int or doc["revision"] < 0
+                   for doc in documents.values())):
+        raise ValueError("Invalid Territorial document batch response")
+    return {name: documents.get(name, {"revision": 0}) for name in names}
 
 
 def _valid_name(name):
@@ -336,6 +443,7 @@ def upsert_posts(connection, records, analysis_status, ingested_at=None, batch_k
                 or not re.fullmatch(r"[a-z][a-z0-9_]{0,49}", record["platform"])):
             raise ValueError("Invalid post projection identity")
         document = {**record, "id": key}
+        document["listing_published_at"] = published_time(record.get("created_at"))
         captured_at = record.get("captured_at") or (ingested_at if analysis_status == "captured" else None)
         if captured_at is None and record.get("mode") == "real":
             captured_at = record.get("observed_at")
@@ -371,3 +479,31 @@ def query_posts(connection, platform, limit, before_seq=None, max_seq=None):
               "captured_at": item.get("captured_at") or item["payload"].get("captured_at")}
              for item in document["items"][:limit]]
     return {**document, "items": items, "next_seq": items[-1]["capture_seq"] if len(document["items"]) > limit else None}
+
+
+def query_ordered_posts(connection, platform, limit, position=None, maximum=None, sort="published_at", order="desc"):
+    import oracledb
+    if (platform is not None and platform not in ("x", "facebook", "instagram", "tiktok")
+            or type(limit) is not int or not 1 <= limit <= 100 or sort not in {"published_at", "captured_at"}
+            or order not in {"asc", "desc"} or maximum is not None and (type(maximum) is not int or maximum < 0)):
+        raise ValueError("Invalid ordered post pagination")
+    before, identity = position["key"] if position else (None, None)
+    if before is not None:
+        before = str(before).zfill(20) if sort == "captured_at" else before if before not in {"", "\uffff"} else "~" if order == "asc" else "!"
+    try:
+        result = connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.LIST_ORDERED_POSTS", oracledb.DB_TYPE_CLOB,
+                                              [platform, limit, before, identity, maximum, sort, order])
+    except Exception as exc:
+        error = exc.args[0] if exc.args else None
+        # Rolling upgrades retain the original reader until the package is installed.
+        if (getattr(error, "code", None) == 6550 and "PLS-00302" in str(error)
+                and "LIST_ORDERED_POSTS" in str(error)):
+            return None
+        raise
+    document = json.loads(result.read() if hasattr(result, "read") else result)
+    # An older producer may still write during rollout; never sort its unnormalized dates.
+    if document.get("projection_pending", 0):
+        return None
+    return {**document, "items": [{**row["payload"], "capture_seq": row["capture_seq"], "analysis_status": row["analysis_status"],
+                                  "captured_at": row.get("captured_at") or row["payload"].get("captured_at")}
+                                 for row in document["items"]]}

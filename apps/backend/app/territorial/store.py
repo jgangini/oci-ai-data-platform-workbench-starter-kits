@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from .core import SYNTHETIC_MODES, canonical_mode, PLATFORMS, SOURCE_FIELDS, build_snapshot, default_source, normalize_event, utc_text, validate_review, review_location
 from . import capture, landing
 from .core import publication_revisions
+from .database import published_time
 
 
 class TerritorialStore:
@@ -35,6 +36,13 @@ class TerritorialStore:
                     observed_at TEXT NOT NULL, payload TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS sensor_events_observed ON sensor_events(observed_at,sensor_id);
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(social_posts)")}
+            for name, kind in (("listing_published_at", "TEXT"), ("listing_revision", "INTEGER NOT NULL DEFAULT 0")):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE social_posts ADD COLUMN {name} {kind}")
+            db.execute("CREATE INDEX IF NOT EXISTS social_posts_publication_seq ON social_posts(platform,listing_published_at,capture_seq)")
+            for row in db.execute("SELECT payload FROM social_posts WHERE listing_revision=0").fetchall():
+                self._post(db, json.loads(row[0]))
             if not self._get(db, "posts_index_migrated", False):
                 for row in db.execute("SELECT payload FROM events ORDER BY rowid").fetchall():
                     self._post(db, json.loads(row[0]))
@@ -146,9 +154,12 @@ class TerritorialStore:
 
     def _post(self, db, event):
         event = {**event, "mode": canonical_mode(event["mode"])}
-        db.execute("""INSERT INTO social_posts(post_key,platform,payload,analysis_status,ingested_at)
-            VALUES (?,?,?,'processed',?) ON CONFLICT(post_key) DO UPDATE SET payload=excluded.payload""",
-            (event["id"], event["platform"], json.dumps(event, ensure_ascii=False), utc_text(self.clock())))
+        revision = db.execute("""INSERT INTO state(key,value) VALUES('posts_listing_revision','1')
+            ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1 RETURNING CAST(value AS INTEGER)""").fetchone()[0]
+        db.execute("""INSERT INTO social_posts(post_key,platform,payload,analysis_status,ingested_at,listing_published_at,listing_revision)
+            VALUES (?,?,?,'processed',?,?,?) ON CONFLICT(post_key) DO UPDATE SET payload=excluded.payload,
+            listing_published_at=excluded.listing_published_at,listing_revision=excluded.listing_revision""",
+            (event["id"], event["platform"], json.dumps(event, ensure_ascii=False), utc_text(self.clock()), published_time(event.get("created_at")), revision))
 
     def posts(self, platform, limit, before_seq=None, max_seq=None):
         if (platform is not None and platform not in PLATFORMS or type(limit) is not int or not 1 <= limit <= 100
@@ -169,6 +180,33 @@ class TerritorialStore:
                   "captured_at": row[3], "ingested_at": row[3]} for row in rows[:limit]]
         return {"items": items, "max_seq": max_seq, "total": total,
                 "next_seq": items[-1]["capture_seq"] if len(rows) > limit else None}
+
+    def ordered_posts(self, platform, limit, position=None, maximum=None, sort="published_at", order="desc"):
+        if (platform is not None and platform not in PLATFORMS or type(limit) is not int or not 1 <= limit <= 100
+                or sort not in {"published_at", "captured_at"} or order not in {"asc", "desc"}
+                or maximum is not None and (type(maximum) is not int or maximum < 0)):
+            raise ValueError("Invalid ordered post pagination")
+        before, identity = position["key"] if position else (None, None)
+        column = "capture_seq" if sort == "captured_at" else "COALESCE(listing_published_at,?)"
+        nulls = "~" if order == "asc" else "!"
+        if sort == "published_at" and before in {"", "\uffff"}:
+            before = nulls
+        direction, operator = ("ASC", ">") if order == "asc" else ("DESC", "<")
+        with self.connection() as db:
+            db.execute("BEGIN")
+            if maximum is None:
+                maximum = db.execute("SELECT COALESCE(MAX(capture_seq),0) FROM social_posts "
+                    "WHERE platform IN ('x','facebook','instagram','tiktok') AND (? IS NULL OR platform=?)", (platform, platform)).fetchone()[0]
+            scoped = "platform IN ('x','facebook','instagram','tiktok') AND (? IS NULL OR platform=?) AND capture_seq<=?"
+            total, revision = db.execute(f"SELECT COUNT(*),COALESCE(SUM(listing_revision),0) FROM social_posts WHERE {scoped}", (platform, platform, maximum)).fetchone()
+            rows = db.execute(f"""SELECT capture_seq,payload,analysis_status,ingested_at FROM (
+                SELECT *,{column} AS sort_key FROM social_posts WHERE {scoped})
+                WHERE (? IS NULL OR sort_key {operator} ? OR (sort_key=? AND post_key {operator} ?))
+                ORDER BY sort_key {direction},post_key {direction} LIMIT ?""",
+                ((*([nulls] if sort == "published_at" else []), platform, platform, maximum, before, before, before, identity, limit + 1))).fetchall()
+        return {"max_seq": maximum, "total": total, "listing_revision": revision,
+                "items": [{"capture_seq": row[0], "payload": json.loads(row[1]), "analysis_status": row[2],
+                           "captured_at": row[3], "ingested_at": row[3]} for row in rows]}
 
     def _revision(self, db):
         value = self._get(db, "publication", {"revision": 0})
@@ -196,7 +234,8 @@ class TerritorialStore:
             return {}
         if state.get("status") == "completed":
             state["stage"] = "completed"
-        return {key: state[key] for key in ("operation_id", "status", "stage", "counts", "version", "error") if key in state}
+        return {key: state[key] for key in ("operation_id", "status", "stage", "counts", "version", "error",
+                                          "replacements", "revision", "completed_at", "cancelled_at") if key in state}
 
     def ensure_synthetic_capture(self, db=None) -> None:
         state = self._get(db, "synthetic_reset", {}) if db is not None else self.synthetic_reset_status()
@@ -210,7 +249,7 @@ class TerritorialStore:
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             saved = self._get(db, "synthetic_reset", {})
-            from .synthetic_reset import check_scope
+            from .synthetic_reset import check_scope, operation_history
             check_scope(saved, operation_id)
             if saved.get("operation_id") == operation_id and saved.get("status") == "completed":
                 return saved
@@ -219,8 +258,7 @@ class TerritorialStore:
             if saved.get("operation_id") != operation_id and saved.get("status") in {"pending", "error"}:
                 raise HTTPException(409, "A synthetic reset is unfinished; retry its operation ID")
             state = saved if saved.get("operation_id") == operation_id else {
-                "operation_id": operation_id, "counts": {}, "stage": "landing", "completed_ids": saved.get("completed_ids", []),
-                "operation_scopes": saved.get("operation_scopes", {})}
+                **operation_history(saved), "operation_id": operation_id, "counts": {}, "stage": "landing"}
             state.update(status="pending")
             state.pop("error", None)
             controls = self._get(db, "capture_controls", {})

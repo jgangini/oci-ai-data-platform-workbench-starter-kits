@@ -8,28 +8,49 @@ const compiled = ts.transpileModule(readFileSync(new URL('../src/TerritorialSens
 const families = ['river_level', 'rainfall', 'temperature', 'soil_moisture', 'wind_speed'];
 const saved = { sensor_type: 'river_level', config_version: 1, mode: 'Synthetic', is_simulated: true, interval_minutes: 5, sensor_count: 800, capture_running: false };
 const configuration = (overrides = {}) => ({ configs: families.map(sensor_type => ({ ...saved, sensor_type, ...overrides[sensor_type] })), sensor_schedule: { start_at: null, interval_minutes: 5, config_version: 1 }, runtime: 'local_fixture' });
-function harness(t) {
-  let cursor = 0, dirty = true, effects = [], tree; const slots = [], requests = [], timers = new Set(); const previous = globalThis.window;
+function harness(t, active = true) {
+  let cursor = 0, dirty = true, effects = [], tree; const slots = [], requests = [], timers = new Set(), listeners = new Map(); const previous = globalThis.window, previousDocument = globalThis.document;
   globalThis.window = { setInterval(callback) { timers.add(callback); return callback; }, clearInterval(callback) { timers.delete(callback); } };
+  globalThis.document = { hidden: false, addEventListener(name, callback) { listeners.set(name, callback); }, removeEventListener(name) { listeners.delete(name); } };
   const hooks = {
     useState(initial) { const id = cursor++; if (!(id in slots)) slots[id] = initial; return [slots[id], value => { const next = typeof value === 'function' ? value(slots[id]) : value; dirty ||= !Object.is(slots[id], next); slots[id] = next; }]; },
     useRef(initial) { const id = cursor++; return slots[id] ||= { current: initial }; },
     useEffect(callback, deps) { const id = cursor++, old = slots[id]; if (!old || deps.some((value, index) => value !== old.deps[index])) effects.push(() => { old?.cleanup?.(); slots[id] = { deps, cleanup: callback() }; }); },
   };
   const component = {}; new Function('exports', 'require', compiled)(component, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === './CaptureScheduleForm' ? { CaptureScheduleForm() {} } : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './SyntheticDataReset' ? { SyntheticDataReset() {}, SyntheticDataResetStatus() {} } : name === './TerritorialSensorReadings' ? { TerritorialSensorReadings() {} } : { territorialEndpoint: '/api/admin/territorial', territorialError: error => error.message, timestamp: value => value || 'Not available' });
-  const props = { api: (path, options) => new Promise((resolve, reject) => requests.push({ path, options, resolve, reject })), timeZone: 'America/Bogota' };
+  const props = { active, api: (path, options) => new Promise((resolve, reject) => requests.push({ path, options, resolve, reject })), timeZone: 'America/Bogota' };
   function render() { for (let n = 0; dirty && n < 20; n++) { cursor = 0; dirty = false; effects = []; tree = component.TerritorialSensors(props); effects.forEach(effect => effect()); } assert.equal(dirty, false); }
   const nodes = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? nodes(child) : [])];
   const find = (type, match = () => true) => { const value = nodes(tree).find(node => (node?.type === type || node?.type?.name === type) && match(node.props)); assert.ok(value, `Missing ${type}`); return value; };
   const act = callback => { callback(); render(); };
-  t.after(() => { slots.forEach(slot => slot?.cleanup?.()); if (previous === undefined) delete globalThis.window; else globalThis.window = previous; });
+  t.after(() => { slots.forEach(slot => slot?.cleanup?.()); if (previous === undefined) delete globalThis.window; else globalThis.window = previous; if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument; });
   render();
-  return { requests, find, act, nodes: () => nodes(tree), poll: () => act(() => [...timers][0]()), settle: async () => { await new Promise(setImmediate); render(); },
+  return { requests, find, act, timers, nodes: () => nodes(tree), poll: () => act(() => [...timers][0]()), settle: async () => { await new Promise(setImmediate); render(); },
+    active: value => act(() => { props.active = value; dirty = true; }),
+    hidden: value => act(() => { document.hidden = value; listeners.get('visibilitychange')?.(); }),
     select: family => act(() => find('button', p => p.id === `territorial-sensor-tab-${family}`).props.onClick()),
     status: name => find('div', p => p.children?.[0]?.type === 'dt' && p.children[0].props.children === name).props.children[1].props.children,
     click: name => act(() => { const button = find('button', props => props.children === name); assert.ok(!button.props.disabled); button.props.onClick(); }),
     submit: () => act(() => find('form').props.onSubmit({ preventDefault() {} })) };
 }
+
+test('sensor configuration only polls while visible and preserves drafts across module switches', async t => {
+  const h = harness(t, false);
+  assert.equal(h.requests.length, 0); assert.equal(h.timers.size, 0);
+  h.active(true); h.requests[0].resolve(configuration()); await h.settle();
+  h.act(() => h.find('input', p => p.max === '5000').props.onChange({ target: { value: '700' } }));
+  h.poll(); const stale = h.requests[1];
+  h.active(false); assert.equal(stale.options.signal.aborted, true); assert.equal(h.timers.size, 0);
+  stale.resolve(configuration({ river_level: { sensor_count: 600 } })); await h.settle();
+  assert.equal(h.find('input', p => p.max === '5000').props.value, 700);
+  h.active(true); h.requests[2].resolve(configuration()); await h.settle();
+  assert.equal(h.find('input', p => p.max === '5000').props.value, 700);
+  h.hidden(true); h.poll(); assert.equal(h.requests.length, 3);
+  h.hidden(false); assert.equal(h.requests.length, 4);
+  h.hidden(false); h.poll(); assert.equal(h.requests.length, 4);
+  h.requests[3].resolve(configuration()); await h.settle();
+  assert.equal(h.find('input', p => p.max === '5000').props.value, 700);
+});
 
 test('sensor administration preserves drafts and revision, disables duplicate actions and reflects only server capture state', async t => {
   const h = harness(t); h.requests[0].resolve(configuration()); await h.settle();

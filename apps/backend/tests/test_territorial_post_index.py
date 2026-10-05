@@ -83,7 +83,7 @@ def test_schema_upgrade_tolerates_existing_capture_column_but_not_other_errors()
         calls.append(statement)
         if statement.startswith("ALTER TABLE"):
             raise Exception(SimpleNamespace(code=1430))
-    connection = SimpleNamespace(cursor=lambda: SimpleNamespace(execute=execute, fetchone=lambda: [0]), commit=lambda: calls.append("commit"))
+    connection = SimpleNamespace(cursor=lambda: SimpleNamespace(execute=execute, fetchone=lambda: [0], fetchall=lambda: []), commit=lambda: calls.append("commit"))
     database.install_schema(connection)
     assert calls[-1] == "commit" and database.PACKAGE_BODY in calls
     def denied(statement):

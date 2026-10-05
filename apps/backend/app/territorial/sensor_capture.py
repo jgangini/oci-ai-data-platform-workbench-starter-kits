@@ -300,10 +300,11 @@ def local_location(store, sensor_id, values):
     return {"sensor_id": sensor_id, **locations[sensor_id], "location_saved": True, "location_pending_publication": False}
 
 
-def cloud_configuration(runtime):
-    config = runtime._doc("configuration")
-    return _view(config.get("sensors"), runtime._doc("status_sensors"), config.get("sensor_schedule"),
-        runtime._doc("checkpoint_sensors"), time.time())
+def cloud_configuration(runtime, documents=None):
+    read = documents.__getitem__ if documents is not None else runtime._doc
+    config = read("configuration")
+    return _view(config.get("sensors"), read("status_sensors"), config.get("sensor_schedule"),
+        read("checkpoint_sensors"), time.time())
 
 
 def _cloud_migrate(runtime, current):

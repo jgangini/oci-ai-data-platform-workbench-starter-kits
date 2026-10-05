@@ -229,6 +229,9 @@ class LocalTerritorialRuntime:
     async def posts(self, platform, limit, before_seq=None, max_seq=None):
         return self.store.posts(platform, limit, before_seq, max_seq)
 
+    async def ordered_posts(self, platform, limit, position=None, maximum=None, sort="published_at", order="desc"):
+        return self.store.ordered_posts(platform, limit, position, maximum, sort, order)
+
     async def simulation(self, action: str) -> dict:
         async with self.lock:
             return self.store.control_simulation(action)

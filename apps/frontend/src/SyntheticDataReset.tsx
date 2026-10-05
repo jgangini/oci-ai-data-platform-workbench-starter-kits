@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { territorialEndpoint, territorialError, type TerritorialApi } from './territorialAdminState';
 
-export type SyntheticReset = { operation_id?: string; sensor_type?: string; status?: 'pending' | 'completed' | 'error'; stage?: string; error?: string; counts?: Record<string, number>; replacements?: Record<string, string>; revision?: number; completed_at?: string };
+export type SyntheticReset = { operation_id?: string; sensor_type?: string; status?: 'pending' | 'completed' | 'cancelled' | 'error'; stage?: string; error?: string; counts?: Record<string, number>; replacements?: Record<string, string>; revision?: number; completed_at?: string; cancelled_at?: string };
 
 const trash = <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 7h14m-9 4v6m4-6v6M9 7l.7-3h4.6l.7 3m-8.2 0 .7 13h9.2l.7-13" /></svg>;
 
 export function SyntheticDataResetStatus({ state, error, runtime, sensorLabel }: { state: SyntheticReset; error: string; runtime: string; sensorLabel?: string }) {
-  if ((!state.status || state.status === 'completed') && !error) return null;
+  if (state.status === 'cancelled' || (!state.status || state.status === 'completed') && !error) return null;
   const local = runtime === 'local_fixture', aidp = runtime === 'aidp';
   const failed = state.status === 'error' || !!error;
   const subject = sensorLabel || 'Synthetic';
@@ -51,6 +51,7 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [dismissed, setDismissed] = useState<string | null>(null);
   const current = useRef<SyntheticReset>({});
   const request = useRef<AbortController | null>(null);
   const submitting = useRef(false);
@@ -68,7 +69,7 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
     ? next.sensor_type === 'all' || !!next.sensor_type && Object.hasOwn(sensor.labels || {}, next.sensor_type)
     : (next.sensor_type || undefined) === sensor?.type;
   const progressOpen = ['pending', 'error'].includes(operation.status || '') || !!error;
-  const visible = open || progressOpen;
+  const visible = open || progressOpen && dismissed !== (operation.operation_id || '');
 
   function accept(next: SyntheticReset, error = '') {
     if (next.operation_id && (!allowedScope(next) || next.operation_id === current.current.operation_id && next.sensor_type !== current.current.sensor_type)) {
@@ -77,8 +78,10 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
       return;
     }
     if (next.operation_id === current.current.operation_id && next.revision !== undefined && current.current.revision !== undefined && next.revision < current.current.revision) return;
+    if (next.operation_id === current.current.operation_id && ['completed', 'cancelled'].includes(current.current.status || '') && next.status !== current.current.status) return;
     const completed = next.status === 'completed' && (current.current.operation_id !== next.operation_id || current.current.status !== 'completed');
-    if (next.status === 'completed' || next.status === 'pending' && !error) { confirmation.current = null; setOpen(false); }
+    if (['completed', 'cancelled'].includes(next.status || '')) error = '';
+    if (['completed', 'cancelled'].includes(next.status || '') || next.status === 'pending' && !error) { confirmation.current = null; setOpen(false); }
     current.current = next; setOperation(next); setError(error); callbacks.current.onChange(next, error);
     if (completed) callbacks.current.onComplete();
   }
@@ -87,15 +90,16 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
     else accept({ ...current.current, status: 'error', error: 'The reset could not be confirmed. Retry will resume the same request.' }, error);
   }
   useEffect(() => {
-    // A completed configuration read can resolve a stalled status request, but never another operation or scope.
-    if (status?.status === 'completed' && status.operation_id === current.current.operation_id &&
-        status.sensor_type === current.current.sensor_type && ['pending', 'error'].includes(current.current.status || '')) {
+    // A terminal configuration read can resolve a stalled request, but never another operation, scope or older revision.
+    if (status && ['completed', 'cancelled'].includes(status.status || '') && status.operation_id === current.current.operation_id &&
+        status.sensor_type === current.current.sensor_type && ['pending', 'error'].includes(current.current.status || '') &&
+        !(status.revision !== undefined && current.current.revision !== undefined && status.revision < current.current.revision)) {
       request.current?.abort(); request.current = null; submitting.current = false; setBusy(false); accept(status); return;
     }
     // A local request owns its status until verified; older source polls cannot undo it.
     if (!status?.operation_id || request.current || status.status === 'completed') return;
     if (!current.current.operation_id) accept(status);
-    else if (current.current.status === 'completed' && current.current.operation_id !== status.operation_id) void checkStatus();
+    else if (['completed', 'cancelled'].includes(current.current.status || '') && current.current.operation_id !== status.operation_id) void checkStatus();
   }, [status]);
   useEffect(() => () => request.current?.abort(), []);
   useEffect(() => {
@@ -109,7 +113,7 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
   async function checkStatus() {
     if (request.current) return;
     const controller = new AbortController(); request.current = controller;
-    const discovering = current.current.status === 'completed';
+    const discovering = ['completed', 'cancelled'].includes(current.current.status || '');
     try {
       const next = await api<SyntheticReset>(endpoint, { signal: controller.signal });
       if (!controller.signal.aborted) { if (discovering) accept(next); else verified(next); }
@@ -147,9 +151,10 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
     if (disabled || submitting.current || operation.status === 'pending' && !error) return;
     confirmation.current = active && current.current.operation_id ? { ...current.current }
       : { operation_id: crypto.randomUUID(), ...(sensor ? { sensor_type: sensor.type } : {}) };
-    setOpen(true);
+    setDismissed(null); setOpen(true);
   }
   function closeConfirmation() { confirmation.current = null; setOpen(false); }
+  function closeProgress() { setDismissed(current.current.operation_id || ''); }
   async function reset() {
     const approved = confirmation.current;
     if (!open || !approved || disabled || submitting.current) return;
@@ -157,7 +162,7 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
     submitting.current = true; setBusy(true); request.current?.abort();
     const controller = new AbortController(); request.current = controller;
     const operation_id = approved.operation_id;
-    accept({ operation_id, ...(sensor ? { sensor_type: approved.sensor_type } : {}), status: 'pending', stage: 'preparing' }); setOpen(false);
+    accept({ ...approved, status: 'pending', stage: 'preparing', error: undefined }); setOpen(false);
     try {
       const next = await api<SyntheticReset>(endpointFor(approved.sensor_type), {
         method: 'POST', signal: controller.signal, body: JSON.stringify({ operation_id, confirm: true }),
@@ -173,7 +178,7 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
   return <>
     <button type="button" className="table-action table-delete territorial-toolbar-button" aria-label={label} title={label} disabled={disabled || busy || pending} onClick={reviewReset}>{trash}</button>
     {visible && createPortal(<dialog ref={dialog} className={`${open ? 'confirm-modal confirm-delete' : 'territorial-reset-popup'} territorial-reset-dialog`} aria-label={open ? undefined : `${subject} reset`} aria-labelledby={open ? 'territorial-reset-title' : undefined} aria-describedby={open ? 'territorial-reset-description' : undefined} tabIndex={-1}
-      onCancel={event => { event.preventDefault(); if (open) closeConfirmation(); else if (!operation.status) setError(''); }}>
+      onCancel={event => { event.preventDefault(); if (open) closeConfirmation(); else if (!pending) closeProgress(); }}>
       {open ? <><div className="confirm-content"><div className="confirm-icon">{trash}</div><h2 id="territorial-reset-title">{retry ? `Retry ${subject} reset?` : sensor ? `Delete ${subject} data?` : 'Delete all Synthetic data?'}</h2>
         <p id="territorial-reset-description">{sensor ? scope === 'all'
           ? 'This pauses Synthetic capture for all five sensor types and permanently deletes their Synthetic readings, generated files and reading history. Real readings, social network data, saved sensor locations and sensor configuration are kept.'
@@ -185,8 +190,8 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
         <p>After the reset, choose Run now to start a new demonstration.</p></div>
       <footer><button ref={cancel} type="button" onClick={closeConfirmation} autoFocus>Cancel</button><button className="confirm-primary" type="button" disabled={disabled || busy} onClick={() => void reset()}>{retry ? 'Retry reset' : `Delete ${subject} data`}</button></footer></>
       : <><SyntheticDataResetStatus state={operation} error={error} runtime={runtime} sensorLabel={sensor ? subject : undefined} />
-        {!pending && <div className="territorial-reset-popup-actions">{retry ? <button type="button" disabled={disabled || busy} onClick={reviewReset}>Retry {subject} reset</button>
-          : <button type="button" onClick={() => setError('')}>Close</button>}</div>}</>}
+        {!pending && <div className="territorial-reset-popup-actions">{retry && <button type="button" disabled={disabled || busy} onClick={reviewReset}>Retry {subject} reset</button>}
+          <button type="button" onClick={closeProgress}>Close</button></div>}</>}
     </dialog>, document.body)}
   </>;
 }

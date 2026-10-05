@@ -265,9 +265,10 @@ test('capture indication has only Running and Paused while errors remain separat
 });
 
 test('network tabs toggle configuration, retain mounted editors and follow capture state while collapsed', async t => {
-  const slots = [], requests = [], timers = new Map(), listeners = new Map();
+  const slots = [], requests = [], timers = new Map(), listeners = new Map(), visibilityListeners = new Map();
   let cursor = 0, dirty = true, effects = [], tree;
-  const previousWindow = globalThis.window;
+  const previousWindow = globalThis.window, previousDocument = globalThis.document;
+  globalThis.document = { hidden: false, addEventListener(name, callback) { visibilityListeners.set(name, callback); }, removeEventListener(name) { visibilityListeners.delete(name); } };
   globalThis.window = { location: { hash: '' }, addEventListener(name, callback) { listeners.set(name, callback); }, removeEventListener(name) { listeners.delete(name); }, setInterval(callback) { timers.set(callback, callback); return callback; }, clearInterval(id) { timers.delete(id); } };
   const hooks = {
     useState(initial) {
@@ -293,7 +294,7 @@ test('network tabs toggle configuration, retain mounted editors and follow captu
     if (name === './territorial.css') return {};
     return { TerritorialPosts: () => null, SyntheticDataReset: () => null, SyntheticDataResetStatus: () => null };
   });
-  const props = { api: () => new Promise(resolve => requests.push(resolve)), viewerUrlControl: null, searchIcon: null, refreshIcon: null };
+  const props = { api: (path, options) => new Promise(resolve => requests.push(Object.assign(resolve, { signal: options.signal }))), viewerUrlControl: null, searchIcon: null, refreshIcon: null };
   function render() {
     for (let turns = 0; dirty && turns < 20; turns++) {
       dirty = false; cursor = 0; effects = []; tree = component.TerritorialAdmin(props);
@@ -305,7 +306,7 @@ test('network tabs toggle configuration, retain mounted editors and follow captu
   const find = match => { const node = nodes(tree).find(node => node?.props && match(node.props)); assert.ok(node); return node; };
   const dot = platform => find(props => props.id === `territorial-tab-${platform}`).props.children.at(-1).props;
   const sources = ['x', 'facebook', 'instagram', 'tiktok'].map((platform, index) => ({ ...saved, platform, capture_running: index < 3, capture_state: ['running', 'scheduled', 'capturing', 'paused'][index] }));
-  t.after(() => { for (const slot of slots) slot?.cleanup?.(); if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
+  t.after(() => { for (const slot of slots) slot?.cleanup?.(); if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument; });
   render();
   assert.ok(!nodes(tree).some(node => node?.type?.name === 'LoadingIndicator'));
   const posts = nodes(tree).find(node => node?.type?.name === 'TerritorialPosts');
@@ -351,11 +352,21 @@ test('network tabs toggle configuration, retain mounted editors and follow captu
   assert.equal(find(props => props.id === 'territorial-source-forms').props.hidden, true);
   globalThis.window.location.hash = '#parameters'; listeners.get('hashchange')(); render();
   assert.equal(find(props => props.children === 'Parameters').props['aria-pressed'], true);
-  assert.equal(timers.size, 1); [...timers.values()][0]();
+  assert.equal(timers.size, 0); assert.equal(visibilityListeners.size, 0);
+  assert.equal(nodes(tree).find(node => node?.type?.name === 'TerritorialPosts').props.active, false);
+  find(props => props.children === 'Social Networks').props.onClick(); render();
+  assert.equal(timers.size, 1); assert.equal(requests.length, 2, 'Returning to Social immediately refreshes configuration');
   requests[1]({ sources: sources.map(source => ({ ...source, capture_running: false, capture_state: 'paused' })), runtime: 'local_fixture' });
   await new Promise(setImmediate); render();
   assert.equal(dot('x').className, 'territorial-capture-dot paused');
   assert.equal(find(props => props.id === 'territorial-source-forms').props.hidden, true);
+  document.hidden = true; visibilityListeners.get('visibilitychange')(); [...timers.values()][0]();
+  assert.equal(requests.length, 2, 'A hidden browser tab must not poll configuration');
+  document.hidden = false; visibilityListeners.get('visibilitychange')(); assert.equal(requests.length, 3);
+  find(props => props.children === 'Sensors').props.onClick(); render();
+  assert.equal(requests[2].signal.aborted, true); assert.equal(timers.size, 0);
+  requests[2]({ sources, runtime: 'local_fixture' }); await new Promise(setImmediate); render();
+  assert.equal(dot('x').className, 'territorial-capture-dot paused', 'A late hidden-module response cannot replace configuration');
 });
 
 test('incremental polling updates processing without shifting rows or pagination', () => {
@@ -408,10 +419,11 @@ const postsCompiled = ts.transpileModule(readFileSync(new URL('../src/Territoria
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
 }).outputText;
 
-function postsHarness(t) {
-  const slots = [], requests = [], timers = new Map(), timeouts = new Map();
+function postsHarness(t, active = true) {
+  const slots = [], requests = [], timers = new Map(), timeouts = new Map(), listeners = new Map();
   let cursor = 0, dirty = true, effects = [], tree, timerId = 0, now = 0;
-  const previousWindow = globalThis.window;
+  const previousWindow = globalThis.window, previousDocument = globalThis.document;
+  globalThis.document = { hidden: false, addEventListener(name, callback) { listeners.set(name, callback); }, removeEventListener(name) { listeners.delete(name); } };
   globalThis.window = {
     setInterval(callback) { timers.set(++timerId, callback); return timerId; }, clearInterval(id) { timers.delete(id); },
     setTimeout(callback, delay) { timeouts.set(++timerId, { callback, due: now + delay }); return timerId; }, clearTimeout(id) { timeouts.delete(id); },
@@ -433,7 +445,7 @@ function postsHarness(t) {
     if (name === './LoadingIndicator') return { LoadingIndicator() {} };
     assert.equal(name, './territorialAdminState'); return exports;
   });
-  const props = { refreshKey: 0, searchIcon: null, refreshIcon: null,
+  const props = { active, refreshKey: 0, searchIcon: null, refreshIcon: null,
     api: (url, options) => new Promise((resolve, reject) => requests.push({ url, signal: options.signal, resolve, reject })) };
   function render() {
     for (let turns = 0; dirty && turns < 20; turns++) {
@@ -445,9 +457,11 @@ function postsHarness(t) {
   function nodes(value) { return [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? nodes(child) : [])]; }
   const find = (type, match = () => true) => { const node = nodes(tree).find(node => node?.type === type && match(node.props)); assert.ok(node, `Missing ${type}`); return node; };
   const act = callback => { callback(); render(); };
-  t.after(() => { for (const slot of slots) slot?.cleanup?.(); if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
+  t.after(() => { for (const slot of slots) slot?.cleanup?.(); if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument; });
   render();
-  return { requests, find, all: type => nodes(tree).filter(node => node?.type === type), rows: () => (find('tbody').props.children || []).map(row => row.key),
+  return { requests, find, timers, all: type => nodes(tree).filter(node => node?.type === type), rows: () => (find('tbody').props.children || []).map(row => row.key),
+    active: value => act(() => { props.active = value; dirty = true; }),
+    hidden: value => act(() => { document.hidden = value; listeners.get('visibilitychange')?.(); }),
     input: value => act(() => find('input').props.onChange({ target: { value } })),
     submit: () => act(() => find('form').props.onSubmit({ preventDefault() {} })),
     click: name => act(() => { const button = find('button', props => (props['aria-label'] || props.children) === name); assert.ok(!button.props.disabled, `${name} is disabled`); button.props.onClick(); }),
@@ -464,6 +478,24 @@ const postPage = (id, next_cursor = null) => ({ items: [{ id, platform: 'x', use
   next_cursor, total: 3, version: `posts-${id}` });
 const postParams = request => Object.fromEntries(new URL(request.url, 'https://example.test').searchParams);
 const defaultPostParams = { limit: '20', sort: 'published_at', order: 'desc' };
+
+test('publication polling stops for hidden modules and browser tabs and resumes without losing filters', async t => {
+  const view = postsHarness(t, false);
+  assert.equal(view.requests.length, 0); assert.equal(view.timers.size, 0);
+  view.active(true); view.requests[0].resolve(postPage('initial')); await view.settle();
+  view.input('Kennedy'); view.advance(250); view.requests[1].resolve(postPage('matched')); await view.settle();
+  view.poll(); const stale = view.requests[2];
+  view.active(false); assert.equal(stale.signal.aborted, true); assert.equal(view.timers.size, 0);
+  stale.resolve(postPage('stale')); await view.settle(); assert.deepEqual(view.rows(), ['matched']);
+  view.active(true); assert.equal(view.requests.length, 4);
+  assert.deepEqual(postParams(view.requests[3]), { ...defaultPostParams, q: 'Kennedy' });
+  view.requests[3].resolve(postPage('matched')); await view.settle();
+  view.hidden(true); view.poll(); assert.equal(view.requests.length, 4);
+  view.hidden(false); assert.equal(view.requests.length, 5, 'Returning to the browser tab refreshes immediately');
+  view.hidden(false); view.poll(); assert.equal(view.requests.length, 5, 'Returning cannot overlap requests');
+  view.requests[4].resolve(postPage('matched')); await view.settle();
+  assert.deepEqual(view.rows(), ['matched']);
+});
 
 test('publication loading belongs to its table container and clears on response or error', async t => {
   const view = postsHarness(t);

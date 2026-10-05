@@ -49,7 +49,7 @@ function PostPreview({ post, onClose, timeZone }: { post: Post; onClose: () => v
   </dialog>;
 }
 
-export function TerritorialPosts({ api, refreshKey, searchIcon, refreshIcon, timeZone = 'America/Bogota' }: { api: TerritorialApi; refreshKey: number; searchIcon: ReactNode; refreshIcon: ReactNode; timeZone?: string }) {
+export function TerritorialPosts({ api, refreshKey, searchIcon, refreshIcon, timeZone = 'America/Bogota', active = true }: { api: TerritorialApi; refreshKey: number; searchIcon: ReactNode; refreshIcon: ReactNode; timeZone?: string; active?: boolean }) {
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [pageSize, setPageSize] = useState(20);
   const [search, setSearch] = useState('');
@@ -72,10 +72,11 @@ export function TerritorialPosts({ api, refreshKey, searchIcon, refreshIcon, tim
     return () => window.clearTimeout(timer);
   }, [search, query]);
   useEffect(() => {
+    if (!active) return;
     const controller = new AbortController();
     let loading = false;
     async function load(replace: boolean) {
-      if (loading) return;
+      if (loading || document.hidden) return;
       loading = true;
       if (replace) setBusy(true);
       try {
@@ -94,8 +95,10 @@ export function TerritorialPosts({ api, refreshKey, searchIcon, refreshIcon, tim
     }
     void load(true);
     const timer = window.setInterval(() => { void load(false); }, 5000);
-    return () => { controller.abort(); window.clearInterval(timer); };
-  }, [pageSize, cursor, query, platform, order, refresh, refreshKey]);
+    const resume = () => { void load(true); };
+    document.addEventListener('visibilitychange', resume);
+    return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', resume); };
+  }, [pageSize, cursor, query, platform, order, refresh, refreshKey, active]);
   const first = page?.items.length ? (cursors.length - 1) * pageSize + 1 : 0;
   const last = page?.items.length ? first + page.items.length - 1 : 0;
   return <section className="territorial-posts" aria-label="Captured publications">

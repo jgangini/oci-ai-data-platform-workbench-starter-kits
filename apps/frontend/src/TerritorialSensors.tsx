@@ -44,9 +44,10 @@ export function TerritorialSensors({ api, timeZone, active = true, searchIcon, r
     setEditors(previous => previous[type] && (sensorDirty(previous[type]) || previous[type].saved.config_version > next.config_version) ? previous : { ...previous, [type]: { saved: next, draft: next } });
   };
   useEffect(() => {
+    if (!active) return;
     const controller = new AbortController(); let loading = false;
     const load = async () => {
-      if (loading) return;
+      if (loading || document.hidden) return;
       loading = true; const sequence = { ...revisions.current }, pending = new Set(Object.keys(mutations.current));
       try {
         const result = await api<{ configs: SensorConfig[]; runtime: string; sensor_schedule?: CaptureSchedule; reset?: SyntheticReset }>(endpoint, { signal: controller.signal });
@@ -61,9 +62,11 @@ export function TerritorialSensors({ api, timeZone, active = true, searchIcon, r
       catch (reason) { if (!controller.signal.aborted) setLoadError(territorialError(reason)); }
       finally { loading = false; }
     };
-    void load(); const timer = window.setInterval(() => void load(), 5000);
-    return () => { controller.abort(); window.clearInterval(timer); };
-  }, [api, refresh]);
+    const resume = () => { void load(); };
+    resume(); const timer = window.setInterval(resume, 5000);
+    document.addEventListener('visibilitychange', resume);
+    return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', resume); };
+  }, [api, refresh, active]);
   useEffect(() => () => { for (const controller of Object.values(mutations.current)) controller.abort(); }, []);
   function tabKey(event: KeyboardEvent<HTMLButtonElement>) {
     const offset = ['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 0;

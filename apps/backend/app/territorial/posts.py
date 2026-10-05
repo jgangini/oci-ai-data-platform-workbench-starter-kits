@@ -5,28 +5,18 @@ import hmac
 import json
 import re
 import time
-from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 from .corpus import VERSION, VERSIONS, presentation
 
 from .core import SYNTHETIC_MODES, canonical_mode
+from .database import published_time as _published_time
 
 
 def _query_key(q):
     normalized = q.strip().casefold()
     return hashlib.sha256(normalized.encode()).hexdigest() if normalized else ""
-
-
-def _published_time(value):
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds") if parsed.tzinfo is not None else None
-    except (ValueError, OverflowError):
-        return None
 
 
 def _valid_position(position, sort, order, maximum):
@@ -117,10 +107,20 @@ def _order_key(item, view, sort, order):
     return date, view["id"]
 
 
-async def search_page(read_page, limit, before_seq=None, max_seq=None, *, q="", sort="captured_at", order="desc"):
+async def search_page(read_page, limit, before_seq=None, max_seq=None, *, q="", sort="captured_at", order="desc", read_ordered=None):
     if sort not in {"captured_at", "published_at"} or order not in {"asc", "desc"}:
         raise ValueError("Unsupported publication order")
     if sort != "captured_at" or order != "desc":
+        if not q.strip() and read_ordered is not None:
+            page = await read_ordered(limit, before_seq, max_seq, sort, order)
+            if page is not None:
+                fingerprint = hashlib.sha256(json.dumps([page["max_seq"], page["total"], page["listing_revision"]]).encode()).hexdigest()
+                if before_seq and before_seq["digest"] != fingerprint:
+                    raise HTTPException(409, "This publication list changed while paging. Reload latest.")
+                items = page["items"][:limit]
+                return {**page, "items": items, "sort_digest": fingerprint,
+                        "next_seq": {"key": list(_order_key(items[-1], post_view(items[-1]), sort, order)), "digest": fingerprint}
+                        if len(page["items"]) > limit else None}
         return await _ordered_page(read_page, limit, before_seq, max_seq, q=q, sort=sort, order=order)
     query = q.strip().casefold()
     if not query:

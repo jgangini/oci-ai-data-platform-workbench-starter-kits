@@ -104,12 +104,12 @@ class DeltaLake:
                 raise ValueError("Gold publication identity mismatch")
             yield snapshot
 
-    def delete_publication(self, version):
+    def delete_publications(self, versions):
         from delta.tables import DeltaTable
         from pyspark.sql import functions as F
-        if not re.fullmatch(r"gold-[a-f0-9]{32}", version):
+        if not versions or len(versions) > 4 or any(not re.fullmatch(r"gold-[a-f0-9]{32}", version) for version in versions):
             raise ValueError("Invalid Gold publication identity")
-        DeltaTable.forName(self.spark, self.tables["gold"]).delete(F.col("id") == version)
+        DeltaTable.forName(self.spark, self.tables["gold"]).delete(F.col("id").isin(versions))
 
     def backfill_posts(self, connection):
         if read_document(connection, "runtime").get("post_index_revision") == 1:

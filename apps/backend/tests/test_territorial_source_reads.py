@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from app.territorial.cloud import CloudRuntime
 from app.territorial.core import PLATFORMS, default_source
+from app.territorial.database import read_documents
 
 
 def reader(monkeypatch, documents):
@@ -19,6 +20,10 @@ def reader(monkeypatch, documents):
             return self
 
         def callfunc(self, procedure, _return_type, args):
+            if procedure == "ADMIN.PRISMA_CONTROL.READ_DOCS":
+                names = json.loads(args[0])
+                calls.append(tuple(names))
+                return json.dumps({name: documents[name] for name in names if name in documents})
             assert procedure == "ADMIN.PRISMA_CONTROL.READ_DOC"
             calls.append(args[0])
             return json.dumps(documents[args[0]]) if args[0] in documents else None
@@ -47,8 +52,8 @@ def test_sources_share_one_connection_and_read_fresh_controls_on_each_request(mo
     }
     runtime, calls = reader(monkeypatch, documents)
     first = asyncio.run(runtime.sources())
-    expected_reads = ["connect", "configuration", *("status_" + name for name in PLATFORMS),
-        "simulation", "status_pipeline", "status_synthetic", "checkpoint_reset", "close"]
+    expected_reads = ["connect", ("configuration", *("status_" + name for name in PLATFORMS),
+        "simulation", "status_pipeline", "status_synthetic", "checkpoint_reset"), "close"]
     assert calls == expected_reads
     assert first["sources"][0]["last_received_count"] == 17
     assert first["simulation"]["elapsed_seconds"] == 25
@@ -77,4 +82,26 @@ def test_corrupt_document_closes_shared_connection_and_rejects_partial_sources(m
         asyncio.run(runtime.sources())
     assert error.value.status_code == 503
     assert isinstance(error.value.__cause__, ValueError)
-    assert calls == ["connect", "configuration", "status_x", "status_facebook", "close"]
+    assert calls == ["connect", ("configuration", *("status_" + name for name in PLATFORMS),
+        "simulation", "status_pipeline", "status_synthetic", "checkpoint_reset"), "close"]
+
+
+def test_document_batch_falls_back_only_for_an_older_package():
+    import oracledb
+    from types import SimpleNamespace
+    calls = []
+    error = "ORA-06550: PLS-00302: component 'READ_DOCS' must be declared"
+    def invoke(name, _kind, args):
+        calls.append(name)
+        if name.endswith("READ_DOCS"):
+            raise oracledb.DatabaseError(error)
+        return json.dumps({"revision": 1, "name": args[0]})
+    connection = SimpleNamespace(cursor=lambda: SimpleNamespace(callfunc=invoke))
+    result = read_documents(connection, ("configuration", "checkpoint_reset"))
+    assert result["configuration"]["revision"] == 1
+    assert calls == ["ADMIN.PRISMA_CONTROL.READ_DOCS", "ADMIN.PRISMA_CONTROL.READ_DOC", "ADMIN.PRISMA_CONTROL.READ_DOC"]
+    calls.clear()
+    error = "ORA-03113: connection lost"
+    with pytest.raises(oracledb.DatabaseError):
+        read_documents(connection, ("configuration",))
+    assert calls == ["ADMIN.PRISMA_CONTROL.READ_DOCS"]

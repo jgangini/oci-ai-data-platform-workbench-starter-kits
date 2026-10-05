@@ -89,9 +89,10 @@ export function TerritorialAdmin({ api, timeZone = 'America/Bogota', viewerUrlCo
   useEffect(() => { const navigate = () => { if (window.location.hash === '#parameters') setModule('parameters'); }; window.addEventListener('hashchange', navigate); return () => window.removeEventListener('hashchange', navigate); }, []);
   useEffect(() => { try { sessionStorage.setItem('territorial-control-network', selected); } catch { /* Storage may be disabled. */ } }, [selected]);
   useEffect(() => {
+    if (module !== 'social') return;
     const controller = new AbortController(); let loading = false;
     async function load() {
-      if (loading) return;
+      if (loading || document.hidden) return;
       loading = true;
       try {
         const result = await api<Configuration>(`${endpoint}/sources`, { signal: controller.signal });
@@ -99,9 +100,11 @@ export function TerritorialAdmin({ api, timeZone = 'America/Bogota', viewerUrlCo
       } catch (reason) { if (!controller.signal.aborted) setError(territorialError(reason)); }
       finally { loading = false; }
     }
-    void load(); const timer = window.setInterval(() => { void load(); }, 5000);
-    return () => { controller.abort(); window.clearInterval(timer); };
-  }, [refreshKey]);
+    const resume = () => { void load(); };
+    resume(); const timer = window.setInterval(resume, 5000);
+    document.addEventListener('visibilitychange', resume);
+    return () => { controller.abort(); window.clearInterval(timer); document.removeEventListener('visibilitychange', resume); };
+  }, [refreshKey, module]);
   function selectNetwork(platform: string) { setSelected(platform); setCollapsed(false); }
   function tabKey(event: KeyboardEvent<HTMLButtonElement>) {
     const offset = ['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 0;
@@ -137,7 +140,7 @@ export function TerritorialAdmin({ api, timeZone = 'America/Bogota', viewerUrlCo
       <div id="territorial-source-forms" hidden={collapsed}>{networks.map(platform => { const source = config?.sources.find(item => item.platform === platform); return <section key={platform} id={`territorial-panel-${platform}`} className="settings-panel territorial-network-panel" role="tabpanel" aria-labelledby={`territorial-tab-${platform}`} hidden={selected !== platform}>
         <SourceCard source={source} platform={platform} api={api} onUpdate={updated} timeZone={timeZone} disabled={resetBlocked} />
         {config && !source && <p>Source configuration is unavailable.</p>}</section>; })}</div>
-      <TerritorialPosts key={resetRevision} api={api} refreshKey={refreshKey} timeZone={timeZone} searchIcon={searchIcon} refreshIcon={refreshIcon} />
+      <TerritorialPosts key={resetRevision} api={api} active={module === 'social'} refreshKey={refreshKey} timeZone={timeZone} searchIcon={searchIcon} refreshIcon={refreshIcon} />
     </div><div hidden={module !== 'sensors'}><TerritorialSensors api={api} timeZone={timeZone} active={module === 'sensors'} searchIcon={searchIcon} refreshIcon={refreshIcon} /></div>
     <div hidden={module !== 'parameters'}><TerritorialParameters api={api} active={module === 'parameters'} /></div>
   </section>;

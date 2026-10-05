@@ -20,7 +20,7 @@ def state_for(state, kind):
     family(kind)
     scope = state.get("sensor_type")
     return {key: state[key] for key in ("operation_id", "sensor_type", "status", "stage", "counts", "version", "error",
-                                      "replacements", "revision", "completed_at")
+                                      "replacements", "revision", "completed_at", "cancelled_at")
             if key in state} if scope in (*sensors.SENSOR_TYPES, "all") and (kind == "all" or scope in (kind, "all")) else {}
 
 
@@ -46,9 +46,9 @@ def command(state, kind, operation_id):
         return {"operation_id": operation_id, "sensor_type": kind, "status": "completed", "stage": "completed"}
     if state.get("status") in {"pending", "error"}:
         raise HTTPException(409, "Another delete operation is unfinished; retry its original scope and operation ID")
-    return {"operation_id": operation_id, "sensor_type": kind, "status": "pending", "stage": "preparing", "ready": False,
-            "counts": {}, "completed_ids": state.get("completed_ids", []), "operation_scopes": {
-                **state.get("operation_scopes", {}), operation_id: kind}}
+    history = synthetic_reset.operation_history(state)
+    return {**history, "operation_id": operation_id, "sensor_type": kind, "status": "pending", "stage": "preparing", "ready": False,
+            "counts": {}, "operation_scopes": {**history["operation_scopes"], operation_id: kind}}
 
 
 def _validate_rows(rows, kind):
@@ -196,7 +196,7 @@ def cloud(runtime, kind, operation_id):
     except Exception:
         runtime._change("checkpoint_reset", lambda doc: {**doc, "status": "error",
             "error": "Sensor deletion could not be scheduled. Retry this operation."}
-            if doc.get("operation_id") == operation_id and doc.get("status") != "completed" else doc)
+            if doc.get("operation_id") == operation_id and doc.get("status") not in {"completed", "cancelled"} else doc)
     return state_for(runtime._doc("checkpoint_reset"), kind)
 
 
@@ -258,9 +258,10 @@ def execute(connection, objects, lake, config, now, command, publish_snapshot):
         synthetic_reset.clean_history(connection, objects, lake, config, operation, sensor_type=kind)
         database.mutate_document(connection, "checkpoint_reset", lambda doc: {**doc, "status": "completed", "stage": "completed",
             "version": snapshot["version"], "error": None, "completed_at": utc_text(now),
-            "completed_ids": list(dict.fromkeys([*doc.get("completed_ids", []), operation]))})
+            "completed_ids": list(dict.fromkeys([*doc.get("completed_ids", []), operation]))}
+            if doc.get("operation_id") == operation and doc.get("status") == "pending" else doc)
         return snapshot
     except Exception as exc:
         database.mutate_document(connection, "checkpoint_reset", lambda doc: {**doc, "status": "error", "error": type(exc).__name__}
-            if doc.get("operation_id") == operation and doc.get("status") != "completed" else doc)
+            if doc.get("operation_id") == operation and doc.get("status") not in {"completed", "cancelled"} else doc)
         raise RuntimeError("Sensor deletion is incomplete; retry the same operation") from None

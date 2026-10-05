@@ -11,6 +11,7 @@ from .core import SYNTHETIC_MODES, PLATFORMS, default_source, simulation_state, 
 
 HISTORY_PREFIX = "04_gold/prisma/snapshots/"
 VERSION = re.compile(r"gold-[a-f0-9]{32}")
+HISTORY_BATCH_BYTES = 32 * 1024 * 1024
 
 
 def encoded(value):
@@ -23,10 +24,28 @@ def _synthetic_ids(items):
 
 def check_scope(state, operation_id, sensor_type=None):
     from fastapi import HTTPException
+    if (operation_id in state.get("cancelled_ids", []) or operation_id in state.get("cancelled_operations", {})
+            or operation_id == state.get("operation_id") and state.get("status") == "cancelled"):
+        raise HTTPException(409, "This delete operation was cancelled. Confirm a new operation with a new ID.")
     known = operation_id == state.get("operation_id") or operation_id in state.get("completed_ids", [])
     scope = state.get("sensor_type") if operation_id == state.get("operation_id") else state.get("operation_scopes", {}).get(operation_id)
     if known and scope != sensor_type:
         raise HTTPException(409, "A delete operation ID cannot be reused for another scope")
+
+
+def operation_history(state):
+    """Retain cancelled receipts when the administrator confirms a different operation."""
+    history = {"completed_ids": list(state.get("completed_ids", [])),
+               "cancelled_ids": list(state.get("cancelled_ids", [])),
+               "operation_scopes": dict(state.get("operation_scopes", {})),
+               "cancelled_operations": dict(state.get("cancelled_operations", {}))}
+    if state.get("operation_id"):
+        history["operation_scopes"][state["operation_id"]] = state.get("sensor_type")
+        if state.get("status") == "cancelled":
+            identifier = state["operation_id"]
+            history["cancelled_ids"] = list(dict.fromkeys([*history["cancelled_ids"], identifier]))
+            history["cancelled_operations"][identifier] = {key: value for key, value in state.items() if key not in history}
+    return history
 
 
 def prune_publication(snapshot, sensor_type=None):
@@ -149,28 +168,55 @@ def _clean_controls(connection, removed_posts, removed_events):
     database.mutate_document(connection, "status_synthetic", lambda doc: {"status": "idle", "landing_count": 0})
 
 
-def _save_clean_history(connection, objects, lake, config, snapshot, operation_id, sensor_type=None, object_etag=None):
-    clean = prune_publication(snapshot, sensor_type)
-    if clean is None:
-        return
-    old, new = snapshot["version"], clean["version"]
-    if not VERSION.fullmatch(old):
-        raise ValueError("Invalid publication identity during synthetic reset")
-    lake.put("gold", [{"id": new, **clean}])
-    database.publish(connection, clean)
-    objects.put_object(config["namespace"], config["bucket"], HISTORY_PREFIX + new + ".json", encoded(clean), content_type="application/json")
-    # The cleanup journal survives failure between any two independent stores.
-    database.mutate_document(connection, "checkpoint_reset", lambda doc: {**doc,
-        "replacements": {**doc.get("replacements", {}), old: new},
-        "counts": {**doc.get("counts", {}), "history_rewritten": len(set(doc.get("replacements", {})) | {old})}})
+def _save_clean_history(connection, objects, lake, config, batch, operation_id, sensor_type=None):
+    replacements = {snapshot["version"]: clean["version"] for snapshot, clean, _, _ in batch}
+    def journal(doc):
+        if (doc.get("operation_id") != operation_id or doc.get("sensor_type") != sensor_type
+                or doc.get("status") != "pending" or doc.get("ready") is not True):
+            raise RuntimeError("Publication cleanup is no longer the active reset")
+        return {**doc, "replacements": {**doc.get("replacements", {}), **replacements},
+                "counts": {**doc.get("counts", {}), "history_rewritten": len(set(doc.get("replacements", {})) | replacements.keys())}}
+    journal(database.read_document(connection, "checkpoint_reset"))
+    lake.put("gold", [{"id": clean["version"], **clean} for _, clean, _, _ in batch])
+    for _, clean, body, _ in batch:
+        database.publish(connection, clean)
+        objects.put_object(config["namespace"], config["bucket"], HISTORY_PREFIX + clean["version"] + ".json", body, content_type="application/json")
+    # Every replacement exists in all three stores before one durable receipt permits old deletes.
+    database.mutate_document(connection, "checkpoint_reset", journal)
     if sensor_type is None:
-        _clean_controls(connection, _synthetic_ids(snapshot["evidence"]), _synthetic_ids(snapshot["incidents"]))
-    lake.delete_publication(old)
-    if sensor_type is None:
-        database.replace_synthetic_publication(connection, operation_id, old, new)
-    else:
-        database.replace_sensor_publication(connection, operation_id, sensor_type, old, new)
-    _delete_history_object(objects, config, snapshot, object_etag)
+        _clean_controls(connection, set().union(*(_synthetic_ids(row["evidence"]) for row, _, _, _ in batch)),
+                        set().union(*(_synthetic_ids(row["incidents"]) for row, _, _, _ in batch)))
+    lake.delete_publications(list(replacements))
+    for snapshot, clean, _, etag in batch:
+        if sensor_type is None:
+            database.replace_synthetic_publication(connection, operation_id, snapshot["version"], clean["version"])
+        else:
+            database.replace_sensor_publication(connection, operation_id, sensor_type, snapshot["version"], clean["version"])
+        _delete_history_object(objects, config, snapshot, etag)
+
+
+def _history_batches(publications, sensor_type):
+    batch, size = [], 0
+    for snapshot, etag in publications:
+        clean = prune_publication(snapshot, sensor_type)
+        if clean is None:
+            continue
+        if not VERSION.fullmatch(snapshot["version"]):
+            raise ValueError("Invalid publication identity during synthetic reset")
+        body = encoded(clean)
+        if len(body) > 64 * 1024 * 1024:
+            raise ValueError("Synthetic reset publication exceeds the 64 MiB demo limit")
+        if batch and size + len(body) > HISTORY_BATCH_BYTES:
+            yield batch
+            batch, size = [], 0
+        batch.append((snapshot, clean, body, etag))
+        size += len(body)
+        # A legacy publication above 32 MiB keeps its existing 64 MiB limit and runs alone.
+        if len(batch) == 4 or size >= HISTORY_BATCH_BYTES:
+            yield batch
+            batch, size = [], 0
+    if batch:
+        yield batch
 
 
 def _delete_history_object(objects, config, snapshot, etag=None):
@@ -208,12 +254,11 @@ def _history_objects(objects, config):
 
 def clean_history(connection, objects, lake, config, operation_id, sensor_type=None):
     # Each store is scanned: interrupted publication can exist in only one or two stores.
-    for snapshot in lake.publications():
-        _save_clean_history(connection, objects, lake, config, snapshot, operation_id, sensor_type)
-    for snapshot in database.publications(connection):
-        _save_clean_history(connection, objects, lake, config, snapshot, operation_id, sensor_type)
-    for snapshot, etag in _history_objects(objects, config):
-        _save_clean_history(connection, objects, lake, config, snapshot, operation_id, sensor_type, etag)
+    sources = (lambda: ((snapshot, None) for snapshot in lake.publications()),
+               lambda: ((snapshot, None) for snapshot in database.publications(connection)), lambda: _history_objects(objects, config))
+    for read in sources:
+        for batch in _history_batches(read(), sensor_type):
+            _save_clean_history(connection, objects, lake, config, batch, operation_id, sensor_type)
 
 
 def execute(connection, objects, lake, config, now, command, publish_snapshot):
@@ -250,9 +295,11 @@ def execute(connection, objects, lake, config, now, command, publish_snapshot):
         clean_history(connection, objects, lake, config, operation_id)
         database.mutate_document(connection, "checkpoint_reset", lambda doc: {**doc, "status": "completed", "stage": "completed",
             "version": snapshot["version"], "error": None, "completed_at": utc_text(now),
-            "completed_ids": list(dict.fromkeys([*doc.get("completed_ids", []), operation_id]))})
+            "completed_ids": list(dict.fromkeys([*doc.get("completed_ids", []), operation_id]))}
+            if doc.get("operation_id") == operation_id and doc.get("status") == "pending" else doc)
         return snapshot
     except Exception as exc:
         database.mutate_document(connection, "checkpoint_reset", lambda doc: {**doc, "status": "error",
-            "error": type(exc).__name__})
+            "error": type(exc).__name__}
+            if doc.get("operation_id") == operation_id and doc.get("status") not in {"completed", "cancelled"} else doc)
         raise RuntimeError("Synthetic reset is incomplete; retry the same operation") from None

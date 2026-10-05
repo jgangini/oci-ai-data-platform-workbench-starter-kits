@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import hashlib
 import json
 import time
@@ -15,7 +16,7 @@ from fastapi import HTTPException
 from ..autonomous import AutonomousGovernanceClient
 from .core import SYNTHETIC_MODES, canonical_mode, PLATFORMS, utc_text, default_source, simulation_state, source_migration, aidp_credential_name, validate_review, review_location
 from . import capture, landing, sensor_capture, sensors, sensor_reset
-from .database import read_document, mutate_document, upsert_posts, query_posts
+from .database import read_document, read_documents, mutate_document, upsert_posts, query_posts
 from .source_rules import check_revision, source_view, validate_rules
 from .scheduling import needs_schedule, set_schedule, submit_run, keep_streams_running
 
@@ -25,6 +26,8 @@ class CloudRuntime:
         self.settings, self.aidp_factory = settings, aidp_factory
         self.database = AutonomousGovernanceClient(settings.autonomous_runtime_file)
         self.capture_lock = threading.RLock()
+        self._snapshot_lock = threading.Lock()
+        self._snapshot_cache = (None, None)
 
     def _connect(self):
         return self.database._connect(self.database._runtime())
@@ -44,7 +47,7 @@ class CloudRuntime:
     def _documents(self, names):
         # Reuse the authenticated connection for this response; never cache live controls.
         with self._connect() as connection:
-            return {name: read_document(connection, name) for name in names}
+            return read_documents(connection, names)
 
     def _change(self, name, change):
         with self._connect() as connection:
@@ -324,6 +327,13 @@ class CloudRuntime:
                 return query_posts(connection, platform, limit, before_seq, max_seq)
         return await self._io(read)
 
+    async def ordered_posts(self, platform, limit, position=None, maximum=None, sort="published_at", order="desc"):
+        from .database import query_ordered_posts
+        def read():
+            with self._connect() as connection:
+                return query_ordered_posts(connection, platform, limit, position, maximum, sort, order)
+        return await self._io(read)
+
     def _guard_reset(self):
         if self._social_reset_status().get("status") in {"pending", "error"}:
             raise HTTPException(409, "Finish or retry the Synthetic reset before changing sources or reviews")
@@ -355,7 +365,7 @@ class CloudRuntime:
 
     def _reset_command(self, operation_id):
         current = self._doc("checkpoint_reset")
-        from .synthetic_reset import check_scope
+        from .synthetic_reset import check_scope, operation_history
         check_scope(current, operation_id)
         if operation_id in current.get("completed_ids", []):
             return {"operation_id": operation_id, "status": "completed", "stage": "completed"}
@@ -366,9 +376,8 @@ class CloudRuntime:
         if self._doc("runtime").get("synthetic_reset_version") != 2:
             raise HTTPException(501, "Update the AIDP workflow before resetting Synthetic data")
         if current.get("operation_id") != operation_id:
-            current = self._change("checkpoint_reset", lambda doc: {"operation_id": operation_id,
-                "status": "pending", "stage": "preparing", "ready": False, "counts": {}, "completed_ids": doc.get("completed_ids", []),
-                "operation_scopes": doc.get("operation_scopes", {})})
+            current = self._change("checkpoint_reset", lambda doc: {**operation_history(doc), "operation_id": operation_id,
+                "status": "pending", "stage": "preparing", "ready": False, "counts": {}})
         return current
 
     def _reset_synthetic(self, operation_id):
@@ -390,7 +399,7 @@ class CloudRuntime:
                 # A timed-out submission may already be running; retain its identity and never claim deletion succeeded.
                 self._change("checkpoint_reset", lambda doc: {**doc, "status": "error",
                     "error": "Synthetic reset could not be scheduled. Retry this operation."}
-                    if doc.get("operation_id") == operation_id and doc.get("status") != "completed" else doc)
+                    if doc.get("operation_id") == operation_id and doc.get("status") not in {"completed", "cancelled"} else doc)
             return self._doc("checkpoint_reset")
 
     async def reset_synthetic(self, operation_id):
@@ -511,8 +520,9 @@ class CloudRuntime:
                 raise result
 
     async def sensors(self):
-        config = await self._io(sensor_capture.cloud_configuration, self)
-        config = sensor_reset.annotated(config, await self._io(self._doc, "checkpoint_reset"))
+        documents = await self._io(self._documents, ("configuration", "status_sensors", "checkpoint_sensors", "checkpoint_reset"))
+        config = sensor_capture.cloud_configuration(self, documents)
+        config = sensor_reset.annotated(config, documents["checkpoint_reset"])
         return {"config": config, "configs": config["configs"], "reset": config["reset"], "sensor_schedule": config["sensor_schedule"], "runtime": "aidp"}
 
     async def update_sensors(self, values, sensor_type=None):
@@ -584,10 +594,15 @@ class CloudRuntime:
         key = str(pointer.get("snapshot_key", ""))
         if not key.startswith("04_gold/prisma/snapshots/") or ".." in key:
             raise HTTPException(503, "Invalid Territorial Control publication")
-        snapshot = fetch(key)
-        if snapshot.get("version") != pointer.get("version"):
-            raise HTTPException(503, "Incomplete Territorial Control publication")
-        return {**snapshot, "runtime": "aidp"}
+        identity = (self.settings.objectstorage_namespace, bucket, key, pointer.get("version"))
+        # ponytail: retain only one immutable publication; mutable controls and the pointer are always read afresh.
+        with self._snapshot_lock:
+            if self._snapshot_cache[0] != identity:
+                snapshot = fetch(key)
+                if snapshot.get("version") != pointer.get("version"):
+                    raise HTTPException(503, "Incomplete Territorial Control publication")
+                self._snapshot_cache = (identity, snapshot)
+            return {**deepcopy(self._snapshot_cache[1]), "runtime": "aidp"}
 
     async def snapshot(self):
         return await self._io(self._snapshot)

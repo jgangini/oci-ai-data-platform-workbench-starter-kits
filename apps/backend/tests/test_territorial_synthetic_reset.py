@@ -3,6 +3,7 @@ import copy
 import json
 import hashlib
 import threading
+from unittest.mock import MagicMock
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -35,9 +36,20 @@ class ResetLake(Lake):
     def publications(self):
         return iter(copy.deepcopy(list(self.data["gold"].values())))
 
-    def delete_publication(self, version):
-        self.log.append("delete:gold:" + version)
-        self.data["gold"].pop(version, None)
+    def delete_publications(self, versions):
+        for version in versions:
+            self.log.append("delete:gold:" + version)
+            self.data["gold"].pop(version, None)
+
+
+def history_records(state, count=5):
+    _, _, publications, lake, objects, *_, snapshot = state
+    originals = [{**snapshot, "version": "gold-" + f"{index:032x}"} for index in range(count)]
+    publications.clear()
+    publications.update({item["version"]: copy.deepcopy(item) for item in originals})
+    lake.data["gold"] = {item["version"]: {"id": item["version"], **copy.deepcopy(item)} for item in originals}
+    objects.data = {reset.HISTORY_PREFIX + item["version"] + ".json": reset.encoded(item) for item in originals}
+    return originals
 
 
 @pytest.fixture
@@ -109,6 +121,116 @@ def test_reset_progress_tracks_cleanup_and_finishes_after_history(resetting, mon
     run_reset(resetting)
     assert observed == ["draining", "landing", "delta", "database", "publishing", "history"]
     assert docs["checkpoint_reset"]["stage"] == docs["checkpoint_reset"]["status"] == "completed"
+
+
+def test_history_batches_delta_writes_and_journal_only_after_all_three_new_copies(resetting, monkeypatch):
+    _, docs, publications, lake, objects, *_ = resetting
+    originals = history_records(resetting)
+    puts, deletes = MagicMock(wraps=lake.put), MagicMock(wraps=lake.delete_publications)
+    monkeypatch.setattr(lake, "put", puts)
+    monkeypatch.setattr(lake, "delete_publications", deletes)
+    mutate = database.mutate_document
+    commits = []
+    def journal(connection, name, change):
+        if name == "checkpoint_reset":
+            next_state = change(copy.deepcopy(docs[name]))
+            for version in next_state["replacements"].values():
+                assert version in publications and version in lake.data["gold"]
+                assert json.loads(objects.data[reset.HISTORY_PREFIX + version + ".json"]) == publications[version]
+            commits.append(set(next_state["replacements"]))
+        return mutate(connection, name, change)
+    monkeypatch.setattr(database, "mutate_document", journal)
+    reset.clean_history(None, objects, lake, CONFIG, docs["checkpoint_reset"]["operation_id"])
+    assert [len(call.args[1]) for call in puts.call_args_list] == [4, 1]
+    assert [len(call.args[0]) for call in deletes.call_args_list] == [4, 1]
+    assert list(map(len, commits)) == [4, 5]
+    assert docs["checkpoint_reset"]["counts"]["history_rewritten"] == 5
+    assert not {item["version"] for item in originals}.intersection(publications)
+
+
+@pytest.mark.parametrize("phase", ["gold", "adb", "object", "journal", "delta_delete", "adb_delete", "object_delete"])
+def test_history_batch_failure_recovers_every_store_without_losing_retained_data(resetting, monkeypatch, phase):
+    _, docs, publications, lake, objects, *_ = resetting
+    originals = history_records(resetting, 4)
+    targets = {"gold": (lake, "put"), "adb": (database, "publish"), "object": (objects, "put_object"),
+               "journal": (database, "mutate_document"), "delta_delete": (lake, "delete_publications"),
+               "adb_delete": (database, "replace_synthetic_publication"), "object_delete": (objects, "delete_object")}
+    owner, name = targets[phase]
+    original = getattr(owner, name)
+    calls = 0
+    def fail(*args, **kwargs):
+        nonlocal calls
+        if phase == "journal" and args[1] != "checkpoint_reset":
+            return original(*args, **kwargs)
+        calls += 1
+        if calls == (2 if phase in {"adb", "object", "adb_delete", "object_delete"} else 1):
+            if phase == "delta_delete":
+                original(*args, **kwargs)  # The Delta commit succeeded but its acknowledgement was lost.
+            raise RuntimeError("Injected history batch failure")
+        return original(*args, **kwargs)
+    monkeypatch.setattr(owner, name, fail)
+    identifier = docs["checkpoint_reset"]["operation_id"]
+    with pytest.raises(RuntimeError, match="Injected"):
+        reset.clean_history(None, objects, lake, CONFIG, identifier)
+    for old in originals:
+        version = old["version"]
+        if phase in {"gold", "adb", "object", "journal"}:
+            assert publications[version] == old
+            assert lake.data["gold"][version] == {"id": version, **old}
+            assert json.loads(objects.data[reset.HISTORY_PREFIX + version + ".json"]) == old
+        else:
+            clean = reset.prune_publication(old)
+            new = clean["version"]
+            assert docs["checkpoint_reset"]["replacements"][version] == new
+            assert publications[new] == clean
+            assert lake.data["gold"][new] == {"id": new, **clean}
+            assert json.loads(objects.data[reset.HISTORY_PREFIX + new + ".json"]) == clean
+    monkeypatch.setattr(owner, name, original)
+    reset.clean_history(None, objects, lake, CONFIG, identifier)
+    for old in originals:
+        clean = reset.prune_publication(old)
+        assert old["version"] not in publications and old["version"] not in lake.data["gold"]
+        assert reset.HISTORY_PREFIX + old["version"] + ".json" not in objects.data
+        assert publications[clean["version"]] == clean
+        assert clean["evidence"] == [item for item in old["evidence"] if item["mode"] == "real"]
+    assert docs["checkpoint_reset"]["counts"]["history_rewritten"] == 4
+
+
+@pytest.mark.parametrize("change", [{"status": "cancelled"}, {"operation_id": "other"}, {"sensor_type": "all"}, {"ready": False}])
+@pytest.mark.parametrize("when", ["before", "journal"])
+def test_history_batch_checks_exact_pending_operation_before_writes_and_before_old_deletes(resetting, monkeypatch, change, when):
+    _, docs, publications, lake, objects, *_ = resetting
+    originals = history_records(resetting, 4)
+    identifier = docs["checkpoint_reset"]["operation_id"]
+    if when == "before":
+        docs["checkpoint_reset"].update(change)
+    else:
+        put = objects.put_object
+        def changed(*args, **kwargs):
+            put(*args, **kwargs)
+            docs["checkpoint_reset"].update(change)
+        monkeypatch.setattr(objects, "put_object", changed)
+    before = copy.deepcopy(docs["checkpoint_reset"])
+    with pytest.raises(RuntimeError, match="no longer"):
+        reset.clean_history(None, objects, lake, CONFIG, identifier)
+    assert docs["checkpoint_reset"] == {**before, **change}
+    for old in originals:
+        assert publications[old["version"]] == old
+        assert old["version"] in lake.data["gold"]
+        assert json.loads(objects.data[reset.HISTORY_PREFIX + old["version"] + ".json"]) == old
+    if when == "before":
+        assert len(publications) == len(lake.data["gold"]) == len(objects.data) == 4
+
+
+def test_history_batch_bounds_bytes_and_runs_one_large_legacy_publication_alone(resetting, monkeypatch):
+    originals = history_records(resetting, 9)
+    size = len(reset.encoded(reset.prune_publication(originals[0])))
+    monkeypatch.setattr(reset, "HISTORY_BATCH_BYTES", size * 2)
+    batches = list(reset._history_batches(((item, None) for item in originals), None))
+    assert [len(batch) for batch in batches] == [2, 2, 2, 2, 1]
+    assert all(sum(len(row[2]) for row in batch) <= size * 2 for batch in batches)
+    monkeypatch.setattr(reset, "HISTORY_BATCH_BYTES", size - 1)
+    assert all(len(batch) == 1 for batch in reset._history_batches(((item, None) for item in originals), None))
 
 
 def test_reset_purges_synthetic_everywhere_preserves_real_and_restarts_from_same_landing(resetting):
@@ -336,7 +458,7 @@ def test_history_prefetch_is_bounded_and_keeps_all_store_mutations_on_writer_thr
     objects.data = {reset.HISTORY_PREFIX + item["version"] + ".json": reset.encoded(item) for item in originals}
     original_keys = set(objects.data)
     writer = threading.get_ident()
-    for owner, name in ((lake, "put"), (lake, "delete_publication"), (database, "publish"),
+    for owner, name in ((lake, "put"), (lake, "delete_publications"), (database, "publish"),
                         (database, "mutate_document"), (database, "replace_synthetic_publication"),
                         (objects, "put_object"), (objects, "delete_object")):
         operation = getattr(owner, name)
