@@ -498,7 +498,10 @@ date and interval below Sensors applies to all families. The mode selector
 allows Synthetic only; real sensor ingestion is not implemented and the server
 rejects non-Synthetic modes rather than simulating real measurements.
 Their last/next capture, successful record count and capture delay are reported
-per family. Run now starts only the selected family; Pause preserves its readings
+per family. The map's aggregate status uses the earliest next capture among
+running families and the latest completed capture, including existing family
+intervals before a shared start date is configured.
+Run now starts only the selected family; Pause preserves its readings
 and checkpoint without stopping the other families or the permanent AIDP stream.
 Running families are limited to 5,000 configured stations in total. Existing
 shared settings are split using their original family order (4,000 across five

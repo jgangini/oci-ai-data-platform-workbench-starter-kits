@@ -16,6 +16,37 @@ def plan(start, minutes=5):
     return capture.update_schedule({}, {"expected_revision": 1, "start_at": utc_text(start), "interval_minutes": minutes})
 
 
+@pytest.mark.parametrize("paused", [False, True])
+def test_legacy_family_projection_reports_actual_due_without_changing_capture(monkeypatch, paused):
+    runtime, clock, delivered = Runtime(), [NOW], {}
+    kinds = tuple(sensors.SENSOR_TYPES)
+    config = {"by_type": {kind: {"capture_running": not (paused and index == 0),
+        "sensor_count": 1, "interval_minutes": 5} for index, kind in enumerate(kinds)}}
+    status = {"by_type": {kind: {"last_run_at": utc_text(NOW - index), "next_due": utc_text(NOW + 60 * (index + 1))}
+                         for index, kind in enumerate(kinds)}}
+    runtime.documents.update(configuration={"sensors": config}, status_sensors=status,
+        checkpoint_sensors={"by_type": {kind: {"anchor": NOW - 300 + 60 * (index + 1),
+            "next_due": NOW + 60 * (index + 1)} for index, kind in enumerate(kinds)}})
+    monkeypatch.setattr(sensor_capture.time, "time", lambda: clock[0])
+    monkeypatch.setattr(sensor_capture, "_cloud_deliver", lambda _runtime, rows: delivered.update(sensors.text_files(rows)))
+    original = copy.deepcopy(runtime.documents)
+    view = sensor_capture.cloud_configuration(runtime)
+    assert view["sensor_schedule"]["start_at"] is None
+    assert view["next_due"] == utc_text(NOW + (120 if paused else 60))
+    assert view["last_run_at"] == utc_text(NOW)
+    assert view["configs"] == list(sensors.family_configs(config, status).values())
+    assert runtime.documents == original
+    assert sensor_capture.cloud_tick(runtime) == 0 and delivered == {}
+    assert runtime.documents == original
+
+    clock[0] = NOW + 301
+    assert sensor_capture.cloud_tick(runtime) == len(kinds) - int(paused)
+    expected = {}
+    for kind in kinds[int(paused):]:
+        expected.update(sensors.text_files(sensors.generate_batch(clock[0], sensor_count=1, families=[kind])))
+    assert delivered == expected
+
+
 @pytest.mark.parametrize("force", [False, True])
 def test_future_schedule_blocks_new_sensor_batches_but_preserves_committed_pending(force):
     config = sensors.configuration({"capture_running": True, "sensor_count": 100})

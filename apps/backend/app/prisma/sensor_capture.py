@@ -25,7 +25,9 @@ def _view(config, status, schedule, checkpoint, now):
             due = cursor["pending"]["anchor"] if cursor.get("pending") else capture.schedule_at(schedule, now, cursor.get("anchor"))
             family.update(interval_minutes=result["sensor_schedule"]["interval_minutes"], next_due=utc_text(due) if family["capture_running"] else None)
         result["interval_minutes"] = result["sensor_schedule"]["interval_minutes"]
-        result["next_due"] = min((family["next_due"] for family in result["configs"] if family["next_due"]), default=None)
+    result["next_due"] = min((family["next_due"] for family in result["configs"]
+                              if family["capture_running"] and family["next_due"]), default=None)
+    result["last_run_at"] = max((family["last_run_at"] for family in result["configs"] if family["last_run_at"]), default=None)
     return result
 
 
