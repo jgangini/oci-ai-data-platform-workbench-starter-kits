@@ -296,6 +296,123 @@ def test_adb_projection_recovers_after_silver_merge_without_reclassifying(runtim
     assert projections.count("processed") == 2
 
 
+def test_later_rejection_keeps_each_valid_post_and_retries_only_the_selected_tail(runtime, monkeypatch):
+    _, docs, _, lake, _ = runtime
+    original = normalize_event(simulation_events(0)[0])
+    posts = [{**original, "id": f"x:post-{index}", "source_id": f"post-{index}"} for index in range(10)]
+    lake.put("bronze", posts)
+    calls, processed = [], []
+    monkeypatch.setattr(pipeline, "upsert_posts", lambda _db, rows, status, **_: processed.extend(
+        item["id"] for item in rows if status == "processed"))
+
+    def classify_one(rows):
+        assert len(rows) == 1
+        post = rows[0]
+        calls.append(post["id"])
+        if post["id"] == posts[3]["id"]:
+            assert processed == [item["id"] for item in posts[:3]]
+            raise ValueError("Claim evidence must quote the original post literally")
+        return [{**post, "classification_method": "validated-once"}]
+
+    result = pipeline.enrich_pending(object(), lake, classify_one, NOW, 1)
+    saved = copy.deepcopy(lake.data["silver"])
+    remaining = [item["id"] for item in posts[3:]]
+    assert len(saved) == 3 and result["pending_count"] == 7
+    assert docs["checkpoint_enrichment"]["pending_ids"] == remaining
+    assert docs["checkpoint_enrichment"]["prepared"] == []
+    assert result["last_error_reason"] == docs["checkpoint_enrichment"]["last_error_reason"] == "nonliteral_claim"
+    lake.put("bronze", [{**original, "id": "x:new-arrival", "source_id": "new-arrival"}])
+    pipeline.enrich_pending(object(), lake, lambda _: pytest.fail("Backoff must suppress model calls"), NOW + 10, 1)
+    now = result["retry_at"]
+    for attempt in range(2, 6):
+        result = pipeline.enrich_pending(object(), lake, classify_one, now, 1)
+        assert docs["checkpoint_enrichment"]["attempts"] == attempt
+        assert docs["checkpoint_enrichment"]["pending_ids"] == remaining
+        now = result["retry_at"] or now + 600
+    assert result["needs_attention"] and result["pending_count"] == 8
+    pipeline.enrich_pending(object(), lake, lambda _: pytest.fail("Open circuit must suppress model calls"), now, 1)
+    assert calls == [item["id"] for item in posts[:3]] + [posts[3]["id"]] * 5
+    # Explicit recovery keeps the selected IDs; an unrelated new arrival waits for the next batch.
+    docs["checkpoint_enrichment"].update(attempts=0, retry_at=0, circuit_open=False)
+    def recovered(rows):
+        calls.extend(item["id"] for item in rows)
+        return rows
+    result = pipeline.enrich_pending(object(), lake, recovered, now, 1)
+    assert result["pending_count"] == 1 and result["last_error_reason"] is None
+    assert processed == [item["id"] for item in posts]
+    assert all(lake.data["silver"][key] == value for key, value in saved.items())
+    assert docs["checkpoint_enrichment"]["pending_ids"] == []
+    assert docs["checkpoint_enrichment"]["last_error_reason"] is None
+    assert calls[-7:] == remaining and "x:new-arrival" not in lake.data["silver"]
+
+
+@pytest.mark.parametrize("failure_stage", ["silver", "adb", "journal_clear"])
+def test_partial_batch_crash_finishes_prepared_post_before_classifying_the_tail(runtime, monkeypatch, failure_stage):
+    _, docs, _, lake, _ = runtime
+    original = normalize_event(simulation_events(0)[0])
+    posts = [{**original, "id": f"x:post-{index}", "source_id": f"post-{index}"} for index in range(3)]
+    lake.put("bronze", posts)
+    calls, processed, failed = [], set(), False
+    original_put, original_mutate = lake.put, pipeline.mutate_document
+
+    def put(layer, rows):
+        nonlocal failed
+        if layer == "silver" and rows[0]["id"] == posts[1]["id"] and failure_stage == "silver" and not failed:
+            failed = True
+            raise RuntimeError("Injected storage boundary failure")
+        original_put(layer, rows)
+
+    def project(_db, rows, status, **_):
+        nonlocal failed
+        if status == "processed":
+            if rows[0]["id"] == posts[1]["id"] and failure_stage == "adb" and not failed:
+                failed = True
+                raise RuntimeError("Injected storage boundary failure")
+            processed.update(item["id"] for item in rows)
+
+    def mutate(db, name, change):
+        nonlocal failed
+        current = copy.deepcopy(docs.get(name, {}))
+        updated = change(current)
+        if (failure_stage == "journal_clear" and not failed and current.get("prepared") and
+                current["prepared"][0]["id"] == posts[1]["id"] and updated.get("prepared") == []):
+            failed = True
+            raise RuntimeError("Injected storage boundary failure")
+        return original_mutate(db, name, change)
+
+    def classify_one(rows):
+        assert all(key in processed for key in calls), "Finish ADB projection before the next model call"
+        calls.extend(item["id"] for item in rows)
+        return rows
+
+    monkeypatch.setattr(lake, "put", put)
+    monkeypatch.setattr(pipeline, "upsert_posts", project)
+    monkeypatch.setattr(pipeline, "mutate_document", mutate)
+    with pytest.raises(RuntimeError, match="storage boundary"):
+        pipeline.enrich_pending(object(), lake, classify_one, NOW, 1)
+    assert calls == [item["id"] for item in posts[:2]]
+    assert docs["checkpoint_enrichment"]["prepared"] == [posts[1]]
+    assert docs["checkpoint_enrichment"]["pending_ids"] == [item["id"] for item in posts[1:]]
+    lake.put("bronze", [{**original, "id": "x:new-arrival", "source_id": "new-arrival"}])
+    result = pipeline.enrich_pending(object(), lake, classify_one, NOW + 1, 1)
+    assert calls == [item["id"] for item in posts]  # The prepared post is never sent to the model twice.
+    assert processed == set(calls) and result["pending_count"] == 1
+    assert docs["checkpoint_enrichment"]["prepared"] == docs["checkpoint_enrichment"]["pending_ids"] == []
+
+
+@pytest.mark.parametrize("error", [ValueError("credential=do-not-persist"),
+    ValueError("Claim evidence must quote the original post literally: credential=do-not-persist"),
+    RuntimeError("Claim evidence must quote the original post literally")])
+def test_enrichment_error_reason_does_not_persist_untrusted_exception_text(runtime, error):
+    _, docs, _, lake, _ = runtime
+    lake.put("bronze", [normalize_event(simulation_events(0)[0])])
+    def reject(_):
+        raise error
+    result = pipeline.enrich_pending(object(), lake, reject, NOW, 1)
+    assert result["last_error_reason"] is None and docs["checkpoint_enrichment"]["last_error_reason"] is None
+    assert str(error) not in json.dumps({"result": result, "documents": docs})
+
+
 def test_persistent_runtime_keeps_ingestion_running_during_llm_failure(runtime, monkeypatch):
     _, docs, _, lake, objects = runtime
     docs["status_sensorstream"] = {"sensor_layers_version": 2}

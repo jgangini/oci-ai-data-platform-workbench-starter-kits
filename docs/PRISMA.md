@@ -333,8 +333,15 @@ verified checksum of the original platform object.
 Both file streams start before either is awaited. Ingestion persists independently
 of model enrichment. At most ten pending posts are enriched per tick; five failures
 open an observable circuit, retain pending posts and stop inference retries until
-an explicit Run or configuration change. An enrichment journal recovers an
-Autonomous projection failure after a successful Silver write.
+an explicit Run or configuration change. Each validated post is journaled and
+confirmed in Silver and Autonomous before the next classification. Recovery
+finishes an interrupted projection and retries the remaining selected posts,
+without reclassifying the completed prefix. A nonliteral claim quote allows one
+corrective model response for that post, with the same strict schema and literal
+quote check; persistent rejection stays pending. Other provider or validation
+failures do not receive this correction. `last_error_reason=nonliteral_claim`
+identifies this specific validation failure without saving arbitrary exception
+text or model output in operational status.
 
 The bootstrap sets `streaming_mode=persistent` for tasks with `isStreaming`
 and concurrency one. Permanent Job requests omit `timeoutSeconds`: the native
@@ -617,7 +624,7 @@ corroboration index as heuristic.
 
 Architecture comparison for the query-grounding and shared capture increment (2026-10-05):
 quality 6595 → 6578, coupling 0.08 unchanged, zero cycles and god files; complex
-functions 44 → 56. This is an intentional gate exception, not a passing gate:
+functions 44 → 57. This is an intentional gate exception, not a passing gate:
 the agent retains current-turn query validation, same-version citations,
 provider-compatible formatting, row-bound inventories and explicit failure handling for errors observed
 in native AIDP runs. Finite capture also preserves exhausted cursors and retries
@@ -626,7 +633,9 @@ Shared scheduling adds UTC slot, concurrent-save and quota guards, durable
 bounded-batch recovery, and per-layer publication coalescing. These guards share
 the existing capture/publication boundaries; no new services or dependencies
 were introduced. Source excerpts are rendered literally to prevent the observed
-cross-author attribution failure.
+cross-author attribution failure. Per-post enrichment journals preserve valid
+work across a later rejection, and one bounded model correction retains the
+strict literal-quote validator after the observed noncontiguous quotation.
 Splitting these guards solely to lower the aggregate would obscure their state
 and trust boundaries. The baseline was not reset.
 

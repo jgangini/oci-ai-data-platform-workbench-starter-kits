@@ -150,7 +150,7 @@ def test_classifier_requests_a_strict_schema_for_one_post_and_grounded_claims():
         assert properties["severity"]["enum"] == list(SEVERITIES)
         assert properties["confidence"] == {"type": "number", "minimum": 0, "maximum": 1}
     assert claims["items"]["properties"]["relation"]["enum"] == ["supports", "contradicts"]
-    assert result["prompt_version"] == "territorial-control-claims-v2"
+    assert result["prompt_version"] == "territorial-control-claims-v3"
 
 
 @pytest.mark.parametrize("claims", [
@@ -162,8 +162,96 @@ def test_claims_fail_closed_on_ungrounded_or_invalid_model_output(claims):
     event = normalize_event({"platform": "x", "source_id": "one", "mode": "real",
         "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"})
     labels = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium", "confidence": 0.7, "claims": claims}
+    client = ClaimsModel([labels])
     with pytest.raises(ValueError):
-        classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=ClaimsModel([labels]))
+        classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
+    assert len(client.requests) == (2 if claims == [claim(evidence_text="Invented quotation")] else 1)
+
+
+@pytest.mark.parametrize("corrected", [True, False])
+def test_noncontiguous_native_quote_gets_one_strict_correction_per_post(corrected):
+    first = "El pasto junto al foco está oscuro y todavía humea, acá en Chapinero."
+    third = "El humo no ha parado."
+    event = normalize_event({"platform": "instagram", "source_id": "noncontiguous", "mode": "simulation",
+        "text": first + " ¿Nos pueden orientar las autoridades sobre ese tramo? " + third + " #Colombia #Bogota #incendio",
+        "created_at": "2026-10-05T14:00:00Z"})
+    label = {"id": event["id"], "category": "incendio", "locality": "Chapinero", "severity": "medium", "confidence": 0.7,
+             "claims": [claim("incendio", "Chapinero", evidence_text=first + " " + third)]}
+
+    class CorrectionModel(ClaimsModel):
+        def chat(self, request):
+            if self.requests and corrected:
+                self.labels = [{**label, "claims": [claim("incendio", "Chapinero", evidence_text=first)]}]
+            return super().chat(request)
+
+    client = CorrectionModel([label])
+    if corrected:
+        result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
+        assert result["claims"][0]["evidence_text"] == first
+        assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v3"
+        assert event["text"] == first + " ¿Nos pueden orientar las autoridades sobre ese tramo? " + third + " #Colombia #Bogota #incendio"
+    else:
+        with pytest.raises(ValueError, match="quote the original post literally"):
+            classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
+    assert len(client.requests) == 2
+    first_request, correction = client.requests
+    original = first_request.chat_request.messages[0].content[0].text
+    repaired = correction.chat_request.messages[0].content[0].text
+    assert "único fragmento contiguo" in original and repaired.startswith("Corrección:")
+    assert repaired.endswith(original)
+    assert json.loads(repaired.rsplit("Reportes:\n", 1)[1]) == [{"id": event["id"], "text": event["text"]}]
+    assert first + " " + third not in repaired  # Never inject the faulty quote as source evidence.
+    for request in client.requests:
+        assert request.compartment_id == "compartment" and request.serving_mode.model_id == "model"
+        assert request.chat_request.max_tokens == 2048 and request.chat_request.temperature == 0
+        assert request.chat_request.response_format == first_request.chat_request.response_format
+        assert request.chat_request.response_format.json_schema.is_strict is True
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("provider unavailable"),
+    ValueError("Claim evidence must quote the original post literally")])
+def test_provider_failure_never_triggers_quote_correction(failure):
+    event = normalize_event({"platform": "x", "source_id": "provider", "mode": "real",
+        "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"})
+
+    class FailedModel(ClaimsModel):
+        def chat(self, request):
+            self.requests.append(request)
+            raise failure
+
+    client = FailedModel([])
+    with pytest.raises(type(failure), match=str(failure)):
+        classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
+    assert len(client.requests) == 1
+
+
+@pytest.mark.parametrize("response", ["not JSON", '{"items":[]}',
+    '{"items":[{"id":"wrong-id"}]}'])
+def test_response_contract_errors_never_trigger_quote_correction(response):
+    event = normalize_event({"platform": "x", "source_id": "contract", "mode": "real",
+        "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"})
+    client = ClaimsModel([], response_text=response)
+    with pytest.raises(ValueError):
+        classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
+    assert len(client.requests) == 1
+
+
+def test_quote_correction_budget_resets_only_for_the_next_post():
+    events = [normalize_event({"platform": "x", "source_id": str(index), "mode": "simulation",
+        "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"}) for index in range(2)]
+
+    class TwoPostsModel(ClaimsModel):
+        def chat(self, request):
+            payload = json.loads(request.chat_request.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1])[0]
+            self.labels = [{"id": payload["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium",
+                "confidence": 0.7, "claims": [claim(evidence_text=payload["text"] if len(self.requests) % 2 else "Not a literal quote")]}]
+            return super().chat(request)
+
+    client = TwoPostsModel([])
+    result = classify(events, {"model_id": "model", "compartment_id": "compartment"}, client=client)
+    assert [row["id"] for row in result] == [row["id"] for row in events] and len(client.requests) == 4
+    assert [json.loads(request.chat_request.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1])[0]["id"]
+            for request in client.requests] == [events[0]["id"], events[0]["id"], events[1]["id"], events[1]["id"]]
 
 
 def test_explicit_empty_claims_are_retained_for_irrelevant_posts():

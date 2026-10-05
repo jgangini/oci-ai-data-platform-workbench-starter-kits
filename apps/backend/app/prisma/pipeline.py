@@ -418,42 +418,49 @@ def publish_snapshot(connection, objects, lake, config, events, reviews, simulat
 def _finish_enrichment(connection, lake, prepared):
     lake.put("silver", prepared)
     upsert_posts(connection, prepared, "processed")
-    mutate_document(connection, "checkpoint_enrichment", lambda current: {**current, "prepared": [],
-        "attempts": 0, "retry_at": 0, "last_error": None, "circuit_open": False, "pending_ids": []})
+    completed = {item["id"] for item in prepared}
+    return mutate_document(connection, "checkpoint_enrichment", lambda current: {**current, "prepared": [],
+        "attempts": 0, "retry_at": 0, "last_error": None, "last_error_reason": None, "circuit_open": False,
+        "pending_ids": [key for key in current.get("pending_ids", []) if key not in completed]})
 
 
 def enrich_pending(connection, lake, classifier, now, configuration_revision=None):
     checkpoint = read_document(connection, "checkpoint_enrichment")
     if checkpoint.get("prepared"):
-        _finish_enrichment(connection, lake, checkpoint["prepared"])
-        checkpoint = read_document(connection, "checkpoint_enrichment")
+        checkpoint = _finish_enrichment(connection, lake, checkpoint["prepared"])
     if checkpoint.get("configuration_revision", configuration_revision) != configuration_revision:
         checkpoint = mutate_document(connection, "checkpoint_enrichment", lambda current: {**current,
             "configuration_revision": configuration_revision, "attempts": 0, "retry_at": 0,
-            "last_error": None, "circuit_open": False, "pending_ids": []})
+            "last_error": None, "last_error_reason": None, "circuit_open": False, "pending_ids": []})
     pending = lake.pending(checkpoint.get("pending_ids"))
     count = lake.pending_count()
     if not pending:
-        return {"pending_count": count, "last_error": None, "retry_at": 0, "needs_attention": False}
+        return {"pending_count": count, "last_error": None, "last_error_reason": None, "retry_at": 0, "needs_attention": False}
     upsert_posts(connection, pending, "ingested", ingested_at=utc_text(now))
     if checkpoint.get("circuit_open") or (checkpoint.get("retry_at") or 0) > now:
         return {"pending_count": count, "last_error": checkpoint.get("last_error"), "retry_at": checkpoint.get("retry_at"),
+                "last_error_reason": checkpoint.get("last_error_reason"),
                 "needs_attention": bool(checkpoint.get("circuit_open"))}
-    try:
-        classified = classifier(pending)
-        if len(classified) != len(pending) or {item["id"] for item in classified} != {item["id"] for item in pending}:
-            raise ValueError("Classifier returned incomplete evidence")
-    except Exception as exc:
-        attempts = min(5, int(checkpoint.get("attempts", 0)) + 1)
-        retry_at = now + min(300, 30 * 2 ** (attempts - 1)) if attempts < 5 else None
-        mutate_document(connection, "checkpoint_enrichment", lambda current: {**current,
-            "attempts": attempts, "retry_at": retry_at, "last_error": type(exc).__name__, "circuit_open": attempts == 5,
-            "pending_ids": [item["id"] for item in pending], "configuration_revision": configuration_revision})
-        return {"pending_count": count, "last_error": type(exc).__name__, "retry_at": retry_at, "needs_attention": attempts == 5}
-    # Journal before Silver: a crash after its MERGE must still replay the ADB projection.
-    mutate_document(connection, "checkpoint_enrichment", lambda current: {**current, "prepared": classified})
-    _finish_enrichment(connection, lake, classified)
-    return {"pending_count": lake.pending_count(), "last_error": None, "retry_at": 0, "needs_attention": False}
+    for index, event in enumerate(pending):
+        remaining = [item["id"] for item in pending[index:]]
+        try:
+            classified = classifier([event])
+            if len(classified) != 1 or classified[0]["id"] != event["id"]:
+                raise ValueError("Classifier returned incomplete evidence")
+        except Exception as exc:
+            reason = "nonliteral_claim" if isinstance(exc, ValueError) and str(exc) == "Claim evidence must quote the original post literally" else None
+            attempts = min(5, int(checkpoint.get("attempts", 0)) + 1)
+            retry_at = now + min(300, 30 * 2 ** (attempts - 1)) if attempts < 5 else None
+            mutate_document(connection, "checkpoint_enrichment", lambda current: {**current,
+                "attempts": attempts, "retry_at": retry_at, "last_error": type(exc).__name__, "last_error_reason": reason, "circuit_open": attempts == 5,
+                "pending_ids": remaining, "configuration_revision": configuration_revision})
+            return {"pending_count": lake.pending_count(), "last_error": type(exc).__name__, "retry_at": retry_at,
+                    "last_error_reason": reason, "needs_attention": attempts == 5}
+        # Journal each validated post before Silver; recovery must finish its ADB projection before the next model call.
+        mutate_document(connection, "checkpoint_enrichment", lambda current: {**current, "prepared": classified,
+            "pending_ids": remaining, "configuration_revision": configuration_revision})
+        checkpoint = _finish_enrichment(connection, lake, classified)
+    return {"pending_count": lake.pending_count(), "last_error": None, "last_error_reason": None, "retry_at": 0, "needs_attention": False}
 
 
 def _tick(connection, objects, lake, config, secret_get, now, classifier, client, *, progress=None):
