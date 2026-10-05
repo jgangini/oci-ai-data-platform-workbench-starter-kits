@@ -30,7 +30,7 @@ from .governance import (
     governance_sync_notebook,
 )
 from .lab_packs import LabAsset, LabPack, available_lab_ids, load_lab_pack
-from .prisma.runtime_secrets import identity_hash, shared_credential
+from .territorial.runtime_secrets import identity_hash, shared_credential
 from .notebooks import (
     LAYER_PREFIXES,
     WORKSPACE_ROOT,
@@ -2805,7 +2805,7 @@ class AidpClient:
             raise AidpProvisionError("The dedicated governance OCI credential is incomplete.")
         return {
             "displayName": GOVERNANCE_CREDENTIAL_NAME,
-            "credentialDescription": "Shared OCI credential for governance and PRISMA runtimes",
+            "credentialDescription": "Shared OCI credential for governance and Territorial runtimes",
             "type": "SECRET_TOKEN",
             "credentialDetails": {
                 "credentialType": "SECRET_TOKEN",
@@ -4043,7 +4043,7 @@ class AidpClient:
         self._cleanup_agent(workspace_key, GOVERNANCE_AGENT_NAME)
         self._delete_governance_compute(workspace_key)
         self._cleanup_lab_job(workspace_key, GOVERNANCE_JOB_NAME)
-        # ponytail: OCI credentials are shared with PRISMA; module removal retains them.
+        # ponytail: OCI credentials are shared with Territorial Control; module removal retains them.
         for path in (
             f"{MODULE_ROOT}/agent/governance_agent.py",
             f"{MODULE_ROOT}/agent/requirements.txt",

@@ -43,7 +43,7 @@
     "fields": [
       {
         "name": "enable_prisma_viewer",
-        "label": "Enable PRISMA private viewer VM",
+        "label": "Enable God’s Eye View private viewer VM",
         "type": "boolean",
         "default": false,
         "group": "application_vm"
@@ -304,6 +304,10 @@
     "email_access_fields": ["deployment_mode", "admin_username", "admin_password", "registration_code"]
   },
   "outputs": [
+    "territorial_viewer_enabled",
+    "territorial_viewer_url",
+    "territorial_viewer_instance_id",
+    "territorial_viewer_principal_group",
     "prisma_viewer_enabled",
     "prisma_viewer_url",
     "prisma_viewer_instance_id",
@@ -401,10 +405,12 @@
   "post_apply": {
     "entrypoint": "terraform/hooks/post_apply.py",
     "include_paths": [
+      "apps/backend/app/territorial",
       "apps/backend/app/prisma",
       "apps/backend/app/__init__.py",
       "apps/backend/app/aidp.py",
       "apps/backend/app/config.py",
+      "apps/backend/app/viewer_identity.py",
       "apps/backend/app/security.py",
       "apps/backend/app/governance.py",
       "apps/backend/app/lab_packs.py",

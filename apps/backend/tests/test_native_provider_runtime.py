@@ -11,10 +11,10 @@ from cryptography.exceptions import InvalidTag
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-VIEWER = Path(__file__).parents[2] / "prisma-viewer"
+VIEWER = Path(__file__).parents[2] / "territorial-viewer"
 sys.path.insert(0, str(VIEWER))
 from native import provider_runtime as runtime
-from test_prisma_bridge import bridge
+from test_territorial_bridge import bridge
 
 HEADERS = {"cookie": "admin-session=fixture-value"}
 

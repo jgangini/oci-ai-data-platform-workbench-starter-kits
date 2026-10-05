@@ -68,6 +68,9 @@ button { min-height: 48px; border: 0; border-radius: 10px; color: white; backgro
 .release-packages .release-package-actions { width: 1%; text-align: right; white-space: nowrap; }
 .module-configure { display: inline-grid; width: 40px; height: 40px; min-height: 40px; padding: 0; place-items: center; color: #665c56; background: transparent; border: 1px solid #ded5cb; border-radius: 8px; }
 .module-configure svg { width: 22px; height: 22px; }
+.module-configure + .module-configure { margin-left: 8px; }
+.module-manager-dialog { padding: 0; max-width: calc(100vw - 32px); }
+.module-manager-dialog::backdrop { background: rgba(20,16,13,.52); backdrop-filter: blur(5px); }
 .module-configure:hover { color: #b33b2b; background: #fff8f5; }
 .module-configure:focus-visible { outline: 3px solid #c74634; outline-offset: 2px; }
 .application-update svg { width: 18px; height: 18px; }

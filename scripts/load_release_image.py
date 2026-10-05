@@ -14,6 +14,8 @@ from vm_release_updater import REPOSITORY, SHA, SHA256, _download, semantic_vers
 
 COMPONENTS = {
     "aidp-lab": ("aidp-lab-image-amd64.tar.gz", "aidp-release.json"),
+    "territorial-viewer": ("territorial-viewer-image-amd64.tar.gz", "territorial-release.json"),
+    # Installed VM updaters and immutable historical releases retain these exact asset identities.
     "prisma-viewer": ("prisma-viewer-image-amd64.tar.gz", "prisma-release.json"),
 }
 
@@ -65,7 +67,12 @@ def load(tag: str, commit: str, component: str) -> str:
         document = response.read(1_048_577)
     if len(document) > 1_048_576:
         raise ValueError("Release document exceeds the size limit")
-    assets = selected_assets(json.loads(document), tag, component)
+    release = json.loads(document)
+    if component == "territorial-viewer" and not any(
+        asset.get("name") in COMPONENTS[component] for asset in release.get("assets", [])
+    ):
+        component = "prisma-viewer"
+    assets = selected_assets(release, tag, component)
     image_name, manifest_name = COMPONENTS[component]
     with tempfile.TemporaryDirectory(prefix="starter-image-") as directory:
         root = Path(directory)

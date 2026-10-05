@@ -476,17 +476,18 @@ def _run_container(
     ]
     if candidate:
         # A copied local state does not isolate the live Autonomous capture cursors.
-        arguments.extend(["-e", "PRISMA_VIEWER_ENABLED=false"])
+        arguments.extend(["-e", "TERRITORIAL_VIEWER_ENABLED=false", "-e", "PRISMA_VIEWER_ENABLED=false"])
     else:
         arguments.extend(["-p", "443:443"])
         # Keep the optional viewer bridge private when replacing the admin container.
         environment_file = root / ".env"
-        for line in environment_file.read_text().splitlines() if environment_file.exists() else []:
-            if line.startswith("PRISMA_ADMIN_BIND="):
-                address = ipaddress.IPv4Address(line.partition("=")[2])
-                if not address.is_private or address.is_unspecified or address.is_loopback:
-                    raise RuntimeError("invalid_prisma_admin_bind")
-                arguments.extend(["-p", f"{address}:8000:8000"])
+        environment = dict(line.split("=", 1) for line in environment_file.read_text().splitlines() if "=" in line) if environment_file.exists() else {}
+        address = environment.get("TERRITORIAL_ADMIN_BIND", environment.get("PRISMA_ADMIN_BIND"))
+        if address:
+            address = ipaddress.IPv4Address(address)
+            if not address.is_private or address.is_unspecified or address.is_loopback:
+                raise RuntimeError("invalid_territorial_admin_bind")
+            arguments.extend(["-p", f"{address}:8000:8000"])
     arguments.extend(
         [
             "-v",

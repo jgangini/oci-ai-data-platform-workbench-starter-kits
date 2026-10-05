@@ -78,7 +78,7 @@ visudo -cf /etc/sudoers.d/101-aidp-lab-bootstrap-public-key
 systemctl stop firewalld >/dev/null 2>&1 || true
 firewall-offline-cmd --zone=public --add-service=http
 firewall-offline-cmd --zone=public --add-service=https
-%{ if enable_prisma_viewer ~}
+%{ if enable_territorial_viewer ~}
 firewall-offline-cmd --zone=public --add-port=8000/tcp
 %{ endif ~}
 systemctl enable --now firewalld
@@ -166,10 +166,13 @@ SESSION_SECRET_FILE=/var/lib/aidp-lab/session.key
 VM_UPDATE_ENABLED=true
 AIDP_UPDATE_DIR=/var/lib/aidp-lab/update
 COOKIE_SECURE=true
-PRISMA_VIEWER_URL=${prisma_viewer_url}
-PRISMA_VIEWER_ENABLED=${enable_prisma_viewer}
-%{ if enable_prisma_viewer ~}
-PRISMA_ADMIN_BIND=${prisma_admin_private_ip}
+TERRITORIAL_VIEWER_URL=${territorial_viewer_url}
+TERRITORIAL_VIEWER_ENABLED=${enable_territorial_viewer}
+PRISMA_VIEWER_URL=${territorial_viewer_url}
+PRISMA_VIEWER_ENABLED=${enable_territorial_viewer}
+%{ if enable_territorial_viewer ~}
+TERRITORIAL_ADMIN_BIND=${territorial_admin_private_ip}
+PRISMA_ADMIN_BIND=${territorial_admin_private_ip}
 %{ endif ~}
 EOF
 chmod 0600 /opt/aidp-lab/.env
@@ -269,8 +272,8 @@ docker run -d \
   --env-file /opt/aidp-lab/.env \
   -p 80:80 \
   -p 443:443 \
-%{ if enable_prisma_viewer ~}
-  -p ${prisma_admin_private_ip}:8000:8000 \
+%{ if enable_territorial_viewer ~}
+  -p ${territorial_admin_private_ip}:8000:8000 \
 %{ endif ~}
   -v "$TLS_DIR:/etc/aidp-lab/tls:ro,z" \
 %{ if enable_public_ip_tls ~}

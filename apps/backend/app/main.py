@@ -22,10 +22,11 @@ from .aidp import (
     participant_owner_key,
 )
 from .config import Settings, SettingsStore
+from .viewer_identity import mount_identity
 from .identity import IdentityClient, IdentityConflict, IdentityPending, IdentityRejected, LocalIdentityClient
 from .lab_packs import available_lab_ids, public_lab_catalog
-from .prisma.api import mount_prisma, run_local_prisma
-from .prisma.access import mount_access
+from .territorial.api import mount_territorial, run_local_territorial
+from .territorial.access import mount_access
 from .releases import (
     ApplicationReleaseManager,
     ReleaseUpdateConflict,
@@ -184,16 +185,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        run_producer = (settings.local_development_mode or settings.prisma_enabled) and not (settings.local_development_mode and not settings.prisma_local_mode)
-        prisma_task = asyncio.create_task(run_local_prisma(app)) if run_producer else None
+        run_producer = (settings.local_development_mode or settings.territorial_enabled) and not (settings.local_development_mode and not settings.territorial_local_mode)
+        territorial_task = asyncio.create_task(run_local_territorial(app)) if run_producer else None
         try:
             yield
         finally:
-            if prisma_task:
-                prisma_task.cancel()
+            if territorial_task:
+                territorial_task.cancel()
                 with suppress(asyncio.CancelledError):
-                    await prisma_task
-        for client in (app.state.identity_client, app.state.aidp_client, app.state.prisma_aidp_client):
+                    await territorial_task
+        for client in (app.state.identity_client, app.state.aidp_client, app.state.territorial_aidp_client):
             if client is not None:
                 await client.close()
 
@@ -211,7 +212,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.login_limiter = RateLimiter(5, 60)
     app.state.identity_client = None
     app.state.aidp_client = None
-    app.state.prisma_aidp_client = None
+    app.state.territorial_aidp_client = None
     app.state.release_manager = ApplicationReleaseManager(settings)
     app.state.health_lock = asyncio.Lock()
     app.state.health_expires_at = 0.0
@@ -240,14 +241,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.aidp_factory = default_aidp_factory
 
-    def prisma_aidp_factory():
-        if not settings.local_development_mode or settings.prisma_local_mode:
+    def territorial_aidp_factory():
+        if not settings.local_development_mode or settings.territorial_local_mode:
             return app.state.aidp_factory()
-        if app.state.prisma_aidp_client is None:
-            app.state.prisma_aidp_client = AidpClient(settings)
-        return app.state.prisma_aidp_client
+        if app.state.territorial_aidp_client is None:
+            app.state.territorial_aidp_client = AidpClient(settings)
+        return app.state.territorial_aidp_client
 
-    app.state.prisma_aidp_factory = prisma_aidp_factory
+    app.state.territorial_aidp_factory = territorial_aidp_factory
 
     async def refresh_local_material(identity, user_id, user):
         if isinstance(identity, LocalIdentityClient):
@@ -305,7 +306,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return username
 
     require_viewer = mount_access(app, require_admin, cookie_name)
-    mount_prisma(app, require_admin, require_viewer)
+    mount_identity(app, require_admin, require_viewer)
+    mount_territorial(app, require_admin, require_viewer)
 
     async def provision_user(name: str, email: str, lab_ids: list[str], territorial_control: bool = False) -> JSONResponse:
         if territorial_control and not settings.local_development_mode:
@@ -384,9 +386,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if isinstance(identity, LocalIdentityClient):
             if territorial_control:
-                await identity.grant_prisma(result.user_id, True)
+                await identity.grant_territorial(result.user_id, True)
             await identity.record_material(result.user_id, content)
-            content["local_access"] = {"simulated": True, "login_url": "/local/prisma/login", "delivery": "Local welcome file; no email sent"}
+            content["local_access"] = {"simulated": True, "login_url": "/local/gods-eye-view/login", "delivery": "Local welcome file; no email sent"}
         return JSONResponse(status_code=201 if result.status == "created" else 200, content=content)
 
     @app.get("/api/health")
@@ -500,7 +502,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/admin/session")
     async def admin_session(response: Response, username: str = Depends(require_admin)) -> dict[str, str]:
-        response.headers["X-PRISMA-User"] = username
+        response.headers["X-Territorial-User"] = username
+        response.headers["X-PRISMA-User"] = username  # Existing reverse proxies use this header.
         return {"username": username, "operator_username": settings.operator_username}
 
     async def admin_settings_payload() -> dict[str, object]:

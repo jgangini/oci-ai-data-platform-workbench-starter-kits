@@ -676,7 +676,7 @@ def assert_fresh_catalog(
     namespace: str,
     bucket: str,
     *,
-    prisma_landing_bucket: str = "",
+    territorial_landing_bucket: str = "",
 ) -> tuple[int, int]:
     schemas = api.list_all("/schemas", params={"catalogKey": catalog_key})
     global_schemas = [
@@ -718,9 +718,9 @@ def assert_fresh_catalog(
         raise ReconcileError(
             f"Fresh-only bootstrap found legacy external volumes overlapping medallion paths: {names}; no resources were deleted"
         )
-    allowed = [item for item in external if prisma_landing_bucket
+    allowed = [item for item in external if territorial_landing_bucket
                and item.get("_listed_schema") == "prisma_ingest" and item.get("displayName") == "landing"
-               and item.get("storageLocation") == f"oci://{prisma_landing_bucket}@{namespace}/01_landing/prisma/raw/"]
+               and item.get("storageLocation") == f"oci://{territorial_landing_bucket}@{namespace}/01_landing/prisma/raw/"]
     if len(allowed) > 1 or len(external) != len(allowed):
         raise ReconcileError(
             f"Fresh-only bootstrap found an unapproved external volume in {CATALOG_NAME}; no resources were deleted"
@@ -877,9 +877,9 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
     bucket = str(outputs["bucket_name"])
     global_schema_count, external_volume_count = assert_fresh_catalog(
         api, catalog_key, namespace, bucket,
-        prisma_landing_bucket=str(outputs["medallion_bucket_names"]["landing"]) if outputs.get("prisma_viewer_enabled") is True else "",
+        territorial_landing_bucket=str(outputs["medallion_bucket_names"]["landing"]) if outputs.get("territorial_viewer_enabled", outputs.get("prisma_viewer_enabled")) is True else "",
     )
-    events.append(f"Fresh-only catalog verified: zero legacy schemas; {external_volume_count} approved PRISMA external volumes")
+    events.append(f"Fresh-only catalog verified: zero legacy schemas; {external_volume_count} approved Territorial external volumes")
     workspace_key = str(workspace["key"])
     shared_compute, compute_created = ensure_resource(
         api,
@@ -1639,11 +1639,11 @@ def main() -> int:
             messages.append("Registration VM consumed and deleted the encrypted bootstrap object")
         else:
             messages.append("Registration VM already has the validated Autonomous bootstrap v2 runtime")
-        if outputs.get("prisma_viewer_enabled") is True:
-            # Keep imports additive: existing one-VM labs do not load the PRISMA runtime.
-            from prisma_bootstrap import bootstrap_prisma
+        if outputs.get("territorial_viewer_enabled", outputs.get("prisma_viewer_enabled")) is True:
+            # Keep imports additive: existing one-VM labs do not load the Territorial runtime.
+            from territorial_bootstrap import bootstrap_territorial
             try:
-                reconciled.update(bootstrap_prisma(
+                reconciled.update(bootstrap_territorial(
                     api, context, outputs, oci_config, signer, object_storage,
                     wallet, wallet_password, admin_password, reconciled,
                     deadline=_post_apply_deadline,
@@ -1653,14 +1653,14 @@ def main() -> int:
             except Exception as exc:
                 # Database/SDK exceptions may contain secret-bearing request details.
                 safe = isinstance(exc, ReconcileError) or (type(exc) is RuntimeError and str(exc).startswith(
-                    ("PRISMA", "Managed PRISMA", "Duplicate PRISMA", "Duplicate managed PRISMA", "Existing PRISMA")
+                    ("Territorial", "Managed Territorial", "Duplicate Territorial", "Duplicate managed Territorial", "Existing Territorial")
                 ))
                 detail = str(exc) if safe else type(exc).__name__
                 code = getattr(exc.args[0], "code", None) if exc.args else None
                 if not safe and type(code) is int and 0 < code < 100000:
                     detail += f" (ORA-{code:05d})"
-                raise ReconcileError("PRISMA bootstrap failed: " + detail) from None
-            messages.append("PRISMA native job and published snapshot verified; versioned AIDP agent is ACTIVE")
+                raise ReconcileError("Territorial bootstrap failed: " + detail) from None
+            messages.append("Territorial native job and published snapshot verified; versioned AIDP agent is ACTIVE")
         wait_for_application(str(outputs["application_url"]), verify_tls=outputs.get("public_ip_tls_enabled") is True)
         messages.append("Registration application is healthy over HTTPS")
         reconciled["runtime_ready"] = True

@@ -8,7 +8,7 @@ import tarfile
 import pytest
 
 
-MODULE_PATH = Path(__file__).parents[2] / "prisma-viewer" / "prepare_upstream.py"
+MODULE_PATH = Path(__file__).parents[2] / "territorial-viewer" / "prepare_upstream.py"
 SPEC = importlib.util.spec_from_file_location("gods_eye_prepare_upstream", MODULE_PATH)
 upstream = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(upstream)

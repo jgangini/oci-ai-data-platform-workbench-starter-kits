@@ -485,13 +485,13 @@ class LocalIdentityClient:
                 return user_id
         return None
 
-    async def prisma_user(self, user_id: str) -> dict[str, Any] | None:
+    async def territorial_user(self, user_id: str) -> dict[str, Any] | None:
         user = self.users.get(user_id)
         if not user or not user.get("active") or user.get("status") != "active" or not user.get("prisma_access"):
             return None
-        return {**user, "mode": "SIMULADO"}
+        return {**user, "territorial_access": bool(user.get("prisma_access")), "mode": "SIMULADO"}
 
-    async def grant_prisma(self, user_id: str, enabled: bool) -> None:
+    async def grant_territorial(self, user_id: str, enabled: bool) -> None:
         if type(enabled) is not bool:
             raise ValueError("Territorial Control permission must be a boolean")
         user = self.users.get(user_id)
@@ -514,11 +514,12 @@ class LocalIdentityClient:
             _write_private_json(path, {**welcome, "material": public})
 
     async def list_lab_users(self) -> list[dict[str, Any]]:
-        return sorted(self.users.values(), key=lambda item: item["email"].casefold())
+        return sorted(({**user, "territorial_access": bool(user.get("prisma_access"))}
+                       for user in self.users.values()), key=lambda item: item["email"].casefold())
 
     async def list_users_by_ocids(self, user_ocids: set[str]) -> list[dict[str, Any]]:
         return [
-            user
+            {**user, "territorial_access": bool(user.get("prisma_access"))}
             for user in self.users.values()
             if str(user.get("ocid") or "") in user_ocids
         ]

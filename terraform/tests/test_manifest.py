@@ -19,8 +19,8 @@ def test_manifest_packages_importable_prisma_hook_runtime(tmp_path) -> None:
         else:
             shutil.copyfile(source, target)
     result = subprocess.run([sys.executable, "-I", "-c",
-        "import sys; sys.path.insert(0, 'terraform/hooks'); import prisma_bootstrap; "
-        "from app.aidp import AidpClient; assert prisma_bootstrap.runtime_archive()"],
+        "import sys; sys.path.insert(0, 'terraform/hooks'); import territorial_bootstrap; "
+        "from app.aidp import AidpClient; assert territorial_bootstrap.runtime_archive()"],
         cwd=tmp_path, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
 
@@ -46,6 +46,9 @@ def test_deploy_studio_manifest_contract() -> None:
     assert manifest["post_apply"]["timeout_seconds"] == 3600
     assert (root / manifest["post_apply"]["entrypoint"]).is_file()
     fields = {field["name"]: field for field in manifest["form"]["fields"]}
+    assert fields["enable_prisma_viewer"]["default"] is False
+    assert fields["enable_prisma_viewer"]["label"] == "Enable God’s Eye View private viewer VM"
+    assert "enable_territorial_viewer" not in fields
     assert "home_region" not in fields
     assert "preferred_vm_shape" not in fields
     assert "vm_ocpus" not in fields
@@ -276,7 +279,8 @@ def test_release_workflow_reruns_only_mutate_drafts() -> None:
     assert "Existing published release is mutable; refusing to edit or republish it." in workflow
     assert "if: steps.release.outputs.mode == 'immutable'" in workflow
     assert "immutable release asset manifest mismatch" in workflow
-    assert workflow.count('test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz"') == 2
+    assert workflow.count('test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz"') == 1
+    assert workflow.count('test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz,territorial-release.json,territorial-viewer-image-amd64.tar.gz"') == 2
     immutable_start = workflow.index("- name: Verify existing immutable release assets")
     immutable_end = workflow.index("- uses: hashicorp/setup-terraform@v3")
     immutable_verification = workflow[immutable_start:immutable_end]

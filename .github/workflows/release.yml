@@ -70,13 +70,17 @@ jobs:
           verify_dir="$RUNNER_TEMP/immutable-release"
           mkdir -p "$verify_dir"
           asset_names="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz"
+          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz" || test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz,territorial-release.json,territorial-viewer-image-amd64.tar.gz"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$verify_dir" \
             --pattern "$RELEASE_IMAGE_ASSET" \
             --pattern "$RELEASE_MANIFEST_ASSET" \
             --pattern prisma-release.json \
             --pattern prisma-viewer-image-amd64.tar.gz
+          if [[ "$asset_names" == *territorial-release.json* ]]; then
+            gh release download "$GITHUB_REF_NAME" --dir "$verify_dir" \
+              --pattern territorial-release.json --pattern territorial-viewer-image-amd64.tar.gz
+          fi
           gzip -t "$verify_dir/$RELEASE_IMAGE_ASSET"
           RELEASE_VERIFY_DIR="$verify_dir" python - <<'PY'
           import hashlib
@@ -118,7 +122,16 @@ jobs:
               "image_tag": f'prisma-viewer:{os.environ["RELEASE_COMMIT_SHA"]}',
           }
           if json.loads((root / "prisma-release.json").read_text()) != expected:
-              raise SystemExit("immutable PRISMA release manifest mismatch")
+              raise SystemExit("immutable legacy viewer release manifest mismatch")
+          if (root / "territorial-release.json").exists():
+              canonical = root / "territorial-viewer-image-amd64.tar.gz"
+              with canonical.open("rb") as stream:
+                  if hashlib.file_digest(stream, "sha256").hexdigest() != digest.hexdigest():
+                      raise SystemExit("viewer release aliases differ")
+              expected["image"].update(asset_name=canonical.name,
+                  image_tag=f'territorial-viewer:{os.environ["RELEASE_COMMIT_SHA"]}')
+              if json.loads((root / "territorial-release.json").read_text()) != expected:
+                  raise SystemExit("immutable territorial release manifest mismatch")
           PY
         env:
           GH_TOKEN: ${{ github.token }}
@@ -194,15 +207,16 @@ jobs:
               encoding="utf-8",
           )
           PY
-      - name: Build frozen PRISMA viewer release assets
+      - name: Build frozen territorial viewer release assets
         if: steps.release.outputs.mode != 'immutable'
         run: |
           set -euo pipefail
-          image_tag="prisma-viewer:$RELEASE_COMMIT_SHA"
+          image_tag="territorial-viewer:$RELEASE_COMMIT_SHA"
           docker build --platform linux/amd64 \
-            --file apps/prisma-viewer/Dockerfile --tag "$image_tag" .
+            --file apps/territorial-viewer/Dockerfile --tag "$image_tag" --tag "prisma-viewer:$RELEASE_COMMIT_SHA" .
           test "$(docker image inspect "$image_tag" --format '{{.Os}}/{{.Architecture}}')" = "linux/amd64"
-          docker save "$image_tag" | gzip -n -9 > "$RELEASE_DIST/prisma-viewer-image-amd64.tar.gz"
+          docker save "$image_tag" "prisma-viewer:$RELEASE_COMMIT_SHA" | gzip -n -9 > "$RELEASE_DIST/territorial-viewer-image-amd64.tar.gz"
+          cp "$RELEASE_DIST/territorial-viewer-image-amd64.tar.gz" "$RELEASE_DIST/prisma-viewer-image-amd64.tar.gz"
           python - <<'PY'
           import hashlib
           import json
@@ -219,6 +233,9 @@ jobs:
               "image_tag": f'prisma-viewer:{os.environ["RELEASE_COMMIT_SHA"]}',
           }
           (root / "prisma-release.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+          manifest["image"].update(asset_name="territorial-viewer-image-amd64.tar.gz",
+              image_tag=f'territorial-viewer:{os.environ["RELEASE_COMMIT_SHA"]}')
+          (root / "territorial-release.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
           PY
       - name: Create or reuse draft GitHub release
         if: steps.release.outputs.mode != 'immutable'
@@ -241,6 +258,8 @@ jobs:
             "$RELEASE_DIST/$RELEASE_MANIFEST_ASSET" \
             "$RELEASE_DIST/prisma-release.json" \
             "$RELEASE_DIST/prisma-viewer-image-amd64.tar.gz" \
+            "$RELEASE_DIST/territorial-release.json" \
+            "$RELEASE_DIST/territorial-viewer-image-amd64.tar.gz" \
             --clobber
         env:
           GH_TOKEN: ${{ github.token }}
@@ -251,17 +270,23 @@ jobs:
           verify_dir="$RUNNER_TEMP/uploaded-release"
           mkdir -p "$verify_dir"
           asset_names="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz"
+          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz,territorial-release.json,territorial-viewer-image-amd64.tar.gz"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$verify_dir" \
             --pattern "$RELEASE_IMAGE_ASSET" \
             --pattern "$RELEASE_MANIFEST_ASSET" \
             --pattern prisma-release.json \
             --pattern prisma-viewer-image-amd64.tar.gz
+          if [[ "$asset_names" == *territorial-release.json* ]]; then
+            gh release download "$GITHUB_REF_NAME" --dir "$verify_dir" \
+              --pattern territorial-release.json --pattern territorial-viewer-image-amd64.tar.gz
+          fi
           cmp "$RELEASE_DIST/$RELEASE_IMAGE_ASSET" "$verify_dir/$RELEASE_IMAGE_ASSET"
           cmp "$RELEASE_DIST/$RELEASE_MANIFEST_ASSET" "$verify_dir/$RELEASE_MANIFEST_ASSET"
           cmp "$RELEASE_DIST/prisma-release.json" "$verify_dir/prisma-release.json"
           cmp "$RELEASE_DIST/prisma-viewer-image-amd64.tar.gz" "$verify_dir/prisma-viewer-image-amd64.tar.gz"
+          cmp "$RELEASE_DIST/territorial-release.json" "$verify_dir/territorial-release.json"
+          cmp "$RELEASE_DIST/territorial-viewer-image-amd64.tar.gz" "$verify_dir/territorial-viewer-image-amd64.tar.gz"
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Publish GitHub release

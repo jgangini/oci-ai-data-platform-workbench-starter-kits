@@ -6,7 +6,7 @@
 .aidp/
 graphify-out/
 datasets/
-apps/prisma-viewer/.upstream/
+apps/territorial-viewer/.upstream/
 **/node_modules/
 **/dist/
 **/__pycache__/

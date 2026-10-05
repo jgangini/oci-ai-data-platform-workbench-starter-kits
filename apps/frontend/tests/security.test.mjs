@@ -213,7 +213,7 @@ test("administrators manage one shared governance module from Settings outside p
   const manager = source.slice(source.indexOf('function GovernanceModuleManager'), source.indexOf('function usePublicConfig'));
   assert.match(source, /is_aidp_admin: boolean/);
   assert.match(source, /operation_type\?: ModuleOperationKind \| null/);
-  assert.equal((source.match(/<GovernanceModuleManager\b/g) ?? []).length, 2);
+  assert.equal((source.match(/<GovernanceModuleManager\b/g) ?? []).length, 1);
   assert.doesNotMatch(source, /function GovernanceModuleModal|window\.location\.assign\("\/admin\/users\?module=/);
   assert.match(manager, /users\.filter\(user => user\.is_aidp_admin\)/);
   assert.match(manager, /if \(!usersLoaded \|\| !moduleManagerUser \|\| !moduleManagerUser\.is_aidp_admin/);
@@ -230,11 +230,11 @@ test("administrators manage one shared governance module from Settings outside p
   assert.ok(!labCatalog.labs.includes("agent"));
 });
 
-test("unmanaged AIDP administrators retain module access without participant controls", () => {
+test("unmanaged AIDP administrators have no participant or global module row actions", () => {
   assert.match(source, /user\.managed === false \? \(/);
   assert.match(source, /<strong>AIDP administrator<\/strong>/);
   assert.match(source, /<small>Platform administration only<\/small>/);
-  assert.match(source, /user\.is_aidp_admin && governanceModule/);
+  assert.doesNotMatch(source, /user\.is_aidp_admin && governanceModule/);
   assert.match(source, /user\.managed !== false && \([\s\S]*Manage starter kits for/);
 });
 

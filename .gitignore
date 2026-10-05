@@ -16,6 +16,6 @@ __pycache__/
 node_modules/
 dist/
 *.tsbuildinfo
-apps/prisma-viewer/.upstream/
+apps/territorial-viewer/.upstream/
 coverage/
 .DS_Store

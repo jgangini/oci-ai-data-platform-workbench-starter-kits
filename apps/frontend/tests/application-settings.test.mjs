@@ -34,7 +34,7 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
     useEffect(callback, deps) { const id = cursor++, old = slots[id]; if (!old || deps.some((value, index) => value !== old.deps[index])) effects.push(() => { old?.cleanup?.(); slots[id] = { deps, cleanup: callback() }; }); },
   };
   const module = {};
-  new Function('exports', 'require', compiled + '\nexports.GovernanceModuleManager = GovernanceModuleManager; exports.AdminLoginCard = AdminLoginCard;')(module, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === 'react-dom' ? { createPortal: node => node } : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './registrationPoll' ? { ...poll, pollRegistration: options => managerProps ? poll.pollRegistration({ ...options, sleep: async () => {} }) : options.request(options.signal) } : {});
+  new Function('exports', 'require', compiled + '\nexports.GovernanceModuleManager = GovernanceModuleManager; exports.AdminLoginCard = AdminLoginCard;')(module, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === 'react-dom' ? { createPortal: node => node } : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './GodsEyeModuleManager' ? { GodsEyeModuleManager() {} } : name === './registrationPoll' ? { ...poll, pollRegistration: options => managerProps ? poll.pollRegistration({ ...options, sleep: async () => {} }) : options.request(options.signal) } : {});
   const component = managerProps ? () => module.GovernanceModuleManager({ ...managerProps, onClose: () => { closed++; }, onChanged: () => { changed++; } }) : location.pathname === '/admin/login' ? module.AdminLoginCard : module.App().type;
   function render() { for (let n = 0; dirty && n < 20; n++) {
     cursor = 0; dirty = false; effects = []; tree = component();
@@ -133,7 +133,7 @@ test('Settings Governance icon opens one shared manager without navigation or de
   const nodes = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? nodes(child) : [])];
   const button = nodes(tree).find(node => node?.props?.className === 'module-configure module-deploy');
   assert.equal(button.type, 'button'); assert.equal(button.props.type, 'button');
-  assert.equal(button.props.children.type.name, 'RefreshIcon');
+  assert.equal(button.props.children.type.name, 'InstallIcon');
   assert.equal(button.props['aria-label'], 'Deploy or redeploy AI Data Governance');
   assert.equal(button.props['aria-haspopup'], 'dialog');
   assert.ok(!h.nodes().some(node => node?.type?.name === 'GovernanceModuleManager'));
@@ -146,14 +146,68 @@ test('Settings Governance icon opens one shared manager without navigation or de
   assert.equal(h.navigations.length, 0); assert.equal(h.mutations().length, 0);
 });
 
-test('Users opens the same manager with its administrator preselected', async t => {
+test('Users keeps participant actions but global installation stays in Settings', async t => {
   const h = await harness(t, release, '/admin/users', { ...moduleInitial(governance), '/api/config': { deployment_mode: 'laboratory', labs: [] } });
-  assert.equal(h.nodes().filter(node => node?.props?.className === 'table-action table-module').length, 1);
-  h.act(() => h.find('button', props => props['aria-label'] === 'Manage AI Data Governance as operator@example.test').props.onClick());
-  assert.equal(h.find('GovernanceModuleManager').props.initialUserId, 'operator');
+  assert.equal(h.nodes().filter(node => node?.props?.className === 'table-action table-module').length, 0);
+  assert.ok(h.find('button', props => props['aria-label'] === 'Manage starter kits for student@example.test'));
+  assert.ok(!h.nodes().some(node => node?.props?.['aria-label']?.includes('operator@example.test')));
+  assert.ok(!h.requests.some(request => request.path === '/api/admin/modules'));
   assert.equal(h.mutations().length, 0); assert.deepEqual(h.navigations, []);
-  h.act(() => h.find('GovernanceModuleManager').props.onClose());
   assert.ok(!h.nodes().some(node => node?.type?.name === 'GovernanceModuleManager'));
+});
+
+test('Settings offers separate install and configuration actions for the global viewer module', async t => {
+  const h = await harness(t, { ...release, packages: [{ package_id: 'territorial_control', display_name: 'God’s Eye View · Custom layers', scope: 'global', bundled_version: '1.0.0' }] });
+  const card = h.find('ApplicationReleaseSettings');
+  const children = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? children(child) : [])];
+  const nodes = children(card.type(card.props));
+  const install = nodes.find(node => node?.props?.['aria-label'] === 'Install God’s Eye View · Custom layers');
+  assert.equal(install.type, 'button');
+  assert.equal(install.props.children.type.name, 'InstallIcon');
+  assert.equal(install.props['aria-haspopup'], 'dialog');
+  assert.equal(nodes.find(node => node?.props?.['aria-label'] === 'Configure God’s Eye View · Custom layers').props.href, '/admin/gods-eye-view');
+  h.act(() => install.props.onClick());
+  assert.equal(h.nodes().filter(node => node?.type?.name === 'GodsEyeModuleManager').length, 1);
+  assert.equal(h.mutations().length, 0);
+  h.act(() => h.find('GodsEyeModuleManager').props.onClose());
+  assert.ok(!h.nodes().some(node => node?.type?.name === 'GodsEyeModuleManager'));
+});
+
+for (const outcome of ['populated', 'empty', 'error']) test(`Users spinner ends on ${outcome} and does not show an empty table while waiting`, async t => {
+  const h = await harness(t, release, '/admin/users', { '/api/admin/users': null, '/api/config': { labs: [] } });
+  assert.ok(h.find('LoadingIndicator', props => props.label === 'Loading users…'));
+  assert.equal(h.find('table').props['aria-busy'], true);
+  assert.ok(!text(h.nodes()[0]).includes('No matching lab users.'));
+  const request = h.requests.find(request => request.path === '/api/admin/users');
+  request.resolve(outcome === 'error' ? { detail: 'Users unavailable' } : { users: outcome === 'empty' ? [] : administrators }, outcome === 'error' ? 503 : 200);
+  await h.settle();
+  assert.ok(!h.nodes().some(node => node?.props?.label === 'Loading users…'));
+  assert.equal(h.find('table').props['aria-busy'], false);
+  assert.equal(text(h.nodes()[0]).includes('No matching lab users.'), outcome === 'empty');
+  if (outcome === 'populated') assert.ok(text(h.find('tbody')).includes('operator@example.test'));
+  if (outcome === 'error') {
+    assert.match(text(h.find('td', props => props.role === 'alert')), /Users unavailable/);
+    h.act(() => h.find('button', props => props['aria-label'] === 'Refresh users').props.onClick());
+    assert.ok(h.find('LoadingIndicator', props => props.label === 'Loading users…'));
+    h.requests.at(-1).resolve({ users: administrators }); await h.settle();
+    assert.equal(h.find('table').props['aria-busy'], false);
+    assert.ok(!h.nodes().some(node => node?.type === 'td' && node.props.role === 'alert'));
+  }
+});
+
+for (const oldFirst of [true, false]) test(`Users ignores an older request resolved ${oldFirst ? 'before' : 'after'} its replacement`, async t => {
+  const h = await harness(t, release, '/admin/users', { '/api/admin/users': null, '/api/config': { labs: [] } });
+  const previous = h.requests.find(request => request.path === '/api/admin/users');
+  h.act(() => h.find('button', props => props['aria-label'] === 'Refresh users').props.onClick());
+  if (oldFirst) {
+    previous.resolve({ users: [] }); await h.settle();
+    assert.equal(h.find('table').props['aria-busy'], true);
+  }
+  h.requests.at(-1).resolve({ users: administrators }); await h.settle();
+  if (!oldFirst) { previous.resolve({ detail: 'Old failure' }, 500); await h.settle(); }
+  assert.equal(h.find('table').props['aria-busy'], false);
+  assert.ok(text(h.find('tbody')).includes('operator@example.test'));
+  assert.ok(!text(h.nodes()[0]).includes('Old failure'));
 });
 
 for (const installed of [false, true]) test(`Governance ${installed ? 'redeploy' : 'deploy'} is direct, administrator-only and idempotent on double click`, async t => {

@@ -9,9 +9,10 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { PrismaAdmin } from "./PrismaAdmin";
+import { TerritorialAdmin } from "./TerritorialAdmin";
 import { LoadingIndicator } from "./LoadingIndicator";
-import { LocalPrismaAccess } from "./LocalPrismaAccess";
+import { GodsEyeModuleManager } from "./GodsEyeModuleManager";
+import { LocalTerritorialAccess } from "./LocalTerritorialAccess";
 
 import { labAssignmentChanges } from "./labAssignments";
 
@@ -43,7 +44,7 @@ type LabUser = {
   labs: AssignedLab[];
   active: boolean;
   managed?: boolean;
-  prisma_access?: boolean;
+  territorial_access?: boolean;
   is_aidp_admin: boolean;
   participant_code?: number | null;
 };
@@ -1099,6 +1100,13 @@ function RefreshIcon() {
   );
 }
 
+function InstallIcon() {
+  return <svg viewBox="0 0 36 36" fill="currentColor" aria-hidden="true">
+    <path d="M30.92,8H26.55a1,1,0,0,0,0,2H31V30H5V10H9.38a1,1,0,0,0,0-2H5.08A2,2,0,0,0,3,10V30a2,2,0,0,0,2.08,2H30.92A2,2,0,0,0,33,30V10A2,2,0,0,0,30.92,8Z" />
+    <path d="M10.3,18.87l7,6.89a1,1,0,0,0,1.4,0l7-6.89a1,1,0,0,0-1.4-1.43L19,22.65V4a1,1,0,0,0-2,0V22.65l-5.3-5.21a1,1,0,0,0-1.4,1.43Z" />
+  </svg>;
+}
+
 function EditIcon() {
   return (
     <svg
@@ -1835,9 +1843,9 @@ function AdminUsers() {
   const adminSession = useAdminSession();
   const publicConfig = usePublicConfig();
   const catalog = participantLabCatalog(publicConfig?.labs ?? fallbackCatalog);
-  const [governanceOpen, setGovernanceOpen] = useState(() => new URLSearchParams(window.location.search).get("module") === "ai_data_governance_vsc_extension");
   const [users, setUsers] = useState<LabUser[]>([]);
-  const [modules, setModules] = useState<AdminModule[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const usersRequestRef = useRef(0);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -1861,35 +1869,34 @@ function AdminUsers() {
   const [operating, setOperating] = useState(false);
   const [operationProgress, setOperationProgress] = useState<RegistrationResponse | null>(null);
   const [operationError, setOperationError] = useState("");
-  const [moduleManagerUserId, setModuleManagerUserId] = useState<string | null>(null);
-  const [moduleLoadError, setModuleLoadError] = useState("");
   const [pendingDelete, setPendingDelete] = useState<LabUser | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
   async function loadUsers() {
+    const request = ++usersRequestRef.current;
+    setUsersLoading(true);
     setTableError("");
     try {
       const loaded = (await api<{ users: LabUser[] }>("/api/admin/users")).users;
+      if (request !== usersRequestRef.current) return;
       setUsers(loaded);
       return loaded;
     } catch (reason) {
+      if (request !== usersRequestRef.current) return;
       if (reason instanceof ApiRequestError && reason.status === 401)
         window.location.assign("/admin/login");
       else
         setTableError(
           reason instanceof Error ? reason.message : "Unable to load users",
         );
+    } finally {
+      if (request === usersRequestRef.current) setUsersLoading(false);
     }
-  }
-  async function loadModules() {
-    setModuleLoadError("");
-    try { setModules((await api<{ modules: AdminModule[] }>("/api/admin/modules")).modules); }
-    catch (reason) { setModuleLoadError(reason instanceof Error ? reason.message : "Unable to load global modules"); }
   }
   useEffect(() => {
     void loadUsers();
-    void loadModules();
     return () => {
+      usersRequestRef.current++;
       createAbortRef.current?.abort();
       operationAbortRef.current?.abort();
     };
@@ -1898,7 +1905,6 @@ function AdminUsers() {
     `${user.name} ${user.email}`.toLowerCase().includes(query.toLowerCase()),
   );
   const labManagerUser = users.find((user) => user.id === labManagerUserId) ?? null;
-  const governanceModule = modules.find(({ module_id }) => module_id === "ai_data_governance_vsc_extension") ?? null;
   const pendingLabUpdate = Boolean(
     pendingLabAction?.kind === "redeploy" && pendingLabAction.lab.update_available,
   );
@@ -2185,10 +2191,7 @@ function AdminUsers() {
                 <button
                   className="toolbar-icon"
                   type="button"
-                  onClick={() => {
-                    void loadUsers();
-                    void loadModules();
-                  }}
+                  onClick={() => void loadUsers()}
                   aria-label="Refresh users"
                   title="Refresh users"
                 >
@@ -2196,13 +2199,8 @@ function AdminUsers() {
                 </button>
               </div>
             </div>
-            {moduleLoadError && (
-              <p className="notice error admin-module-error" role="alert">
-                {moduleLoadError}
-              </p>
-            )}
             <div className="table-wrap">
-              <table>
+              <table aria-busy={usersLoading}>
                 <thead>
                   <tr>
                     <th>Name</th>
@@ -2214,7 +2212,9 @@ function AdminUsers() {
                   </tr>
                 </thead>
                 <tbody>
-                  {tableError ? (
+                  {usersLoading ? (
+                    <tr><td colSpan={6}><LoadingIndicator label="Loading users…" /></td></tr>
+                  ) : tableError ? (
                     <tr>
                       <td colSpan={6} className="table-error" role="alert">
                         {tableError} Refresh and try again.
@@ -2263,19 +2263,6 @@ function AdminUsers() {
                       </td>
                       <td className="row-actions">
                         <span className="row-action-group">
-                          {user.is_aidp_admin && governanceModule && (
-                            <button
-                              className="table-action table-module"
-                              type="button"
-                              aria-haspopup="dialog"
-                              aria-expanded={governanceOpen && moduleManagerUserId === user.id}
-                              onClick={() => { setModuleManagerUserId(user.id); setGovernanceOpen(true); }}
-                              aria-label={`Manage ${governanceModule.display_name} as ${user.email}`}
-                              title={`Manage ${governanceModule.display_name}`}
-                            >
-                              <AdminLoginIcon />
-                            </button>
-                          )}
                           {user.managed !== false && (
                             <>
                               <button
@@ -2308,7 +2295,7 @@ function AdminUsers() {
                     </tr>
                     ))
                   )}
-                  {!tableError && !visible.length && (
+                  {!tableError && !visible.length && !usersLoading && (
                     <tr>
                       <td colSpan={6} className="empty">
                         No matching lab users.
@@ -2369,8 +2356,6 @@ function AdminUsers() {
         }}
         onSave={() => void saveLabAssignments()}
       />
-      {governanceOpen && <GovernanceModuleManager initialUserId={moduleManagerUserId || undefined}
-        onClose={() => { setGovernanceOpen(false); setModuleManagerUserId(null); }} onChanged={() => void loadModules()} />}
       <ConfirmModal
         open={Boolean(pendingLabAction) && !operating}
         kind={pendingLabAction?.kind === "remove" ? "delete" : "reset"}
@@ -2557,11 +2542,13 @@ function ApplicationReleaseSettings({
   busy,
   error,
   onConfigureGovernance,
+  onConfigureGodsEye,
 }: {
   release: AdminApplicationRelease | null;
   busy: boolean;
   error: string;
   onConfigureGovernance: () => void;
+  onConfigureGodsEye: () => void;
 }) {
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
@@ -2583,7 +2570,7 @@ function ApplicationReleaseSettings({
           <h2>Application version</h2>
           <p>Update the VM in place from the latest immutable release without reinstalling it.</p>
         </div>
-        <span className={`prisma-mode release-state ${release?.update_available || operationRunning ? "update" : "current real"}`}>
+        <span className={`territorial-mode release-state ${release?.update_available || operationRunning ? "update" : "current real"}`}>
           {statusLabel}
         </span>
       </header>
@@ -2648,13 +2635,18 @@ function ApplicationReleaseSettings({
                     <td className="release-package-actions">
                       {item.package_id === "ai_data_governance_vsc_extension" && (
                         <button type="button" className="module-configure module-deploy" onClick={onConfigureGovernance} aria-label="Deploy or redeploy AI Data Governance" title="Deploy or redeploy AI Data Governance" aria-haspopup="dialog">
-                          <RefreshIcon />
+                          <InstallIcon />
                         </button>
                       )}
                       {item.package_id === "territorial_control" && (
+                        <>
+                        <button type="button" className="module-configure module-deploy" onClick={onConfigureGodsEye} aria-label={`Install ${item.display_name}`} title={`Install ${item.display_name}`} aria-haspopup="dialog">
+                          <InstallIcon />
+                        </button>
                         <a className="module-configure" href="/admin/gods-eye-view" aria-label={`Configure ${item.display_name}`} title={`Configure ${item.display_name}`}>
                           <AdminLoginIcon />
                         </a>
+                        </>
                       )}
                     </td>
                   </tr>
@@ -2691,6 +2683,7 @@ function AdminSettings() {
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [confirmReleaseUpdate, setConfirmReleaseUpdate] = useState(false);
   const [confirmGovernance, setConfirmGovernance] = useState(false);
+  const [confirmGodsEye, setConfirmGodsEye] = useState(false);
   const [releaseError, setReleaseError] = useState("");
   const [releaseProgress, setReleaseProgress] = useState<RegistrationResponse | null>(null);
   const [error, setError] = useState("");
@@ -3018,7 +3011,7 @@ function AdminSettings() {
                   <RefreshIcon />{releaseBusy ? "Updating…" : "Update from GitHub"}
                 </button>}
             </div>
-            {configuringModule ? <PrismaAdmin api={api} timeZone={savedTimeZone} searchIcon={<SearchIcon />} refreshIcon={<RefreshIcon />} viewerUrlControl={
+            {configuringModule ? <TerritorialAdmin api={api} timeZone={savedTimeZone} searchIcon={<SearchIcon />} refreshIcon={<RefreshIcon />} viewerUrlControl={
               <label className="settings-field">
                 God’s Eye View URL
                 <span className="settings-url-control settings-url-control-actions">
@@ -3032,6 +3025,7 @@ function AdminSettings() {
               busy={releaseBusy}
               error={releaseError}
               onConfigureGovernance={() => setConfirmGovernance(true)}
+              onConfigureGodsEye={() => setConfirmGodsEye(true)}
             />
               <div className="settings-time-zone-controls">
                 <label className="settings-field">Display time zone<select value={timeZone} onChange={event => setTimeZone(event.target.value)}>{timeZones.map(zone => <option key={zone.value} value={zone.value}>{zone.label}</option>)}</select></label>
@@ -3048,6 +3042,7 @@ function AdminSettings() {
       </section>
       <Toast message={toast} onDismiss={() => setToast("")} />
       {confirmGovernance && <GovernanceModuleManager onClose={() => setConfirmGovernance(false)} />}
+      {confirmGodsEye && <GodsEyeModuleManager api={api} onClose={() => setConfirmGodsEye(false)} />}
       <ConfirmModal
         open={confirmReleaseUpdate}
         kind="question"
@@ -3070,8 +3065,8 @@ function AdminSettings() {
 }
 
 export function App() {
-  if (window.location.pathname === "/local/gods-eye-view/login") return <Shell><LocalPrismaAccess api={api} /></Shell>;
-  if (window.location.pathname === "/local/gods-eye-view/workspace") return <Shell><LocalPrismaAccess api={api} workspace /></Shell>;
+  if (window.location.pathname === "/local/gods-eye-view/login") return <Shell><LocalTerritorialAccess api={api} /></Shell>;
+  if (window.location.pathname === "/local/gods-eye-view/workspace") return <Shell><LocalTerritorialAccess api={api} workspace /></Shell>;
   if (window.location.pathname === "/admin/gods-eye-view") return <AdminSettings />;
   if (window.location.pathname === "/admin/settings") return <AdminSettings />;
   if (window.location.pathname === "/admin/login")

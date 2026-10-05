@@ -86,8 +86,15 @@ variable "deployment_mode" {
   }
 }
 
+variable "enable_territorial_viewer" {
+  description = "Create the private God’s Eye View VM behind the authenticated application."
+  type        = bool
+  default     = null
+}
+
+# Compatibility input for existing Deploy Studio state; the canonical input takes precedence.
 variable "enable_prisma_viewer" {
-  description = "Create a private PRISMA viewer VM behind the authenticated Starter Kits application."
+  description = "Legacy alias of enable_territorial_viewer. Use the canonical input for new deployments."
   type        = bool
   default     = false
 }
