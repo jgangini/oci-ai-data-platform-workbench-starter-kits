@@ -119,6 +119,28 @@
         {
           "before": "  const panels = [...stack.children].filter(\n    (panel) => panel.matches('[data-panel-id]') && !panel.hidden,\n  );",
           "after": "  let panels = [...stack.children].filter(\n    (panel) => panel.matches('[data-panel-id]') && !panel.hidden,\n  );\n  const exclusivePanel = panels.find(\n    (panel) => panel.dataset.railExclusive !== undefined && !panel.classList.contains('collapsed'),\n  );\n  if (exclusivePanel) panels = [exclusivePanel];"
+        },
+        {
+          "before": "      left: rect.left,\n      right: rect.right,",
+          "after": "      left: obstacle.id === 'gev-voice-control' ? stackRect.left : rect.left,\n      right: obstacle.id === 'gev-voice-control' ? stackRect.right : rect.right,"
+        },
+        {
+          "before": "        Math.max(\n          panel.getBoundingClientRect().height,\n          panel.scrollHeight || 0,\n          panel.classList.contains('collapsed') ? 42 : 0,\n        ),",
+          "after": "        panel === exclusivePanel\n          ? leftStack?.querySelector?.('#data-panel:not(.collapsed)')?.getBoundingClientRect().height || viewportHeight\n          : Math.max(\n              panel.getBoundingClientRect().height,\n              panel.scrollHeight || 0,\n              panel.classList.contains('collapsed') ? 42 : 0,\n            ),"
+        }
+      ]
+    },
+    {
+      "path": "src/ui/leftPanelRail.js",
+      "sha256": "195d9cb24742f2837e90198d97e4e0c1434dfa41a1443a83f2c74114ed09ffb0",
+      "replacements": [
+        {
+          "before": "  const safeGap = viewportHeight * 0.012;",
+          "after": "  const safeGap = Math.max(8, viewportHeight * 0.012);"
+        },
+        {
+          "before": "    if (!overlapsHorizontally) continue;",
+          "after": "    // Voice and the lower HUD status share a floor across both rails.\n    if (!overlapsHorizontally && obstacle.id !== 'gev-voice-control' && !obstacle.classList.contains('hud-bottom-right')) continue;"
         }
       ]
     }

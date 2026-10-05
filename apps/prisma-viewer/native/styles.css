@@ -1,6 +1,6 @@
 /* Scoped extensions: native Godâ€™s Eye View keeps its complete layout and styles. */
 /* Align attribution with Power up where the footer has room beside the dock. */
-@media (min-width: 1400px) {
+@media (min-width: 1280px) {
   :root:not([data-ui-theme="cyber"]) body:not(.ui-clean-view, .recording-mode, .cockpit-mode, .scene-playback-mode) #cesium-credits,
   :root:not([data-ui-theme="cyber"]) body:not(.ui-clean-view, .recording-mode, .cockpit-mode, .scene-playback-mode):has(#intel-hud[data-variant="minimal"].active) #cesium-credits { bottom: .9rem; }
 }
@@ -116,9 +116,9 @@
 .tc-review-dialog::backdrop { background: #02070bc9; backdrop-filter: blur(4px); }
 .tc-review-dialog .tc-review-confirm-note { max-height: 180px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border-left: 2px solid var(--accent); background: var(--accent-dim); }
 .tc-review-dialog button:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 3px; }
-/* Match Data Layers' native height ceiling while respecting the right rail's allocation. */
+/* The native rail matches expanded Data Layers and reserves the voice control's floor. */
 #right-context-rail:has(> [data-rail-exclusive]:not([hidden]):not(.collapsed)) > :not([data-rail-exclusive]) { display: none !important; }
-#right-context-rail > #territorial-analyst:not(.collapsed), #right-context-rail.layout-focus > #territorial-analyst:not(.collapsed) { height: 620px; max-height: min(620px, calc(100vh - var(--left-stack-top) - var(--left-stack-gap) - 36px), var(--right-stack-max-height, 100vh)); }
+#right-context-rail > #territorial-analyst:not(.collapsed), #right-context-rail.layout-focus > #territorial-analyst:not(.collapsed) { height: var(--right-panel-allocated-height, 100%); max-height: var(--right-panel-allocated-height, 100%); }
 @media (max-width: 720px) { #right-context-rail > #territorial-analyst:not(.collapsed) { height: 100%; max-height: 100%; } }
 #territorial-analyst:not(.collapsed) > .global-context-panel-inner { max-height: inherit; }
 #territorial-analyst .tc-panel-body { display: flex; flex-direction: column; gap: 8px; overflow-y: hidden; }

@@ -8,6 +8,7 @@ import { createTerritorialLayer, mountTerritorialPanel, seedBogotaView, TERRITOR
 import { ShareLinkManager } from '../.upstream/src/sharelink.js';
 import { PanelChrome } from '../.upstream/src/ui/panelChrome.js';
 import { layoutRightPanelRail } from '../.upstream/src/ui/rightPanelRail.js';
+import { layoutLeftPanelRail } from '../.upstream/src/ui/leftPanelRail.js';
 import { chatContext, createAgentFlowLayer, mountAnalyst } from '../native/analyst.js';
 import { LayerLifecycle } from '../.upstream/src/data/lifecycle.js';
 import { mountCaptureRefresh } from '../native/captureRefresh.js';
@@ -781,6 +782,51 @@ test('exclusive Agent Flow receives the whole right rail and restores siblings w
       assert.equal(actual.stack.dataset.expandedCount, ordinary.stack.dataset.expandedCount);
     }
   }
+});
+
+test('Data Layers and the assistant share the visible voice and HUD floor across resizes and Scenes allocation', () => {
+  const left = new PanelElement(), data = new PanelElement(), scenes = new PanelElement();
+  const right = new PanelElement(), chat = new PanelElement(), voice = new PanelElement(), hudStatus = new PanelElement();
+  let height = 1000, voiceVisible = true, withScenes = false, hudStatusVisible = false;
+  hudStatus.classList.add('hud-bottom-right');
+  data.id = 'data-panel'; scenes.id = 'scene-panel'; chat.id = 'territorial-analyst'; voice.id = 'gev-voice-control';
+  chat.dataset.railExclusive = '';
+  for (const panel of [data, scenes, chat]) panel.dataset.panelId = panel.id;
+  const rect = (x, top, width, h) => ({ left: x, right: x + width, top, bottom: top + h, width, height: h });
+  left.getBoundingClientRect = () => rect(50, parseFloat(left.style['--left-stack-safe-top'] || '26') * height / 100, 360, height);
+  right.getBoundingClientRect = () => rect(1000, left.getBoundingClientRect().top, 400, height);
+  voice.getBoundingClientRect = () => rect(650, height - 100, 140, 80);
+  hudStatus.getBoundingClientRect = () => rect(1000, height - 200, 400, 120);
+  for (const panel of [data, scenes]) panel.getBoundingClientRect = () => rect(50, left.getBoundingClientRect().top, 280,
+    parseFloat(panel.style['--left-panel-allocated-height']) || 1400);
+  chat.getBoundingClientRect = () => rect(1000, left.getBoundingClientRect().top, 400, 620);
+  left.querySelectorAll = () => withScenes ? [data, scenes] : [data];
+  left.querySelector = () => data.classList.contains('collapsed') ? null : data;
+  left.append(data, scenes); right.append(chat);
+  const options = { windowRef: { get innerHeight() { return height; }, matchMedia: () => ({ matches: false }) },
+    hud: { visible: false, variant: 'minimal' }, obstacles: [voice, hudStatus], onCollapse() {}, onRetry() {},
+    getComputedStyle: element => ({ display: (element === voice && !voiceVisible) || (element === hudStatus && !hudStatusVisible) ? 'none' : 'block', visibility: 'visible', opacity: '1', rowGap: '8px' }) };
+  const run = () => {
+    layoutLeftPanelRail({ ...options, stack: left, collapsedHeights: new Map(), onAligned() {} });
+    layoutRightPanelRail({ ...options, stack: right, leftStack: left, documentRef: { activeElement: null }, readDisplayScrollTop: () => 0 });
+  };
+  for (const h of [1000, 600, 1100]) for (const scenesOpen of [false, true]) {
+    height = h; withScenes = scenesOpen; run();
+    const expectedFloor = height - 100 - Math.max(8, height * .012);
+    assert.ok(Math.abs(Number(right.dataset.safeBottom) - expectedFloor) < .1);
+    const dataHeight = parseFloat(data.style['--left-panel-allocated-height']);
+    const chatHeight = parseFloat(chat.style['--right-panel-allocated-height']);
+    assert.ok(Math.abs(dataHeight - chatHeight) < .2, `${height}/${withScenes}: panels must match`);
+    assert.ok(left.getBoundingClientRect().top + dataHeight <= expectedFloor + .2);
+  }
+  withScenes = false; hudStatusVisible = true; options.hud = { visible: true, variant: 'tactical' }; run();
+  assert.ok(Math.abs(parseFloat(data.style['--left-panel-allocated-height']) - parseFloat(chat.style['--right-panel-allocated-height'])) < .2,
+    'A taller right HUD status block must constrain both rails equally');
+  assert.ok(left.getBoundingClientRect().top + data.getBoundingClientRect().height <= height - 200 - height * .012 + .2);
+  hudStatusVisible = false; voiceVisible = false; run();
+  assert.ok(Number(right.dataset.safeBottom) > height - 100, 'A hidden voice control must not reserve stale geometry');
+  data.classList.add('collapsed'); run();
+  assert.ok(parseFloat(chat.style['--right-panel-allocated-height']) > 100, 'Collapsed Data Layers must not collapse the assistant');
 });
 
 test('Agent Flow is one native Context panel and Enter submits without taking Shift, IME or repeats', async (t) => {
