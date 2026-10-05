@@ -1,3 +1,4 @@
+import { LoadingIndicator } from './LoadingIndicator';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { networkNames, postStatus, prismaEndpoint, prismaError, refreshedPosts, safeMediaUrl, timestamp, type Post, type PostPage, type PostListing, type PrismaApi } from './prismaAdminState';
 
@@ -124,7 +125,7 @@ export function PrismaPosts({ api, refreshKey, searchIcon, refreshIcon, timeZone
         <td>{highlightMatch(post.country || 'Unknown', query)}</td>
         <td className="prisma-post-created"><time dateTime={post.published_at || undefined}>{timestamp(post.published_at, timeZone)}</time></td><td><span className={`badge ${post.processing_status === 'processed' ? 'active' : 'pending'}`}>{postStatus(post.processing_status)}</span></td><td className="prisma-post-preview-cell"><button className="table-action table-edit prisma-preview-button" type="button" aria-label={`Preview publication by ${post.username || 'unknown author'}`} onClick={() => setPreview(post)}>
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" fill="none" stroke="currentColor" strokeWidth="1.6" /><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg></button></td></tr>)}</tbody></table>
-      {!page && busy && <p role="status">Loading publications…</p>}{page?.items.length === 0 && <p className="empty" role="status">{query || platform ? 'No publications match these filters.' : 'No publications captured yet.'}</p>}</div>
+      {!page && busy && <LoadingIndicator label="Loading publications…" />}{page?.items.length === 0 && <p className="empty" role="status">{query || platform ? 'No publications match these filters.' : 'No publications captured yet.'}</p>}</div>
     </div>
     <nav className="prisma-pagination" aria-label="Publication pages"><label>Rows per page<select value={pageSize} disabled={searching} onChange={event => { setPageSize(Number(event.target.value)); setCursors([null]); setListing({ page: null, changed: false }); }}>{[10, 20, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}</select></label>
       <span aria-live="polite">{first}–{last} of {page?.total ?? 0}</span><button type="button" className="secondary" disabled={searching || cursors.length === 1} onClick={() => { setCursors(value => value.slice(0, -1)); setListing({ page: null, changed: false }); }}>Previous</button>

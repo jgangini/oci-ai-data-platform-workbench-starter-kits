@@ -1,3 +1,4 @@
+import { LoadingIndicator } from './LoadingIndicator';
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import { prismaEndpoint, prismaError, timestamp, type PrismaApi } from './prismaAdminState';
 import { PrismaSensorReadings } from './PrismaSensorReadings';
@@ -116,7 +117,7 @@ export function PrismaSensors({ api, timeZone, active = true, searchIcon, refres
       </div>
     </div>
     <PrismaSyntheticResetStatus {...resetView} runtime={runtime} sensorLabel={sensorFamilies[selected]} />
-    {!config && !error && !loadError && <p role="status">Loading sensor configuration…</p>}
+    {!config && !error && !loadError && <LoadingIndicator label="Loading sensor configuration…" />}
     <section id="prisma-sensor-readings-panel" className="prisma-module-content" role="tabpanel" aria-labelledby={`prisma-sensor-tab-${selected}`}>
     <div id="prisma-sensor-configuration" hidden={collapsed}>{config && editor && <form className="prisma-source" onSubmit={(event: FormEvent) => { event.preventDefault(); void action('save'); }}>
       <div className="prisma-source-heading"><h3><svg className="prisma-platform-logo" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d={sensorIcons[selected]} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>{sensorFamilies[selected]}</h3><div className="prisma-source-badges"><span className={`prisma-mode prisma-capture-state ${config.capture_running ? 'running' : 'paused'}`} role="status" title={config.capture_running ? 'Running' : 'Paused'}><span className={`prisma-capture-dot ${config.capture_running ? 'running' : 'paused'}`} aria-hidden="true" />{config.capture_running ? 'Running' : 'Paused'}</span></div></div>

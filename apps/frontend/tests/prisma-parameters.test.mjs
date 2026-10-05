@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import * as jsxRuntime from 'react/jsx-runtime';
 
-const compiled = Object.fromEntries(['PrismaParameters', 'PrismaOciParameters'].map(name => [name, ts.transpileModule(readFileSync(new URL(`../src/${name}.tsx`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText]));
+const compiled = Object.fromEntries(['PrismaParameters', 'PrismaOciParameters', 'LoadingIndicator'].map(name => [name, ts.transpileModule(readFileSync(new URL(`../src/${name}.tsx`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText]));
 const provider = { id: 'google-maps', label: 'Google Maps', configured: true, fields: [{ id: 'GOOGLE_MAPS_API_KEY', label: 'API key', configured: true, secret: true, client_exposed: true }, { id: 'SECOND_KEY', label: 'Other key', configured: true, secret: true }] };
 const providerLinks = {
   'google-maps': 'https://developers.google.com/maps/documentation/tile/get-api-key', openai: 'https://platform.openai.com/api-keys',

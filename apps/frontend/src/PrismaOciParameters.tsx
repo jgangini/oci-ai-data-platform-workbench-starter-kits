@@ -1,3 +1,4 @@
+import { LoadingIndicator } from './LoadingIndicator';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { prismaEndpoint, prismaError, type PrismaApi } from './prismaAdminState';
 
@@ -79,7 +80,7 @@ export function PrismaOciParameters({ api, active, voice = false, onConfigured }
   return <form className="prisma-source" onSubmit={(event: FormEvent) => { event.preventDefault(); if (dirty && !busy && !loading) setConfirm(true); }} aria-label={title}>
     <div className="prisma-source-heading"><h3>{title}</h3><div className="prisma-source-badges">{saved && <span className={`prisma-mode ${saved.configured ? 'real' : ''}`}>{saved.configured ? 'Configured' : 'Not configured'}</span>}</div></div>
     <p className="prisma-provider-description">{voice ? 'Interprets spoken requests, controls the globe and generates spoken replies.' : 'Selects the model for the direct OCI text assistant.'}</p>
-    {!saved && !error && <p role="status">Loading settings…</p>}
+    {!saved && !error && <LoadingIndicator label="Loading settings…" />}
     <fieldset disabled={!!busy || loading}>{saved && <><div className="prisma-fields"><label>Model<select required value={model} onChange={event => { setModel(event.target.value); setMessage(''); setError(''); }}>
       {!models.some(item => item.id === model) && <option value={model}>{(model === saved.model_id ? saved.model_name : model) || 'Select a model'}</option>}
       {models.map(item => <option key={item.id} value={item.id} disabled={!item.selectable}>{item.name}{item.reason ? ` · ${item.reason}` : ''}</option>)}</select></label>
@@ -87,7 +88,7 @@ export function PrismaOciParameters({ api, active, voice = false, onConfigured }
       {voice && <small>Region: {saved.region} · Speech model: {saved.tts_model}</small>}</>}
       <div className="prisma-parameter-fields-help"><a className="prisma-key-help" href="https://docs.oracle.com/en-us/iaas/Content/generative-ai/getting-started.htm" target="_blank" rel="noopener noreferrer" aria-label={`Get key information for ${title}`}>GET KEY ↗</a></div>
       {saved && <><div className="prisma-source-actions"><button type="submit" disabled={!dirty || !model || !saved.available}>Save</button><button type="button" className="secondary" disabled={dirty || !saved.configured} onClick={() => void action('test')}>{busy === 'test' ? 'Testing…' : 'Test'}</button>
-        <button type="button" className="secondary" disabled={!saved.available} onClick={() => void action('models')}>{busy === 'models' ? 'Loading…' : cursor ? 'More models' : 'Load models'}</button>
+        <button type="button" className="secondary" disabled={!saved.available} onClick={() => void action('models')}>{busy === 'models' ? <LoadingIndicator label="Loading models…" inline /> : cursor ? 'More models' : 'Load models'}</button>
         {dirty && <button type="button" className="secondary" onClick={() => accept(saved)}>Discard changes</button>}</div>
       <small>{dirty ? 'Save before testing. ' : ''}{voice ? 'Test makes speech and audio inference requests using the saved model and voice.' : 'Test makes an inference request using the saved model.'}</small>
       {!dirty && !message && !error && <small>Last inference test: {saved.last_test?.status === 'success' ? 'Passed' : saved.last_test?.error?.message || (saved.last_test ? 'Failed' : 'Not tested')}</small>}

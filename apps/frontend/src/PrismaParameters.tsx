@@ -1,3 +1,4 @@
+import { LoadingIndicator } from './LoadingIndicator';
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { ParameterConfirmation, PrismaOciParameters } from './PrismaOciParameters';
 import { prismaEndpoint, prismaError, type PrismaApi } from './prismaAdminState';
@@ -130,7 +131,7 @@ export function PrismaParameters({ api, active }: { api: PrismaApi; active: bool
     </button>)}
     </div>
     {configuration?.runtime_status === 'pending' && <p role="status" className="prisma-reset-status">Provider settings are saved. Waiting for the globe service to apply them…</p>}
-    {loading && !configuration && <p role="status">Loading parameters…</p>}{error && <p role="alert" className="prisma-error">{error}</p>}
+    {loading && !configuration && <LoadingIndicator label="Loading parameters…" />}{error && <p role="alert" className="prisma-error">{error}</p>}
     {error && <button type="button" className="secondary" disabled={loading} onClick={() => setRefresh(value => value + 1)}>Retry settings</button>}
     {configuration?.providers.map(provider => <section key={provider.id} id={`prisma-parameter-panel-${provider.id}`} className="settings-panel" role="tabpanel" aria-labelledby={`prisma-parameter-tab-${provider.id}`} hidden={collapsed || selectedId !== provider.id}>
       <PrismaProviderParameters api={api} provider={provider} revision={configuration.revision} active={active} onRefresh={() => setRefresh(value => value + 1)} onSaved={next => { savedRevision.current++; setConfiguration(next); setError(''); setRefresh(value => value + 1); }} />

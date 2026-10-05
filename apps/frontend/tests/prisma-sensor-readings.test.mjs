@@ -22,7 +22,7 @@ function harness(t, overrides = {}) {
     useState(initial) { const id = cursor++; if (!(id in slots)) slots[id] = initial; return [slots[id], value => { const next = typeof value === 'function' ? value(slots[id]) : value; dirty ||= !Object.is(slots[id], next); slots[id] = next; }]; },
     useEffect(callback, deps) { const id = cursor++, old = slots[id]; if (!old || deps.some((value, index) => value !== old.deps[index])) effects.push(() => { old?.cleanup?.(); slots[id] = { deps, cleanup: callback() }; }); },
   };
-  const component = {}; new Function('exports', 'require', compiled)(component, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : state);
+  const component = {}; new Function('exports', 'require', compiled)(component, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === './LoadingIndicator' ? { LoadingIndicator() {} } : state);
   const props = { api: (path, options) => new Promise((resolve, reject) => requests.push({ path, options, resolve, reject })), timeZone: 'America/Bogota', family: '', families: { river_level: 'River level', rainfall: 'Rainfall' }, searchIcon: null, refreshIcon: null, ...overrides };
   function render() { for (let n = 0; dirty && n < 20; n++) { cursor = 0; dirty = false; effects = []; tree = component.PrismaSensorReadings(props); effects.forEach(effect => effect()); } assert.equal(dirty, false); }
   const nodes = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? nodes(child) : [])];

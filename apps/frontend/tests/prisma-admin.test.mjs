@@ -111,6 +111,7 @@ test('network tabs toggle configuration, retain mounted editors and follow captu
   new Function('exports', 'require', compiled)(component, name => {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return jsxRuntime;
+    if (name === './LoadingIndicator') return { LoadingIndicator() {} };
     if (name === './prismaAdminState') return exports;
     if (name === './prisma.css') return {};
     return { PrismaPosts: () => null, PrismaSyntheticReset: () => null, PrismaSyntheticResetStatus: () => null };
@@ -128,7 +129,9 @@ test('network tabs toggle configuration, retain mounted editors and follow captu
   const dot = platform => find(props => props.id === `prisma-tab-${platform}`).props.children.at(-1).props;
   const sources = ['x', 'facebook', 'instagram', 'tiktok'].map((platform, index) => ({ ...saved, platform, capture_running: index < 3, capture_state: ['running', 'scheduled', 'capturing', 'paused'][index] }));
   t.after(() => { for (const slot of slots) slot?.cleanup?.(); if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
-  render(); requests[0]({ sources, runtime: 'local_fixture' }); await new Promise(setImmediate); render();
+  render(); assert.equal(find(props => props.label === 'Loading configuration…').type.name, 'LoadingIndicator');
+  requests[0]({ sources, runtime: 'local_fixture' }); await new Promise(setImmediate); render();
+  assert.ok(!nodes(tree).some(node => node?.type?.name === 'LoadingIndicator'));
   for (const [index, platform] of ['x', 'facebook', 'instagram', 'tiktok'].entries()) {
     assert.equal(dot(platform)['aria-label'], index < 3 ? 'Running' : 'Paused');
     assert.equal(dot(platform).className, `prisma-capture-dot ${index < 3 ? 'running' : 'paused'}`);
@@ -236,6 +239,7 @@ function postsHarness(t) {
   new Function('exports', 'require', postsCompiled)(component, name => {
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return jsxRuntime;
+    if (name === './LoadingIndicator') return { LoadingIndicator() {} };
     assert.equal(name, './prismaAdminState'); return exports;
   });
   const props = { refreshKey: 0, searchIcon: null, refreshIcon: null,

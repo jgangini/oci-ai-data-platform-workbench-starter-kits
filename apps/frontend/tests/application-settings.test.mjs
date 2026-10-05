@@ -20,7 +20,7 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
     useEffect(callback, deps) { const id = cursor++, old = slots[id]; if (!old || deps.some((value, index) => value !== old.deps[index])) effects.push(() => { old?.cleanup?.(); slots[id] = { deps, cleanup: callback() }; }); },
   };
   const module = {};
-  new Function('exports', 'require', compiled)(module, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === './registrationPoll' ? { ...poll, pollRegistration: ({ request, signal }) => request(signal) } : {});
+  new Function('exports', 'require', compiled)(module, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './registrationPoll' ? { ...poll, pollRegistration: ({ request, signal }) => request(signal) } : {});
   const component = module.App().type;
   function render() { for (let n = 0; dirty && n < 20; n++) { cursor = 0; dirty = false; effects = []; tree = component(); effects.forEach(effect => effect()); } assert.equal(dirty, false); }
   const nodes = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? nodes(child) : [])];
@@ -29,12 +29,23 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
   const settle = async () => { await new Promise(setImmediate); render(); };
   t.after(() => { slots.forEach(slot => slot?.cleanup?.()); if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
   render();
-  for (const request of requests) request.resolve(initial[request.path] ?? (request.path === '/api/admin/settings' ? settings : request.path === '/api/admin/application' ? currentRelease : { username: 'admin' }));
+  for (const request of requests) if (initial[request.path] !== null) request.resolve(initial[request.path] ?? (request.path === '/api/admin/settings' ? settings : request.path === '/api/admin/application' ? currentRelease : { username: 'admin' }));
   await settle();
   return { requests, navigations, find, act, settle, nodes: () => nodes(tree), mutations: () => requests.filter(request => ['PUT', 'POST'].includes(request.options.method)),
     dialog: () => find('ConfirmModal', props => props.title === 'Update application?'),
     update: () => act(() => { const button = find('button', props => props.className === 'settings-save application-update'); assert.ok(!button.props.disabled); button.props.onClick(); }) };
 }
+
+for (const failed of [false, true]) test(`Workbench configuration loader ends on ${failed ? 'failure' : 'empty success'}`, async t => {
+  const h = await harness(t, release, '/admin/settings', { '/api/admin/settings': null });
+  assert.equal(h.find('LoadingIndicator', props => props.label === 'Loading configuration…').props.inline, true);
+  const request = h.requests.find(item => item.path === '/api/admin/settings');
+  if (failed) request.reject(new Error('Settings unavailable'));
+  else request.resolve({ ...settings, aidp_url: '' });
+  await h.settle();
+  assert.ok(!h.nodes().some(node => node?.props?.label === 'Loading configuration…'));
+  assert.equal(h.find('input', props => props['aria-label'] === 'AI Data Platform Workbench URL').props.placeholder, 'Not configured');
+});
 
 test('application updates require confirmation, preserve the warning and cancel without dispatching', async t => {
   const h = await harness(t);

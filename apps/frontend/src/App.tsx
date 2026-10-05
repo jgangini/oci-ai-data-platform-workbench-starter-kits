@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { PrismaAdmin } from "./PrismaAdmin";
+import { LoadingIndicator } from "./LoadingIndicator";
 import { LocalPrismaAccess } from "./LocalPrismaAccess";
 
 import { labAssignmentChanges } from "./labAssignments";
@@ -393,7 +394,7 @@ function ProvisioningOverlay({
     >
       <div className="registration-result">
         <span className="progress-orbit" aria-hidden="true" />
-        <p className="registration-loading-title">Loading...</p>
+        <p className="sr-only">Loading...</p>
         <p className="registration-progress-phase" id={phaseId}>
           {phaseLabel}
         </p>
@@ -2180,7 +2181,7 @@ function AdminUsers() {
                   </select>
                 </label>
                 {usersLoaded && !users.some(user => user.is_aidp_admin) && <p role="alert">No AI Data Platform administrator is available. Deployment requires an existing AI_DATA_PLATFORM_ADMIN account.</p>}
-                <p role="status">{governanceModule ? governanceModule.status.replaceAll("_", " ") : moduleLoadError ? "Module status unavailable" : "Loading module status…"}</p>
+                {!governanceModule && !moduleLoadError ? <LoadingIndicator label="Loading module status…" /> : <p role="status">{governanceModule ? governanceModule.status.replaceAll("_", " ") : "Module status unavailable"}</p>}
                 <button type="button" disabled={!governanceModule || !users.some(user => user.id === governanceAdminId && user.is_aidp_admin)} onClick={() => {
                   const user = users.find(user => user.id === governanceAdminId && user.is_aidp_admin);
                   if (user) void openModuleManager(user);
@@ -2759,7 +2760,7 @@ function ApplicationReleaseSettings({
       ) : error ? (
         <p className="release-operation error" role="alert">{error}</p>
       ) : (
-        <p className="settings-help" role="status">Loading release metadata…</p>
+        <LoadingIndicator label="Loading release metadata…" />
       )}
     </section>
   );
@@ -2772,6 +2773,7 @@ function AdminSettings() {
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>(configuringModule || window.location.hash === "#application" ? "application" : "workbench");
   const [aidpServiceEndpoint, setAidpServiceEndpoint] = useState("");
   const [aidpUrl, setAidpUrl] = useState("");
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [aidpPlatformId, setAidpPlatformId] = useState("");
   const [deploymentMode, setDeploymentMode] = useState<"laboratory" | "production">("laboratory");
   const [registrationCode, setRegistrationCode] = useState("");
@@ -2838,7 +2840,7 @@ function AdminSettings() {
               ? reason.message
               : "Unable to load settings",
           );
-      });
+      }).finally(() => setSettingsLoading(false));
     void loadApplicationRelease();
     return () => releaseAbortRef.current?.abort();
   }, []);
@@ -3026,14 +3028,14 @@ function AdminSettings() {
             <label className="settings-field">
               AI Data Platform Workbench URL
               <span className="settings-url-control settings-url-control-actions">
-                <input
+                {settingsLoading ? <LoadingIndicator label="Loading configuration…" inline /> : <input
                   ref={urlRef}
                   value={aidpUrl}
                   readOnly
                   spellCheck={false}
                   aria-label="AI Data Platform Workbench URL"
-                  placeholder="Loading configuration…"
-                />
+                  placeholder="Not configured"
+                />}
                 <button
                   type="button"
                   className="copy-url"

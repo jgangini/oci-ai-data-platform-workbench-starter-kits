@@ -1,3 +1,4 @@
+import { LoadingIndicator } from './LoadingIndicator';
 import { FormEvent, useEffect, useState } from 'react';
 
 type Api = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -24,7 +25,7 @@ export function LocalPrismaAccess({ api, workspace = false }: { api: Api; worksp
       <h2>AIDP workspace preview</h2><p>Territorial Control · {data.project_access.role}: <code>{data.project_access.workspace_path}</code></p>
       <h3>Additional starter kits</h3><ul>{data.user.material?.labs?.map(lab => <li key={lab.lab_id}>{lab.lab_id}: <code>{lab.workspace_path}</code></li>)}</ul>
       <p>This preview represents the local provisioning result. It does not connect to a cloud AIDP workspace.</p>
-      <a href={data.viewer_url}>Open God’s Eye View →</a></> : <p role="status">Loading workspace…</p>
+      <a href={data.viewer_url}>Open God’s Eye View →</a></> : <LoadingIndicator label="Loading workspace…" />
       : <form onSubmit={submit}><p>Use the credentials in your local welcome file. No email is sent.</p>
         <label>Email<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required /></label>
         <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required /></label>

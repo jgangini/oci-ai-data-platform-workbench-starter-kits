@@ -1,3 +1,4 @@
+import { LoadingIndicator } from './LoadingIndicator';
 import { useEffect, useState, type ReactNode } from 'react';
 import { prismaError, timestamp, type PrismaApi } from './prismaAdminState';
 
@@ -73,7 +74,7 @@ export function PrismaSensorReadings({ api, timeZone, family, families, searchIc
       <td>{reading.value} {reading.unit}</td><td className="prisma-post-created"><time dateTime={reading.observed_at}>{timestamp(reading.observed_at, timeZone)}</time></td>
       <td><span className={`badge prisma-sensor-status ${reading.status}`}>{statuses[reading.status] || reading.status}</span></td>
     </tr>)}</tbody></table>
-      {!readings && busy && <p role="status">Loading sensor readings…</p>}{readings && !items.length && <p className="empty" role="status">{family || query || status ? 'No readings match these filters.' : 'No sensor readings published yet.'}</p>}
+      {!readings && busy && <LoadingIndicator label="Loading sensor readings…" />}{readings && !items.length && <p className="empty" role="status">{family || query || status ? 'No readings match these filters.' : 'No sensor readings published yet.'}</p>}
     </div></div>
     <nav className="prisma-pagination" aria-label="Sensor reading pages"><label>Rows per page<select value={pageSize} onChange={event => setPageSize(Number(event.target.value))}>{[10, 20, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}</select></label>
       <span aria-live="polite">{first}–{last} of {filtered.length}</span><button type="button" className="secondary" disabled={searching || currentPage === 1} onClick={() => setPagination({ page: currentPage - 1, filters })}>Previous</button>

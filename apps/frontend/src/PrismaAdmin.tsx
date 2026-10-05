@@ -1,3 +1,4 @@
+import { LoadingIndicator } from './LoadingIndicator';
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import { PrismaPosts } from './PrismaPosts';
 import { PrismaSensors } from './PrismaSensors';
@@ -118,7 +119,7 @@ export function PrismaAdmin({ api, timeZone = 'America/Bogota', viewerUrlControl
     {viewerUrlControl}
     <div className="settings-tabs prisma-module-tabs" role="group" aria-label="Source modules"><button type="button" className="settings-tab" aria-pressed={module === 'social'} onClick={() => setModule('social')}>Social Networks</button><button type="button" className="settings-tab" aria-pressed={module === 'sensors'} onClick={() => setModule('sensors')}>Sensors</button><button type="button" className="settings-tab" aria-pressed={module === 'parameters'} onClick={() => setModule('parameters')}>Parameters</button></div>
     <div hidden={module !== 'social'} className="prisma-module-content">
-    {error && <p role="alert" className="prisma-error">{error}</p>}{!config && !error && <p role="status">Loading configuration…</p>}
+    {error && <p role="alert" className="prisma-error">{error}</p>}{!config && !error && <LoadingIndicator label="Loading configuration…" />}
     {config && <><div className="prisma-sources-title"><h2>Social Networks</h2></div>
       <div className="prisma-network-toolbar"><div className="settings-tabs prisma-network-tabs" role="tablist" aria-label="Social networks">{networks.map(platform => { const source = config.sources.find(item => item.platform === platform); const state = source ? captureState(source) : 'Unavailable'; return <button key={platform} ref={element => { tabs.current[platform] = element; }} id={`prisma-tab-${platform}`} className="settings-tab" type="button" role="tab"
         aria-selected={selected === platform} aria-expanded={selected === platform && !collapsed} aria-controls={`prisma-panel-${platform}`} tabIndex={selected === platform ? 0 : -1} onClick={() => selected === platform ? setCollapsed(value => !value) : selectNetwork(platform)} onKeyDown={tabKey}>
