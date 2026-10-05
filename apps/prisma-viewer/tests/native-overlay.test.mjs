@@ -697,13 +697,75 @@ test('Agent Flow is one native Context panel and Enter submits without taking Sh
   assert.equal(keydown(textarea, 'Enter', { repeat: true }).defaultPrevented, true);
   assert.equal(requests.length, 0); assert.equal(form.submitRequests, undefined);
   assert.equal(keydown(textarea, 'Enter').defaultPrevented, true);
+  assert.equal(textarea.value, '', 'An accepted submission clears the composer immediately');
   await new Promise(setImmediate);
   assert.equal(form.submitRequests, 1); assert.equal(requests.length, 1);
   assert.deepEqual(requests[0], { path: '/api/prisma/chat', body: { question: 'What happened in Kennedy?', version: 'v1', filters: { locality: 'Kennedy' }, incident_id: 'flood' } });
   assert.match(view.count.textContent, /^1 questions?$/); assert.equal(view.log.children.length, 2);
-  assert.equal(textarea.value, '  What happened in Kennedy?  ');
+  assert.equal(textarea.value, '');
   const changesBefore = changes.length; lifetime.abort(); disclosure.dispatchEvent(new Event('click'));
   assert.equal(changes.length, changesBefore); assert.deepEqual(rail.children, [context, social, sensors]);
+});
+
+for (const [phase, errorStatus, edit] of [
+  ['snapshot', 500, 'untouched'], ['chat', 409, 'untouched'], ['chat', 500, 'untouched'],
+  ['chat', 500, 'new draft'], ['chat', 500, 'cleared'],
+]) test(`composer respects ${edit} input after ${phase} error ${errorStatus}`, async (t) => {
+  const requests = []; let reject;
+  const view = analystHarness(t, (path, options) => {
+    requests.push({ path, options }); return new Promise((_resolve, fail) => { reject = fail; });
+  }, phase === 'snapshot' ? { layer: { state: () => ({ enabled: false, snapshot: publication(), filters: {} }) }, sensorContext: () => ({ enabled: false }) } : {});
+  const original = '  Compare <sensor> with social reports.\n';
+  view.textarea.value = original; view.form.requestSubmit();
+  assert.equal(view.textarea.value, '', 'Clear before either the snapshot GET or chat POST finishes');
+  assert.equal(view.log.children[0].querySelector('p').textContent, original.trim());
+  await new Promise(setImmediate);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].path, phase === 'snapshot' ? '/api/prisma/snapshot' : '/api/prisma/chat');
+  if (phase === 'chat') assert.equal(JSON.parse(requests[0].options.body).question, original.trim());
+  if (edit !== 'untouched') {
+    view.textarea.value = 'Next question'; view.textarea.dispatchEvent(new Event('input'));
+    if (edit === 'cleared') { view.textarea.value = ''; view.textarea.dispatchEvent(new Event('input')); }
+  }
+  reject(Object.assign(new Error('Request failed'), { status: errorStatus })); await new Promise(setImmediate);
+  assert.equal(view.textarea.value, edit === 'untouched' ? original : edit === 'cleared' ? '' : 'Next question');
+  assert.equal(view.form['aria-busy'], 'false'); assert.equal(view.form.querySelector('button')['aria-label'], 'Send question');
+  assert.equal(requests.length, 1, 'An error never resubmits automatically');
+});
+
+for (const phase of ['snapshot', 'chat']) for (const action of ['stop', 'new']) test(`late ${phase} errors after ${action} cannot restore the submitted draft`, async (t) => {
+  let reject, requestSignal;
+  const view = analystHarness(t, (_path, options) => {
+    requestSignal = options.signal; return new Promise((_resolve, fail) => { reject = fail; });
+  }, phase === 'snapshot' ? { layer: { state: () => ({ enabled: false, snapshot: publication(), filters: {} }) }, sensorContext: () => ({ enabled: false }) } : {});
+  view.textarea.value = 'Abandoned question'; view.form.requestSubmit(); await new Promise(setImmediate);
+  assert.equal(view.textarea.value, '');
+  const button = action === 'new' ? view.panel.querySelector('[data-new]') : view.form.querySelector('button');
+  button.dispatchEvent(new Event('click', { cancelable: true }));
+  assert.equal(requestSignal.aborted, true);
+  const status = view.status.textContent, messages = [...view.log.children];
+  reject(Object.assign(new Error('Late request failure'), { status: 500 })); await new Promise(setImmediate);
+  assert.equal(view.textarea.value, ''); assert.equal(view.status.textContent, status);
+  assert.deepEqual(view.log.children, messages); assert.equal(view.form['aria-busy'], 'false');
+});
+
+test('chat timestamps record send and reply time locally, preserve a new draft and omit the real-agent publication footer', async (t) => {
+  let resolve;
+  const view = analystHarness(t, () => new Promise(done => { resolve = done; }));
+  const sentAt = new Date(); view.textarea.value = 'Sensor status?'; view.form.requestSubmit();
+  assert.equal(view.textarea.value, ''); await new Promise(setImmediate);
+  view.textarea.value = 'My next question'; view.textarea.dispatchEvent(new Event('input'));
+  t.mock.timers.tick(65_000); const receivedAt = new Date();
+  resolve({ answer: 'Current evidence.', version: 'v1', runtime: 'aidp', evidence_ids: [], actions: [] }); await new Promise(setImmediate);
+  assert.equal(view.textarea.value, 'My next question'); assert.equal(view.log.children.length, 2);
+  const formatter = new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true });
+  for (const [index, at] of [sentAt, receivedAt].entries()) {
+    const entry = view.log.children[index], times = entry.querySelectorAll('time');
+    assert.equal(times.length, 1); assert.equal(times[0].classList.contains('tc-message-time'), true);
+    assert.equal(times[0].dateTime, at.toISOString());
+    assert.equal(times[0].textContent.replace(/\s/g, ''), formatter.format(at).replace(/\s/g, ''));
+    assert.equal(entry.querySelectorAll('small').length, 0, 'Real-agent bubbles contain no technical publication footer');
+  }
 });
 
 test('Agent Flow follows the native layer toggle, cancels GET and POST, and preserves its conversation', async (t) => {
@@ -851,6 +913,7 @@ test('Agent Flow fetches a fresh publication for each question while both layers
   assert.deepEqual(requests[3].body, { question: 'What changed in the latest publication?', version: 'v2', filters: {}, session_id: 'same-session' });
   assert.equal(state.enabled, false); assert.equal(state.snapshot.version, '');
   assert.match(view.log.children[1].children.find(item => item.tagName === 'SMALL').textContent, /Local fixture response · no model inference/);
+  assert.doesNotMatch(view.log.children[1].children.find(item => item.tagName === 'SMALL').textContent, /Publication/);
 });
 
 for (const cancellation of ['button', 'voice']) test(`Agent Flow ${cancellation} cancellation stops an initial snapshot and rejects a late result`, async (t) => {

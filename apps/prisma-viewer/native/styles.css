@@ -132,8 +132,11 @@
 .tc-chat-log[hidden], .tc-agent-panel [hidden], .tc-social-panel [hidden], .tc-oci-settings [hidden] { display: none; }
 #key-setup .key-setup-footer { overflow-y: hidden; scrollbar-gutter: stable; scrollbar-width: thin; }
 #key-setup .key-setup-footer::-webkit-scrollbar { width: 6px; }
-.tc-message { padding: 8px; margin: 8px 0; border-left: 2px solid var(--accent); background: var(--accent-dim); }
-.tc-message-user { border-color: var(--text-secondary); }
+.tc-message { width: fit-content; max-width: 90%; min-width: 0; box-sizing: border-box; margin: 8px 0; }
+.tc-message-user { margin-left: auto; }
+.tc-message-assistant { border-left: 2px solid var(--accent); background: var(--accent-dim); }
+.tc-message p { margin: 6px 0; }
+.tc-message-time { display: block; margin-top: 6px; color: var(--text-secondary); text-align: right; font-size: 10px; }
 .tc-message button { margin: 4px 4px 0 0; font-size: 11px; }
 .tc-composer { position: relative; }
 #territorial-analyst .tc-composer textarea { display: block; height: 104px; min-height: 104px; padding: 10px 12px 48px; resize: vertical; }

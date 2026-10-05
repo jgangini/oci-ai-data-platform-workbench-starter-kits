@@ -3,6 +3,7 @@ import { allowedActions, validateSnapshot } from '../src/model.js';
 import { text } from './territorialLayer.js';
 import { bindPanelDisclosure, collapsePanelOnEscape } from '../.upstream/src/ui/panelDisclosure.js';
 
+const messageTime = new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true });
 const sendIcon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10.3009 13.6949L20.102 3.89742M10.5795 14.1355L12.8019 18.5804C13.339 19.6545 13.6075 20.1916 13.9458 20.3356C14.2394 20.4606 14.575 20.4379 14.8492 20.2747C15.1651 20.0866 15.3591 19.5183 15.7472 18.3818L19.9463 6.08434C20.2845 5.09409 20.4535 4.59896 20.3378 4.27142C20.2371 3.98648 20.013 3.76234 19.7281 3.66167C19.4005 3.54595 18.9054 3.71502 17.9151 4.05315L5.61763 8.2523C4.48114 8.64037 3.91289 8.83441 3.72478 9.15032C3.56153 9.42447 3.53891 9.76007 3.66389 10.0536C3.80791 10.3919 4.34498 10.6605 5.41912 11.1975L9.86397 13.42C10.041 13.5085 10.1295 13.5527 10.2061 13.6118C10.2742 13.6643 10.3352 13.7253 10.3876 13.7933C10.4468 13.87 10.491 13.9585 10.5795 14.1355Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const stopIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM8.58579 8.58579C8 9.17157 8 10.1144 8 12C8 13.8856 8 14.8284 8.58579 15.4142C9.17157 16 10.1144 16 12 16C13.8856 16 14.8284 16 15.4142 15.4142C16 14.8284 16 13.8856 16 12C16 10.1144 16 9.17157 15.4142 8.58579C14.8284 8 13.8856 8 12 8C10.1144 8 9.17157 8 8.58579 8.58579Z" fill="currentColor"/></svg>';
 
@@ -27,7 +28,7 @@ export function chatContext(state, sensorContext = {}) {
 
 function renderAidpReply(reply, snapshot, { message, layer, state, status, showEvidence, showSensor, onChange }) {
   const entry = message('assistant', reply.answer);
-  entry.append(text('small', `${reply.runtime === 'aidp' ? 'AIDP agent' : 'Local fixture response · no model inference'} · Publication ${reply.version}`));
+  if (reply.runtime !== 'aidp') entry.append(text('small', 'Local fixture response · no model inference'));
   const evidenceIds = new Set(snapshot.evidence.map((item) => item.id));
   for (const id of reply.evidence_ids || []) {
     if (!evidenceIds.has(id)) continue;
@@ -65,13 +66,18 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
   const disclosure = bindPanelDisclosure({ panel, buttons: [panel.querySelector('.panel-collapse-btn')], onChange, onEscape: (event) => collapsePanelOnEscape(event, { panel, onChange }) });
   const form = panel.querySelector('form'); const textarea = form.querySelector('textarea'); const send = form.querySelector('button'); const status = panel.querySelector('[data-chat-status]');
   const log = panel.querySelector('#tc-aidp-log');
-  let busy = false, aidpSnapshot, aidpSession, lastReply, lastError, chatSnapshot, publicationRequest, questionGeneration = 0;
+  let busy = false, aidpSnapshot, aidpSession, lastReply, lastError, chatSnapshot, publicationRequest, questionGeneration = 0, draftRevision = 0;
   const setBusy = (value) => {
     busy = value; send.type = value ? 'button' : 'submit'; send.title = value ? 'Stop request' : 'Send question';
     send.setAttribute('aria-label', send.title); send.innerHTML = value ? stopIcon : sendIcon; form.setAttribute('aria-busy', String(value));
   };
   setBusy(false);
-  const message = (role, content) => { const entry = text('article', '', `tc-message tc-message-${role}`); entry.append(text('strong', role === 'user' ? 'You' : 'AI Assistant'), text('p', content)); log.append(entry); entry.scrollIntoView({ block: 'nearest' }); return entry; };
+  const message = (role, content) => {
+    const now = new Date(), time = text('time', messageTime.format(now), 'tc-message-time'); time.dateTime = now.toISOString();
+    const entry = text('article', '', `scene-shot-row tc-message tc-message-${role}`);
+    entry.append(text('strong', role === 'user' ? 'You' : 'AI Assistant'), text('p', content), time);
+    log.append(entry); entry.scrollIntoView({ block: 'nearest' }); return entry;
+  };
   const contextState = () => {
     const state = layer.state(), sensor = sensorContext();
     const sensorSelected = sensor.enabled !== false && Boolean(sensor.sensor_id);
@@ -122,14 +128,21 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
   }
   send.addEventListener('click', (event) => { if (busy) { event.preventDefault(); cancel(); status.textContent = 'Request cancelled.'; } }, { signal });
   panel.querySelector('[data-new]').addEventListener('click', () => { cancel(); log.replaceChildren(); status.textContent = ''; textarea.value = ''; aidpSession.destroy(); aidpSession = newAidpSession(); void aidpSession.start(); textarea.focus(); }, { signal });
+  textarea.addEventListener('input', () => { draftRevision++; }, { signal });
   textarea.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
     event.preventDefault();
     if (!event.repeat) form.requestSubmit();
   }, { signal });
   form.addEventListener('submit', (event) => {
-    event.preventDefault(); const question = textarea.value.trim(); if (!question || busy) return;
-    void ask(question).catch((error) => { if (!signal.aborted && error.name !== 'AbortError') status.textContent = error.message; });
+    event.preventDefault(); const draft = textarea.value, question = draft.trim(); if (!question || busy) return;
+    const pending = ask(question), generation = questionGeneration, revision = draftRevision;
+    textarea.value = '';
+    void pending.catch((error) => {
+      if (signal.aborted || error.name === 'AbortError' || generation !== questionGeneration) return;
+      if (revision === draftRevision && !textarea.value) textarea.value = draft;
+      if (!lastError) status.textContent = error.message;
+    });
   }, { signal });
   let wasEnabled = false;
   const unsubscribe = agentFlow.subscribe((enabled) => {
