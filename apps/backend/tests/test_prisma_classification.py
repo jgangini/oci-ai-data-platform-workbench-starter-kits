@@ -150,7 +150,7 @@ def test_classifier_requests_a_strict_schema_for_one_post_and_grounded_claims():
         assert properties["severity"]["enum"] == list(SEVERITIES)
         assert properties["confidence"] == {"type": "number", "minimum": 0, "maximum": 1}
     assert claims["items"]["properties"]["relation"]["enum"] == ["supports", "contradicts"]
-    assert result["prompt_version"] == "territorial-control-claims-v4"
+    assert result["prompt_version"] == "territorial-control-claims-v5"
 
 
 def test_stance_request_distinguishes_risk_existence_from_intensity_and_attributes_summaries():
@@ -167,11 +167,13 @@ def test_stance_request_distinguishes_risk_existence_from_intensity_and_attribut
     prompt = request.messages[0].content[0].text
     for instruction in ("existencia del riesgo definido por category y locality", "resuelve la doble negación",
                         "no generes supports y contradicts artificiales", "No atribuyas contradicción sólo por incertidumbre",
-                        "atribuye explícitamente lo dicho al autor", "preserva rumores, incertidumbre y límites de observación"):
+                        "atribuye explícitamente lo dicho al autor", "preserva rumores, incertidumbre y límites de observación",
+                        "exactamente una postura global del AUTOR", "nunca repitas un par",
+                        "category=por_clasificar y claims=[]", "Ejemplo 1, prudencia", "Ejemplo 2, intensidad", "Ejemplo 3, negación"):
         assert instruction in prompt
     assert json.loads(prompt.rsplit("Reportes:\n", 1)[1]) == [{"id": event["id"], "text": text}]
     assert len(client.requests) == 1 and request.max_tokens == 2048 and request.temperature == 0
-    assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v4"
+    assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v5"
 
 
 @pytest.mark.parametrize("claims", [
@@ -209,7 +211,7 @@ def test_noncontiguous_native_quote_gets_one_strict_correction_per_post(correcte
     if corrected:
         result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
         assert result["claims"][0]["evidence_text"] == first
-        assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v4"
+        assert result["mode"] == "Synthetic" and result["prompt_version"] == "territorial-control-claims-v5"
         assert event["text"] == first + " ¿Nos pueden orientar las autoridades sobre ese tramo? " + third + " #Colombia #Bogota #incendio"
     else:
         with pytest.raises(ValueError, match="quote the original post literally"):
@@ -229,8 +231,76 @@ def test_noncontiguous_native_quote_gets_one_strict_correction_per_post(correcte
         assert request.chat_request.response_format.json_schema.is_strict is True
 
 
+@pytest.mark.parametrize("relation", ["supports", "contradicts"])
+@pytest.mark.parametrize("second", ["corrected", "duplicate", "nonliteral"])
+def test_duplicate_risk_claims_share_one_correction_budget_with_literal_quotes(relation, second):
+    text = "Dicen que hay inundación en Kennedy, Bogotá. Aclaro: no hay inundación en Kennedy, Bogotá."
+    event = normalize_event({"platform": "x", "source_id": "duplicate-risk", "mode": "real",
+        "text": text, "created_at": "2026-10-05T14:00:00Z"})
+    denied = claim(relation="contradicts", evidence_text="no hay inundación en Kennedy, Bogotá.",
+                   summary_en="The author corrects a rumor and denies flooding in Kennedy, Bogotá.")
+    label = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium", "confidence": 0.7,
+             "claims": [denied, {**denied, "relation": relation}]}
+
+    class CorrectingModel(ClaimsModel):
+        def chat(self, request):
+            if self.requests and second != "duplicate":
+                self.labels = [{**label, "claims": [{**denied, "evidence_text":
+                    denied["evidence_text"] if second == "corrected" else "Invented quote"}]}]
+            return super().chat(request)
+
+    client = CorrectingModel([label])
+    if second == "corrected":
+        result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
+        assert len(result["claims"]) == 1 and result["claims"][0]["relation"] == "contradicts"
+        assert result["text"] == text and result["mode"] == "real"
+    else:
+        reason = "duplicate risk-locality" if second == "duplicate" else "quote the original post literally"
+        with pytest.raises(ValueError, match=reason):
+            classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
+    assert len(client.requests) == 2
+    first, correction = [request.chat_request for request in client.requests]
+    assert correction.messages[0].content[0].text.startswith("Corrección: se repitió un par")
+    assert correction.messages[0].content[0].text.endswith(first.messages[0].content[0].text)
+    assert correction.response_format == first.response_format and correction.max_tokens == first.max_tokens == 2048
+    assert json.loads(correction.messages[0].content[0].text.rsplit("Reportes:\n", 1)[1]) == [{"id": event["id"], "text": text}]
+
+
+@pytest.mark.parametrize("category,locality,quote", [
+    ("inundacion", "Bosa", "No hay inundación en Bosa, Bogotá."),
+    ("incendio", "Kennedy", "No hay incendio en Kennedy, Bogotá."),
+])
+def test_unique_risk_contract_preserves_different_risks_or_localities(category, locality, quote):
+    event = normalize_event({"platform": "x", "source_id": "distinct-risks", "mode": "real",
+        "text": "Hay inundación en Kennedy, Bogotá. " + quote, "created_at": "2026-10-05T14:00:00Z"})
+    labels = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium", "confidence": 0.7,
+        "claims": [claim(), claim(category, locality, relation="contradicts", evidence_text=quote,
+            summary_en="The author explicitly denies this risk in the named locality.")]}
+    client = ClaimsModel([labels])
+    result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
+    assert len(result["claims"]) == 2 and len(client.requests) == 1
+    assert {(row["category"], row["locality"]) for row in result["claims"]} == {("inundacion", "Kennedy"), (category, locality)}
+
+
+def test_quote_then_duplicate_failure_never_gets_a_third_response():
+    event = normalize_event({"platform": "x", "source_id": "shared-budget", "mode": "real",
+        "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"})
+    label = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium", "confidence": 0.7}
+
+    class CorrectingModel(ClaimsModel):
+        def chat(self, request):
+            self.labels = [{**label, "claims": [claim(), claim()] if self.requests else [claim(evidence_text="Invented quote")]}]
+            return super().chat(request)
+
+    client = CorrectingModel([])
+    with pytest.raises(ValueError, match="duplicate risk-locality"):
+        classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)
+    assert len(client.requests) == 2
+
+
 @pytest.mark.parametrize("failure", [RuntimeError("provider unavailable"),
-    ValueError("Claim evidence must quote the original post literally")])
+    ValueError("Claim evidence must quote the original post literally"),
+    ValueError("Classifier returned duplicate risk-locality claims")])
 def test_provider_failure_never_triggers_quote_correction(failure):
     event = normalize_event({"platform": "x", "source_id": "provider", "mode": "real",
         "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"})
@@ -275,9 +345,11 @@ def test_quote_correction_budget_resets_only_for_the_next_post():
             for request in client.requests] == [events[0]["id"], events[0]["id"], events[1]["id"], events[1]["id"]]
 
 
-def test_explicit_empty_claims_are_retained_for_irrelevant_posts():
+@pytest.mark.parametrize("text", ["Concierto en Bogotá",
+    "Hay incendio en Usme y no hay incendio en Usme. No sé cuál afirmación es correcta. Bogotá, Colombia."])
+def test_explicit_empty_claims_are_retained_for_irrelevant_or_irreconcilable_posts(text):
     event = normalize_event({"platform": "x", "source_id": "concert", "mode": "real",
-        "text": "Concierto en Bogotá", "created_at": "2026-10-05T14:00:00Z"})
+        "text": text, "created_at": "2026-10-05T14:00:00Z"})
     label = {"id": event["id"], "category": "por_clasificar", "locality": "Sin localizar", "severity": "low", "confidence": 0.9, "claims": []}
     result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=ClaimsModel([label]))[0]
     assert result["claims"] == []

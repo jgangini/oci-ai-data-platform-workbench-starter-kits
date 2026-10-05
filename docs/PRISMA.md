@@ -336,10 +336,18 @@ open an observable circuit, retain pending posts and stop inference retries unti
 an explicit Run or configuration change. Each validated post is journaled and
 confirmed in Silver and Autonomous before the next classification. Recovery
 finishes an interrupted projection and retries the remaining selected posts,
-without reclassifying the completed prefix. A nonliteral claim quote allows one
-corrective model response for that post, with the same strict schema and literal
-quote check; persistent rejection stays pending. Other provider or validation
-failures do not receive this correction. `last_error_reason=nonliteral_claim`
+without reclassifying the completed prefix. New classifier responses contain at
+most one claim per `(category, locality)`, representing the author's overall
+stance on the risk's existence. Different risks and localities remain separate;
+historical claims and correlations are retained. Intensity changes, precautions
+and rejecting a premature all-clear do not negate the risk. Summaries attribute
+allegations to their author. An irreconcilable stance can return `por_clasificar`
+with `claims=[]` for human review; the original report is preserved. These prompt
+instructions require native semantic acceptance and do not guarantee truth.
+A nonliteral quote or repeated risk/locality allows one corrective model response
+for that post, with the same strict schema, literal quote and unique-key checks.
+Both failures share the two-call total limit; persistent rejection stays pending.
+Other provider or validation failures do not receive this correction. `last_error_reason=nonliteral_claim`
 identifies this specific validation failure without saving arbitrary exception
 text or model output in operational status.
 
@@ -623,7 +631,7 @@ independent witnesses; the formatter receives that limit and labels the
 corroboration index as heuristic.
 
 Architecture comparison for the query-grounding and shared capture increment (2026-10-05):
-quality 6595 → 6578, coupling 0.08 unchanged, zero cycles and god files; complex
+quality 6595 → 6579, coupling 0.08 unchanged, zero cycles and god files; complex
 functions 44 → 57. This is an intentional gate exception, not a passing gate:
 the agent retains current-turn query validation, same-version citations,
 provider-compatible formatting, row-bound inventories and explicit failure handling for errors observed
@@ -635,7 +643,8 @@ the existing capture/publication boundaries; no new services or dependencies
 were introduced. Source excerpts are rendered literally to prevent the observed
 cross-author attribution failure. Per-post enrichment journals preserve valid
 work across a later rejection, and one bounded model correction retains the
-strict literal-quote validator after the observed noncontiguous quotation.
+strict literal-quote and unique-risk validators after observed quotation and
+claim-splitting failures.
 Splitting these guards solely to lower the aggregate would obscure their state
 and trust boundaries. The baseline was not reset.
 

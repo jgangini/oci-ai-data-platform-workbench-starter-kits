@@ -5,8 +5,9 @@ import re
 
 from .core import CATEGORIES, LOCALITIES, SEVERITIES, normalize_event
 
-PROMPT_VERSION = "territorial-control-claims-v4"
+PROMPT_VERSION = "territorial-control-claims-v5"
 _NON_LITERAL_QUOTE = "Claim evidence must quote the original post literally"
+_DUPLICATE_RISK = "Classifier returned duplicate risk-locality claims"
 
 _LABEL_PROPERTIES = {
     "category": {"type": "string", "enum": [*CATEGORIES, "por_clasificar"]},
@@ -48,7 +49,7 @@ def _labels(item):
 def _claims(items, text):
     if not isinstance(items, list) or len(items) > 8:
         raise ValueError("Classifier claims must be a list of at most eight items")
-    result = []
+    result, risks = [], set()
     for item in items:
         if not isinstance(item, dict) or item.get("relation") not in {"supports", "contradicts"}:
             raise ValueError("Unknown claim evidence relation")
@@ -60,6 +61,10 @@ def _claims(items, text):
         if not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 400:
             raise ValueError("Claim requires a bounded English summary")
         labels = _labels(item)
+        risk = labels["category"], labels["locality"]
+        if risk in risks:
+            raise ValueError(_DUPLICATE_RISK)
+        risks.add(risk)
         result.append({**{key: labels[key] for key in ("category", "locality", "severity", "confidence")},
                        "relation": item["relation"], "evidence_text": quote, "summary_en": summary.strip()})
     return result
@@ -84,17 +89,26 @@ def classify(events, config, signed=None, client=None):
                   "Si el reporte describe inundación o anegamiento, usa inundacion aunque también mencione lluvia. "
                   f"Categorías: {list(CATEGORIES)} o por_clasificar. Localidad: {list(LOCALITIES)} o Sin localizar. "
                   "Severity: low, medium, high. Confidence: número entre 0 y 1. Conserva la clasificación principal en los campos superiores. "
-                  "Extrae claims, hasta ocho afirmaciones por publicación; una publicación puede referirse a varios riesgos o localidades "
-                  "cuando cada afirmación lo expresa explícitamente. No dupliques el post. Para cada claim devuelve category, locality, "
-                  "severity, confidence, relation, evidence_text y summary_en. relation=supports cuando el autor afirma que ocurre el riesgo; "
-                  "relation=contradicts sólo cuando niega explícitamente la existencia del riesgo definido por category y locality. "
+                  "Extrae hasta ocho claims: exactamente una postura global del AUTOR por cada par (category, locality), "
+                  "leyendo el post completo. Conserva riesgos o localidades diferentes como claims separados; nunca repitas un par. "
+                  "No dupliques el post. Para cada claim devuelve category, locality, severity, confidence, relation, evidence_text y summary_en. "
+                  "relation=supports cuando el autor afirma que ocurre el riesgo; relation=contradicts sólo cuando niega explícitamente "
+                  "la existencia del riesgo definido por category y locality. Una corrección explícita del autor prevalece sobre el rumor que cita. "
                   "Evalúa relation frente a la existencia del riesgo, no frente a su intensidad, severidad o visibilidad. "
                   "Menor intensidad, menos humo o no ver una llama no niegan por sí solos la existencia del riesgo. "
                   "Negar que el riesgo haya terminado o rechazar su extinción no contradice su existencia; resuelve la doble negación. "
-                  "Agrupa en un solo claim del mismo riesgo y localidad las observaciones del post que sólo varían en intensidad o severidad; "
-                  "no generes supports y contradicts artificiales por esos cambios. Conserva riesgos o localidades diferentes como claims separados. "
+                  "Agrupa las observaciones del mismo riesgo y localidad; no generes supports y contradicts artificiales por intensidad o severidad. "
                   "Ambas relaciones describen la postura textual, nunca verdad verificada ni confirmación humana. "
                   "No atribuyas contradicción sólo por incertidumbre. "
+                  "Si la postura global del autor es irreconciliable o no se puede determinar para revisión humana, "
+                  "devuelve category=por_clasificar y claims=[]; no elijas automáticamente una de las afirmaciones. "
+                  "Ejemplo 1, prudencia: 'Reportan fuego en Suba; mantengámonos lejos' => un claim incendio/Suba, supports. "
+                  "summary_en: 'The author reports a fire in Suba and advises keeping away.' La distancia no implica control ni ausencia de peligro. "
+                  "Ejemplo 2, intensidad: 'Bajó el agua en Bosa, pero la calle sigue inundada' => un claim inundacion/Bosa, supports. "
+                  "summary_en: 'The author reports less water but continued street flooding in Bosa.' "
+                  "Ejemplo 3, negación: 'No demos por apagado el fuego en Usme' => incendio/Usme, supports; "
+                  "'Dicen que hay fuego en Usme; corrijo: no hay incendio' => incendio/Usme, contradicts, sin otro claim supports. "
+                  "summary_en del segundo: 'The author corrects a rumor and denies a fire in Usme.' "
                   "evidence_text debe ser una cita literal breve del mensaje, suficiente para justificar categoría, ubicación y relación; "
                   "copia un único fragmento contiguo, sin unir frases separadas, omitir palabras internas ni añadir puntos suspensivos. "
                   "summary_en es un resumen conciso en inglés de máximo 400 caracteres que atribuye explícitamente lo dicho al autor; "
@@ -105,7 +119,7 @@ def classify(events, config, signed=None, client=None):
                   "\"confidence\":0.5,\"relation\":\"supports\",\"evidence_text\":\"cita literal\",\"summary_en\":\"English summary\"}]}]}. "
                   "Incluye cada id exactamente una vez. Reportes:\n" + json.dumps([
                       {"id": item["id"], "text": item["text"][:12000]}], ensure_ascii=False))
-        # ponytail: one corrective response only for a nonliteral quote; all other failures propagate.
+        # ponytail: one correction shared by quote/duplicate-risk errors; persistent or other failures propagate.
         for correction in range(2):
             request = model.GenericChatRequest(messages=[model.UserMessage(content=[model.TextContent(text=prompt)])],
                 temperature=0, max_tokens=2048, response_format=model.JsonSchemaResponseFormat(
@@ -126,11 +140,13 @@ def classify(events, config, signed=None, client=None):
                 try:
                     claims = _claims(labels["claims"], item["text"][:12000])
                 except ValueError as error:
-                    if correction or str(error) != _NON_LITERAL_QUOTE:
+                    if correction or str(error) not in {_NON_LITERAL_QUOTE, _DUPLICATE_RISK}:
                         raise
-                    prompt = ("Corrección: una evidence_text anterior no era un fragmento contiguo literal. "
-                              "Vuelve a clasificar el mismo reporte; copia cada cita exactamente de un único fragmento "
-                              "del texto original, sin unir frases separadas ni eliminar palabras internas. " + prompt)
+                    detail = ("una evidence_text anterior no era un fragmento contiguo literal; copia cada cita de un único fragmento, "
+                              "sin unir frases ni eliminar palabras internas. " if str(error) == _NON_LITERAL_QUOTE else
+                              "se repitió un par (category, locality); devuelve una sola postura global del autor por cada par, "
+                              "no una postura por frase. Si es irreconciliable, devuelve category=por_clasificar y claims=[]. ")
+                    prompt = "Corrección: " + detail + "Vuelve a clasificar el mismo reporte. " + prompt
                     continue
                 if not claims and labels["category"] != "por_clasificar":
                     raise ValueError("A relevant risk classification requires at least one grounded claim")
