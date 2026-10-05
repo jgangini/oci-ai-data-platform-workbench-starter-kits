@@ -30,8 +30,8 @@ export function voiceActions(actions) {
 async function runVoiceActions(reply, { turn, runAction, askAgent, emit }) {
   for (const action of voiceActions(reply.actions)) {
     turn.signal.throwIfAborted();
-    emit({ type: 'state', state: 'executing', detail: action.name === 'ask_aidp' ? 'Consulting Agent Flow' : `Map: ${action.name.replaceAll('_', ' ')}` });
-    if (action.name === 'ask_aidp' && !askAgent) throw new Error('Agent Flow is not available.');
+    emit({ type: 'state', state: 'executing', detail: action.name === 'ask_aidp' ? 'Consulting AI Assistant' : `Map: ${action.name.replaceAll('_', ' ')}` });
+    if (action.name === 'ask_aidp' && !askAgent) throw new Error('AI Assistant is not available.');
     const result = action.name === 'ask_aidp'
       ? await askAgent(action.arguments.question, { signal: turn.signal })
       : await runAction(action.name, action.arguments, { signal: turn.signal });
@@ -115,7 +115,7 @@ class OciVoiceSession {
 
   start() { return this.beginRecording(); }
   stop() { this.clearTurn(); this.state.history = []; }
-  sendText() { throw new Error('OCI voice requires recorded audio. Use OCI Assistant for text.'); }
+  sendText() { throw new Error('OCI voice requires recorded audio. Use AI Assistant for text.'); }
   sendMapEvent() {}
   bindControls() {
     this.ui.root.dataset.provider = 'oci';

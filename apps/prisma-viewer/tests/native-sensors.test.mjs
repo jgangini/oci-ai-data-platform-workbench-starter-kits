@@ -366,7 +366,7 @@ test('sensor panel keeps keyboard focus and collapsed state across readings, and
 
 test('sensor Filter submits drafts explicitly, numbers continue across pages, and statuses have matching map colors', async t => {
   const view = await panelHarness(t, Array.from({ length: 55 }, (_, index) => reading(index, { status: ['normal', 'warning', 'critical'][index % 3] })));
-  assert.equal(view.layer.source, 'OCI AIDP');
+  assert.equal(view.layer.source, 'OCI AIDP · Workflow');
   assert.doesNotMatch(view.panel.innerHTML, /Synthetic|sensors-provenance|data-count/);
   const list = view.panel.querySelector('.sensors-list'), filters = view.panel.querySelector('form');
   assert.equal(list.children.length, 50); assert.match(list.children[0].querySelector('.scene-shot-label').textContent, /^#0001 sensor-0/);

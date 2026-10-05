@@ -11,7 +11,7 @@ export function createAgentFlowLayer() {
   const listeners = new Set();
   const publish = (value) => { enabled = value; for (const listener of listeners) listener(enabled); };
   return {
-    id: 'agent-flow', name: 'Agent Flow', icon: '◉', source: 'OCI AIDP · Workflow',
+    id: 'agent-flow', name: 'AI Assistant', icon: '◉', source: 'OCI AIDP · Agent Flow',
     init() {}, update() {}, enable() { publish(true); }, disable() { publish(false); },
     destroy() { publish(false); listeners.clear(); },
     isEnabled: () => enabled,
@@ -53,13 +53,13 @@ function renderAidpReply(reply, snapshot, { message, layer, state, status, showE
 export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSensor, sensorContext = () => ({}), refreshSensors, signal, setPanelCollapsed }) {
   const panel = document.createElement('section'); panel.id = 'territorial-analyst'; panel.className = 'tc-agent-panel panel-collapsible collapsed'; panel.dataset.panelId = panel.id; panel.dataset.railExclusive = '';
   panel.innerHTML = `<div class="panel-glow"></div><div class="global-context-panel-inner"><div class="panel-header">
-    <span class="panel-title">AGENT FLOW</span><span class="panel-divider"></span>
+    <span class="panel-title">AI ASSISTANT</span><span class="panel-divider"></span>
     <button class="tc-new-conversation" type="button" data-new aria-label="New conversation" title="New conversation"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5H5v14h14v-7M15 4h5v5m-9 4 9-9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-    <button class="panel-collapse-btn" data-dock-toggle-target="territorial-analyst" type="button" aria-expanded="false" aria-label="Expand Agent Flow" title="Expand Agent Flow"><span aria-hidden="true">▶</span></button>
+    <button class="panel-collapse-btn" data-dock-toggle-target="territorial-analyst" type="button" aria-expanded="false" aria-label="Expand AI Assistant" title="Expand AI Assistant"><span aria-hidden="true">▶</span></button>
     </div><div class="tc-panel-body data-toggle-list" data-rail-scroller>
-    <div id="tc-aidp-log" class="tc-chat-log scene-shot-list" role="log" aria-label="Agent Flow conversation" tabindex="0" data-rail-scroller></div>
+    <div id="tc-aidp-log" class="tc-chat-log scene-shot-list" role="log" aria-label="AI Assistant conversation" tabindex="0" data-rail-scroller></div>
     <p data-chat-status role="status" aria-live="polite"></p>
-    <form class="tc-composer"><label class="tc-sr-only" for="tc-question">Ask Agent Flow</label><textarea id="tc-question" maxlength="2000" rows="3" placeholder="Ask Agent Flow…" required></textarea><span data-turns aria-label="Submitted questions">0 questions</span><button type="submit" class="tc-send" aria-label="Send question" title="Send question">${sendIcon}</button></form></div></div>`;
+    <form class="tc-composer"><label class="tc-sr-only" for="tc-question">Ask AI Assistant</label><textarea id="tc-question" maxlength="2000" rows="3" placeholder="Ask AI Assistant…" required></textarea><span data-turns aria-label="Submitted questions">0 questions</span><button type="submit" class="tc-send" aria-label="Send question" title="Send question">${sendIcon}</button></form></div></div>`;
   document.getElementById('global-context-panel').after(panel);
   const onChange = (collapsed) => setPanelCollapsed(panel.id, collapsed, { explicit: true, persist: false, syncShare: false });
   const disclosure = bindPanelDisclosure({ panel, buttons: [panel.querySelector('.panel-collapse-btn')], onChange, onEscape: (event) => collapsePanelOnEscape(event, { panel, onChange }) });
@@ -71,7 +71,7 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
     send.setAttribute('aria-label', send.title); send.innerHTML = value ? stopIcon : sendIcon; form.setAttribute('aria-busy', String(value));
   };
   setBusy(false);
-  const message = (role, content) => { const entry = text('article', '', `tc-message tc-message-${role}`); entry.append(text('strong', role === 'user' ? 'You' : 'Agent Flow'), text('p', content)); log.append(entry); entry.scrollIntoView({ block: 'nearest' }); return entry; };
+  const message = (role, content) => { const entry = text('article', '', `tc-message tc-message-${role}`); entry.append(text('strong', role === 'user' ? 'You' : 'AI Assistant'), text('p', content)); log.append(entry); entry.scrollIntoView({ block: 'nearest' }); return entry; };
   const contextState = () => {
     const state = layer.state(), sensor = sensorContext();
     const sensorSelected = sensor.enabled !== false && Boolean(sensor.sensor_id);
@@ -93,9 +93,9 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
 
   function cancel() { questionGeneration++; publicationRequest?.abort(); publicationRequest = undefined; aidpSession.stop(); setBusy(false); }
   async function ask(question, { signal: turnSignal } = {}) {
-    if (busy) throw new Error('Agent Flow is already processing a question.');
+    if (busy) throw new Error('AI Assistant is already processing a question.');
     turnSignal?.throwIfAborted(); signal.throwIfAborted();
-    if (!agentFlow.isEnabled()) throw new DOMException('Agent Flow is off', 'AbortError');
+    if (!agentFlow.isEnabled()) throw new DOMException('AI Assistant is off', 'AbortError');
     const generation = ++questionGeneration;
     onChange(false); status.textContent = ''; lastReply = undefined; lastError = undefined;
     message('user', question); setBusy(true);
@@ -116,7 +116,7 @@ export function mountAnalyst({ layer, agentFlow, request, showEvidence, showSens
       turnSignal?.throwIfAborted(); signal.throwIfAborted();
       if (generation !== questionGeneration) throw new DOMException('Question cancelled', 'AbortError');
       if (lastError) throw lastError;
-      if (!lastReply) throw new Error('Agent Flow did not return an answer.');
+      if (!lastReply) throw new Error('AI Assistant did not return an answer.');
       return lastReply;
     } finally { turnSignal?.removeEventListener('abort', cancel); if (generation === questionGeneration) { publicationRequest = undefined; setBusy(false); } }
   }

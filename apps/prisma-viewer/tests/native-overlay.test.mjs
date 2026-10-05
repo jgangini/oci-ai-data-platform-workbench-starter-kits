@@ -676,14 +676,14 @@ test('Agent Flow is one native Context panel and Enter submits without taking Sh
   assert.equal(panel.tagName, 'SECTION'); assert.equal(panel.id, 'territorial-analyst');
   assert.equal(panel.dataset.railExclusive, '');
   assert.deepEqual(rail.children, [context, panel, social, sensors]); assert.equal(panel.hidden, false); assert.equal(panel.classList.contains('collapsed'), false);
-  assert.match(panel.innerHTML, /class="panel-title">Agent Flow</i);
-  assert.match(panel.innerHTML, /id="tc-aidp-log"[^>]*role="log"[^>]*aria-label="Agent Flow conversation"/);
+  assert.match(panel.innerHTML, /class="panel-title">AI Assistant</i);
+  assert.match(panel.innerHTML, /id="tc-aidp-log"[^>]*role="log"[^>]*aria-label="AI Assistant conversation"/);
   assert.match(panel.innerHTML, /id="tc-aidp-log" class="tc-chat-log scene-shot-list"/);
   assert.doesNotMatch(panel.innerHTML, /<summary|role="tab|tc-oci|data-provider=/);
   const header = panel.innerHTML.split('tc-panel-body')[0];
   assert.match(header, /data-new/); assert.match(header, /aria-label="New conversation"/); assert.match(header, /<svg/);
   const disclosure = panel.querySelector('.panel-collapse-btn');
-  panel.querySelector('.panel-title, .location-toolbar-label').textContent = 'Agent Flow';
+  panel.querySelector('.panel-title, .location-toolbar-label').textContent = 'AI Assistant';
   disclosure.dispatchEvent(new Event('click'));
   disclosure.dispatchEvent(new Event('click'));
   assert.equal(panel.classList.contains('collapsed'), false); assert.equal(disclosure['aria-expanded'], 'true');

@@ -30,7 +30,7 @@ async function askAgent(question, settings = {}) {
   const manager = application.getComponents().data.dataManager;
   const enabled = await manager.setEnabled(agentFlow.id, true, { origin: 'voice', signal: settings.signal });
   settings.signal?.throwIfAborted();
-  if (!enabled || !manager.isEnabled(agentFlow.id)) throw new DOMException('Agent Flow activation cancelled', 'AbortError');
+  if (!enabled || !manager.isEnabled(agentFlow.id)) throw new DOMException('AI Assistant activation cancelled', 'AbortError');
   return analyst.ask(question, settings);
 }
 async function startApplication() {

@@ -128,7 +128,7 @@ export function createSensorsLayer({ Cesium, request, signal }) {
     source.entities.resumeEvents(); if (newGeometry) updateStems(true); selection(); viewer.scene.requestRender();
   }
   const layer = {
-    id: SENSOR_LAYER_ID, name: 'Sensors', icon: '◈', source: 'OCI AIDP', updateInterval: 30000,
+    id: SENSOR_LAYER_ID, name: 'Sensors', icon: '◈', source: 'OCI AIDP · Workflow', updateInterval: 30000,
     init(target) {
       viewer = target; source = new Cesium.CustomDataSource(SENSOR_LAYER_ID); source.show = enabled; viewer.dataSources.add(source);
       occluder = new Cesium.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84, viewer.camera.positionWC);
