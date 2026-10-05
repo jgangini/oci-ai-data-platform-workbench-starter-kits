@@ -25,7 +25,8 @@ def runtime(monkeypatch):
     cursor = MagicMock()
     database = MagicMock()
     database.return_value.__enter__.return_value.cursor.return_value = cursor
-    formatter = SimpleNamespace(ainvoke=AsyncMock(return_value={"answer": "No matching rows", "version": "v1",
+    formatter = SimpleNamespace(ainvoke=AsyncMock(return_value={"incident_refs": [],
+        "answer": "No matching rows", "version": "v1",
         "evidence_ids": [], "sensor_evidence_ids": [], "actions": []}))
     planner = SimpleNamespace(ainvoke=AsyncMock(return_value={"tool": "finish", "args": {}}))
     memory = object()
@@ -143,7 +144,8 @@ def test_setup_and_invoke_keep_configured_model_tools_and_session_memory(monkeyp
     assert fake.configuration["recursion_limit"] == 24
     assert list(result) == ["messages"] and len(result["messages"]) == 1
     assert isinstance(result["messages"][0], fake.messages.AIMessage)
-    assert json.loads(result["messages"][0].content) == fake.formatter.ainvoke.return_value
+    assert json.loads(result["messages"][0].content) == {key: value for key, value in fake.formatter.ainvoke.return_value.items()
+        if key != "incident_refs"}
     assert fake.llm.with_structured_output.call_count == 2
     schema = fake.llm.with_structured_output.call_args.args[0]
     assert fake.llm.with_structured_output.call_args.kwargs == {"method": "json_schema"}
@@ -459,7 +461,8 @@ def test_invoke_accepts_empty_sql_results_and_uses_a_new_id_for_each_followup(mo
     for _ in range(2):
         result = asyncio.run(fake.agent.invoke(query))
         assert len(result["messages"]) == 1
-        assert json.loads(result["messages"][0].content) == fake.formatter.ainvoke.return_value
+        assert json.loads(result["messages"][0].content) == {key: value for key, value in fake.formatter.ainvoke.return_value.items()
+            if key != "incident_refs"}
     turns = [item for item in history if isinstance(item, messages.HumanMessage)]
     assert len({item.id for item in turns}) == 2
     assert all(item.content == query for item in turns)
@@ -529,7 +532,8 @@ def test_formatter_receives_only_current_successful_queries_and_their_exact_filt
         return {"messages": returned_messages}
 
     fake.graph.ainvoke.side_effect = response
-    fake.formatter.ainvoke.return_value = {"answer": "Datos Synthetic de Colombia", "version": "v1",
+    fake.formatter.ainvoke.return_value = {"incident_refs": [],
+        "answer": "Datos Synthetic de Colombia", "version": "v1",
         "evidence_ids": ["E1", "E2"], "sensor_evidence_ids": ["S1"], "actions": []}
     original_formatter_reply = json.dumps(fake.formatter.ainvoke.return_value, sort_keys=True)
     request = {"question": "Compara eventos críticos de Colombia con el sensor", "context": {"version": "v1"}}
@@ -537,7 +541,7 @@ def test_formatter_receives_only_current_successful_queries_and_their_exact_filt
     formatted = json.loads(fake.formatter.ainvoke.call_args.args[0][1].content)
     assert formatted["request"] == request
     assert formatted["queries"] == [
-        {**valid[0], "rows": [{"id": "incident-1", "evidence_ids": ["E1"], "mode": "Synthetic"}]},
+        {**valid[0], "rows": [{"id": "incident-1", "incident_ref": "I1", "evidence_ids": ["E1"], "mode": "Synthetic"}]},
         {**valid[1], "filters": {"version": "v1", "evidence_id": "E2"}, "rows": [{**valid[1]["rows"][0], "id": "E2"}]},
         {**valid[2], "rows": [{"id": "S1", "mode": "Synthetic", "value": 2.3, "unit": "mm/h"}]},
     ]
@@ -575,11 +579,11 @@ def test_formatter_hides_only_known_body_aliases_and_preserves_exact_citations_a
     state += completed_query(fake, "consultar_sensores", scope, [{"id": "reading-1"}], "sensor")
     state.append(fake.messages.AIMessage(content="Done", id="last"))
     reply = {"answer": body, "version": "v1", "evidence_ids": ["E2", "E1"], "sensor_evidence_ids": ["S1"], "actions": []}
-    fake.formatter.ainvoke.return_value = reply.copy()
+    fake.formatter.ainvoke.return_value = {**reply, "incident_refs": []}
     result = asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))
     assert json.loads(result["messages"][0].content) == {**reply, "answer": expected,
         "evidence_ids": ["post-2", "post-1"], "sensor_evidence_ids": ["reading-1"]}
-    assert fake.formatter.ainvoke.return_value == reply
+    assert fake.formatter.ainvoke.return_value == {**reply, "incident_refs": []}
     instructions = fake.formatter.ainvoke.call_args.args[0][0].content
     assert "confianza de clasificación" in instructions and "nunca probabilidad del incidente real" in instructions
     assert "agrupaciones heurísticas de reportes" in instructions and "independencia no está comprobada" in instructions
@@ -624,13 +628,148 @@ def test_synthetic_notice_comes_only_from_all_consulted_rows_without_mutating_mo
     fake.graph.ainvoke.side_effect = lambda inputs, **kwargs: {"messages": [*inputs["messages"],
         messages.AIMessage(tool_calls=[{"id": "call-1", "name": "consultar_incidentes", "args": {"version": "v1"}}]),
         messages.ToolMessage(tool_call_id="call-1", name="consultar_incidentes", content=json.dumps(rows))]}
-    fake.formatter.ainvoke.return_value = {"answer": "Respuesta consultada.", "version": "v1", "actions": []}
+    fake.formatter.ainvoke.return_value = {"incident_refs": [],
+        "answer": "Respuesta consultada.", "version": "v1", "actions": []}
     original_reply = dict(fake.formatter.ainvoke.return_value)
     result = asyncio.run(fake.agent.invoke(json.dumps({"question": "Eventos", "context": {"version": "v1"}})))
     reply = json.loads(result["messages"][0].content)
     notice = "Datos sintéticos de prueba; no confirman emergencias reales.\n\n" if prefixed else ""
-    assert reply == {**original_reply, "answer": notice + original_reply["answer"], "evidence_ids": [], "sensor_evidence_ids": []}
+    assert reply == {"answer": notice + original_reply["answer"], "version": "v1", "actions": [],
+        "evidence_ids": [], "sensor_evidence_ids": []}
     assert fake.formatter.ainvoke.return_value == original_reply
+
+
+def test_inventory_renders_each_incident_tuple_and_its_citation_instead_of_mixed_model_prose(monkeypatch):
+    fake = runtime(monkeypatch)
+    rows = [
+        {"id": "incident-8a61752a156c89d8", "category": "infraestructura", "locality": "Kennedy",
+            "severity": "high", "review_status": "pending", "mode": "Synthetic", "evidence_ids": ["infra-post", "infra-copy"],
+            "last_observed_at": "2026-10-05T03:00:00-05:00", "created_at": "2026-10-01T00:00:00Z"},
+        {"id": "incident-a1ec90626b57b172", "category": "movimiento_masa", "locality": "Ciudad Bolívar",
+            "severity": "high", "review_status": "validated", "mode": "Synthetic", "evidence_ids": ["landslide-post"],
+            "last_observed_at": "2026-10-05T09:00:00Z"},
+        {"id": "incident-24b2a1bd60a87554", "category": "inundacion", "locality": "Kennedy",
+            "severity": "high", "review_status": "rejected", "mode": "Synthetic", "evidence_ids": ["flood-post"]},
+    ]
+    original_rows = json.dumps(rows, sort_keys=True)
+    state = [fake.messages.HumanMessage(content='{"question":"Enumera los eventos","context":{"version":"v1"}}')]
+    state += completed_query(fake, rows=rows)
+    state += completed_query(fake, rows=[rows[0]], call_id="selected-again")
+    state += completed_query(fake, "consultar_sensores", rows=[{"id": "reading-1", "mode": "Synthetic"}], call_id="sensor")
+    state.append(fake.messages.AIMessage(content="Preliminary", id="terminal"))
+    fake.formatter.ainvoke.return_value.update(incident_refs=["I1", "I2"],
+        answer="Movimiento de masa en Kennedy; severidad alta. Confirmado. Evacuar ahora.",
+        evidence_ids=["invented-post"], sensor_evidence_ids=["invented-reading"],
+        actions=[{"type": "focus_incident", "incident_id": "invented-incident"}])
+    original_reply = json.dumps(fake.formatter.ainvoke.return_value, sort_keys=True)
+
+    result = asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))
+    reply = json.loads(result["messages"][0].content)
+    assert reply == {"version": "v1", "evidence_ids": ["infra-post", "landslide-post"], "sensor_evidence_ids": [], "actions": [],
+        "answer": "Datos sintéticos de prueba; no confirman emergencias reales.\n\n"
+        "Mostrando 2 de 3 resultados de incidentes consultados.\n\n"
+        "- Daño de infraestructura en Kennedy; severidad alta; revisión pendiente; último reporte: 2026-10-05T08:00:00 UTC; procedencia: Synthetic.\n"
+        "- Movimiento de masa en Ciudad Bolívar; severidad alta; revisión validado; último reporte: 2026-10-05T09:00:00 UTC; procedencia: Synthetic."}
+    assert result["messages"][0].id == "terminal"
+    assert json.dumps(fake.formatter.ainvoke.return_value, sort_keys=True) == original_reply
+    assert json.dumps(rows, sort_keys=True) == original_rows
+    formatted = json.loads(fake.formatter.ainvoke.call_args.args[0][1].content)["queries"]
+    assert [row["incident_ref"] for row in formatted[0]["rows"]] == ["I1", "I2", "I3"]
+    assert formatted[1]["rows"][0]["incident_ref"] == "I1"
+    assert "incident_ref" not in formatted[2]["rows"][0]
+    schema = fake.llm.with_structured_output.call_args.args[0]
+    assert "response_mode" not in schema["properties"] and "response_mode" not in schema["required"]
+    assert schema["properties"]["incident_refs"] == {"type": "array", "maxItems": 3,
+        "items": {"type": "string", "enum": ["I1", "I2", "I3"]}}
+    assert "incident_refs" in schema["required"]
+    assert not {"response_mode", "incident_refs"} & set(REPLY_SCHEMA["properties"])
+    fake.formatter.ainvoke.assert_awaited_once()
+
+
+@pytest.mark.parametrize("selected", [["I7"], ["E1"], ["I1", "I1"], "I1", [None],
+    [f"I{index}" for index in range(1, 7)]])
+def test_inventory_rejects_unknown_duplicate_or_excess_incident_selection(monkeypatch, selected):
+    fake = runtime(monkeypatch)
+    rows = [{"id": f"incident-{index}", "evidence_ids": [f"post-{index}"]} for index in range(6)]
+    state = [fake.messages.HumanMessage(content='{"question":"Enumera","context":{"version":"v1"}}')]
+    state += completed_query(fake, rows=rows)
+    fake.formatter.ainvoke.return_value.update(incident_refs=selected)
+    with pytest.raises(RuntimeError, match="Invalid incident selection"):
+        asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))
+    assert fake.llm.with_structured_output.call_args.args[0]["properties"]["incident_refs"]["maxItems"] == 5
+
+
+@pytest.mark.parametrize("change,error", [
+    ({"evidence_ids": []}, "no queried evidence"),
+    ({"last_observed_at": "2026-10-05T03:00:00"}, "requires a timezone"),
+])
+def test_inventory_requires_a_row_citation_and_unambiguous_report_timestamp(monkeypatch, change, error):
+    fake = runtime(monkeypatch)
+    row = {"id": "incident-1", "evidence_ids": ["post-1"], **change}
+    state = [fake.messages.HumanMessage(content='{"question":"Enumera","context":{"version":"v1"}}')]
+    state += completed_query(fake, rows=[row])
+    fake.formatter.ainvoke.return_value.update(incident_refs=["I1"])
+    with pytest.raises(RuntimeError, match=error):
+        asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))
+
+
+def test_formatter_empty_incident_results_keep_scope_and_allow_an_explanation(monkeypatch):
+    fake = runtime(monkeypatch)
+    scope = {"version": "v1", "country": "Perú", "mode": "real"}
+    state = [fake.messages.HumanMessage(content=json.dumps({"question": "Enumera", "context": scope}))]
+    state += completed_query(fake, args=scope)
+    fake.formatter.ainvoke.return_value.update(answer="No hay resultados de incidentes en la versión y filtros consultados.")
+    reply = json.loads(asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))["messages"][0].content)
+    assert reply == {"answer": "No hay resultados de incidentes en la versión y filtros consultados.",
+        "version": "v1", "evidence_ids": [], "sensor_evidence_ids": [], "actions": []}
+    assert fake.llm.with_structured_output.call_args.args[0]["properties"]["incident_refs"] == {
+        "type": "array", "maxItems": 0, "items": {"type": "string"}}
+    assert json.loads(fake.formatter.ainvoke.call_args.args[0][1].content)["queries"] == [
+        {"tool": "consultar_incidentes", "filters": scope, "rows": []}]
+
+
+@pytest.mark.parametrize("rows", [[], [{"id": "reading-1"}]])
+def test_sensor_query_cannot_select_an_unqueried_incident(monkeypatch, rows):
+    fake = runtime(monkeypatch)
+    state = [fake.messages.HumanMessage(content='{"question":"Enumera eventos","context":{"version":"v1"}}')]
+    state += completed_query(fake, "consultar_sensores", rows=rows)
+    fake.formatter.ainvoke.return_value.update(incident_refs=["I1"])
+    with pytest.raises(RuntimeError, match="Invalid incident selection"):
+        asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))
+
+
+def test_empty_incident_selection_allows_verification_explanation_even_with_queried_incidents(monkeypatch):
+    fake = runtime(monkeypatch)
+    state = [fake.messages.HumanMessage(content='{"question":"¿Qué falta verificar?","context":{"version":"v1"}}')]
+    state += completed_query(fake, rows=[{"id": "incident-1", "evidence_ids": ["post-1"]}])
+    fake.formatter.ainvoke.return_value.update(answer="Falta contrastar el lugar y la hora del reporte.", evidence_ids=["E1"])
+    reply = json.loads(asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))["messages"][0].content)
+    assert reply == {"answer": "Falta contrastar el lugar y la hora del reporte.", "version": "v1",
+        "evidence_ids": ["post-1"], "sensor_evidence_ids": [], "actions": []}
+
+
+def test_inventory_missing_report_date_does_not_use_record_creation_date(monkeypatch):
+    fake = runtime(monkeypatch)
+    state = [fake.messages.HumanMessage(content='{"question":"Enumera","context":{"version":"v1"}}')]
+    state += completed_query(fake, rows=[{"id": "incident-1", "evidence_ids": ["post-1"], "created_at": "2026-10-01T00:00:00Z"}])
+    fake.formatter.ainvoke.return_value.update(incident_refs=["I1"])
+    reply = json.loads(asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))["messages"][0].content)
+    assert "último reporte: no disponible" in reply["answer"] and "2026-10-01" not in reply["answer"]
+
+
+@pytest.mark.parametrize("question,answer", [
+    ("Hola", "Hola, ¿en qué puedo ayudarte?"),
+    ("¿Qué falta verificar?", "Falta contrastar lugar y hora; esta lectura no confirma un incidente."),
+    ("¿Y el sensor ahora?", "Nivel de río: 3.92 m, warning, 2026-10-05T09:00:00 UTC."),
+])
+def test_explanation_preserves_greeting_certainty_and_sensor_followup_text(monkeypatch, question, answer):
+    fake = runtime(monkeypatch)
+    state = [fake.messages.HumanMessage(content=json.dumps({"question": question, "context": {"version": "v1"}}))]
+    state += completed_query(fake, "consultar_sensores", rows=[{"id": "reading-1", "value": 3.92, "unit": "m",
+        "status": "warning", "observed_at": "2026-10-05T09:00:00Z"}])
+    fake.formatter.ainvoke.return_value.update(answer=answer, sensor_evidence_ids=["S1"])
+    reply = json.loads(asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))["messages"][0].content)
+    assert reply == {"answer": answer, "version": "v1", "evidence_ids": [], "sensor_evidence_ids": ["reading-1"], "actions": []}
 
 
 @pytest.mark.parametrize("failure", ["invented_evidence", "invented_sensor", "history_evidence", "wrong_version", "formatter_error",

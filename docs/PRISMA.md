@@ -577,11 +577,19 @@ citation tokens resolved back to queried source IDs. Empty or failed queries
 cannot be presented as proof that no events exist in the real world. Synthetic
 test provenance is preserved; the assistant does not send operational reports.
 
+For event inventories, the model selects up to five queried incident references.
+The application renders each selected row's category, locality, severity, review,
+last report timestamp and provenance together with that row's citation. It labels
+the subset size against the number of queried incidents, not a universal total.
+Report timestamps are not verified occurrence times. This prevents combinations
+of facts from different selected rows; explanations remain model-generated and
+require separate semantic checks.
+
 Postflight for the query-grounding and correlation increment (2026-10-05):
-quality 6595 → 6586, coupling 0.08 unchanged, zero cycles and god files; complex
+quality 6595 → 6585, coupling 0.08 unchanged, zero cycles and god files; complex
 functions 44 → 49. This is an intentional gate exception, not a passing gate:
 the agent retains current-turn query validation, same-version citations,
-provider-compatible formatting and explicit failure handling for errors observed
+provider-compatible formatting, row-bound inventories and explicit failure handling for errors observed
 in native AIDP runs. Finite capture also preserves exhausted cursors and retries
 unfinished institutional/downstream processing without replaying social posts.
 Splitting these guards solely to lower the aggregate would obscure their state
