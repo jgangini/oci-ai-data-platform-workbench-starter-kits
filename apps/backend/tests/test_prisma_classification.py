@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.prisma.classification import PROMPT_VERSION, classify
-from app.prisma.core import LOCALITIES, build_snapshot, default_source, normalize_event
+from app.prisma.core import CATEGORIES, LOCALITIES, SEVERITIES, build_snapshot, default_source, normalize_event
 
 
 @pytest.mark.parametrize("text,category", [
@@ -81,6 +81,7 @@ class ClaimsModel:
     ("```json\n<json>\n```\nExplanation", 0, False), ("```json\n<json>", 0, False),
     ("```yaml\n<json>\n```", 0, False), ("```json\n<json>\n```", 1, False),
     ("```json\n<json>\n```\n```json\n<json>\n```", 0, False), ("<json><json>", 0, False),
+    ("```json\n<json>\n]\n}\n```", 0, False),
 ])
 def test_classifier_accepts_only_plain_json_or_one_complete_json_fence(template, trim, accepted):
     event = normalize_event({"platform": "x", "source_id": "fenced", "mode": "simulation",
@@ -120,6 +121,36 @@ def test_multiple_grounded_claims_preserve_one_post_and_ignore_model_provenance_
     prompt = client.requests[0].chat_request.messages[0].content[0].text
     assert "NOT-FOR-THE-MODEL" not in prompt and "nunca verdad verificada" in prompt
     assert "summary_en" in prompt and client.requests[0].chat_request.max_tokens == 2048
+
+
+def test_classifier_requests_a_strict_schema_for_one_post_and_grounded_claims():
+    event = normalize_event({"platform": "x", "source_id": "schema", "mode": "real",
+        "text": "Hay inundación en Kennedy, Bogotá.", "created_at": "2026-10-05T14:00:00Z"})
+    label = {"id": event["id"], "category": "inundacion", "locality": "Kennedy", "severity": "medium",
+             "confidence": 0.7, "claims": [claim()]}
+    client = ClaimsModel([label])
+    result = classify([event], {"model_id": "model", "compartment_id": "compartment"}, client=client)[0]
+    request = client.requests[0].chat_request
+    assert request.max_tokens == 2048 and request.temperature == 0 and len(client.requests) == 1
+    assert request.response_format.type == "JSON_SCHEMA"
+    contract = request.response_format.json_schema
+    assert contract.is_strict is True and contract.name == "territorial_classification"
+    schema = json.loads(json.dumps(contract.schema))
+    posts = schema["properties"]["items"]
+    assert posts["minItems"] == posts["maxItems"] == 1
+    post = posts["items"]
+    claims = post["properties"]["claims"]
+    assert claims["maxItems"] == 8
+    for item in (schema, post, claims["items"]):
+        assert item["additionalProperties"] is False and set(item["required"]) == set(item["properties"])
+    for item in (post, claims["items"]):
+        properties = item["properties"]
+        assert properties["category"]["enum"] == [*CATEGORIES, "por_clasificar"]
+        assert properties["locality"]["enum"] == [*LOCALITIES, "Sin localizar"]
+        assert properties["severity"]["enum"] == list(SEVERITIES)
+        assert properties["confidence"] == {"type": "number", "minimum": 0, "maximum": 1}
+    assert claims["items"]["properties"]["relation"]["enum"] == ["supports", "contradicts"]
+    assert result["prompt_version"] == "territorial-control-claims-v2"
 
 
 @pytest.mark.parametrize("claims", [

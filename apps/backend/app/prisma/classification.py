@@ -5,7 +5,31 @@ import re
 
 from .core import CATEGORIES, LOCALITIES, SEVERITIES, normalize_event
 
-PROMPT_VERSION = "territorial-control-claims-v1"
+PROMPT_VERSION = "territorial-control-claims-v2"
+
+_LABEL_PROPERTIES = {
+    "category": {"type": "string", "enum": [*CATEGORIES, "por_clasificar"]},
+    "locality": {"type": "string", "enum": [*LOCALITIES, "Sin localizar"]},
+    "severity": {"type": "string", "enum": list(SEVERITIES)},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+}
+_CLASSIFICATION_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["items"],
+    "properties": {"items": {"type": "array", "minItems": 1, "maxItems": 1, "items": {
+        "type": "object", "additionalProperties": False, "required": ["id", *_LABEL_PROPERTIES, "claims"],
+        "properties": {"id": {"type": "string"}, **_LABEL_PROPERTIES,
+            "claims": {"type": "array", "maxItems": 8, "items": {
+                "type": "object", "additionalProperties": False,
+                "required": [*_LABEL_PROPERTIES, "relation", "evidence_text", "summary_en"],
+                "properties": {**_LABEL_PROPERTIES,
+                    "relation": {"type": "string", "enum": ["supports", "contradicts"]},
+                    "evidence_text": {"type": "string", "minLength": 1, "maxLength": 1000},
+                    "summary_en": {"type": "string", "minLength": 1, "maxLength": 400},
+                },
+            }},
+        },
+    }}},
+}
 
 
 def _labels(item):
@@ -71,7 +95,9 @@ def classify(events, config, signed=None, client=None):
                   "Incluye cada id exactamente una vez. Reportes:\n" + json.dumps([
                       {"id": item["id"], "text": item["text"][:12000]} for item in batch], ensure_ascii=False))
         request = model.GenericChatRequest(messages=[model.UserMessage(content=[model.TextContent(text=prompt)])],
-            temperature=0, max_tokens=2048, response_format=model.JsonObjectResponseFormat())
+            temperature=0, max_tokens=2048, response_format=model.JsonSchemaResponseFormat(
+                json_schema=model.ResponseJsonSchema(name="territorial_classification",
+                    schema=_CLASSIFICATION_SCHEMA, is_strict=True)))
         response = client.chat(model.ChatDetails(compartment_id=config["compartment_id"],
             serving_mode=model.OnDemandServingMode(model_id=config["model_id"]), chat_request=request))
         text = "".join(part.text for part in response.data.chat_response.choices[0].message.content if getattr(part, "text", None))
