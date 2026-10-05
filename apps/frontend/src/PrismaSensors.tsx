@@ -1,6 +1,7 @@
 import { LoadingIndicator } from './LoadingIndicator';
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useRef, useState } from 'react';
-import { prismaEndpoint, prismaError, timestamp, type PrismaApi } from './prismaAdminState';
+import { prismaEndpoint, prismaError, timestamp, type CaptureSchedule, type PrismaApi } from './prismaAdminState';
+import { CaptureScheduleForm } from './CaptureScheduleForm';
 import { PrismaSensorReadings } from './PrismaSensorReadings';
 import { PrismaSyntheticReset, PrismaSyntheticResetStatus, type SyntheticReset } from './PrismaSyntheticReset';
 
@@ -16,13 +17,14 @@ const sensorIcons: Record<string, string> = {
 type SensorConfig = { sensor_type: string; config_version: number; mode: 'Synthetic'; is_simulated: true; interval_minutes: number; sensor_count: number;
   capture_running: boolean; last_run_at?: string; next_due?: string; last_received_count?: number; last_error?: string; reset?: SyntheticReset };
 type SensorEditor = { saved: SensorConfig; draft: SensorConfig };
-export const sensorDirty = ({ saved, draft }: SensorEditor) => saved.interval_minutes !== draft.interval_minutes || saved.sensor_count !== draft.sensor_count;
+export const sensorDirty = ({ saved, draft }: SensorEditor) => saved.sensor_count !== draft.sensor_count;
 const endpoint = `${prismaEndpoint}/sensors`;
 
 export function PrismaSensors({ api, timeZone, active = true, searchIcon, refreshIcon }: { api: PrismaApi; timeZone: string; active?: boolean; searchIcon: ReactNode; refreshIcon: ReactNode }) {
   const [selected, setSelected] = useState(families[0]), [collapsed, setCollapsed] = useState(false), [refresh, setRefresh] = useState(0);
   const tabs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [configs, setConfigs] = useState<Record<string, SensorConfig> | null>(null);
+  const [schedule, setSchedule] = useState<CaptureSchedule | null>(null);
   const [editors, setEditors] = useState<Record<string, SensorEditor>>({});
   const [feedback, setFeedback] = useState<Record<string, { busy: string; error: string; message: string }>>({});
   const [loadError, setLoadError] = useState('');
@@ -47,9 +49,10 @@ export function PrismaSensors({ api, timeZone, active = true, searchIcon, refres
       if (loading) return;
       loading = true; const sequence = { ...revisions.current }, pending = new Set(Object.keys(mutations.current));
       try {
-        const result = await api<{ configs: SensorConfig[]; runtime: string }>(endpoint, { signal: controller.signal });
+        const result = await api<{ configs: SensorConfig[]; runtime: string; sensor_schedule?: CaptureSchedule }>(endpoint, { signal: controller.signal });
         if (!controller.signal.aborted) {
           setRuntime(result.runtime);
+          if (result.sensor_schedule) setSchedule(previous => previous && previous.config_version > result.sensor_schedule!.config_version ? previous : result.sensor_schedule!);
           for (const next of result.configs) if (!pending.has(next.sensor_type) && !mutations.current[next.sensor_type] && sequence[next.sensor_type] === revisions.current[next.sensor_type]) receive(next);
           setLoadError('');
         }
@@ -75,12 +78,12 @@ export function PrismaSensors({ api, timeZone, active = true, searchIcon, refres
     const status = (values: Partial<{ busy: string; error: string; message: string }>) => setFeedback(previous => ({ ...previous, [type]: { ...(previous[type] || { busy: '', error: '', message: '' }), ...values } }));
     status({ busy: kind, error: '', message: '' });
     try {
-      const { interval_minutes, sensor_count } = editor.draft;
-      if (kind === 'save' && [[interval_minutes, 60], [sensor_count, 5000]].some(([value, maximum]) => !Number.isInteger(value) || value < 1 || value > maximum)) throw new Error('Enter whole numbers: 1–60 minutes and 1–5000 sensors.');
+      const { sensor_count } = editor.draft;
+      if (kind === 'save' && (!Number.isInteger(sensor_count) || sensor_count < 1 || sensor_count > 5000)) throw new Error('Enter whole numbers: 1–5000 sensors.');
       const path = `${endpoint}/${encodeURIComponent(type)}`;
       const result = await api<{ config: SensorConfig; message?: string }>(kind === 'save' ? path : `${path}/${kind}`, {
         method: kind === 'save' ? 'PUT' : 'POST', signal: controller.signal,
-        ...(kind === 'save' ? { body: JSON.stringify({ expected_revision: editor.saved.config_version, interval_minutes, sensor_count }) } : {}),
+        ...(kind === 'save' ? { body: JSON.stringify({ expected_revision: editor.saved.config_version, sensor_count }) } : {}),
       });
       if (controller.signal.aborted) return;
       if (result.config.sensor_type !== type) throw new Error('The server returned a different sensor type. Refresh its status before trying again.');
@@ -88,7 +91,7 @@ export function PrismaSensors({ api, timeZone, active = true, searchIcon, refres
       if (kind === 'save') setEditors(previous => ({ ...previous, [type]: { saved: result.config, draft: result.config } }));
       // Own Pause advances the revision without invalidating a draft; external edits still require conflict resolution.
       else if (kind === 'pause' && config?.config_version === editor.saved.config_version && result.config.config_version === editor.saved.config_version + 1 && !sensorDirty({ saved: editor.saved, draft: result.config }))
-        setEditors(previous => ({ ...previous, [type]: { saved: result.config, draft: { ...result.config, interval_minutes, sensor_count } } }));
+        setEditors(previous => ({ ...previous, [type]: { saved: result.config, draft: { ...result.config, sensor_count } } }));
       status({ message: result.message || (kind === 'save' ? 'Sensor configuration saved.' : 'Sensor capture updated.') });
     } catch (reason) { if (!controller.signal.aborted) status({ error: prismaError(reason) }); }
     finally { if (!controller.signal.aborted) status({ busy: '' }); if (mutations.current[type] === controller) delete mutations.current[type]; }
@@ -96,6 +99,9 @@ export function PrismaSensors({ api, timeZone, active = true, searchIcon, refres
   const update = (values: Partial<SensorConfig>) => setEditors(previous => ({ ...previous, [selected]: { ...previous[selected], draft: { ...previous[selected].draft, ...values } } }));
   return <section className="prisma-sensors" aria-label="Sensors configuration">
     <div className="prisma-sources-title"><h2>Sensors</h2></div>
+    {schedule && <CaptureScheduleForm schedule={schedule} api={api} kind="sensor"
+      disabled={families.some(family => ['pending', 'error'].includes((resetViews[family]?.state || configs?.[family]?.reset)?.status || ''))}
+      onUpdate={value => { setSchedule(value); setRefresh(previous => previous + 1); }} />}
     <div className="prisma-network-toolbar">
       <div className="settings-tabs prisma-network-tabs" role="tablist" aria-label="Sensor types">{families.map(family => {
         const state = !configs?.[family] ? 'Unavailable' : configs[family].capture_running ? 'Running' : 'Paused';
@@ -122,8 +128,9 @@ export function PrismaSensors({ api, timeZone, active = true, searchIcon, refres
     <div id="prisma-sensor-configuration" hidden={collapsed}>{config && editor && <form className="prisma-source" onSubmit={(event: FormEvent) => { event.preventDefault(); void action('save'); }}>
       <div className="prisma-source-heading"><h3><svg className="prisma-platform-logo" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d={sensorIcons[selected]} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>{sensorFamilies[selected]}</h3><div className="prisma-source-badges"><span className={`prisma-mode prisma-capture-state ${config.capture_running ? 'running' : 'paused'}`} role="status" title={config.capture_running ? 'Running' : 'Paused'}><span className={`prisma-capture-dot ${config.capture_running ? 'running' : 'paused'}`} aria-hidden="true" />{config.capture_running ? 'Running' : 'Paused'}</span></div></div>
       <fieldset disabled={resetBlocked || !!busy}><div className="prisma-fields">
-        <label>Capture interval (minutes)<input type="number" min="1" max="60" step="1" required value={editor.draft.interval_minutes} onChange={event => update({ interval_minutes: Number(event.target.value) })} /></label>
-        <label>Number of sensors<input type="number" min="1" max="5000" step="1" required value={editor.draft.sensor_count} onChange={event => update({ sensor_count: Number(event.target.value) })} /></label></div>
+        <label>Producer mode<select value={editor.draft.mode} onChange={() => update({ mode: 'Synthetic' })} aria-describedby="prisma-sensor-mode-note"><option value="Synthetic">Synthetic</option><option value="real" disabled>Credentials · unavailable</option></select></label>
+        {editor.draft.mode === 'Synthetic' && <label>Number of sensors<input type="number" min="1" max="5000" step="1" required value={editor.draft.sensor_count} onChange={event => update({ sensor_count: Number(event.target.value) })} /></label>}</div>
+        <small id="prisma-sensor-mode-note">Real sensor ingestion is not available yet.</small>
         <div className="prisma-source-actions"><button type="submit">{busy === 'save' ? 'Saving…' : 'Save'}</button><button type="button" className="secondary" disabled={dirty} onClick={() => void action('run')}>{busy === 'run' ? 'Starting…' : 'Run now'}</button><button type="button" className="secondary" disabled={!config.capture_running} onClick={() => void action('pause')}>{busy === 'pause' ? 'Pausing…' : 'Pause'}</button>
           {dirty && <button type="button" className="secondary" onClick={() => setEditors(previous => ({ ...previous, [selected]: { saved: config, draft: config } }))}>Discard changes</button>}</div>
         {dirty && <small>Unsaved changes are kept while status refreshes. Save before Run now.</small>}

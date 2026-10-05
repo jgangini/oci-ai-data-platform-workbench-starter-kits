@@ -8,7 +8,7 @@ const source = readFileSync(new URL('../src/prismaAdminState.ts', import.meta.ur
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const exports = {};
 new Function('exports', compiled)(exports);
-const { captureState, postStatus, refreshedEditor, refreshedPosts, safeMediaUrl, sourceDefaults, sourceDirty, sourcePayload, timestamp } = exports;
+const { captureState, postStatus, refreshedEditor, refreshedPosts, safeMediaUrl, scheduleLocalTime, schedulePayload, sourceDefaults, sourceDirty, sourcePayload, timestamp } = exports;
 const saved = sourceDefaults({ platform: 'x', enabled: true, mode: 'simulation', query: '#bogota', interval_minutes: 5,
   secret_ref: 'PrismaSource_x', credential_configured: false, status: 'paused', capture_running: false, config_version: 7 });
 
@@ -29,9 +29,90 @@ test('Synthetic saves normalize legacy mode, omit hidden tokens and preserve rev
   assert.equal(sourcePayload({ ...editor, draft: { ...saved, mode: 'simulation' } }).mode, 'Synthetic');
   assert.equal(sourceDirty(editor), false);
   assert.equal('bearer_token' in sourcePayload(editor), false);
+  assert.equal(sourcePayload(editor).synthetic_batch_max, 3);
+  assert.equal('interval_minutes' in sourcePayload(editor), false);
+  assert.equal(sourceDirty({ ...editor, draft: { ...saved, interval_minutes: 10 } }), false);
+  assert.equal(sourceDirty({ ...editor, draft: { ...saved, synthetic_batch_max: 4 } }), true);
   const real = sourcePayload({ ...editor, draft: { ...saved, mode: 'real' } });
   assert.equal(real.bearer_token, 'hidden-token'); assert.equal(real.expected_revision, 7);
+  assert.equal('synthetic_batch_max' in real, false);
+  for (const value of [0, 1.5, 101, NaN]) assert.throws(() => sourcePayload({ ...editor, draft: { ...saved, synthetic_batch_max: value } }), /whole number/);
   assert.throws(() => sourcePayload({ ...editor, draft: { ...saved, report_thresholds: { low: 8, medium: 7, high: 20 } } }), /must be positive and increase/);
+});
+
+test('shared schedule converts browser wall time to UTC and rejects missing, invalid and skipped local times', t => {
+  const previous = process.env.TZ; process.env.TZ = 'America/New_York';
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  assert.equal(scheduleLocalTime(null), '');
+  assert.equal(scheduleLocalTime('2026-10-05T15:30:12Z'), '2026-10-05T11:30:12');
+  assert.deepEqual(schedulePayload('2026-10-05T11:30:12', 7, 2), { start_at: '2026-10-05T15:30:12.000Z', interval_minutes: 7, expected_revision: 2 });
+  assert.equal(schedulePayload('2026-01-05T11:30', 1, 1).start_at, '2026-01-05T16:30:00.000Z');
+  for (const value of ['', 'invalid', '2026-02-30T10:00', '2026-03-08T02:30']) assert.throws(() => schedulePayload(value, 5, 1), /valid scheduled/);
+  for (const value of [0, 1.5, 1441, NaN]) assert.throws(() => schedulePayload('2026-10-05T11:30', value, 1), /whole number/);
+});
+
+function sourceFormHarness(t, name, initial) {
+  let cursor = 0, dirty = true, effects = [], tree; const slots = [], requests = [], updated = [];
+  const hooks = {
+    useState(initial) { const id = cursor++; if (!(id in slots)) slots[id] = typeof initial === 'function' ? initial() : initial;
+      return [slots[id], value => { const next = typeof value === 'function' ? value(slots[id]) : value; dirty ||= !Object.is(slots[id], next); slots[id] = next; }]; },
+    useRef(initial) { const id = cursor++; return slots[id] ||= { current: initial }; },
+    useEffect(callback, deps) { const id = cursor++, old = slots[id]; if (!old || deps.some((value, index) => value !== old.deps[index])) effects.push(() => { old?.cleanup?.(); slots[id] = { deps, cleanup: callback() }; }); },
+  };
+  const filename = name === 'SourceCard' ? 'PrismaAdmin' : 'CaptureScheduleForm';
+  const source = readFileSync(new URL(`../src/${filename}.tsx`, import.meta.url), 'utf8') + (name === 'SourceCard' ? '\nexport { SourceCard };' : '');
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+  const component = {}; new Function('exports', 'require', compiled)(component, dependency => dependency === 'react' ? hooks : dependency === 'react/jsx-runtime' ? jsxRuntime : dependency === './prismaAdminState' ? exports : {});
+  const props = { ...initial, api: (path, options) => new Promise((resolve, reject) => requests.push({ path, options, resolve, reject })), onUpdate: value => updated.push(value), disabled: false };
+  function render() { for (let n = 0; dirty && n < 20; n++) { cursor = 0; dirty = false; effects = []; tree = component[name](props); effects.forEach(effect => effect()); } assert.equal(dirty, false); }
+  const nodes = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? nodes(child) : [])];
+  const find = (type, match = () => true) => { const value = nodes(tree).find(node => node?.type === type && match(node.props)); assert.ok(value, `Missing ${type}`); return value; };
+  const act = callback => { callback(); render(); };
+  const cleanup = () => slots.forEach(slot => slot?.cleanup?.()); t.after(cleanup); render();
+  return { requests, updated, find, act, cleanup, nodes: () => nodes(tree),
+    receive: value => act(() => { Object.assign(props, value); dirty = true; }),
+    change: (type, value) => act(() => find('input', p => p.type === type).props.onChange({ target: { value } })),
+    submit: () => act(() => find('form').props.onSubmit({ preventDefault() {} })),
+    settle: async () => { await new Promise(setImmediate); render(); } };
+}
+
+test('shared schedule saves once without starting capture and preserves dirty drafts and revisions across polling conflicts', async t => {
+  const initial = { start_at: null, interval_minutes: 5, config_version: 1 };
+  const h = sourceFormHarness(t, 'CaptureScheduleForm', { schedule: initial, kind: 'social' });
+  assert.equal(h.requests.length, 0); assert.equal(h.find('input', p => p.type === 'datetime-local').props.value, '');
+  h.submit(); await h.settle(); assert.equal(h.requests.length, 0); assert.match(h.find('p', p => p.role === 'alert').props.children, /valid scheduled/);
+  h.change('datetime-local', '2026-10-06T11:30:00'); h.change('number', '7');
+  const fresh = { start_at: '2026-10-07T16:00:00Z', interval_minutes: 9, config_version: 2 };
+  h.receive({ schedule: fresh }); assert.equal(h.find('input', p => p.type === 'number').props.value, 7);
+  h.submit(); h.submit(); assert.equal(h.requests.length, 1); assert.equal(h.requests[0].path, '/api/admin/prisma/social-schedule');
+  assert.equal(h.requests[0].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(h.requests[0].options.body), schedulePayload('2026-10-06T11:30:00', 7, 1));
+  h.requests[0].reject(Object.assign(new Error('Schedule conflict'), { status: 409 })); await h.settle();
+  assert.equal(h.find('input', p => p.type === 'number').props.value, 7); assert.equal(h.updated.length, 0);
+  h.act(() => h.find('button', p => p.children === 'Discard schedule changes').props.onClick());
+  assert.equal(h.find('input', p => p.type === 'datetime-local').props.value, scheduleLocalTime(fresh.start_at));
+  h.change('number', '10'); h.submit(); assert.equal(JSON.parse(h.requests[1].options.body).expected_revision, 2);
+  const saved = { ...fresh, interval_minutes: 10, config_version: 3 }; h.requests[1].resolve(saved); await h.settle();
+  assert.deepEqual(h.updated, [saved]); h.receive({ schedule: initial }); assert.equal(h.find('input', p => p.type === 'number').props.value, 10);
+  h.receive({ kind: 'sensor', schedule: saved }); h.change('number', '11'); h.submit();
+  assert.equal(h.requests[2].path, '/api/admin/prisma/sensor-schedule');
+  h.cleanup(); assert.equal(h.requests[2].options.signal.aborted, true); h.requests[2].resolve({ ...saved, config_version: 4 }); await h.settle();
+  assert.equal(h.updated.length, 1, 'Unmounted saves cannot update parent state');
+});
+
+test('individual source limits apply only to Synthetic mode and never write the shared interval', async t => {
+  const h = sourceFormHarness(t, 'SourceCard', { source: saved, timeZone: 'UTC' });
+  assert.equal(h.find('input', p => p.max === '100').props.value, 3);
+  assert.equal(h.nodes().some(node => node?.type === 'input' && node.props.max === '1440'), true, 'Correlation window remains per source');
+  assert.equal(h.nodes().filter(node => node?.type === 'input' && node.props.max === '1440').length, 1);
+  h.act(() => h.find('input', p => p.max === '100').props.onChange({ target: { value: '8' } })); h.submit();
+  assert.equal(JSON.parse(h.requests[0].options.body).synthetic_batch_max, 8);
+  assert.equal('interval_minutes' in JSON.parse(h.requests[0].options.body), false);
+  h.requests[0].resolve({ ...saved, synthetic_batch_max: 8, config_version: 8 }); await h.settle();
+  h.act(() => h.find('select').props.onChange({ target: { value: 'real' } }));
+  assert.equal(h.nodes().some(node => node?.type === 'input' && node.props.max === '100'), false);
+  h.submit(); assert.equal('synthetic_batch_max' in JSON.parse(h.requests[1].options.body), false);
+  h.requests[1].resolve({ ...saved, mode: 'real', config_version: 9 }); await h.settle();
 });
 
 test('searches accept 1000 characters and reject excess without truncating saved drafts', () => {
@@ -112,6 +193,7 @@ test('network tabs toggle configuration, retain mounted editors and follow captu
     if (name === 'react') return hooks;
     if (name === 'react/jsx-runtime') return jsxRuntime;
     if (name === './LoadingIndicator') return { LoadingIndicator() {} };
+    if (name === './CaptureScheduleForm') return { CaptureScheduleForm() {} };
     if (name === './prismaAdminState') return exports;
     if (name === './prisma.css') return {};
     return { PrismaPosts: () => null, PrismaSyntheticReset: () => null, PrismaSyntheticResetStatus: () => null };
@@ -130,7 +212,9 @@ test('network tabs toggle configuration, retain mounted editors and follow captu
   const sources = ['x', 'facebook', 'instagram', 'tiktok'].map((platform, index) => ({ ...saved, platform, capture_running: index < 3, capture_state: ['running', 'scheduled', 'capturing', 'paused'][index] }));
   t.after(() => { for (const slot of slots) slot?.cleanup?.(); if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
   render(); assert.equal(find(props => props.label === 'Loading configuration…').type.name, 'LoadingIndicator');
-  requests[0]({ sources, runtime: 'local_fixture' }); await new Promise(setImmediate); render();
+  requests[0]({ sources, runtime: 'local_fixture', social_schedule: { start_at: null, interval_minutes: 5, config_version: 1 } }); await new Promise(setImmediate); render();
+  assert.equal(nodes(tree).filter(node => node?.type?.name === 'CaptureScheduleForm').length, 1);
+  assert.equal(find(props => props.kind === 'social').props.schedule.start_at, null);
   assert.ok(!nodes(tree).some(node => node?.type?.name === 'LoadingIndicator'));
   for (const [index, platform] of ['x', 'facebook', 'instagram', 'tiktok'].entries()) {
     assert.equal(dot(platform)['aria-label'], index < 3 ? 'Running' : 'Paused');
@@ -141,6 +225,7 @@ test('network tabs toggle configuration, retain mounted editors and follow captu
   assert.equal(tab('x').props['aria-expanded'], true);
   tab('x').props.onClick(); render();
   assert.equal(formHidden(), true);
+  assert.ok(nodes(tree).some(node => node?.type?.name === 'CaptureScheduleForm'), 'Shared schedule remains outside collapsed individual forms');
   assert.equal(tab('x').props['aria-selected'], true);
   assert.equal(tab('x').props['aria-expanded'], false);
   assert.equal(tab('x').props.tabIndex, 0);

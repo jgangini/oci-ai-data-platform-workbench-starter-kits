@@ -4,6 +4,7 @@ import { createLayerCatalog } from '../.upstream/src/app/catalog.js';
 import { describeError } from '../.upstream/src/standalone/errors.js';
 import { createTerritorialLayer, mountTerritorialPanel, seedBogotaView } from './territorialLayer.js';
 import { createSensorsLayer, mountSensorsPanel } from './sensorsLayer.js';
+import { mountCaptureRefresh } from './captureRefresh.js';
 import { createAgentFlowLayer, mountAnalyst } from './analyst.js';
 import { browserProviderConfig, mountProviderSettings } from './providerSettings.js';
 import { createOciVoiceSession, selectedVoiceProvider } from './ociVoice.js';
@@ -55,6 +56,10 @@ async function startApplication() {
 }
 
 startApplication().then(async ({ controls }) => {
+  const manager = application.getComponents().data.dataManager;
+  for (const [layer, kind] of [[territorial, 'social'], [sensors, 'sensors']]) {
+    mountCaptureRefresh({ layer, kind, request, signal: lifetime, refresh: (id, options) => manager.refreshLayer(id, options) });
+  }
   if (voiceProvider === 'openai') document.querySelector('#gev-voice-control .gev-voice-kicker').textContent = 'OPENAI VOICE';
   const panel = mountTerritorialPanel({ layer: territorial, request, signal: lifetime,
     setPanelCollapsed: (...args) => controls.styleManager.setPanelCollapsed(...args) });

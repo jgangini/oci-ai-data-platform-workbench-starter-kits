@@ -10,7 +10,83 @@ import { PanelChrome } from '../.upstream/src/ui/panelChrome.js';
 import { layoutRightPanelRail } from '../.upstream/src/ui/rightPanelRail.js';
 import { chatContext, createAgentFlowLayer, mountAnalyst } from '../native/analyst.js';
 import { LayerLifecycle } from '../.upstream/src/data/lifecycle.js';
+import { mountCaptureRefresh } from '../native/captureRefresh.js';
 import { browserProviderConfig, managedProviderLabel, mountProviderSettings, ociModelLabel, ociProviderPresentation } from '../native/providerSettings.js';
+
+function captureRefreshHarness(t, kind = 'social') {
+  const originalTimeout = globalThis.setTimeout, originalClear = globalThis.clearTimeout;
+  const timers = new Map(), requests = [], refreshes = [], listeners = new Set(), lifetime = new AbortController();
+  let clock = 0, serial = 0;
+  globalThis.setTimeout = (callback, delay) => { timers.set(++serial, { callback, at: clock + delay }); return serial; };
+  globalThis.clearTimeout = id => timers.delete(id);
+  const state = { enabled: true, isRefreshing: false, snapshot: { version: 'v1' } };
+  const layer = { id: kind, state: () => state, subscribe(callback) { listeners.add(callback); callback(state); return () => listeners.delete(callback); } };
+  const dispose = mountCaptureRefresh({ layer, kind, signal: lifetime.signal,
+    request: (path, options) => new Promise((resolve, reject) => requests.push({ path, signal: options.signal, resolve, reject })),
+    refresh: (id, options) => new Promise(resolve => refreshes.push({ id, signal: options.signal, resolve })),
+  });
+  t.after(() => { dispose(); globalThis.setTimeout = originalTimeout; globalThis.clearTimeout = originalClear; });
+  return { state, timers, requests, refreshes, lifetime, dispose, listeners,
+    enabled(value) { state.enabled = value; for (const callback of listeners) callback(state); },
+    advance(ms) { clock += ms; for (const [id, timer] of timers) if (timer.at <= clock) { timers.delete(id); timer.callback(); } },
+    delay: () => Math.min(...[...timers.values()].map(timer => timer.at - clock)),
+    settle: () => new Promise(setImmediate),
+  };
+}
+const captureStatus = (changes = {}) => ({ server_now: '2035-01-01T10:00:00Z', next_capture_at: '2035-01-01T10:00:30Z',
+  schedule: { start_at: '2035-01-01T10:00:00Z', interval_minutes: 5, config_version: 1 },
+  capture_revision: 'capture1', publication_revision: 'kind1', publication_version: 'v1', processing_pending: false, ...changes });
+
+for (const kind of ['social', 'sensors']) test(`${kind} refresh follows server cadence and its own publication revision without concurrent requests`, async t => {
+  const h = captureRefreshHarness(t, kind); h.advance(0);
+  assert.equal(h.requests[0].path, `/api/prisma/capture-status?kind=${kind}`);
+  h.requests[0].resolve(captureStatus()); await h.settle();
+  assert.equal(h.refreshes.length, 0); assert.ok(h.delay() > 29900 && h.delay() <= 30000, 'Server clock determines the delay despite a client clock years behind');
+  h.advance(30000); h.requests[1].resolve(captureStatus({ server_now: '2035-01-01T10:00:30Z', next_capture_at: '2035-01-01T10:05:30Z', capture_revision: 'capture2', processing_pending: true, publication_version: 'other-layer-v2' })); await h.settle();
+  assert.equal(h.refreshes.length, 0, 'Another layer changing the global publication cannot refresh this layer');
+  assert.equal(h.delay(), 5000);
+  h.advance(5000); h.requests[2].resolve(captureStatus({ server_now: '2035-01-01T10:00:35Z', next_capture_at: '2035-01-01T10:05:30Z', capture_revision: 'capture2', processing_pending: true, publication_revision: 'kind2', publication_version: 'v3' })); await h.settle();
+  assert.equal(h.refreshes.length, 1); assert.equal(h.refreshes[0].id, kind);
+  assert.equal(h.timers.size, 0); h.advance(600000); assert.equal(h.requests.length, 3, 'A slow snapshot cannot start overlapping status polls');
+  h.state.snapshot.version = 'v3'; h.refreshes[0].resolve(true); await h.settle(); assert.ok(h.delay() > 294900 && h.delay() <= 295000);
+  h.advance(30000); assert.equal(h.requests.length, 3, 'One downloaded publication closes this slot even while an old backlog is still pending');
+  h.advance(h.delay()); h.requests.at(-1).resolve(captureStatus({ server_now: '2035-01-01T10:05:30Z', next_capture_at: null, capture_revision: 'capture2', processing_pending: true, publication_revision: 'kind9', publication_version: 'v9' })); await h.settle();
+  assert.equal(h.refreshes.length, 2, 'Intermediate revisions are coalesced into the latest publication in the next slot');
+  h.state.snapshot.version = 'v9'; h.refreshes[1].resolve(true); await h.settle();
+  assert.ok(h.delay() > 299900 && h.delay() <= 300000, 'Paused/completed capture with an old backlog waits a full interval');
+});
+
+test('capture metadata waits briefly for asynchronous publication then backs off even when pending status is stale', async t => {
+  const h = captureRefreshHarness(t); h.advance(0); h.requests[0].resolve(captureStatus()); await h.settle();
+  let seconds = 30;
+  for (const delay of [5000, 10000, 20000, 30000, 300000]) {
+    h.advance(h.delay()); h.requests.at(-1).resolve(captureStatus({ server_now: new Date(Date.parse('2035-01-01T10:00:00Z') + seconds * 1000).toISOString(),
+      next_capture_at: '2035-01-01T10:05:30Z', capture_revision: 'capture2', processing_pending: false })); await h.settle();
+    assert.equal(Math.round(h.delay()), delay); assert.equal(h.refreshes.length, 0); seconds += delay / 1000;
+  }
+});
+
+test('capture refresh aborts disable/destroy and discards old replies after re-enable', async t => {
+  const h = captureRefreshHarness(t); h.advance(0); h.enabled(false);
+  assert.equal(h.requests[0].signal.aborted, true); assert.equal(h.timers.size, 0);
+  h.enabled(true); h.advance(0); h.requests[0].resolve(captureStatus({ publication_revision: 'old', publication_version: 'old' })); await h.settle();
+  assert.equal(h.refreshes.length, 0); assert.equal(h.timers.size, 0);
+  h.requests[1].resolve(captureStatus({ publication_revision: 'new', publication_version: 'new' })); await h.settle();
+  assert.equal(h.refreshes.length, 1); h.lifetime.abort(); assert.equal(h.refreshes[0].signal.aborted, true);
+  h.refreshes[0].resolve(true); await h.settle(); assert.equal(h.timers.size, 0); assert.equal(h.listeners.size, 0);
+  h.enabled(true); h.advance(300000); assert.equal(h.requests.length, 2);
+});
+
+test('capture status errors and absent legacy revision cannot trigger full snapshots or tight polling', async t => {
+  const h = captureRefreshHarness(t); h.advance(0);
+  h.requests[0].resolve(captureStatus({ publication_revision: null, publication_version: null, next_capture_at: null })); await h.settle();
+  assert.equal(h.refreshes.length, 0); assert.equal(h.delay(), 300000);
+  for (const delay of [5000, 10000, 20000, 40000, 80000, 160000, 300000, 300000]) {
+    h.advance(h.delay()); h.requests.at(-1).reject(new Error('Unavailable')); await h.settle(); assert.equal(h.delay(), delay);
+  }
+  h.advance(h.delay()); h.requests.at(-1).resolve(captureStatus({ schedule: { interval_minutes: -1 }, publication_revision: 'different' })); await h.settle();
+  assert.equal(h.refreshes.length, 0); assert.equal(h.delay(), 300000);
+});
 
 test.beforeEach((t) => {
   t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-03T01:00:00Z').getTime() });
@@ -243,7 +319,7 @@ test('social panel belongs below Context, follows its layer and reuses native di
     assert.equal(status.textContent, 'Loading publications…'); assert.equal(status.hidden, false);
     await refresh; assert.equal(panel.classList.contains('collapsed'), true);
     assert.equal(status.textContent, ''); assert.equal(status.hidden, true);
-    assert.equal(layer.updateInterval, 60000);
+    assert.equal(layer.updateInterval, 0);
     const backgroundRefresh = layer.update();
     assert.equal(status.hidden, true, 'Background polling retains the published view without a loading message');
     await backgroundRefresh;

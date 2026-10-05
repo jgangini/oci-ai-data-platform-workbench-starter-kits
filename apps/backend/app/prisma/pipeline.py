@@ -14,6 +14,8 @@ from .landing import decode_record, write_objects, ensure_volumes, stream_progre
 from .runtime_secrets import database_connection, runtime_auth
 from .x import XFailure, poll_queries
 from .sensor_pipeline import SensorLake
+from .capture import schedule_at
+from .core import publication_revisions
 
 
 def encoded(value) -> bytes:
@@ -342,12 +344,18 @@ def poll_source(connection, objects, lake, config, source, status, secret_get, n
     revision = config.get("configuration_revision", 0)
     if (not source["enabled"] and status.get("requested_action") != "test") or not (source.get("capture_running", False) or status.get("requested_action")) or not _due(status, revision, now):
         return
+    slot = schedule_at(config.get("social_schedule"), now, status.get("capture_slot"))
+    if status.get("requested_action") != "test" and slot is not None and slot > now:
+        _status(connection, source["platform"], {"status": "scheduled", "next_due": utc_text(slot)}, status.get("request_id"))
+        return
     values = {"status": "simulation", "last_error": None, "next_due": utc_text(now + source["interval_minutes"] * 60)}
     try:
         if source["mode"] == "real":
             if source["platform"] != "x":
                 raise XFailure("connector_not_available")
             values = _poll_x(connection, objects, lake, config, source, status, secret_get, now, client)
+        if status.get("requested_action") != "test" and slot is not None:
+            values.update(capture_slot=slot, next_due=utc_text(schedule_at(config.get("social_schedule"), now, slot)))
     except XFailure as exc:
         values = {"status": exc.code, "last_error": exc.code, "next_due": utc_text(exc.retry_at) if exc.retry_at else None}
         if exc.code == "rate_limited":
@@ -385,6 +393,7 @@ def publish_snapshot(connection, objects, lake, config, events, reviews, simulat
     if rules is not None and hasattr(lake, "apply_activity"):
         lake.apply_activity(snapshot, rules, now)
     snapshot.update(runtime="aidp", simulation=simulation)
+    snapshot.update(publication_revisions(snapshot))
     digest = hashlib.sha256(encoded(snapshot)).hexdigest()
     version = "gold-" + digest[:32]
     runtime = read_document(connection, "runtime")
@@ -399,7 +408,8 @@ def publish_snapshot(connection, objects, lake, config, events, reviews, simulat
     key = f"04_gold/prisma/snapshots/{version}.json"
     _put_object(objects, config, key, snapshot)
     # The previous pointer remains usable if any preceding durable write fails.
-    _put_object(objects, config, "04_gold/prisma/current.json", {"version": version, "snapshot_key": key})
+    _put_object(objects, config, "04_gold/prisma/current.json", {"version": version, "snapshot_key": key,
+        "published_at": snapshot["published_at"], "social_revision": snapshot["social_revision"], "sensor_revision": snapshot["sensor_revision"]})
     if rules is not None and registry.get("items") != snapshot["incidents"]:
         mutate_document(connection, "event_registry", lambda current: {**current, "items": snapshot["incidents"]})
     return snapshot
@@ -450,7 +460,7 @@ def _tick(connection, objects, lake, config, secret_get, now, classifier, client
     document = read_document(connection, "configuration")
     sources = [{**default_source(platform), **document.get("sources", {}).get(platform, {})} for platform in PLATFORMS]
     state = simulation_state(read_document(connection, "simulation"), now)
-    config = {**config, "configuration_revision": document.get("revision", 0)}
+    config = {**config, "configuration_revision": document.get("revision", 0), "social_schedule": document.get("social_schedule")}
     for source in sources:
         if source["mode"] == "real":
             poll_source(connection, objects, lake, config, source, read_document(connection, "status_" + source["platform"]), secret_get, now, client)

@@ -253,7 +253,7 @@ test('sensor refresh retains all 5000 entities for unchanged publications and up
   let data = publication('first', Array.from({ length: 5000 }, (_, index) => reading(index)));
   const h = harness(async () => structuredClone(data)); t.after(() => h.layer.destroy());
   h.layer.init(h.viewer); h.layer.enable(); await h.layer.update();
-  assert.equal(h.layer.updateInterval, 30000);
+  assert.equal(h.layer.updateInterval, 0);
   h.layer.select('event-1', false); h.viewer.scene.postRender.raiseEvent();
   const entities = h.sources[0].entities, original = [...entities.values], rows = h.layer.state().items;
   let added = 0, removed = 0, geometryChanges = 0;

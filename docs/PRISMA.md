@@ -68,7 +68,12 @@ packages from reporting success while leaving canonical Synthetic records.
 
 The VM captures due synthetic sources into immutable Landing CSV, with `id` and
 JSON `payload` columns; commas, quotes, multiline text and photo metadata retain
-their content. Each source defaults to a five-minute interval. Each nonempty
+their content. Social Networks has one UTC start date and capture interval for
+all four sources (the form shows the browser's time zone). Sensors has a separate
+shared schedule for all five families. Both default to five minutes until a
+schedule is configured; saving a schedule preserves pauses and checkpoints.
+Scheduled captures use the latest start-plus-interval slot and skip missed slots;
+Run cannot advance a future scheduled capture. Each nonempty
 query line is a separate search (up to ten, 512 characters each); query-specific
 X checkpoints preserve continuation while original platform IDs deduplicate
 overlapping results. A successful empty search produces a header-only CSV;
@@ -77,6 +82,11 @@ upstream failures remain errors, never fabricated empty results.
 “Run now” activates capture for that source, including previously disabled
 configurations. Real X capture continues until paused; a Synthetic run consumes
 its 600-second corpus once, then reports completed and pauses automatically.
+Each Synthetic source has a maximum per capture (default 3, range 1–100).
+Each capture randomly selects up to that many eligible, unseen articles. A
+durable pending batch preserves exact bytes on retries, and the emitted-ID
+checkpoint prevents repeats across later intervals. Remaining records continue
+over subsequent captures even after the corpus's 600-second timeline ends.
 “Pause” stops capture without deleting
 publications or checkpoints. The interface shows only Running or Paused;
 capture errors remain visible separately. “Save” only updates configuration
@@ -468,7 +478,10 @@ item for multi-user production access.
 
 The VM sensor producer writes 4,000 explicitly `Synthetic` readings every five
 minutes by default, configurable independently of social capture. The Sensors
-tabs each own their interval, station count, Save, Run now and Pause controls.
+tabs each own their station count, Save, Run now and Pause controls. One start
+date and interval below Sensors applies to all families. The mode selector
+allows Synthetic only; real sensor ingestion is not implemented and the server
+rejects non-Synthetic modes rather than simulating real measurements.
 Their last/next capture, successful record count and capture delay are reported
 per family. Run now starts only the selected family; Pause preserves its readings
 and checkpoint without stopping the other families or the permanent AIDP stream.
@@ -545,10 +558,13 @@ on independent author/platform sources after near-copy suppression, not a
 probability or automatic confirmation. Classification confidence remains separate.
 Publication images retain their source restrictions and Synthetic provenance;
 displaying an attachment does not imply human validation of the incident.
-The Social networks map layer checks for a publication every 60 seconds.
-Background checks retain the existing publication without a repeated refreshing
-message; initial loading and real retrieval errors remain visible. Polling reads
-published state and does not start capture or reinterpret an article's timestamp.
+The map layers use lightweight capture status and the server's schedule instead
+of fixed full-snapshot polling. Relevant content revisions distinguish social
+updates from sensor updates. At a scheduled capture the viewer waits for a new
+published revision, with bounded metadata retries while processing continues;
+it does not treat an empty queue as proof of a particular batch's publication.
+Initial/manual loading remains available. Polling never starts capture or
+rewrites an article's timestamp; disabling a layer cancels its timer and request.
 
 Each incident also publishes `correlation_context`, an explained, bounded set of
 relationships over the existing evidence and sensor payloads. Report activity
@@ -584,16 +600,33 @@ The application renders each selected row's category, locality, severity, review
 last report timestamp and provenance together with that row's citation. It labels
 the subset size against the number of queried incidents, not a universal total.
 Report timestamps are not verified occurrence times. This prevents combinations
-of facts from different selected rows; explanations remain model-generated and
-require separate semantic checks.
+of facts from different selected rows. When source evidence was queried, the
+native model selects relevant citations and assessment/draft format; code renders
+up to four literal source excerpts with their original authors, times, provenance
+and duplicate relationships, plus cited readings. Free attributed paraphrases are
+discarded because native acceptance exposed facts swapped between authors.
+This deliberately limits narrative freedom in those reports; the model still
+performs the native queries and source selection. Other explanations remain
+model-generated and require separate semantic checks.
 
-Postflight for the query-grounding and correlation increment (2026-10-05):
-quality 6595 → 6585, coupling 0.08 unchanged, zero cycles and god files; complex
-functions 44 → 49. This is an intentional gate exception, not a passing gate:
+Evidence queries also retrieve the same publication's event relationships for
+the returned posts, preserving copy origins and contradictory claims without
+duplicating evidence rows. Different networks or accounts do not establish
+independent witnesses; the formatter receives that limit and labels the
+corroboration index as heuristic.
+
+Architecture comparison for the query-grounding and shared capture increment (2026-10-05):
+quality 6595 → 6578, coupling 0.08 unchanged, zero cycles and god files; complex
+functions 44 → 56. This is an intentional gate exception, not a passing gate:
 the agent retains current-turn query validation, same-version citations,
 provider-compatible formatting, row-bound inventories and explicit failure handling for errors observed
 in native AIDP runs. Finite capture also preserves exhausted cursors and retries
 unfinished institutional/downstream processing without replaying social posts.
+Shared scheduling adds UTC slot, concurrent-save and quota guards, durable
+bounded-batch recovery, and per-layer publication coalescing. These guards share
+the existing capture/publication boundaries; no new services or dependencies
+were introduced. Source excerpts are rendered literally to prevent the observed
+cross-author attribution failure.
 Splitting these guards solely to lower the aggregate would obscure their state
 and trust boundaries. The baseline was not reset.
 

@@ -24,6 +24,7 @@ class SourceUpdate(BaseModel):
     mode: Literal["Synthetic", "simulation", "real"] | None = None
     query: str | None = Field(default=None, max_length=1000)
     interval_minutes: int | None = Field(default=None, ge=1, le=1440, strict=True)
+    synthetic_batch_max: int | None = Field(default=None, ge=1, le=100, strict=True)
     secret_ref: str | None = Field(default=None, pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     bearer_token: SecretStr | None = Field(default=None, exclude=True)
     correlation_window_minutes: int | None = Field(default=None, ge=1, le=1440, strict=True)
@@ -53,6 +54,13 @@ class SourceUpdate(BaseModel):
 class SimulationAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: Literal["start", "pause", "resume", "reset", "replay"]
+
+
+class CaptureScheduleUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    start_at: str = Field(min_length=1, max_length=64)
+    interval_minutes: int = Field(ge=1, le=1440, strict=True)
+    expected_revision: int = Field(ge=1, strict=True)
 
 
 class SyntheticReset(BaseModel):
@@ -95,6 +103,7 @@ class ChatRequest(BaseModel):
 
 class SensorUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    mode: Literal["Synthetic"] | None = None
     expected_revision: int = Field(ge=1, strict=True)
     interval_minutes: int | None = Field(default=None, ge=1, le=60, strict=True)
     sensor_count: int | None = Field(default=None, ge=100, le=5000, strict=True)
@@ -106,6 +115,7 @@ SensorType = Literal["river_level", "rainfall", "temperature", "soil_moisture", 
 
 class SensorFamilyUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    mode: Literal["Synthetic"] | None = None
     expected_revision: int = Field(ge=1, strict=True)
     interval_minutes: int | None = Field(default=None, ge=1, le=60, strict=True)
     sensor_count: int | None = Field(default=None, ge=1, le=5000, strict=True)
@@ -243,6 +253,18 @@ def mount_prisma(app, require_admin, require_viewer=None):
     @router.get("/api/admin/prisma/sources")
     async def sources():
         return await invoke("sources")
+
+    @router.put("/api/admin/prisma/social-schedule")
+    async def social_schedule(payload: CaptureScheduleUpdate):
+        return await invoke("save_capture_schedule", "social", payload.model_dump())
+
+    @router.put("/api/admin/prisma/sensor-schedule")
+    async def sensor_schedule(payload: CaptureScheduleUpdate):
+        return await invoke("save_capture_schedule", "sensor", payload.model_dump())
+
+    @viewer.get("/api/prisma/capture-status")
+    async def capture_status(kind: Literal["social", "sensors"] = "social"):
+        return await invoke("capture_status", kind)
 
     @router.get("/api/admin/prisma/sensors")
     async def sensors():

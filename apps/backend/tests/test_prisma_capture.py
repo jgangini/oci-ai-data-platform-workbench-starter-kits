@@ -27,7 +27,7 @@ def test_unknown_or_malformed_synthetic_queries_fail_closed(query):
         capture.search_terms(query)
 
 
-def test_synthetic_window_is_incremental_and_flush_ignores_next_due():
+def test_synthetic_window_is_incremental_and_final_drain_respects_cadence():
     state = {"status": "running", "run_id": "run1", "anchor_at": NOW, "elapsed_seconds": 0}
     source = default_source("x")
     events, cursor = capture.batch(source, state, {}, NOW)
@@ -38,8 +38,9 @@ def test_synthetic_window_is_incremental_and_flush_ignores_next_due():
     events, cursor = capture.batch(source, state, cursor, NOW + 420)
     assert [event["source_id"] for event in events] == ["run1:ubicacion-1"]
     state["elapsed_seconds"] = 600
-    _, final = capture.batch(source, state, cursor, NOW + 600)
-    assert final["elapsed"] == 600  # due was NOW+720, but final flush cannot wait for another interval.
+    assert capture.batch(source, state, cursor, NOW + 600) is None
+    _, final = capture.batch(source, state, cursor, NOW + 720)
+    assert final["elapsed"] == 600 and final["complete"]
 
 
 class Producer(cloud.CloudRuntime):
@@ -80,7 +81,8 @@ def test_failed_vm_upload_never_advances_cursor_and_retry_has_same_landing_key(m
     producer.fail_upload = True
     with pytest.raises(RuntimeError):
         producer._produce()
-    assert "checkpoint_synthetic" not in producer.docs and producer.objects == {}
+    assert not producer.docs["checkpoint_synthetic"].get("sources") and producer.objects == {}
+    assert producer.docs["checkpoint_synthetic"]["pending"]["x"]
     producer.fail_upload = False
     producer._produce()
     first = copy.deepcopy(producer.objects)
@@ -100,7 +102,8 @@ def test_failed_post_projection_keeps_durable_csv_and_retries_before_advancing(m
     with pytest.raises(RuntimeError, match="post-index"):
         producer._produce()
     durable = copy.deepcopy(producer.objects)
-    assert durable and "checkpoint_synthetic" not in producer.docs
+    assert durable and not producer.docs["checkpoint_synthetic"].get("sources")
+    assert producer.docs["checkpoint_synthetic"]["pending"]["x"]
     monkeypatch.setattr(producer, "_project_posts", lambda *_: None)
     producer._produce()
     assert all(producer.objects[key] == value for key, value in durable.items())
@@ -193,6 +196,7 @@ def test_cloud_run_finishes_once_and_run_never_republishes_exhausted_articles(mo
     monkeypatch.setattr(cloud.time, "time", lambda: clock[0])
     producer = Producer()
     producer.docs["simulation"] = {"status": "idle"}
+    producer.docs["configuration"] = {"sources": {"x": {"synthetic_batch_max": 100}}}
     response = producer._request_source("x", "run")
     assert response["source"]["capture_running"] is True
     assert producer.docs["checkpoint_controls"]["x"]["run_id"]
@@ -240,7 +244,7 @@ def test_local_completed_capture_survives_restart_save_and_run_without_new_recor
     from app.prisma.local import LocalPrismaRuntime
     clock = [NOW]
     runtime = LocalPrismaRuntime(tmp_path, clock=lambda: clock[0])
-    asyncio.run(runtime.update_source("x", {"query": ""}))
+    asyncio.run(runtime.update_source("x", {"query": "", "synthetic_batch_max": 100}))
     asyncio.run(runtime.run_source("x"))
     clock[0] += 600
     asyncio.run(runtime.tick())
@@ -271,13 +275,15 @@ def test_final_capture_retries_upload_and_native_drain_without_republishing(monk
     monkeypatch.setattr(cloud.time, "time", lambda: clock[0])
     producer = Producer()
     producer.docs["simulation"] = {"status": "idle"}
+    producer.docs["configuration"] = {"sources": {"x": {"synthetic_batch_max": 100}}}
     producer._request_source("x", "run")
     cursor = copy.deepcopy(producer.docs["checkpoint_synthetic"])
     clock[0] += 600
     producer.fail_upload = True
     with pytest.raises(Exception):
         asyncio.run(producer.tick())
-    assert producer.docs["checkpoint_synthetic"] == cursor
+    assert producer.docs["checkpoint_synthetic"]["sources"] == cursor["sources"]
+    assert producer.docs["checkpoint_synthetic"]["pending"]["x"]
     assert producer.docs["configuration"]["sources"]["x"]["capture_running"]
     producer.fail_upload = False
     producer.fail_wake = True
@@ -301,6 +307,7 @@ def test_pause_run_retries_final_institutional_batch_without_replaying_completed
     monkeypatch.setattr(cloud.time, "time", lambda: clock[0])
     producer = Producer()
     producer.docs["simulation"] = {"status": "idle"}
+    producer.docs["configuration"] = {"sources": {"x": {"synthetic_batch_max": 100}}}
     producer._request_source("x", "run")
     control = copy.deepcopy(producer.docs["checkpoint_controls"])
     upload = producer.put_object
@@ -330,6 +337,7 @@ def test_local_pause_run_retries_final_institutional_file_with_the_same_control(
     from app.prisma.local import LocalPrismaRuntime
     clock = [NOW]
     runtime = LocalPrismaRuntime(tmp_path, clock=lambda: clock[0])
+    asyncio.run(runtime.update_source("x", {"synthetic_batch_max": 100}))
     asyncio.run(runtime.run_source("x"))
     with runtime.store.connection() as db:
         controls = runtime.store._get(db, "capture_controls", {})
@@ -361,6 +369,7 @@ def test_completion_state_write_failure_retries_from_committed_cursor(monkeypatc
     monkeypatch.setattr(cloud.time, "time", lambda: clock[0])
     producer = Producer()
     producer.docs["simulation"] = {"status": "idle"}
+    producer.docs["configuration"] = {"sources": {"x": {"synthetic_batch_max": 100}}}
     producer._request_source("x", "run")
     change = producer._change
     def failing(name, update):

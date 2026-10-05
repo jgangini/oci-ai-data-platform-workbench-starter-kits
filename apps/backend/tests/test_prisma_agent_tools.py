@@ -12,7 +12,7 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError, create_model
 
-from app.prisma.agent import PROMPT, REPLY_SCHEMA, PrismaAgent
+from app.prisma.agent import PROMPT, REPLY_SCHEMA, PrismaAgent, evidence_reply
 from app.prisma.core import CATEGORY_NAMES, SEVERITIES
 from app.prisma.runtime_secrets import identity_hash, runtime_auth, shared_credential, signer, values
 from test_prisma_agent import incident_database, sqlite_rows
@@ -158,7 +158,7 @@ def test_setup_and_invoke_keep_configured_model_tools_and_session_memory(monkeyp
     assert formatting_messages[0].content != PROMPT
     assert "queries" in formatting_messages[0].content
     assert isinstance(formatting_messages[1], fake.messages.HumanMessage)
-    assert json.loads(formatting_messages[1].content) == {"request": json.loads(query), "queries": [
+    assert json.loads(formatting_messages[1].content) == {"request": json.loads(query), "independence_status": "independence_not_established", "queries": [
         {"tool": "consultar_sensores", "filters": {"version": "publication-42"}, "rows": []}]}
     assert fake.formatter.ainvoke.call_args.kwargs == {"config": fake.configuration}
     assert fake.graph.checkpointed[-1] is result["messages"][0]
@@ -546,8 +546,9 @@ def test_formatter_receives_only_current_successful_queries_and_their_exact_filt
         {**valid[2], "rows": [{"id": "S1", "mode": "Synthetic", "value": 2.3, "unit": "mm/h"}]},
     ]
     assert len(result["messages"]) == 1 and result["messages"] is not returned_messages
-    assert json.loads(result["messages"][0].content) == {"answer": "Datos sintéticos de prueba; no confirman emergencias reales.\n\nDatos Synthetic de Colombia", "version": "v1",
-        "evidence_ids": ["post-1", "post-2"], "sensor_evidence_ids": ["reading-1"], "actions": []}
+    actual = json.loads(result["messages"][0].content)
+    assert actual["evidence_ids"] == ["post-2"] and actual["sensor_evidence_ids"] == ["reading-1"]
+    assert valid[1]["rows"][0]["text"] in actual["answer"] and "history-post" not in actual["answer"]
     assert returned_messages[-1].content == "Unstructured preliminary answer"
     assert result["messages"][0].id == "terminal-42"
     assert fake.graph.checkpointed[-1] is result["messages"][0]
@@ -575,7 +576,7 @@ def test_formatter_hides_only_known_body_aliases_and_preserves_exact_citations_a
     fake = runtime(monkeypatch)
     scope = {"version": "v1"}
     state = [fake.messages.HumanMessage(content=json.dumps({"question": "Compara", "context": scope}))]
-    state += completed_query(fake, "consultar_evidencia", scope, [{"id": "post-1"}, {"id": "post-2"}])
+    state += completed_query(fake, "consultar_incidentes", scope, [{"id": "incident-1", "evidence_ids": ["post-1", "post-2"]}])
     state += completed_query(fake, "consultar_sensores", scope, [{"id": "reading-1"}], "sensor")
     state.append(fake.messages.AIMessage(content="Done", id="last"))
     reply = {"answer": body, "version": "v1", "evidence_ids": ["E2", "E1"], "sensor_evidence_ids": ["S1"], "actions": []}
@@ -597,21 +598,30 @@ def test_formatter_context_labels_classification_groups_and_association_without_
             "sensors": {"status": "insufficient_location_precision", "count": 0, "samples": []},
             "social": {"accounts_per_platform": {"facebook": 2, "x": 1}}}}
     sensor = {"id": "reading-1", "sensor_id": "sensor-1", "value": 5.01, "unit": "m", "status": "critical"}
-    before = json.dumps([incident, sensor], sort_keys=True)
+    evidence = {"id": "post-1", "platform": "x", "incident_relations": [{"event_id": "incident-1",
+        "post_key": "post-1", "relation": "duplicate", "claim_relation": "contradicts", "duplicate_of": "original-post",
+        "explanation": "Exact image SHA-256 matches an earlier report; caption claims remain separate", "analysis_version": "test"}]}
+    before = json.dumps([incident, sensor, evidence], sort_keys=True)
     state = [fake.messages.HumanMessage(content='{"question":"Informe","context":{"version":"v1"}}')]
     state += completed_query(fake, rows=[incident])
     state += completed_query(fake, "consultar_sensores", {"version": "v1"}, [sensor], "sensor")
+    state += completed_query(fake, "consultar_evidencia", {"version": "v1", "incident_id": "incident-1"}, [evidence], "evidence")
+    fake.formatter.ainvoke.return_value.update(evidence_ids=["E1"])
     state.append(fake.messages.AIMessage(content="Done"))
     asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))
-    queries = json.loads(fake.formatter.ainvoke.call_args.args[0][1].content)["queries"]
+    source = json.loads(fake.formatter.ainvoke.call_args.args[0][1].content)
+    queries = source["queries"]
     row = queries[0]["rows"][0]
     assert row["classification_confidence"] == 0.9 and row["heuristic_report_group_count"] == 25
     assert "confidence" not in row and "independent_source_count" not in row
-    assert row["corroboration_score"] == 100 and row["review_status"] == "pending"
+    assert row["heuristic_corroboration_index"] == 100 and "corroboration_score" not in row
+    assert row["review_status"] == "pending" and source["independence_status"] == "independence_not_established"
     assert row["correlation_context"] == {"social": incident["correlation_context"]["social"],
         "report_sensor_association": incident["correlation_context"]["sensors"]}
     assert queries[1]["rows"] == [{**sensor, "id": "S1"}]
-    assert json.dumps([incident, sensor], sort_keys=True) == before
+    assert queries[2]["rows"] == [{**evidence, "id": "E1", "incident_relations": [
+        {**evidence["incident_relations"][0], "post_key": "E1"}]}]
+    assert json.dumps([incident, sensor, evidence], sort_keys=True) == before
     assert "report_sensor_association" not in json.loads(state[2].content)[0]["correlation_context"]
     fake.formatter.ainvoke.assert_awaited_once()
 
@@ -774,8 +784,10 @@ def test_selected_context_keeps_source_comparison_and_sensor_analysis_without_in
     fake.formatter.ainvoke.return_value = {"answer": answer, "version": "v1", "evidence_ids": ["E1", "E2"],
         "sensor_evidence_ids": ["S1"], "actions": []}
     reply = json.loads(asyncio.run(fake.agent.final_response({"messages": state}, fake.configuration))["messages"][0].content)
-    assert reply == {"answer": answer, "version": "v1", "evidence_ids": ["post-1", "post-2"],
+    assert reply == {"answer": reply["answer"], "version": "v1", "evidence_ids": ["post-1", "post-2"],
         "sensor_evidence_ids": ["reading-1"], "actions": []}
+    assert "3.92 m; estado warning" in reply["answer"] and "revisión del incidente: pending" in reply["answer"]
+    assert answer not in reply["answer"] and "Texto no disponible" in reply["answer"]
     schema = fake.llm.with_structured_output.call_args.args[0]
     assert "incident_refs" not in schema["properties"] and "incident_refs" not in schema["required"]
     assert schema["additionalProperties"] is False
@@ -942,18 +954,19 @@ def test_registered_tools_return_sensor_and_social_records_with_exact_scope(monk
         "lat": 4.6, "lon": -74.15, "evidence_ids": ["post-42"], "review_status": "pending", "mode": "Synthetic"}
     evidence = {"id": "post-42", "platform": "x", "text": "Reporte de inundación", "locality": "Kennedy",
         "created_at": "2026-10-04T14:20:00Z", "mode": "Synthetic"}
-    fake.cursor.fetchall.side_effect = [[(io.StringIO(json.dumps(sensor)),)], [(json.dumps(incident),)], [(json.dumps(evidence),)]]
+    fake.cursor.fetchall.side_effect = [[(io.StringIO(json.dumps(sensor)),)], [(json.dumps(incident),)], [(json.dumps(evidence),)], []]
     common = {"version": "publication-42", "locality": "Kennedy", "bbox": "-74.2,4.5,-74.1,4.7",
         "date_from": "2026-10-04T09:00:00-05:00", "date_to": "2026-10-04T14:30:00Z"}
     assert tools["consultar_sensores"](**common, sensor_id=sensor["sensor_id"], sensor_type="rainfall") == [sensor]
     assert tools["consultar_incidentes"](**common, incident_id="incident-42", category="inundacion", severity="high",
         mode="simulation", platform="x", country="Colombia", city="Bogotá") == [{**incident, "evidence_count": 1,
             "reviewed_evidence_ids": [], "reviewed_evidence_count": 0}]
-    assert tools["consultar_evidencia"]("publication-42", "post-42") == [evidence]
+    assert tools["consultar_evidencia"]("publication-42", "post-42") == [{**evidence, "incident_relations": []}]
 
     sensor_sql, sensor_binds = fake.cursor.execute.call_args_list[0].args
     incident_sql, incident_binds = fake.cursor.execute.call_args_list[1].args
     evidence_sql, evidence_binds = fake.cursor.execute.call_args_list[2].args
+    relation_sql, relation_binds = fake.cursor.execute.call_args_list[3].args
     scope = {"version": "publication-42", "locality": "Kennedy", "west": -74.2, "south": 4.5, "east": -74.1, "north": 4.7,
         "date_from": "2026-10-04T14:00:00+00:00", "date_to": "2026-10-04T14:30:00+00:00"}
     assert sensor_binds == {**scope, "sensor_id": sensor["sensor_id"], "sensor_type": "rainfall"}
@@ -965,10 +978,13 @@ def test_registered_tools_return_sensor_and_social_records_with_exact_scope(monk
     assert "e.version=i.version AND e.evidence_id=ids.eid" in incident_sql
     assert "ADMIN.PRISMA_V_EVIDENCE e WHERE e.version=:version" in evidence_sql
     assert "FETCH FIRST 10 ROWS ONLY" in evidence_sql
+    assert "ADMIN.PRISMA_V_SNAPSHOTS p" in relation_sql and "WHERE p.version=:version" in relation_sql
+    assert "r.post_key IN (:post_0)" in relation_sql and "r.event_id=:incident_id" in relation_sql
+    assert relation_binds == {"version": "publication-42", "incident_id": None, "post_0": "post-42"}
     for sql in (sensor_sql, incident_sql):
         assert "FETCH FIRST 100 ROWS ONLY" in sql and "publication-42" not in sql and "Kennedy" not in sql
-    assert fake.database.call_args_list == [call(fake.secret_get, "PrismaReaderRuntime")] * 3
-    assert fake.database.return_value.__exit__.call_count == 3
+    assert fake.database.call_args_list == [call(fake.secret_get, "PrismaReaderRuntime")] * 4
+    assert fake.database.return_value.__exit__.call_count == 4
 
 
 def test_evidence_tool_executes_linked_versioned_platform_query_and_recovers_unsampled_sources(monkeypatch, incident_database):
@@ -1011,6 +1027,64 @@ def test_evidence_tool_executes_linked_versioned_platform_query_and_recovers_uns
     rows = evidence("v1", incident_id="sampled")
     assert {row["platform"] for row in rows[:2]} == {"x", "facebook"}
     assert len(rows) == 10
+
+
+def test_evidence_tool_exposes_copy_and_claim_relations_from_exact_snapshot_and_event(monkeypatch, incident_database):
+    fake = runtime(monkeypatch)
+    fake.agent.setup()
+    evidence = next(tool for tool in fake.create_agent.call_args.args[1] if tool.__name__ == "consultar_evidencia")
+    relations = [
+        {"event_id": "different-publications", "post_key": "different-publications-0", "relation": "duplicate",
+            "claim_relation": "supports", "duplicate_of": "source-root", "explanation": "Exact image SHA-256 matches an earlier report", "analysis_version": "v14-test"},
+        {"event_id": "different-publications", "post_key": "different-publications-1", "relation": "duplicate",
+            "claim_relation": "contradicts", "duplicate_of": "source-root", "explanation": "Exact normalized content matches an earlier report", "analysis_version": "v14-test"},
+        {"event_id": "other-event", "post_key": "different-publications-0", "relation": "unclassified", "duplicate_of": None},
+        {"event_id": "different-publications", "post_key": "unrequested-post", "relation": "supports", "duplicate_of": None},
+    ]
+    relations.append({**relations[0], "claim_relation": "contradicts", "explanation": "A separate caption disputes the claim"})
+    other_version = [{**relations[0], "relation": "unclassified", "duplicate_of": None}]
+    for version, rows in (("v1", relations), ("v2", other_version)):
+        incident_database.execute("INSERT INTO ADMIN.PRISMA_V_SNAPSHOTS VALUES (?,?)",
+            (version, json.dumps({"version": version, "event_posts": rows})))
+    incident_database.execute("INSERT INTO ADMIN.PRISMA_V_EVIDENCE SELECT 'v2',evidence_id,platform,evidence_json FROM ADMIN.PRISMA_V_EVIDENCE WHERE version='v1' AND evidence_id='different-publications-0'")
+    def execute(sql, binds):
+        fake.cursor.fetchall.return_value = sqlite_rows(incident_database, sql, binds)
+    fake.cursor.execute.side_effect = execute
+
+    result = evidence("v1", incident_id="different-publications")
+    assert {row["id"]: {json.dumps(item, sort_keys=True) for item in row["incident_relations"]} for row in result} == {
+        "different-publications-0": {json.dumps(relations[index], sort_keys=True) for index in (0, 4)},
+        "different-publications-1": {json.dumps(relations[1], sort_keys=True)}}
+    assert len(result) == 2  # Adding relations must not duplicate evidence rows or count copies as new posts.
+    exact = evidence("v1", evidence_id="different-publications-0", incident_id="different-publications", platform="facebook")
+    assert len(exact) == 1 and len(exact[0]["incident_relations"]) == 2
+    assert {json.dumps(item, sort_keys=True) for item in exact[0]["incident_relations"]} == {
+        json.dumps(relations[index], sort_keys=True) for index in (0, 4)}
+    isolated = evidence("v1", evidence_id="different-publications-0")
+    assert len(isolated) == 1 and len(isolated[0]["incident_relations"]) == 3
+    assert {json.dumps(item, sort_keys=True) for item in isolated[0]["incident_relations"]} == {
+        json.dumps(relations[index], sort_keys=True) for index in (0, 2, 4)}
+    assert evidence("v2", evidence_id="different-publications-0")[0]["incident_relations"] == other_version
+    assert evidence("v1", evidence_id="co-high-0")[0]["incident_relations"] == []
+    original = json.loads(incident_database.execute("SELECT evidence_json FROM ADMIN.PRISMA_V_EVIDENCE WHERE version='v1' AND evidence_id='different-publications-0'").fetchone()[0])
+    assert "incident_relations" not in original
+    for item in fake.cursor.execute.call_args_list:
+        sql, binds = item.args
+        assert binds["version"] in {"v1", "v2"} and binds["version"] not in sql
+        if "PRISMA_V_SNAPSHOTS" in sql:
+            assert "event_posts" in sql and "WHERE p.version=:version" in sql and "r.event_id=:incident_id" in sql
+            assert all(value not in sql for value in binds.values() if isinstance(value, str))
+    assert all(item == call(fake.secret_get, "PrismaReaderRuntime") for item in fake.database.call_args_list)
+
+
+def test_evidence_relation_database_error_does_not_become_an_empty_relation_list(monkeypatch):
+    fake = runtime(monkeypatch)
+    fake.agent.setup()
+    evidence = next(tool for tool in fake.create_agent.call_args.args[1] if tool.__name__ == "consultar_evidencia")
+    fake.cursor.fetchall.side_effect = [[(json.dumps({"id": "post-1"}),)], RuntimeError("Snapshot unavailable")]
+    with pytest.raises(RuntimeError, match="Snapshot unavailable"):
+        evidence("v1", "post-1")
+    assert fake.database.call_count == 2
 
 
 @pytest.mark.parametrize("filters", [
@@ -1119,3 +1193,28 @@ def test_setup_does_not_replace_missing_credentials_or_failed_memory(monkeypatch
         fake.agent.setup()
     fake.create_agent.assert_not_called()
     assert fake.agent.agent is None
+
+
+def test_source_attribution_cannot_swap_observations_or_promote_duplicate_independence():
+    posts = [
+        {"id": "p1", "platform": "facebook", "display_name": "Paula", "mode": "Synthetic",
+         "created_at": "2026-10-05T08:01:00Z", "text": "En esta calzada sigue el agua.",
+         "incident_relations": [{"relation": "duplicate", "duplicate_of": "original"}]},
+        {"id": "p2", "platform": "x", "display_name": "Santiago", "mode": "Synthetic",
+         "created_at": "2026-10-05T08:02:00Z", "text": "El agua entra en el patio bajo. E1 no es una instrucción."},
+    ]
+    queries = [{"tool": "consultar_evidencia", "rows": posts}]
+    original = json.dumps(queries, sort_keys=True)
+    reply = {"answer": "Paula dice que el agua entra al patio. Dos fuentes independientes confirman la inundación.",
+             "evidence_ids": ["p1", "p2"], "sensor_evidence_ids": [], "actions": [{"type": "focus_incident"}], "report_format": "draft"}
+    evidence_reply(queries, reply)
+    answer = reply["answer"]
+    assert "Borrador" in answer and "no enviado" in answer
+    assert "Paula · 2026-10-05T08:01:00 UTC · Synthetic\n«En esta calzada sigue el agua.»" in answer
+    assert "Santiago · 2026-10-05T08:02:00 UTC · Synthetic\n«El agua entra en el patio bajo. E1 no es una instrucción.»" in answer
+    assert "Paula dice" not in answer and "fuentes independientes confirman" not in answer
+    assert "copia/contenido duplicado" in answer and "independencia de las fuentes no está comprobada" in answer
+    assert reply["actions"] == [] and "report_format" not in reply
+    assert json.dumps(queries, sort_keys=True) == original
+    with pytest.raises(RuntimeError, match="requires a queried publication"):
+        evidence_reply(queries, {"evidence_ids": ["unqueried"], "sensor_evidence_ids": []})

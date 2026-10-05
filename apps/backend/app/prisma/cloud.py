@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 import threading
+from datetime import datetime
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -61,18 +63,84 @@ class CloudRuntime:
             source = {**default_source(platform), **configuration.get("sources", {}).get(platform, {})}
             status = self._doc("status_" + platform)
             source.update({key: value for key, value in status.items() if key in
-                {"status", "last_run_at", "next_due", "last_error", "requested_action", "request_id", "last_received_count"}})
+                {"status", "last_run_at", "next_due", "last_error", "requested_action", "request_id", "last_received_count", "capture_slot"}})
             if not source["enabled"]:
                 source.update(status="disabled", next_due=None)
             elif source["mode"] == "real" and status.get("configuration_revision") != configuration.get("revision", 0) and not status.get("requested_action"):
                 source.update(status="ready", last_error=None, next_due=None)
             sources.append(source_view(source))
         return {"sources": sources, "simulation": self._simulation_state(), "runtime": "aidp",
+                "social_schedule": capture.schedule(configuration.get("social_schedule")),
                 "pipeline": self._doc("status_pipeline"), "capture_summary": self._doc("status_synthetic"),
                 "synthetic_reset": self._social_reset_status()}
 
     async def sources(self):
         return await self._io(self._sources)
+
+    async def save_capture_schedule(self, kind, values):
+        def save():
+            with self.capture_lock:
+                def change(doc):
+                    return {**doc, kind + "_schedule": capture.update_schedule(doc.get(kind + "_schedule"), values)}
+                try:
+                    return self._change("configuration", change)[kind + "_schedule"]
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from exc
+        return await self._io(save)
+
+    def _capture_status(self, kind):
+        key = "sensor" if kind == "sensors" else "social"
+        now, configuration = time.time(), self._doc("configuration")
+        shared = capture.schedule(configuration.get(key + "_schedule"))
+        runtime = self._doc("runtime")
+        client = self.aidp_factory()
+        try:
+            response = client.object_storage.get_object(self.settings.objectstorage_namespace,
+                runtime.get("bucket") or self.settings.bucket_name, "04_gold/prisma/current.json")
+            published = json.loads(response.data.content)
+        except Exception as exc:
+            if getattr(exc, "status", None) != 404:
+                raise
+            published = {}
+        if key == "sensor":
+            checkpoint = self._doc("checkpoint_sensors")
+            state = sensor_capture.cloud_configuration(self)
+            due = state.get("next_due")
+            pending = bool(checkpoint.get("pending") or any(row.get("pending") for row in checkpoint.get("by_type", {}).values()))
+            captured_at = state.get("last_run_at")
+        else:
+            checkpoint = self._doc("checkpoint_synthetic")
+            candidates, captured_at = [], self._doc("status_synthetic").get("last_data_at")
+            for name in PLATFORMS:
+                source = {**default_source(name), **configuration.get("sources", {}).get(name, {})}
+                if not source["enabled"] or not source.get("capture_running"):
+                    continue
+                status = self._doc("status_" + name)
+                cursor = checkpoint.get("sources", {}).get(name, {})
+                previous = status.get("capture_slot") if source["mode"] == "real" else cursor.get("capture_slot")
+                slot = capture.schedule_at(shared, now, previous)
+                if source["mode"] == "real":
+                    checkpoint[name] = self._doc("checkpoint_" + name)
+                    retry = checkpoint[name].get("retry_at", 0) or 0
+                    if status.get("status") == "rate_limited" and status.get("next_due"):
+                        retry = max(retry, datetime.fromisoformat(status["next_due"].replace("Z", "+00:00")).timestamp())
+                    if retry > now:
+                        slot = max(slot or 0, retry)
+                if slot is not None:
+                    candidates.append(utc_text(slot))
+                elif status.get("next_due"):
+                    candidates.append(status["next_due"])
+            due = min(candidates, default=None)
+            pipeline = self._doc("status_pipeline")
+            pending = bool(checkpoint.get("pending") or pipeline.get("pending_count") or pipeline.get("last_error"))
+        pending = pending or bool(captured_at and captured_at > (published.get("published_at") or ""))
+        return {"server_now": utc_text(now), "schedule": shared, key + "_schedule": shared, "next_capture_at": due,
+            "capture_revision": hashlib.sha256(json.dumps(checkpoint, sort_keys=True).encode()).hexdigest(),
+            "publication_version": published.get("version"), "publication_revision": published.get(key + "_revision"),
+            "processing_pending": bool(pending)}
+
+    async def capture_status(self, kind):
+        return await self._io(self._capture_status, kind)
 
     def _credential(self, platform, token, reference=None):
         client = self.aidp_factory()
@@ -94,7 +162,7 @@ class CloudRuntime:
     def _update(self, platform, payload):
         if platform not in PLATFORMS:
             raise HTTPException(404, "Unknown platform")
-        fields = {name: value for name, value in payload.items() if name in {"enabled", "mode", "query", "interval_minutes", "correlation_window_minutes", "report_thresholds"}}
+        fields = {name: value for name, value in payload.items() if name in {"enabled", "mode", "query", "interval_minutes", "synthetic_batch_max", "correlation_window_minutes", "report_thresholds"}}
         old = {**default_source(platform), **self._doc("configuration").get("sources", {}).get(platform, {})}
         check_revision(old, payload.get("expected_revision"))
         fields = {**source_migration(platform, old), **fields}
@@ -205,7 +273,8 @@ class CloudRuntime:
                     self._complete_capture(source["platform"], saved)
                 return {**source, "capture_running": False, "capture_paused": True, "status": "completed", "next_due": None, "last_error": None}
             control = saved if source.get("capture_paused") or pending else None
-            control = control or {"run_id": str(uuid4()), "anchor_at": time.time(), "seed": 0}
+            anchor = capture.schedule_at(self._doc("configuration").get("social_schedule"), time.time())
+            control = control or {"run_id": str(uuid4()), "anchor_at": anchor if anchor is not None else time.time(), "seed": 0}
             self._change("checkpoint_controls", lambda doc: {**doc, source["platform"]: control,
                 **({"institutional": control} if institutional else {})})
             self._change("configuration", lambda doc: {**doc, "sources": {**doc.get("sources", {}),
@@ -359,25 +428,32 @@ class CloudRuntime:
             finished = []
             for source, source_control, continuous in capture.inputs(sources, self._doc("checkpoint_controls"), state):
                 name = source["platform"]
-                if (platform and name in PLATFORMS and name != platform) or (not continuous and state["capture_complete"] and not force):
+                if platform and name in PLATFORMS and name != platform:
                     continue
-                saved = self._doc("checkpoint_synthetic").get("sources", {}).get(name, {})
-                if continuous and capture.is_complete(source_control, saved):
+                checkpoint = self._doc("checkpoint_synthetic")
+                saved = checkpoint.get("sources", {}).get(name, {})
+                pending = checkpoint.get("pending", {}).get(name)
+                if not pending and continuous and capture.is_complete(source_control, saved):
                     if name in PLATFORMS:
                         finished.append((name, source_control))
                     continue
-                result = (capture.continuous_batch if continuous else capture.batch)(source, source_control, saved, now, force)
+                result = pending or (capture.continuous_batch if continuous else capture.batch)(source, source_control, saved, now, force,
+                    schedule=config.get("social_schedule"))
                 if result is None:
                     continue
                 events, cursor = result
                 try:
+                    if not pending:
+                        self._change("checkpoint_synthetic", lambda doc: {**doc, "pending": {**doc.get("pending", {}), name: result}})
                     if name in PLATFORMS:
                         self._change("status_" + name, lambda doc: {**doc, "status": "capturing", "last_error": None})
                     key = landing.write_objects(client.object_storage, runtime, events, cursor["batch_key"])
                     self._project_posts(events, now, key)
-                    self._change("checkpoint_synthetic", lambda doc: {**doc, "sources": {**doc.get("sources", {}), name: cursor}})
+                    self._change("checkpoint_synthetic", lambda doc: {**doc, "sources": {**doc.get("sources", {}), name: cursor},
+                        "pending": {key: value for key, value in doc.get("pending", {}).items() if key != name}})
                     self._change("status_synthetic", lambda doc: {**doc, "status": "ready", "last_error": None,
                         "last_run_at": utc_text(now), "landing_count": doc.get("landing_count", 0) + bool(key),
+                        "last_data_at": utc_text(now) if events else doc.get("last_data_at"),
                         "last_landing_key": key or doc.get("last_landing_key")})
                     if name in PLATFORMS:
                         self._change("status_" + name, lambda doc: {**doc, "status": "simulation", "last_error": None,
@@ -391,8 +467,13 @@ class CloudRuntime:
                         self._change("status_" + name, lambda doc: {**doc, "status": "error", "last_error": type(exc).__name__})
                     raise
             for name, source_control in finished:
+                if capture.institutional_pending(source_control, self._doc("checkpoint_controls").get("institutional", {}),
+                        self._doc("checkpoint_synthetic").get("sources", {})):
+                    continue
                 self._complete_capture(name, source_control)
-            completed = state["elapsed_seconds"] >= 600 and not state["capture_complete"]
+            cursors = self._doc("checkpoint_synthetic").get("sources", {})
+            completed = (state["elapsed_seconds"] >= 600 and not state["capture_complete"]
+                and all(capture.is_complete(state, cursors.get(source["platform"], {})) for source in capture.sources(sources)))
             if completed:
                 self._change("simulation", lambda doc: {**doc, "capture_complete": True, "final_job_pending": True}
                              if doc.get("run_id") == state["run_id"] else doc)
@@ -425,9 +506,12 @@ class CloudRuntime:
     async def sensors(self):
         config = await self._io(sensor_capture.cloud_configuration, self)
         config = sensor_reset.annotated(config, await self._io(self._doc, "checkpoint_reset"))
-        return {"config": config, "configs": config["configs"], "runtime": "aidp"}
+        return {"config": config, "configs": config["configs"], "sensor_schedule": config["sensor_schedule"], "runtime": "aidp"}
 
     async def update_sensors(self, values, sensor_type=None):
+        values = dict(values)
+        if values.pop("mode", "Synthetic") != "Synthetic":
+            raise HTTPException(422, "Only Synthetic sensor capture is available")
         def save():
             with self.capture_lock:
                 try:

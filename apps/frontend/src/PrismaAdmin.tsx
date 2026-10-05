@@ -3,12 +3,13 @@ import { FormEvent, KeyboardEvent, ReactNode, useEffect, useRef, useState } from
 import { PrismaPosts } from './PrismaPosts';
 import { PrismaSensors } from './PrismaSensors';
 import { PrismaParameters } from './PrismaParameters';
+import { CaptureScheduleForm } from './CaptureScheduleForm';
 import { PrismaSyntheticReset, PrismaSyntheticResetStatus, type SyntheticReset } from './PrismaSyntheticReset';
 import { captureState, networkNames, prismaEndpoint as endpoint, prismaError, refreshedEditor, sourceDefaults,
-  sourceDirty, sourcePayload, sourceQueryLimit, timestamp, type PrismaApi, type Source, type SourceEditor } from './prismaAdminState';
+  sourceDirty, sourcePayload, sourceQueryLimit, timestamp, type CaptureSchedule, type PrismaApi, type Source, type SourceEditor } from './prismaAdminState';
 import './prisma.css';
 
-type Configuration = { sources: Source[]; runtime: string; synthetic_reset?: SyntheticReset };
+type Configuration = { sources: Source[]; runtime: string; social_schedule?: CaptureSchedule; synthetic_reset?: SyntheticReset };
 const networks = Object.keys(networkNames);
 
 function SourceCard({ source, api, onUpdate, timeZone, disabled }: { source: Source; api: PrismaApi; onUpdate: (source: Source) => void; timeZone: string; disabled: boolean }) {
@@ -48,7 +49,7 @@ function SourceCard({ source, api, onUpdate, timeZone, disabled }: { source: Sou
       <span className={`prisma-mode prisma-capture-state ${state.toLowerCase()}`} role="status" title={state}><span className={`prisma-capture-dot ${state.toLowerCase()}`} aria-hidden="true" />{state}</span></div></div>
     <fieldset disabled={disabled || !!busy}>
       <div className="prisma-fields"><label>Producer mode<select value={draft.mode} onChange={event => updateDraft({ mode: event.target.value as Source['mode'] })}><option value="Synthetic">Synthetic</option><option value="real" disabled={source.platform !== 'x'}>Credentials{source.platform !== 'x' ? ' · unavailable' : ''}</option></select></label>
-        <label>Capture interval (minutes)<input type="number" min="1" max="1440" step="1" required value={draft.interval_minutes} onChange={event => updateDraft({ interval_minutes: Number(event.target.value) })} /></label></div>
+        {draft.mode !== 'real' && <label>Maximum synthetic records per capture<input type="number" min="1" max="100" step="1" required value={draft.synthetic_batch_max} onChange={event => updateDraft({ synthetic_batch_max: Number(event.target.value) })} /></label>}</div>
       {draft.mode === 'real' && <fieldset className="prisma-credentials"><legend>Credentials</legend><div className="prisma-fields">
         <label>Credential reference<input value={draft.secret_ref || ''} readOnly title="Reference managed by the kit" /></label>
         <label>Update token<input type="password" autoComplete="new-password" value={token} onChange={event => setEditor(previous => ({ ...previous, token: event.target.value }))} placeholder={source.credential_configured ? 'Configured · leave blank to keep current' : 'No credential configured'} /></label></div></fieldset>}
@@ -121,6 +122,8 @@ export function PrismaAdmin({ api, timeZone = 'America/Bogota', viewerUrlControl
     <div hidden={module !== 'social'} className="prisma-module-content">
     {error && <p role="alert" className="prisma-error">{error}</p>}{!config && !error && <LoadingIndicator label="Loading configuration…" />}
     {config && <><div className="prisma-sources-title"><h2>Social Networks</h2></div>
+      {config.social_schedule && <CaptureScheduleForm schedule={config.social_schedule} api={api} kind="social" disabled={resetBlocked}
+        onUpdate={social_schedule => { setConfig(previous => previous ? { ...previous, social_schedule } : previous); setRefreshKey(value => value + 1); }} />}
       <div className="prisma-network-toolbar"><div className="settings-tabs prisma-network-tabs" role="tablist" aria-label="Social networks">{networks.map(platform => { const source = config.sources.find(item => item.platform === platform); const state = source ? captureState(source) : 'Unavailable'; return <button key={platform} ref={element => { tabs.current[platform] = element; }} id={`prisma-tab-${platform}`} className="settings-tab" type="button" role="tab"
         aria-selected={selected === platform} aria-expanded={selected === platform && !collapsed} aria-controls={`prisma-panel-${platform}`} tabIndex={selected === platform ? 0 : -1} onClick={() => selected === platform ? setCollapsed(value => !value) : selectNetwork(platform)} onKeyDown={tabKey}>
         <img className="prisma-platform-logo" src={`/brand-icons/${platform}.svg`} width="22" height="22" alt="" />{networkNames[platform]}<span className={`prisma-capture-dot ${state.toLowerCase()}`} role="img" aria-label={state} title={state} /></button>; })}</div>

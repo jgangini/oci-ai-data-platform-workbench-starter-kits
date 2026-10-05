@@ -441,3 +441,18 @@ def test_gateway_hides_tools_and_scopes_sessions_to_authenticated_cookie():
     assert requests[0][1]["json"]["isStreamEnabled"] is False
     assert requests[0][1]["json"]["trace"] is False
     assert agent_gateway.assistant_texts({"role": "tool", "text": "secret"}) == []
+
+
+@pytest.mark.parametrize("kind", ["social", "sensors"])
+def test_capture_status_bridge_requires_session_and_forwards_only_valid_kind(monkeypatch, kind):
+    calls = []
+    async def forward(request, method, path, payload=None):
+        calls.append((method, path, request.headers.get('cookie')))
+        return {"server_now": "2026-10-05T12:00:00Z", "publication_revision": "one", "schedule": {"interval_minutes": 5}}
+    monkeypatch.setattr(bridge, 'admin_request', forward)
+    with TestClient(bridge.app) as client:
+        assert client.get('/api/prisma/capture-status').status_code == 401
+        assert client.get('/api/prisma/capture-status?kind=arbitrary', headers=HEADERS).status_code == 422
+        result = client.get('/api/prisma/capture-status?kind='+kind, headers=HEADERS)
+    assert result.status_code == 200 and result.json()['publication_revision'] == 'one'
+    assert calls == [('GET', '/api/prisma/capture-status?kind='+kind, HEADERS['cookie'])]

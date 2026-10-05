@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 import unicodedata
@@ -19,9 +20,21 @@ def canonical_mode(value):
     return "Synthetic" if value == "simulation" else value
 
 
+def publication_revisions(snapshot):
+    """Independent content tokens keep sensor-only updates from refreshing social layers."""
+    incidents = []
+    for item in snapshot["incidents"]:
+        row = {key: value for key, value in item.items() if key not in {"revision", "updated_at", "correlation_context"}}
+        row["correlation_context"] = {key: value for key, value in item.get("correlation_context", {}).items() if key != "sensors"}
+        incidents.append(row)
+    social = {"incidents": incidents, "evidence": snapshot["evidence"], "event_posts": snapshot.get("event_posts", [])}
+    return {kind + "_revision": hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+            for kind, value in (("social", social), ("sensor", snapshot.get("sensors", [])))}
+
+
 SOURCE_FIELDS = {"enabled", "mode", "query", "interval_minutes", "secret_ref", "credential_configured", "capture_running",
                  "status", "last_run_at", "next_due", "last_error", "last_received_count", "capture_paused",
-                 "correlation_window_minutes", "report_thresholds", "config_version"}
+                 "correlation_window_minutes", "report_thresholds", "config_version", "synthetic_batch_max", "capture_slot"}
 # Representative anchors, not incident coordinates or mathematical centroids. All six
 # verified inside SDP/IDECA locality polygons on 2026-10-02 (EPSG:4326 point intersects).
 # https://www.ideca.gov.co/recursos/mapas/localidad-bogota-dc
@@ -49,7 +62,7 @@ CATEGORY_NAMES = {"inundacion": "Flooding", "incendio": "Fire", "movimiento_masa
 def default_source(platform: str) -> dict:
     query = "#bogota #inundacion\n#colombia #incendio\n#desastre"
     return {"platform": platform, "enabled": True, "capture_running": False, "mode": "Synthetic", "query": query,
-            "interval_minutes": 5, "secret_ref": f"gods-eye-view-{platform}", "credential_configured": False,
+            "interval_minutes": 5, "synthetic_batch_max": 3, "secret_ref": f"gods-eye-view-{platform}", "credential_configured": False,
             "correlation_window_minutes": 30, "report_thresholds": {"low": 5, "medium": 10, "high": 20}, "config_version": 1,
             "status": "simulation", "last_run_at": None, "next_due": None, "last_error": None, "last_received_count": None}
 

@@ -1,9 +1,44 @@
 """Synthetic search input; its clock, filtering and cursors are shared by local and OCI VM producers."""
 import re
+import random
+from datetime import datetime, timezone
 
 from .core import SYNTHETIC_MODES, PLATFORMS, folded, simulation_events
 
 INSTITUTIONAL = ("sensor", "sire", "linea123")
+
+
+def schedule(value=None):
+    return {"start_at": None, "interval_minutes": 5, "config_version": 1, **(value or {})}
+
+
+def update_schedule(saved, payload):
+    from fastapi import HTTPException
+    saved = schedule(saved)
+    if payload.get("expected_revision") != saved["config_version"]:
+        raise HTTPException(409, "Capture schedule changed; reload before saving")
+    interval = payload.get("interval_minutes")
+    if type(interval) is not int or not 1 <= interval <= 1440:
+        raise ValueError("Capture interval must be between 1 and 1440 minutes")
+    try:
+        start = datetime.fromisoformat(payload["start_at"].replace("Z", "+00:00"))
+    except (KeyError, TypeError, AttributeError, ValueError) as exc:
+        raise ValueError("A valid capture start date and time is required") from exc
+    if start.tzinfo is None or start.utcoffset() is None:
+        raise ValueError("Capture start date and time must include its UTC offset")
+    return {"start_at": start.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "interval_minutes": interval, "config_version": saved["config_version"] + 1}
+
+
+def schedule_at(value, now, previous=None):
+    """Use the latest S+nI slot; missed slots are never replayed."""
+    value = schedule(value)
+    if not value["start_at"]:
+        return None
+    start = datetime.fromisoformat(value["start_at"].replace("Z", "+00:00")).timestamp()
+    interval = value["interval_minutes"] * 60
+    slot = start + max(0, int((now - start) // interval)) * interval
+    return slot + interval if previous is not None and previous >= slot else slot
 
 
 def query_lines(value):
@@ -20,6 +55,9 @@ def validate_source(source):
     """Apply the same connector/query boundary to local and cloud administration."""
     if source["mode"] not in (*SYNTHETIC_MODES, "real"):
         raise ValueError("Unsupported source mode")
+    maximum = source.get("synthetic_batch_max", 3)
+    if type(maximum) is not int or not 1 <= maximum <= 100:
+        raise ValueError("Synthetic batch maximum must be between 1 and 100 records")
     queries = query_lines(source["query"])
     if source["mode"] == "real":
         if source["platform"] != "x":
@@ -84,9 +122,14 @@ def matches(text, expression):
     return term(expression)
 
 
-def batch(source, state, cursor, now, force=False):
-    if not state.get("run_id") or state["status"] == "idle":
+def batch(source, state, cursor, now, force=False, schedule=None):
+    if not state.get("run_id") or state["status"] == "idle" or is_complete(state, cursor):
         return None
+    if (schedule_at(schedule, now) or now) > now:
+        return None
+    if source["platform"] in PLATFORMS:
+        return bounded_batch(source, state, cursor, now, force, schedule, state["elapsed_seconds"],
+            lambda selected, start, end: window_events(selected, state["run_id"], state.get("anchor_at"), start, end))
     same = cursor.get("run_id") == state["run_id"] and cursor.get("query") == source["query"]
     start = cursor.get("elapsed", -1) if same else -1
     elapsed = state["elapsed_seconds"]
@@ -140,7 +183,8 @@ def inputs(configured, controls, legacy):
 
 
 def is_complete(control, cursor):
-    return bool(control.get("run_id")) and cursor.get("run_id") == control["run_id"] and cursor.get("elapsed", -1) >= 600
+    return (bool(control.get("run_id")) and cursor.get("run_id") == control["run_id"]
+            and (cursor.get("complete", False) if "emitted_ids" in cursor else cursor.get("elapsed", -1) >= 600))
 
 
 def institutional_pending(control, institutional, cursors):
@@ -148,10 +192,16 @@ def institutional_pending(control, institutional, cursors):
             and any(not is_complete(institutional, cursors.get(name, {})) for name in INSTITUTIONAL))
 
 
-def continuous_batch(source, control, cursor, now, force=False):
+def continuous_batch(source, control, cursor, now, force=False, schedule=None):
     """Capture one finite scenario; an exhausted run never republishes later cycles."""
     if is_complete(control, cursor):
         return None
+    if (schedule_at(schedule, now) or now) > now:
+        return None
+    generation = continuous_generation(source, control, cursor)
+    if source["platform"] in PLATFORMS:
+        return bounded_batch(source, control, cursor, now, force, schedule, min(600, max(0, now - control["anchor_at"])),
+            lambda selected, start, end: continuous_window(selected, control, generation, 0, start, end), generation)
     same = cursor.get("run_id") == control["run_id"] and cursor.get("query") == source["query"]
     start = cursor.get("elapsed", -1) if same else -1
     end = min(600, max(0, now - control["anchor_at"]))
@@ -164,6 +214,35 @@ def continuous_batch(source, control, cursor, now, force=False):
         "interval_minutes": source["interval_minutes"],
         "batch_key": {"platform": source["platform"], "run_id": control["run_id"], "query": source["query"], "from_seconds": start, "to_seconds": end, **generation},
         "next_due": None if final else now + source["interval_minutes"] * 60}
+
+
+def bounded_batch(source, control, cursor, now, force, shared_schedule, end, window, generation=None):
+    """Select unseen records; committing this returned cursor belongs to the Landing writer."""
+    if is_complete(control, cursor) or (end == 0 and control.get("status") == "paused"):
+        return None
+    same_run = cursor.get("run_id") == control["run_id"]
+    previous = cursor if same_run else {}
+    slot = schedule_at(shared_schedule, now, previous.get("capture_slot"))
+    if slot is not None and slot > now:
+        return None
+    if slot is None and same_run and not force and now < (previous.get("next_due") or 0):
+        return None
+    emitted = set(previous.get("emitted_ids", []))
+    if same_run and "emitted_ids" not in previous:
+        emitted.update(item["source_id"] for item in window({**source, "query": previous.get("query", source["query"])}, -1, previous.get("elapsed", -1)))
+    pending = [item for item in window(source, -1, end) if item["source_id"] not in emitted]
+    maximum = source.get("synthetic_batch_max", 3)
+    chosen = random.Random(f"{control['run_id']}:{len(emitted)}:{slot}").sample(pending, min(maximum, len(pending)))
+    emitted.update(item["source_id"] for item in chosen)
+    complete = end >= 600 and len(chosen) == len(pending)
+    interval = (shared_schedule or {}).get("interval_minutes", source["interval_minutes"])
+    due = schedule_at(shared_schedule, now, slot) if slot is not None else now + interval * 60
+    return chosen, {"run_id": control["run_id"], "query": source["query"], "elapsed": end, **(generation or {}),
+        "emitted_ids": sorted(emitted), "complete": complete, "capture_slot": slot,
+        "interval_minutes": interval, "next_due": None if complete else due,
+        "batch_key": {"platform": source["platform"], "run_id": control["run_id"], "query": source["query"],
+            "ids": sorted(item["source_id"] for item in chosen), "capture_slot": slot,
+            "from_seconds": previous.get("elapsed", -1), "to_seconds": end, **(generation or {})}}
 
 
 def continuous_generation(source, control, cursor):

@@ -7,7 +7,7 @@ import * as jsxRuntime from 'react/jsx-runtime';
 const compiled = ts.transpileModule(readFileSync(new URL('../src/PrismaSensors.tsx', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
 const families = ['river_level', 'rainfall', 'temperature', 'soil_moisture', 'wind_speed'];
 const saved = { sensor_type: 'river_level', config_version: 1, mode: 'Synthetic', is_simulated: true, interval_minutes: 5, sensor_count: 800, capture_running: false };
-const configuration = (overrides = {}) => ({ configs: families.map(sensor_type => ({ ...saved, sensor_type, ...overrides[sensor_type] })), runtime: 'local_fixture' });
+const configuration = (overrides = {}) => ({ configs: families.map(sensor_type => ({ ...saved, sensor_type, ...overrides[sensor_type] })), sensor_schedule: { start_at: null, interval_minutes: 5, config_version: 1 }, runtime: 'local_fixture' });
 function harness(t) {
   let cursor = 0, dirty = true, effects = [], tree; const slots = [], requests = [], timers = new Set(); const previous = globalThis.window;
   globalThis.window = { setInterval(callback) { timers.add(callback); return callback; }, clearInterval(callback) { timers.delete(callback); } };
@@ -16,7 +16,7 @@ function harness(t) {
     useRef(initial) { const id = cursor++; return slots[id] ||= { current: initial }; },
     useEffect(callback, deps) { const id = cursor++, old = slots[id]; if (!old || deps.some((value, index) => value !== old.deps[index])) effects.push(() => { old?.cleanup?.(); slots[id] = { deps, cleanup: callback() }; }); },
   };
-  const component = {}; new Function('exports', 'require', compiled)(component, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './PrismaSyntheticReset' ? { PrismaSyntheticReset() {}, PrismaSyntheticResetStatus() {} } : name === './PrismaSensorReadings' ? { PrismaSensorReadings() {} } : { prismaEndpoint: '/api/admin/prisma', prismaError: error => error.message, timestamp: value => value || 'Not available' });
+  const component = {}; new Function('exports', 'require', compiled)(component, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === './CaptureScheduleForm' ? { CaptureScheduleForm() {} } : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './PrismaSyntheticReset' ? { PrismaSyntheticReset() {}, PrismaSyntheticResetStatus() {} } : name === './PrismaSensorReadings' ? { PrismaSensorReadings() {} } : { prismaEndpoint: '/api/admin/prisma', prismaError: error => error.message, timestamp: value => value || 'Not available' });
   const props = { api: (path, options) => new Promise((resolve, reject) => requests.push({ path, options, resolve, reject })), timeZone: 'America/Bogota' };
   function render() { for (let n = 0; dirty && n < 20; n++) { cursor = 0; dirty = false; effects = []; tree = component.PrismaSensors(props); effects.forEach(effect => effect()); } assert.equal(dirty, false); }
   const nodes = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? nodes(child) : [])];
@@ -39,7 +39,7 @@ test('sensor administration preserves drafts and revision, disables duplicate ac
   assert.equal(h.find('input', p => p.max === '5000').props.value, 700);
   h.submit(); h.submit(); assert.equal(h.requests.length, 3);
   assert.equal(h.requests[2].path, '/api/admin/prisma/sensors/river_level');
-  assert.deepEqual(JSON.parse(h.requests[2].options.body), { expected_revision: 1, interval_minutes: 5, sensor_count: 700 });
+  assert.deepEqual(JSON.parse(h.requests[2].options.body), { expected_revision: 1, sensor_count: 700 });
   h.requests[2].reject(new Error('Configuration changed; refresh')); await h.settle(); assert.equal(h.find('p', p => p.role === 'alert').props.children, 'Configuration changed; refresh');
   h.click('Discard changes'); assert.equal(h.find('input', p => p.max === '5000').props.value, 600);
   h.click('Pause'); assert.equal(h.requests[3].path, '/api/admin/prisma/sensors/river_level/pause'); h.requests[3].resolve({ config: { ...saved, config_version: 2, sensor_count: 600 }, message: 'Paused' }); await h.settle();
@@ -51,7 +51,11 @@ test('individual sensor configurations reject invalid quantities before a mutati
   const h = harness(t); h.requests[0].resolve(configuration()); await h.settle();
   assert.ok(!h.nodes().some(node => node.type === 'input' && node.props.type === 'checkbox'));
   assert.equal(h.find('input', p => p.max === '5000').props.min, '1');
-  for (const [maximum, valid, invalid] of [['5000', '800', ['0', '1.5', '5001']], ['60', '5', ['0', '1.5', '61']]]) {
+  assert.equal(h.find('CaptureScheduleForm').props.kind, 'sensor');
+  assert.equal(h.find('select').props.value, 'Synthetic');
+  assert.equal(h.find('option', p => p.value === 'real').props.disabled, true);
+  assert.ok(!h.nodes().some(node => node.type === 'input' && node.props.max === '60'));
+  for (const [maximum, valid, invalid] of [['5000', '800', ['0', '1.5', '5001']]]) {
     for (const value of invalid) {
       h.act(() => h.find('input', p => p.max === maximum).props.onChange({ target: { value } })); h.submit(); await h.settle();
       assert.equal(h.requests.length, 1); assert.match(h.find('p', p => p.role === 'alert').props.children, /whole numbers/);
@@ -132,7 +136,7 @@ test('own Pause preserves the dirty tab draft and advances its Save revision wit
   assert.equal(h.find('input', p => p.max === '5000').props.value, 600);
   h.select('river_level'); assert.equal(h.find('input', p => p.max === '5000').props.value, 700);
   assert.equal(h.find('button', p => p.children === 'Pause').props.disabled, true);
-  h.submit(); assert.deepEqual(JSON.parse(h.requests[2].options.body), { expected_revision: 2, interval_minutes: 5, sensor_count: 700 });
+  h.submit(); assert.deepEqual(JSON.parse(h.requests[2].options.body), { expected_revision: 2, sensor_count: 700 });
   h.requests[2].resolve({ config: { ...saved, config_version: 3, sensor_count: 700 } }); await h.settle();
   assert.equal(h.find('button', p => p.children === 'Run now').props.disabled, false);
 });
@@ -191,8 +195,10 @@ test('a delayed sensor cleanup keeps its original tab and preserves sibling draf
   const wrappers = () => h.nodes().filter(node => node.type === 'span' && node.props.children?.type?.name === 'PrismaSyntheticReset');
   assert.equal(wrappers().length, 5); assert.deepEqual(wrappers().filter(node => !node.props.hidden).map(node => node.key), ['river_level']);
   h.act(() => reset.props.onChange({ operation_id: 'river-reset', sensor_type: 'river_level', status: 'pending' }, ''));
+  assert.equal(h.find('CaptureScheduleForm').props.disabled, true);
   assert.equal(h.find('fieldset').props.disabled, true); h.submit(); assert.equal(h.requests.length, 1);
   h.select('rainfall'); assert.equal(h.find('fieldset').props.disabled, false);
+  assert.equal(h.find('CaptureScheduleForm').props.disabled, true, 'Shared schedule cannot change while another family reset is pending');
   assert.deepEqual(wrappers().filter(node => !node.props.hidden).map(node => node.key), ['rainfall']);
   assert.ok(wrappers().some(node => node.key === 'river_level' && node.props.hidden), 'The pending type remains mounted while hidden');
   h.act(() => h.find('input', p => p.max === '5000').props.onChange({ target: { value: '600' } }));
@@ -203,6 +209,7 @@ test('a delayed sensor cleanup keeps its original tab and preserves sibling draf
   h.act(() => { reset.props.onChange({ operation_id: 'river-reset', sensor_type: 'river_level', status: 'completed' }, ''); reset.props.onComplete(); });
   assert.equal(h.requests[1].path, '/api/admin/prisma/sensors');
   h.requests[1].resolve(configuration({ river_level: { config_version: 2 } })); await h.settle();
+  assert.equal(h.find('CaptureScheduleForm').props.disabled, false);
   assert.equal(h.find('input', p => p.max === '5000').props.value, 600);
   assert.equal(h.find('PrismaSensorReadings').key, '1');
   h.select('river_level'); assert.equal(h.find('fieldset').props.disabled, false);

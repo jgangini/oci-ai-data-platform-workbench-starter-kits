@@ -6,18 +6,27 @@ import os
 import time
 from tempfile import NamedTemporaryFile
 
-from . import sensors
+from . import capture, sensors
 from .core import utc_text
 
 
 def local_configuration(store):
     with store.connection() as db:
-        return _view(store._get(db, "configuration_sensors", {}), store._get(db, "status_sensors", {}))
+        return _view(store._get(db, "configuration_sensors", {}), store._get(db, "status_sensors", {}),
+            store._get(db, "sensor_schedule", {}), store._get(db, "checkpoint_sensors", {}), store.clock())
 
 
-def _view(config, status):
-    return {**sensors.configuration(config, {key: value for key, value in status.items() if key != "by_type"}),
-            "configs": list(sensors.family_configs(config, status).values())}
+def _view(config, status, schedule, checkpoint, now):
+    result = {**sensors.configuration(config, {key: value for key, value in status.items() if key != "by_type"}),
+              "configs": list(sensors.family_configs(config, status).values()), "sensor_schedule": capture.schedule(schedule)}
+    if result["sensor_schedule"]["start_at"]:
+        for family in result["configs"]:
+            cursor = _family_checkpoint(family, checkpoint, family["sensor_type"]) if "by_type" in result else checkpoint
+            due = cursor["pending"]["anchor"] if cursor.get("pending") else capture.schedule_at(schedule, now, cursor.get("anchor"))
+            family.update(interval_minutes=result["sensor_schedule"]["interval_minutes"], next_due=utc_text(due) if family["capture_running"] else None)
+        result["interval_minutes"] = result["sensor_schedule"]["interval_minutes"]
+        result["next_due"] = min((family["next_due"] for family in result["configs"] if family["next_due"]), default=None)
+    return result
 
 
 def _updated(current, values, sensor_type):
@@ -80,7 +89,8 @@ def local_save(store, values, sensor_type=None):
         if sensor_type is not None:
             _local_migrate(store, db, current)
             checkpoint, status = _retimed(result, sensor_type,
-                store._get(db, "checkpoint_sensors", {}), store._get(db, "status_sensors", {}))
+                store._get(db, "checkpoint_sensors", {}), store._get(db, "status_sensors", {}),
+                store._get(db, "sensor_schedule", {}), store.clock())
             store._put(db, "checkpoint_sensors", checkpoint)
             store._put(db, "status_sensors", status)
         store._put(db, "configuration_sensors", result)
@@ -124,28 +134,35 @@ def _resumed(status, checkpoint, config, sensor_type):
     return status
 
 
-def _retimed(current, kind, checkpoint, status):
+def _retimed(current, kind, checkpoint, status, schedule, now):
     after = current["by_type"][kind]
     cursor = checkpoint.get("by_type", {}).get(kind, {})
     if "anchor" in cursor and cursor.get("next_due") != 0 and not cursor.get("pending"):
-        due = cursor["anchor"] + after["interval_minutes"] * 60
+        due = capture.schedule_at(schedule, now, cursor["anchor"])
+        if due is None:
+            due = cursor["anchor"] + after["interval_minutes"] * 60
         checkpoint = _family_change(checkpoint, kind, {"next_due": due})
         status = _family_change(status, kind, {"next_due": utc_text(due) if after["capture_running"] else None})
     return checkpoint, status
 
 
-def _batch(config, now, checkpoint, force, locations):
+def _batch(config, now, checkpoint, force, locations, schedule=None):
     if not config["capture_running"]:
         return None
     if checkpoint.get("pending"):
         return checkpoint["pending"]
-    if not force and checkpoint.get("next_due", 0) > now:
+    scheduled = capture.schedule_at(schedule, now, checkpoint.get("anchor"))
+    if scheduled is not None:
+        if scheduled > now:
+            return None
+    elif not force and checkpoint.get("next_due", 0) > now:
         return None
-    anchor = int(now)
+    anchor = int(now if scheduled is None else scheduled)
     if anchor <= checkpoint.get("anchor", -1):
         return None
     # A retry must deliver the same immutable event bytes even if a station is moved meanwhile.
-    return {"anchor": anchor, "locations": locations, **{key: config[key] for key in ("interval_minutes", "sensor_count", "families")}}
+    return {"anchor": anchor, "locations": locations, **{key: config[key] for key in ("interval_minutes", "sensor_count", "families")},
+            **({"interval_minutes": capture.schedule(schedule)["interval_minutes"]} if scheduled is not None else {})}
 
 
 def _family_ticks(config, sensor_type, run):
@@ -202,13 +219,13 @@ def _local_deliver(store, rows):
                 (row["event_id"], row["sensor_id"], row["observed_at"], json.dumps(row, ensure_ascii=False)) for row in delivered])
 
 
-def _local_family_tick(store, kind, now, force):
+def _local_family_tick(store, kind, now, force, schedule):
     with store.connection() as db:
         config = sensors.family_configs(store._get(db, "configuration_sensors", {}))[kind]
         checkpoints = store._get(db, "checkpoint_sensors", {})
         checkpoint = _family_checkpoint(config, checkpoints, kind)
         locations = store._get(db, "sensor_locations", {})
-    batch = _batch({**config, "families": [kind]}, now, checkpoint, force, locations)
+    batch = _batch({**config, "families": [kind]}, now, checkpoint, force, locations, schedule)
     if not batch:
         return 0
     try:
@@ -216,7 +233,7 @@ def _local_family_tick(store, kind, now, force):
             store._put(db, "checkpoint_sensors", _family_change(store._get(db, "checkpoint_sensors", {}), kind, {"pending": batch}))
         rows = _family_rows(batch, kind)
         _local_deliver(store, rows)
-        due = batch["anchor"] + config["interval_minutes"] * 60
+        due = capture.schedule_at(schedule, now, batch["anchor"]) if schedule["start_at"] else batch["anchor"] + config["interval_minutes"] * 60
         with store.connection() as db:
             store._put(db, "checkpoint_sensors", _family_change(store._get(db, "checkpoint_sensors", {}), kind,
                 {"anchor": batch["anchor"], "next_due": due, "pending": None}))
@@ -234,11 +251,11 @@ def local_tick(store, force=False, sensor_type=None):
     with store.connection() as db:
         config = _capture_config(config, store._get(db, "synthetic_reset", {}))
     if "by_type" in config:
-        return _family_ticks(config, sensor_type, lambda kind: _local_family_tick(store, kind, now, force))
+        return _family_ticks(config, sensor_type, lambda kind: _local_family_tick(store, kind, now, force, config["sensor_schedule"]))
     with store.connection() as db:
         checkpoint = store._get(db, "checkpoint_sensors", {})
         locations = store._get(db, "sensor_locations", {})
-    batch = _batch(config, now, checkpoint, force, locations)
+    batch = _batch(config, now, checkpoint, force, locations, config["sensor_schedule"])
     if not batch:
         return 0
     try:
@@ -247,7 +264,7 @@ def local_tick(store, force=False, sensor_type=None):
         rows = sensors.apply_locations(sensors.generate_batch(batch["anchor"], sensor_count=batch["sensor_count"], families=batch["families"]), batch.get("locations", {}))
         _local_deliver(store, rows)
         anchor = batch["anchor"]
-        due = anchor + batch["interval_minutes"] * 60
+        due = capture.schedule_at(config["sensor_schedule"], now, anchor) if config["sensor_schedule"]["start_at"] else anchor + batch["interval_minutes"] * 60
         with store.connection() as db:
             store._put(db, "checkpoint_sensors", {"anchor": anchor, "next_due": due})
             store._put(db, "status_sensors", {"last_run_at": utc_text(now), "next_due": utc_text(due),
@@ -282,7 +299,9 @@ def local_location(store, sensor_id, values):
 
 
 def cloud_configuration(runtime):
-    return _view(runtime._doc("configuration").get("sensors"), runtime._doc("status_sensors"))
+    config = runtime._doc("configuration")
+    return _view(config.get("sensors"), runtime._doc("status_sensors"), config.get("sensor_schedule"),
+        runtime._doc("checkpoint_sensors"), time.time())
 
 
 def _cloud_migrate(runtime, current):
@@ -306,7 +325,8 @@ def cloud_save(runtime, values, sensor_type=None):
     result = runtime._change("configuration", change)
     if sensor_type is not None:
         old_checkpoint, old_status = runtime._doc("checkpoint_sensors"), runtime._doc("status_sensors")
-        checkpoint, status = _retimed(result["sensors"], sensor_type, old_checkpoint, old_status)
+        checkpoint, status = _retimed(result["sensors"], sensor_type, old_checkpoint, old_status,
+            result.get("sensor_schedule"), time.time())
         if checkpoint != old_checkpoint:
             runtime._change("checkpoint_sensors", lambda doc: _family_change(doc, sensor_type,
                 {"next_due": checkpoint["by_type"][sensor_type]["next_due"]}))
@@ -344,18 +364,18 @@ def _cloud_deliver(runtime, rows):
                                         content, content_type="text/plain; charset=utf-8")
 
 
-def _cloud_family_tick(runtime, kind, now, force):
+def _cloud_family_tick(runtime, kind, now, force, schedule):
     config = sensors.family_configs(runtime._doc("configuration").get("sensors"))[kind]
     checkpoints = runtime._doc("checkpoint_sensors")
     checkpoint = _family_checkpoint(config, checkpoints, kind)
-    batch = _batch({**config, "families": [kind]}, now, checkpoint, force, runtime._doc("reviews").get("sensor_locations", {}))
+    batch = _batch({**config, "families": [kind]}, now, checkpoint, force, runtime._doc("reviews").get("sensor_locations", {}), schedule)
     if not batch:
         return 0
     try:
         runtime._change("checkpoint_sensors", lambda doc: _family_change(doc, kind, {"pending": batch}))
         rows = _family_rows(batch, kind)
         _cloud_deliver(runtime, rows)
-        due = batch["anchor"] + config["interval_minutes"] * 60
+        due = capture.schedule_at(schedule, now, batch["anchor"]) if schedule["start_at"] else batch["anchor"] + config["interval_minutes"] * 60
         runtime._change("checkpoint_sensors", lambda doc: _family_change(doc, kind,
             {"anchor": batch["anchor"], "next_due": due, "pending": None}))
         runtime._change("status_sensors", lambda doc: _family_change(doc, kind,
@@ -370,8 +390,8 @@ def cloud_tick(runtime, force=False, sensor_type=None):
     config, now = cloud_configuration(runtime), time.time()
     config = _capture_config(config, runtime._doc("checkpoint_reset"))
     if "by_type" in config:
-        return _family_ticks(config, sensor_type, lambda kind: _cloud_family_tick(runtime, kind, now, force))
-    batch = _batch(config, now, runtime._doc("checkpoint_sensors"), force, runtime._doc("reviews").get("sensor_locations", {}))
+        return _family_ticks(config, sensor_type, lambda kind: _cloud_family_tick(runtime, kind, now, force, config["sensor_schedule"]))
+    batch = _batch(config, now, runtime._doc("checkpoint_sensors"), force, runtime._doc("reviews").get("sensor_locations", {}), config["sensor_schedule"])
     if not batch:
         return 0
     try:
@@ -379,7 +399,7 @@ def cloud_tick(runtime, force=False, sensor_type=None):
         rows = sensors.apply_locations(sensors.generate_batch(batch["anchor"], sensor_count=batch["sensor_count"], families=batch["families"]), batch.get("locations", {}))
         _cloud_deliver(runtime, rows)
         anchor = batch["anchor"]
-        due = anchor + batch["interval_minutes"] * 60
+        due = capture.schedule_at(config["sensor_schedule"], now, anchor) if config["sensor_schedule"]["start_at"] else anchor + batch["interval_minutes"] * 60
         runtime._change("checkpoint_sensors", lambda doc: {**doc, "anchor": anchor, "next_due": due, "pending": None})
         runtime._change("status_sensors", lambda doc: {**doc, "last_run_at": utc_text(now), "next_due": utc_text(due),
             "last_received_count": len(rows), "last_error": None})

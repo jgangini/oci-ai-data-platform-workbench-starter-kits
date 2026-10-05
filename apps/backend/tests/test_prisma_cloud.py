@@ -456,7 +456,7 @@ def test_stop_waits_for_inflight_csv_before_disabling_and_submitting_drain(monke
     lock = threading.RLock()
     runtime.capture_lock = CaptureLock()
     monkeypatch.setattr(cloud.capture, "inputs", lambda *_: [(source, {}, True)])
-    monkeypatch.setattr(cloud.capture, "continuous_batch", lambda *_: ([{"id": "last-evidence"}], {"batch_key": "last", "next_due": 1000}))
+    monkeypatch.setattr(cloud.capture, "continuous_batch", lambda *_, **__: ([{"id": "last-evidence"}], {"batch_key": "last", "next_due": 1000}))
     def upload(*_):
         upload_started.set()
         assert finish_upload.wait(5), "Test did not release the in-flight upload"

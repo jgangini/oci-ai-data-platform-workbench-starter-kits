@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 import re
 import time
@@ -14,7 +16,7 @@ import httpx
 from .core import SYNTHETIC_MODES, canonical_mode, default_source, source_migration, utc_text
 from .store import PrismaStore
 from .x import XFailure, poll_queries
-from . import landing
+from . import landing, capture
 from .capture import validate_source
 from .source_rules import check_revision, source_view, validate_rules
 from . import sensor_capture, sensor_reset
@@ -74,8 +76,54 @@ class LocalPrismaRuntime:
         async with self.lock:
             snapshot = self.store.snapshot()
             return {"sources": [source_view(source) for source in self.store.sources()], "simulation": self.store.simulation_state(), "runtime": "local_fixture",
+                    "social_schedule": self.store.capture_schedule("social"),
                     "synthetic_reset": self.store.synthetic_reset_status(), "capture_summary": self.store.capture_summary(),
                     "pipeline": {"status": "local_fixture", "version": snapshot["version"], "last_run_at": snapshot.get("published_at")}}
+
+    async def save_capture_schedule(self, kind, values):
+        async with self.lock:
+            return self.store.save_capture_schedule(kind, values)
+
+    async def capture_status(self, kind):
+        async with self.lock:
+            key = "sensor" if kind == "sensors" else "social"
+            shared = self.store.capture_schedule(key)
+            now = self.clock()
+            with self.store.connection() as db:
+                published = self.store._get(db, "snapshot_publication", {})
+                if key == "sensor":
+                    checkpoint = self.store._get(db, "checkpoint_sensors", {})
+                    state = sensor_capture.local_configuration(self.store)
+                    due = state.get("next_due")
+                    pending = bool(checkpoint.get("pending") or any(row.get("pending") for row in checkpoint.get("by_type", {}).values()))
+                else:
+                    checkpoint = {name: self.store._get(db, "synthetic:" + name, {}) for name in capture.PLATFORMS}
+                    candidates = []
+                    for source in self.store.sources():
+                        if not source["enabled"] or not source.get("capture_running"):
+                            continue
+                        cursor = checkpoint[source["platform"]]
+                        previous = source.get("capture_slot") if source["mode"] == "real" else cursor.get("capture_slot")
+                        slot = capture.schedule_at(shared, now, previous)
+                        if source["mode"] == "real":
+                            checkpoint[source["platform"]] = self.store.checkpoint(source["platform"])
+                            retry = checkpoint[source["platform"]].get("retry_at", 0) or 0
+                            if source.get("status") == "rate_limited" and source.get("next_due"):
+                                retry = max(retry, datetime.fromisoformat(source["next_due"].replace("Z", "+00:00")).timestamp())
+                            if retry > now:
+                                slot = max(slot or 0, retry)
+                        if slot is not None:
+                            candidates.append(utc_text(slot))
+                        elif source.get("next_due"):
+                            candidates.append(source["next_due"])
+                    due = min(candidates, default=None)
+                    pending = any(self.store._get(db, "synthetic:pending:" + name, None) for name in capture.PLATFORMS)
+                publication = self.store._get(db, "publication", {})
+                pending = pending or (publication.get("published_at") or "") > (published.get("published_at") or "")
+            return {"server_now": utc_text(now), "schedule": shared, key + "_schedule": shared, "next_capture_at": due,
+                "capture_revision": hashlib.sha256(json.dumps(checkpoint, sort_keys=True).encode()).hexdigest(),
+                "publication_version": published.get("version"), "publication_revision": published.get(key + "_revision"),
+                "processing_pending": bool(pending)}
 
     async def update_source(self, platform: str, payload: dict) -> dict:
         async with self.lock:
@@ -111,6 +159,8 @@ class LocalPrismaRuntime:
                 self.store.ensure_synthetic_capture()
             if scheduled:
                 due = datetime.fromisoformat(source["next_due"].replace("Z", "+00:00")).timestamp() if source["next_due"] else 0
+                planned = capture.schedule_at(self.store.capture_schedule("social"), self.clock(), source.get("capture_slot"))
+                due = planned if planned is not None else due
                 running = source["enabled"] and source.get("capture_running")
                 if not running or due > self.clock():
                     return {"status": "scheduled" if running else "paused", "source": source_view(source)}
@@ -132,6 +182,11 @@ class LocalPrismaRuntime:
                 return {"status": "completed" if completed else "simulation",
                     "message": "Synthetic query validated" if test else "Synthetic capture completed" if completed else "Synthetic capture started",
                     "source": source_view(source)}
+            if not test:
+                slot = capture.schedule_at(self.store.capture_schedule("social"), self.clock(), source.get("capture_slot"))
+                if slot is not None and slot > self.clock():
+                    source = self.store.record_source(platform, {"next_due": utc_text(slot), "status": "scheduled"})
+                    return {"status": "scheduled", "source": source_view(source)}
             result = await asyncio.to_thread(self._poll, source, test)
             return {"status": result["status"], "message": "Connection test completed" if test else "Capture processed", "source": source_view(result)}
 
@@ -148,6 +203,9 @@ class LocalPrismaRuntime:
                 self.store.persist_page(platform, [], checkpoint)
             with self.client_factory() as client:
                 result = poll_queries(client, token, source, saved, now, on_page, on_checkpoint, test=test)
+            slot = capture.schedule_at(self.store.capture_schedule("social"), now, source.get("capture_slot"))
+            if not test and slot is not None:
+                result.update(capture_slot=slot, next_due=utc_text(capture.schedule_at(self.store.capture_schedule("social"), now, slot)))
             return self.store.record_source(platform, {**result, "last_run_at": utc_text(now)})
         except XFailure as exc:
             return self.store.record_source(platform, {"status": exc.code, "last_error": exc.code,
@@ -194,6 +252,7 @@ class LocalPrismaRuntime:
         async with self.lock:
             self.store.advance_simulation()
             sensor_capture.local_tick(self.store)
+            self.store.snapshot()
             sources = self.store.sources()
         for source in sources:
             if not source["enabled"] or not source.get("capture_running", False) or source["mode"] != "real":
@@ -201,6 +260,8 @@ class LocalPrismaRuntime:
             if source["last_error"] and not source["next_due"]:
                 continue
             due = datetime.fromisoformat(source["next_due"].replace("Z", "+00:00")).timestamp() if source["next_due"] else 0
+            planned = capture.schedule_at(self.store.capture_schedule("social"), self.clock(), source.get("capture_slot"))
+            due = planned if planned is not None else due
             if due <= self.clock():
                 await self._capture(source["platform"], False, scheduled=True)
 
@@ -208,9 +269,12 @@ class LocalPrismaRuntime:
         config = sensor_capture.local_configuration(self.store)
         with self.store.connection() as db:
             config = sensor_reset.annotated(config, self.store._get(db, "synthetic_reset", {}))
-        return {"config": config, "configs": config["configs"], "runtime": "local_fixture"}
+        return {"config": config, "configs": config["configs"], "sensor_schedule": config["sensor_schedule"], "runtime": "local_fixture"}
 
     async def update_sensors(self, values, sensor_type=None):
+        values = dict(values)
+        if values.pop("mode", "Synthetic") != "Synthetic":
+            raise ValueError("Only Synthetic sensor capture is available")
         async with self.lock:
             with self.store.connection() as db:
                 sensor_reset.guard(self.store._get(db, "synthetic_reset", {}), sensor_type)

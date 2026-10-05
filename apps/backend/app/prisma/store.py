@@ -15,6 +15,7 @@ from fastapi import HTTPException
 
 from .core import SYNTHETIC_MODES, canonical_mode, PLATFORMS, SOURCE_FIELDS, build_snapshot, default_source, normalize_event, utc_text, validate_review, review_location
 from . import capture, landing
+from .core import publication_revisions
 
 
 class PrismaStore:
@@ -71,6 +72,17 @@ class PrismaStore:
     def sources(self) -> list[dict]:
         return [self.source(platform) for platform in PLATFORMS]
 
+    def capture_schedule(self, kind):
+        with self.connection() as db:
+            return capture.schedule(self._get(db, kind + "_schedule", {}))
+
+    def save_capture_schedule(self, kind, values):
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            saved = capture.update_schedule(self._get(db, kind + "_schedule", {}), values)
+            self._put(db, kind + "_schedule", saved)
+            return saved
+
     def update_source(self, platform: str, values: dict) -> dict:
         source = self.source(platform)
         if set(values) - SOURCE_FIELDS:
@@ -104,7 +116,8 @@ class PrismaStore:
                 self._put(db, "source:" + platform, source)
                 return source
             control = saved if source.get("capture_paused") or pending else None
-            control = control or {"run_id": str(uuid4()), "anchor_at": self.clock(), "seed": 0}
+            anchor = capture.schedule_at(self._get(db, "social_schedule", {}), self.clock())
+            control = control or {"run_id": str(uuid4()), "anchor_at": anchor if anchor is not None else self.clock(), "seed": 0}
             if not any(item.get("capture_running") and item["enabled"] and item["mode"] in SYNTHETIC_MODES for item in self.sources()):
                 controls["institutional"] = control
             controls[platform] = control
@@ -363,6 +376,7 @@ class PrismaStore:
         state = self.simulation_state()
         with self.connection() as db:
             controls = self._get(db, "capture_controls", {})
+            shared_schedule = self._get(db, "social_schedule", {})
         finished = []
         for source, control, continuous in capture.inputs(self.sources(), controls, state):
             with self.connection() as db:
@@ -370,21 +384,29 @@ class PrismaStore:
                 if platform and name in PLATFORMS and name != platform:
                     continue
                 cursor = self._get(db, "synthetic:" + name, {})
-                if continuous and capture.is_complete(control, cursor):
+                pending_key = "synthetic:pending:" + name
+                pending = self._get(db, pending_key, None)
+                if not pending and continuous and capture.is_complete(control, cursor):
                     if name in PLATFORMS:
                         finished.append(name)
                     continue
-                result = (capture.continuous_batch if continuous else capture.batch)(source, control, cursor, self.clock(), force)
+                result = pending or (capture.continuous_batch if continuous else capture.batch)(source, control, cursor, self.clock(), force,
+                    schedule=shared_schedule)
                 if result is None:
                     continue
                 events, cursor = result
+                if not pending:
+                    self._put(db, pending_key, result)
+                    db.commit()  # Journal exact bytes/selection before the external Landing write.
                 directory = self.path.parent / "prisma-landing"
                 key = landing.write_file(directory, events, cursor["batch_key"])
                 self._events(db, landing.records((directory / key).read_bytes()))  # Local fixture uses the identical CSV envelope; OCI uses Spark.
                 self._put(db, "synthetic:" + name, cursor)
+                db.execute("DELETE FROM state WHERE key=?", (pending_key,))
                 summary = self._get(db, "capture_summary", {"landing_count": 0})
                 self._put(db, "capture_summary", {"status": "ready", "landing_count": summary["landing_count"] + bool(key),
-                    "last_landing_key": key or summary.get("last_landing_key"), "last_run_at": utc_text(self.clock())})
+                    "last_landing_key": key or summary.get("last_landing_key"), "last_run_at": utc_text(self.clock()),
+                    "last_data_at": utc_text(self.clock()) if events else summary.get("last_data_at")})
                 if name in PLATFORMS:
                     self._put(db, "source:" + name, {**source, "mode": canonical_mode(source["mode"]), "status": "simulation", "last_received_count": len(events),
                         "last_run_at": utc_text(self.clock()), "next_due": utc_text(cursor["next_due"]) if cursor["next_due"] is not None else None, "last_error": None})
@@ -392,6 +414,9 @@ class PrismaStore:
                         finished.append(name)
         with self.connection() as db:
             for name in finished:
+                if capture.institutional_pending(controls.get(name, {}), controls.get("institutional", {}),
+                        {kind: self._get(db, "synthetic:" + kind, {}) for kind in capture.INSTITUTIONAL}):
+                    continue
                 self._put(db, "source:" + name, {**self._get(db, "source:" + name, {}), "capture_running": False,
                     "capture_paused": True, "status": "completed", "next_due": None, "last_error": None})
 
@@ -413,10 +438,15 @@ class PrismaStore:
                                 rules=rules, previous=registry, now=self.clock(), sensors=local_latest(self))
         digest = hashlib.sha256(json.dumps({name: result[name] for name in ("incidents", "evidence", "event_posts", "sensors")}, sort_keys=True).encode()).hexdigest()[:16]
         result["version"] += "-" + digest
+        result.update(publication_revisions(result))
         with self.connection() as db:
             saved = self._get(db, "snapshot_publication", {})
             if saved.get("version") != result["version"]:
-                saved = {"version": result["version"], "published_at": utc_text(self.clock())}
+                saved = {"version": result["version"], "published_at": utc_text(self.clock()),
+                    "social_revision": result["social_revision"], "sensor_revision": result["sensor_revision"]}
+                self._put(db, "snapshot_publication", saved)
+            elif any(saved.get(key) != result[key] for key in ("social_revision", "sensor_revision")):
+                saved.update(social_revision=result["social_revision"], sensor_revision=result["sensor_revision"])
                 self._put(db, "snapshot_publication", saved)
             result["published_at"] = saved["published_at"]
             if registry != result["incidents"]:

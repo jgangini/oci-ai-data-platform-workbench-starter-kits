@@ -377,6 +377,12 @@ def ready():
     return {"status": "ready", "mode": MODE}
 
 
+@app.get("/api/prisma/capture-status")
+async def capture_status(request: Request, kind: Literal["social", "sensors"] = "social"):
+    principal(request)
+    return await admin_request(request, "GET", f"/api/prisma/capture-status?kind={kind}")
+
+
 @app.get("/api/prisma/snapshot")
 async def snapshot(request: Request, date_from: str = "", date_to: str = ""):
     period_bounds({"date_from": date_from, "date_to": date_to})

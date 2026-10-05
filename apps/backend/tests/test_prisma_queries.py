@@ -84,6 +84,7 @@ def test_multiline_searches_are_independent_and_union_deduplicates():
 def test_per_source_run_survives_restart_and_stops_after_one_finite_scenario(tmp_path):
     now = [NOW]
     runtime = LocalPrismaRuntime(tmp_path, clock=lambda: now[0])
+    asyncio.run(runtime.update_source("x", {"synthetic_batch_max": 100}))
     asyncio.run(runtime.tick())
     assert runtime.store.snapshot()["evidence"] == []  # Saving enabled is not Run.
     asyncio.run(runtime.test_source("x"))
@@ -119,7 +120,7 @@ def test_per_source_run_survives_restart_and_stops_after_one_finite_scenario(tmp
 
 
 def test_overdue_synthetic_run_catches_up_once_without_republishing_a_days_cycles():
-    source = default_source("x")
+    source = {**default_source("x"), "synthetic_batch_max": 100}
     control = {"run_id": "continuous", "anchor_at": NOW}
     first, cursor = capture.continuous_batch(source, control, {}, NOW)
     ids = {item["source_id"] for item in first}

@@ -41,6 +41,7 @@ def incident_database():
     connection.execute("ATTACH DATABASE ':memory:' AS ADMIN")
     connection.execute("CREATE TABLE ADMIN.PRISMA_V_INCIDENTS(version, incident_id, locality, category, severity, source_mode, incident_json)")
     connection.execute("CREATE TABLE ADMIN.PRISMA_V_EVIDENCE(version, evidence_id, platform, evidence_json)")
+    connection.execute("CREATE TABLE ADMIN.PRISMA_V_SNAPSHOTS(version, payload)")
     connection.create_function("TO_UTC_TIMESTAMP_TZ", 1,
         lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat() if value else None)
     # Each tuple is one linked publication; differing geography/network/time must not be combined.
@@ -65,7 +66,7 @@ def incident_database():
                 ("v1", ref, platform, json.dumps(evidence)))
     connection.execute("INSERT INTO ADMIN.PRISMA_V_INCIDENTS SELECT 'v2', incident_id, locality, category, severity, source_mode, incident_json FROM ADMIN.PRISMA_V_INCIDENTS")
     connection.execute("INSERT INTO ADMIN.PRISMA_V_EVIDENCE VALUES ('v2','unknown-country-0','x',?)",
-        (json.dumps({"country": "Colombia", "city": "Bogotá", "created_at": "2026-10-05T14:00:00Z"}),))
+        (json.dumps({"id": "unknown-country-0", "country": "Colombia", "city": "Bogotá", "created_at": "2026-10-05T14:00:00Z"}),))
 
     yield connection
     connection.close()
@@ -75,6 +76,11 @@ def sqlite_rows(connection, sql, binds):
     """Execute production predicates; translate only Oracle JSON/limit syntax for SQLite."""
     sql = sql.replace("JSON_TABLE(i.incident_json,'$.evidence_ids[*]' COLUMNS (eid VARCHAR2(200) PATH '$')) ids",
         "json_each(i.incident_json,'$.evidence_ids') ids").replace("e.evidence_id=ids.eid", "e.evidence_id=ids.value")
+    sql = re.sub(r"JSON_TABLE\(p.payload, '\$\.event_posts\[\*\]' COLUMNS \(\s*"
+        r"post_key VARCHAR2\(200\) PATH '\$\.post_key', event_id VARCHAR2\(200\) PATH '\$\.event_id',\s*"
+        r"relation_json CLOB FORMAT JSON PATH '\$'\)\) r", "json_each(p.payload,'$.event_posts') r", sql)
+    sql = sql.replace("r.relation_json", "r.value").replace("r.post_key", "json_extract(r.value,'$.post_key')").replace(
+        "r.event_id", "json_extract(r.value,'$.event_id')")
     sql = re.sub(r"JSON_VALUE\(([^,]+),('[^']+') RETURNING TIMESTAMP WITH TIME ZONE\)",
         r"TO_UTC_TIMESTAMP_TZ(json_extract(\1,\2))", sql)
     sql = sql.replace(" RETURNING NUMBER", "").replace("JSON_VALUE(", "json_extract(")

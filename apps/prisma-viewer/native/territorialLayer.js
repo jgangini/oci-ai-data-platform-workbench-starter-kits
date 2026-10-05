@@ -151,7 +151,7 @@ export function createTerritorialLayer({ Cesium, request, signal }) {
   }
 
   const layer = {
-    id: TERRITORIAL_LAYER_ID, name: 'Social networks', icon: '◉', source: 'OCI AIDP · Workflow', updateInterval: 60000,
+    id: TERRITORIAL_LAYER_ID, name: 'Social networks', icon: '◉', source: 'OCI AIDP · Workflow', updateInterval: 0,
     init(target) {
       viewer = target;
       dataSource = new Cesium.CustomDataSource(TERRITORIAL_LAYER_ID);
@@ -199,7 +199,7 @@ export function createTerritorialLayer({ Cesium, request, signal }) {
       }
       notify(); return updated;
     },
-    destroy() { endDrag(); lifetime.abort(); feed.pending?.abort(); settleRender?.(); popupAnchor?.destroy(); picking?.destroy(); if (dataSource) viewer.dataSources.remove(dataSource, true); listeners.clear(); },
+    destroy() { feed.enabled = false; notify(); endDrag(); lifetime.abort(); feed.pending?.abort(); settleRender?.(); popupAnchor?.destroy(); picking?.destroy(); if (dataSource) viewer.dataSources.remove(dataSource, true); listeners.clear(); },
     attachPopup(element) { popupAnchor?.destroy(); popup = element; if (viewer) popupAnchor = anchorEventPopup(viewer, Cesium, popup, () => ({ enabled: feed.enabled, incident: { ...feed.snapshot.incidents.find((item) => item.id === selectedId), ...locationDrafts.get(selectedId) } })); return () => { popupAnchor?.destroy(); popupAnchor = undefined; popup = undefined; }; },
     getStats: () => ({ count: items().length, lastUpdate: feed.lastUpdate, lastError: feed.lastError, available: Boolean(feed.snapshot.version) }),
     state,
