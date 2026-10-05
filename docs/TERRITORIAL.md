@@ -850,3 +850,83 @@ The Spark/Delta preservation regression is prepared but was not executed:
 the available local image lacks Spark and Java. The native workflow/database
 upgrade remains separate and must wait for the existing family-scoped cleanup
 to complete; its operation ID and scope are not changed by the UI update.
+
+## Performance diagnosis and cancelled cleanup — 2026-10-05
+
+The administrator subsequently cancelled that family-scoped cleanup. The native
+publisher job run and its task were confirmed `CANCELED` at 18:49:41 UTC.
+Automatic publisher restart is held, captures remain paused, and the original
+operation ID, `river_level` scope and recovery journal are retained. The control
+document uses the existing `error` state with an explicit cancellation message;
+this preserves the reset guard and does not report completion. No retry or new
+cleanup was started for this investigation. Cancellation does not roll back the
+partial deletion: the journal recorded 94 replacement publications and counters
+of 143 landing files and 112801 sensor events removed before the stop.
+
+Read-only measurements used the deployed runtime and source at `87b3984`.
+Times below are samples, not latency guarantees. No Spark computation, capture,
+database write or deletion was used to benchmark performance.
+
+| Path | Evidence | Consequence |
+| --- | --- | --- |
+| Historical cleanup | 24 consecutive Delta commits: 12 single-row `MERGE`s, median 22.065 s (20.260–23.540 s), and 12 single-row `DELETE`s, median 1.804 s (1.698–2.207 s). Median interval between completed replacement deletes: 28.206 s. | A separate pair of distributed writes per publication dominates this part of cleanup. |
+| Autonomous historical payloads | Four `LIST_PUBLICATIONS` calls returned 2.17–2.79 MB each. Procedure calls took 140–175 ms; CLOB reads took 1.104, 1.166, 2.413 and 107.136 s; JSON parsing took 13–18 ms. | Large payload retrieval is a second cost, with one severe latency outlier. The outlier's underlying cause is not established. |
+| Social configuration | Nine small control documents took 2.037 s in serial procedure/LOB reads, plus 0.648 s to connect. | Even an empty table does not make source configuration immediate. |
+| Sensor publication | Current snapshot: 2038748 bytes and 3200 sensors. Pointer GET took 0.537 s; snapshot GET/body took 1.009 s and parsing 14 ms. | The sensor table repeatedly transfers the full publication before displaying a page. This path reads Object Storage, not a historical Autonomous CLOB. |
+
+The Social Networks table always requests `sort=published_at` in
+[`TerritorialPosts.tsx`](../apps/frontend/src/TerritorialPosts.tsx).
+[`posts._ordered_page`](../apps/backend/app/territorial/posts.py) consequently
+scans every stored post in pages of 100, hydrates their display fields, sorts
+them and computes a full digest before returning the requested 20 rows. Each
+internal page opens another database connection through
+[`CloudRuntime.posts`](../apps/backend/app/territorial/cloud.py), and
+[`LIST_POSTS`](../apps/backend/app/territorial/database.py) repeats its maximum
+and count queries. This is an O(N) application-side scan for each displayed
+page, search, sort or refresh. The live Social table was empty during this
+measurement: its 34-byte result took about 0.225 s excluding connection setup.
+The scan defect is confirmed by code; its latency at a populated size was not
+measured, and the 107-second history read must not be attributed to this table.
+
+[`TerritorialSensorReadings`](../apps/frontend/src/TerritorialSensorReadings.tsx)
+downloads the complete map publication every five seconds while active, then
+filters, sorts and slices in the browser. Other publication fields travel with
+the sensor rows. The backend downloads the same immutable snapshot again even
+when the current version has not changed.
+
+[`TerritorialAdmin`](../apps/frontend/src/TerritorialAdmin.tsx) keeps the source
+modules mounted with `hidden`. Social posts and both configuration pollers
+continue every five seconds while their module is hidden; sensor readings
+already respect their `active` prop. Sensor configuration also opens four
+connections per response for individual control-document reads. These extra
+requests contribute load even when Social has no records.
+
+The corrective order is:
+
+1. Stop polling inactive modules and hidden browser pages; reuse one connection
+   for each configuration response. Keep mutation and reset status authoritative.
+2. Move Social filtering, chronological ordering and pagination into the stored
+   projection, returning only the requested page. Preserve UTC date semantics,
+   hydrated search fields, stable cutoffs, signed cursors and edit invalidation;
+   a capture-sequence maximum alone does not detect edits to older posts.
+3. Serve a sensor-only projection with server pagination and reuse immutable
+   snapshots by version. Check the current pointer and authorization per request;
+   do not cache mutable capture, review or reset controls.
+4. Batch historical Delta replacement writes and deletes, initially bounded to
+   four publications or 32 MiB, with an explicit single-item policy for an
+   otherwise valid publication above that target. Make all replacement copies and the recovery
+   journal durable before deleting originals. Keep one Delta writer and separate
+   database connections for any parallel work; more concurrent deletes are not
+   a substitute for fewer distributed transactions.
+5. Enumerate history by metadata and fetch payloads only when needed. Preserve
+   reconciliation of publications present in only one or two of the three stores;
+   simply skipping those passes would break recovery after interrupted writes.
+
+The Spark application listing was reachable, but the stage endpoint returned
+404. Therefore the 22-second `MERGE` cost cannot yet be assigned specifically to
+shuffle, scheduling, worker size or storage throughput. Local pruning of a
+separate saved 7 MB snapshot took about 49 ms for one sensor family, which does
+not explain these multi-second distributed operations. The proposed optimizations
+are not deployed by this diagnostic step, and no speedup is claimed. Acceptance
+must measure populated first/next pages, unchanged-version refreshes, hidden-tab
+request counts and interrupted batch recovery before any approved cleanup retry.
