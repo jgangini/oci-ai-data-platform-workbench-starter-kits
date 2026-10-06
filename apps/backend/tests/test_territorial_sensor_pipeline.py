@@ -107,7 +107,8 @@ def test_social_job_does_not_start_or_own_the_sensor_checkpoint(monkeypatch):
         query.awaitTermination.assert_not_called()
 
 
-def test_sensor_entrypoint_owns_only_its_heartbeat_and_stops_failed_query(monkeypatch):
+@pytest.mark.parametrize("store,version", [("autonomous", 2), ("autonomous", 3), ("gold", 3)])
+def test_sensor_entrypoint_owns_only_its_heartbeat_and_stops_failed_query(monkeypatch, store, version):
     from app.territorial import sensor_pipeline, database, landing
     query = SimpleNamespace(id="sensor-query", recentProgress=[{}], lastProgress={"numInputRows": 4000},
                             isActive=True, exception=MagicMock(side_effect=[None, RuntimeError("stream failed")]), stop=MagicMock())
@@ -115,10 +116,10 @@ def test_sensor_entrypoint_owns_only_its_heartbeat_and_stops_failed_query(monkey
     writes = []
     monkeypatch.setattr(database, "mutate_document", lambda _connection, name, update: writes.append((name, update({}))))
     monkeypatch.setattr(database, "read_document", lambda *_: {})
-    monkeypatch.setattr(database, "sensor_reset_version", lambda _: 2)
+    monkeypatch.setattr(database, "sensor_reset_version", lambda _: version)
     monkeypatch.setattr(landing, "ensure_volumes", lambda *_: None)
     monkeypatch.setattr(sensor_pipeline.time, "sleep", lambda _: None)
-    config = {**CONFIG, "sensor_landing_volume_path": "/Volumes/oci_medallion/prisma_ingest/landing/sensors",
+    config = {**CONFIG, "analytics_store": store, "sensor_landing_volume_path": "/Volumes/oci_medallion/prisma_ingest/landing/sensors",
               "sensor_checkpoint_volume_path": "/Volumes/oci_medallion/prisma_ingest/checkpoints/sensors-v1", "pipeline_revision": "revision"}
     with pytest.raises(RuntimeError, match="checkpoint retained"):
         sensor_pipeline.run(None, None, config, connection=object(), lake=lake, clock=lambda: NOW)
@@ -129,6 +130,19 @@ def test_sensor_entrypoint_owns_only_its_heartbeat_and_stops_failed_query(monkey
     assert writes[0][1]["sensor_layers_version"] == 2
     lake.restore_history.assert_called_once_with()
     query.stop.assert_called_once()
+
+
+@pytest.mark.parametrize("store,version", [("autonomous", 1), ("gold", 2)])
+def test_sensor_entrypoint_rejects_old_contract_before_restoring_or_ingesting(monkeypatch, store, version):
+    from app.territorial import sensor_pipeline, database, landing
+    lake = SimpleNamespace(start=MagicMock(), restore_history=MagicMock())
+    monkeypatch.setattr(database, "sensor_reset_version", lambda _: version)
+    monkeypatch.setattr(database, "mutate_document", lambda *_: pytest.fail("Old contract must not change controls"))
+    monkeypatch.setattr(landing, "ensure_volumes", lambda *_: None)
+    with pytest.raises(RuntimeError, match="Sensor reset database contract"):
+        sensor_pipeline.run(None, None, {**CONFIG, "analytics_store": store}, connection=object(), lake=lake)
+    lake.restore_history.assert_not_called()
+    lake.start.assert_not_called()
 
 
 def test_restart_with_delete_receipt_does_not_restore_history_until_reset_completes(monkeypatch):

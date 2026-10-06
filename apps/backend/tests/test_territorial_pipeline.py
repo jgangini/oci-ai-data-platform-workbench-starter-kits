@@ -99,13 +99,37 @@ def runtime(monkeypatch):
     return log, docs, publications, Lake(log, objects), objects
 
 
-def test_old_database_reset_contract_fails_before_ingestion_or_publication(runtime, monkeypatch):
+@pytest.mark.parametrize("store,social_version,sensor_version", [("autonomous", 1, 2), ("gold", 2, 3), ("gold", 3, 2)])
+def test_old_database_reset_contract_fails_before_ingestion_or_publication(runtime, monkeypatch, store, social_version, sensor_version):
     log, docs, publications, lake, objects = runtime
-    monkeypatch.setattr(pipeline, "reset_version", lambda _db: 1)
+    monkeypatch.setattr(pipeline, "reset_version", lambda _db: social_version)
+    monkeypatch.setattr(pipeline, "sensor_reset_version", lambda _db: sensor_version)
     with pytest.raises(RuntimeError, match="database contract"):
-        pipeline.run(None, None, CONFIG, connection=object(), objects=objects, lake=lake,
+        pipeline.run(None, None, {**CONFIG, "analytics_store": store}, connection=object(), objects=objects, lake=lake,
                      client=object(), classifier=lambda events: events, clock=lambda: NOW)
     assert log == [] and docs == publications == objects.data == {}
+
+
+@pytest.mark.parametrize("store,version", [("autonomous", 2), ("autonomous", 3), ("gold", 3)])
+def test_database_reset_versions_allow_legacy_and_gold_entrypoints(runtime, monkeypatch, store, version):
+    _, docs, publications, lake, objects = runtime
+    monkeypatch.setattr(pipeline, "reset_version", lambda _db: version)
+    monkeypatch.setattr(pipeline, "sensor_reset_version", lambda _db: version)
+    snapshot = pipeline.run(None, None, {**CONFIG, "analytics_store": store}, connection=object(),
+                            objects=objects, lake=lake, client=object(), classifier=lambda events: events, clock=lambda: NOW)
+    assert docs["status_pipeline"]["status"] == "ready"
+    assert lake.data["gold"][snapshot["version"]]["version"] == snapshot["version"]
+    assert (snapshot["version"] in publications) is (store == "autonomous")
+
+
+def test_gold_cutover_preserves_publication_without_autonomous_analytical_copy(runtime):
+    log, docs, publications, lake, objects = runtime
+    snapshot = pipeline.publish_snapshot(object(), objects, lake, {**CONFIG, "analytics_store": "gold"}, [], {}, {}, NOW)
+    assert publications == {} and "adb" not in log
+    assert lake.data["gold"][snapshot["version"]]["version"] == snapshot["version"]
+    pointer = json.loads(objects.data["04_gold/prisma/current.json"])
+    assert pointer["version"] == snapshot["version"]
+    assert json.loads(objects.data[pointer["snapshot_key"]]) == snapshot
 
 
 def test_sensor_coordinate_overrides_enter_gold_adb_and_agent_publication_atomically(runtime):

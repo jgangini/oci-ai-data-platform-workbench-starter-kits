@@ -19,7 +19,7 @@ import post_apply
 
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("governance_exists", [False, True])
-def test_sensor_read_grant_is_installed_for_new_and_existing_agent_credentials(monkeypatch, tmp_path, existing, governance_exists):
+def test_control_writer_is_separate_and_legacy_reader_is_preserved(monkeypatch, tmp_path, existing, governance_exists):
     api, connection = Api(), MagicMock()
     connection.cursor.return_value.fetchone.return_value = (0,)
     monkeypatch.setitem(sys.modules, "oracledb", SimpleNamespace(connect=lambda **_: nullcontext(connection)))
@@ -41,17 +41,21 @@ def test_sensor_read_grant_is_installed_for_new_and_existing_agent_credentials(m
         {"compartment_ocid": "test", "agent_model_id": "test"}, wallet_dsn=lambda _: "test",
         validate_wallet=lambda value: value, generate_password=passwords)
     statements = [entry.args[0] for entry in connection.cursor.return_value.execute.call_args_list]
-    assert statements.count("GRANT SELECT ON ADMIN.PRISMA_V_SENSOR_EVENTS TO PRISMA_READER") == 1
-    assert not any("PRISMA_V_SENSOR_EVENTS TO PRISMA_WRITER" in sql for sql in statements)
-    assert passwords.call_count == (0 if existing else 2)
+    assert not any("GRANT SELECT" in sql or "PRISMA_READER" in sql for sql in statements)
+    assert passwords.call_count == (0 if existing else 1)
     if existing:
         assert all(method == "GET" for method, *_ in api.calls)
         assert not any(sql.startswith(("CREATE USER", "ALTER USER")) for sql in statements)
     else:
-        writer = next(payload for method, path, payload, _ in api.calls if method == "POST" and path == "/credentials" and payload["displayName"] == "TerritorialWriterRuntime")
+        writer = next(payload for method, path, payload, _ in api.calls if method == "POST" and path == "/credentials" and payload["displayName"] == "AidpControlStore")
         fields = {item["secretKey"] for item in writer["credentialDetails"]["secretTokenPair"]}
-        assert ("private_key" in fields) is not governance_exists
+        assert not {"private_key", "tenancy", "user", "fingerprint"}.intersection(fields)
         assert {"db_user", "db_password", "dsn", "wallet", "wallet_password"} <= fields
+
+
+def stream_runtime(values=None):
+    return {"writer_credential_name": "AidpControlStore", "pipeline_revision": "a" * 64,
+            "oci_credential_name": "AidpRuntime", "oci_identity_sha256": "b" * 64, **(values or {})}
 
 
 class Api:
@@ -82,11 +86,11 @@ class Api:
             return response(self.contents[path])
         if method == "GET" and path == "/asyncOperations/operation":
             return response({"status": "SUCCEEDED"})
-        if path.endswith("/actions/deploy"):
-            self.resources[path.removesuffix("/actions/deploy")] = [{"key": "deployment", "lifecycleState": "DEPLOYING"}]
+        if path.endswith(("/actions/deploy", "/actions/redeploy")):
+            self.resources[path.rsplit("/actions/", 1)[0]] = [{"key": "deployment", "lifecycleState": "DEPLOYING", **payload}]
             return SimpleNamespace(body={}, headers={"aidp-async-operation-key": "operation"})
         if path.endswith("/deployments/deployment"):
-            return response({"key": "deployment", "lifecycleState": self.deploy_state,
+            return response({**self.resources[path.rsplit("/", 1)[0]][0], "key": "deployment", "lifecycleState": self.deploy_state,
                 "endpointUrl": "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/managed/chat",
                 "sessionRetentionConfig": {"retentionPeriodInDays": 7, "unused": None}})
         if path.endswith("/jobRuns") and method == "POST":
@@ -102,6 +106,9 @@ class Api:
             if "timeoutSeconds" not in payload:
                 self.resources[path]["timeoutSeconds"] = self.job_timeout_default
             return response(self.resources[path])
+        if method == "PUT" and "/agents/" in path:
+            self.resources[path].update(payload)
+            return response(self.resources[path])
         if method == "POST":
             state_field = "lifeCycleState" if path == "/credentials" else "lifecycleState"
             value = {**payload, "key": "key-" + (payload.get("displayName") or payload["name"]), state_field: "ACTIVE"}
@@ -111,6 +118,89 @@ class Api:
         if method == "GET":
             return response(self.resources.get(path, []))
         raise AssertionError((method, path))
+
+
+@pytest.mark.parametrize("existing", [None, "AidpRuntime", "AidpDataGovernanceExtension", "TerritorialWriterRuntime", "PrismaWriterRuntime"])
+def test_shared_api_credential_is_created_once_or_adopted_without_rotation(tmp_path, existing):
+    api = Api()
+    if existing:
+        api.resources["/credentials"] = [{"key": "existing", "displayName": existing, "type": "SECRET_TOKEN", "lifeCycleState": "ACTIVE"}]
+    key = tmp_path / "fixture.pem"
+    if not existing:
+        key.write_text("fixture only", encoding="utf-8")
+    config = {"tenancy": "tenancy", "user": "user", "fingerprint": "fingerprint", "region": "region", "key_file": str(key)}
+    first = bootstrap.ensure_oci_credential(api, config)
+    assert bootstrap.ensure_oci_credential(api, config) == first
+    assert first["displayName"] == (existing or "AidpRuntime")
+    writes = [payload for method, path, payload, _ in api.calls if method != "GET"]
+    assert len(writes) == (0 if existing else 1)
+    if writes:
+        keys = {item["secretKey"] for item in writes[0]["credentialDetails"]["secretTokenPair"]}
+        assert keys == {"tenancy", "user", "fingerprint", "region", "private_key"}
+
+
+def test_stable_shared_sources_cannot_be_overwritten_while_other_workflow_runs(monkeypatch):
+    api, bundle = Api(), bootstrap.runtime_archive()
+    config = {"streaming_mode": "persistent"}
+    social = bootstrap.install_job(api, "ws", "social-compute", stream_runtime(config), bundle, ensure_folder=lambda *_: None)
+    sensors = bootstrap.install_job(api, "ws", "sensor-compute", stream_runtime(config), bundle, ensure_folder=lambda *_: None, workflow="sensors")
+    request = api.request
+    def running(method, path, **kwargs):
+        if path.endswith("/jobRuns") and (kwargs.get("params") or {}).get("jobKey") == sensors:
+            return SimpleNamespace(body=[{"key": "running", "jobKey": sensors, "state": {"status": "RUNNING"}}], headers={})
+        return request(method, path, **kwargs)
+    monkeypatch.setattr(api, "request", running)
+    previous, count = dict(api.contents), len(api.calls)
+    with pytest.raises(RuntimeError, match="Stop both managed"):
+        bootstrap.install_job(api, "ws", "social-compute", stream_runtime({**config, "bucket": "changed"}), bundle, ensure_folder=lambda *_: None)
+    assert api.contents == previous and all(method == "GET" for method, *_ in api.calls[count:])
+    assert bootstrap.install_job(api, "ws", "social-compute", stream_runtime(config), bundle, ensure_folder=lambda *_: None) == social
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_matching_manifest_does_not_hide_live_source_drift(monkeypatch, missing):
+    api, bundle = Api(), bootstrap.runtime_archive()
+    config = stream_runtime({"streaming_mode": "persistent"})
+    job = bootstrap.install_job(api, "ws", "compute", config, bundle, ensure_folder=lambda *_: None)
+    entry = api.resources["/workspaces/ws/jobs/" + job]["tasks"][0]["filePath"]
+    endpoint = next(path for path, item in api.contents.items() if item["path"] == entry)
+    expected = api.contents[endpoint]["content"]
+    request, active = api.request, True
+    def running(method, path, **kwargs):
+        if path.endswith("/jobRuns"):
+            return SimpleNamespace(body=[{"key": "active", "jobKey": job, "state": {"status": "RUNNING"}}] if active else [], headers={})
+        return request(method, path, **kwargs)
+    monkeypatch.setattr(api, "request", running)
+    # A live workflow with identical source is an idempotent reinstall.
+    assert bootstrap.install_job(api, "ws", "compute", config, bundle, ensure_folder=lambda *_: None) == job
+    if missing:
+        del api.contents[endpoint]
+    else:
+        api.contents[endpoint]["content"] += "\n# external change\n"
+    previous, count = dict(api.contents), len(api.calls)
+    with pytest.raises(RuntimeError, match="Stop both managed"):
+        bootstrap.publish_runtime_sources(api, "ws", config, bundle, ensure_folder=lambda *_: None)
+    assert api.contents == previous and all(method == "GET" for method, *_ in api.calls[count:])
+    active = False
+    bootstrap.publish_runtime_sources(api, "ws", config, bundle, ensure_folder=lambda *_: None)
+    assert api.contents[endpoint]["content"] == expected
+
+
+@pytest.mark.parametrize("legacy_path", ["/Workspace/medallon/prisma/prisma_tick_version.ipynb", "/Workspace/territorial/releases/old/social_network.py"])
+def test_first_canonical_sources_do_not_interrupt_legacy_streams(monkeypatch, legacy_path):
+    api = Api()
+    old = {"key": "legacy", "name": "prisma_bogota_tick", "tasks": [{"filePath": legacy_path}]}
+    api.resources["/workspaces/ws/jobs"] = [old]
+    api.resources["/workspaces/ws/jobs/legacy"] = old
+    request = api.request
+    def running(method, path, **kwargs):
+        if path.endswith("/jobRuns"):
+            pytest.fail("Legacy sources must not be stopped or polled for canonical publication")
+        return request(method, path, **kwargs)
+    monkeypatch.setattr(api, "request", running)
+    root = bootstrap.publish_runtime_sources(api, "ws", stream_runtime({}), bootstrap.runtime_archive(), ensure_folder=lambda *_: None)
+    assert root == "/Workspace/medallion/gods_eye_view"
+    assert not any(method != "GET" and "/jobs" in path for method, path, *_ in api.calls)
 
 
 @pytest.fixture(autouse=True)
@@ -127,17 +217,16 @@ def test_bundle_is_deterministic_compilable_and_contains_classification(tmp_path
         assert "territorial/scheduling.py" in archive.namelist()
         assert "territorial/pipeline.py" in archive.namelist()
         assert {"territorial/sensors.py", "territorial/sensor_pipeline.py"} <= set(archive.namelist())
-        assert "prisma/__init__.py" in archive.namelist()
+        assert all(name.startswith("territorial/") for name in archive.namelist())
         assert all("local" not in name and "api" not in name for name in archive.namelist())
         for name in archive.namelist():
             ast.parse(archive.read(name), filename=name)
-    ast.parse(bootstrap.bundle_prelude(bundle))
     import subprocess
     path = tmp_path / "runtime.zip"
     path.write_bytes(bundle)
     result = subprocess.run([sys.executable, "-I", "-c",
         "import sys; sys.path.insert(0, sys.argv[1]); from territorial.pipeline import run; "
-        "from prisma.pipeline import run as legacy; assert callable(run) and callable(legacy)", str(path)],
+        "from territorial.gold_reader import query; assert callable(run) and callable(query)", str(path)],
         capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
 
@@ -223,42 +312,107 @@ def test_runtime_credential_reuses_unique_token_and_rejects_duplicates_without_r
     assert all(method == "GET" for method, *_ in api.calls)
 
 
+def agent_runtime():
+    return {"region": "us-chicago-1", "model_id": "governance-model", "compartment_id": "compartment",
+        "oci_credential_name": "AidpRuntime", "oci_identity_sha256": "a" * 64,
+        "catalog": "oci_medallion", "gold_query_compute_id": "gold-query-compute"}
+
+
+def publish_agent(api, runtime=None):
+    runtime, bundle = runtime or agent_runtime(), bootstrap.runtime_archive()
+    bootstrap.publish_runtime_sources(api, "ws", stream_runtime(runtime), bundle, ensure_folder=lambda *_: None)
+    return bootstrap.publish_agent(api, "ws", bundle, runtime["region"], runtime)
+
+
 def test_agent_publish_waits_async_and_detail_active_without_deleting_prior_release():
     api = Api()
     api.resources["/workspaces/ws/agents"] = [{"displayName": "prior-agent", "key": "prior", "lifecycleState": "ACTIVE"}]
-    result = bootstrap.publish_agent(api, "ws", bootstrap.runtime_archive(), "us-chicago-1")
+    result = publish_agent(api)
     assert result["state"] == "ACTIVE" and result["endpoint"].endswith("/chat")
     assert any(path == "/asyncOperations/operation" for _, path, _, _ in api.calls)
     assert not any(method == "DELETE" for method, _, _, _ in api.calls)
     assert api.resources["/workspaces/ws/agents"][0]["key"] == "prior"
-    source = next(value["content"] for path, value in api.contents.items() if "agent_" in path)
+    source = next(value["content"] for value in api.contents.values() if value["path"] == "/Workspace/medallion/gods_eye_view/40_report/ai_gods_eye_view.py")
     ast.parse(source)
+    assert "sys.path" not in source and "manifest.json" not in source and "gold_query_compute_id" in source
+    compute = next(payload for method, path, payload, _ in api.calls if method == "POST" and path.endswith("/clusters"))
+    assert compute["displayName"] == "aidp_gods_eye_view_agent_compute"
 
 
 def test_failed_agent_deployment_never_returns_ready():
     api = Api()
     api.deploy_state = "FAILED"
     with pytest.raises(RuntimeError, match="prior deployment preserved"):
-        bootstrap.publish_agent(api, "ws", bootstrap.runtime_archive(), "us-chicago-1")
+        publish_agent(api)
     assert not any(method == "DELETE" for method, _, _, _ in api.calls)
 
 
-def test_agent_publication_versions_explicit_model_and_shared_identity_with_bundle():
-    api, bundle = Api(), bootstrap.runtime_archive()
-    runtime = {"region": "us-chicago-1", "model_id": "governance-model", "compartment_id": "compartment",
-        "oci_credential_name": "AidpDataGovernanceExtension", "oci_identity_sha256": "a" * 64,
+def test_published_agent_runs_as_one_relocated_native_file(tmp_path):
+    import subprocess
+    api = Api()
+    publish_agent(api)
+    entries = [item for item in api.contents.values() if "/40_report/" in item["path"]]
+    assert {item["name"] for item in entries} == {"ai_gods_eye_view.py", "requirements.txt"}
+    entry = tmp_path / "ai_gods_eye_view.py"
+    entry.write_text(next(item["content"] for item in entries if item["name"] == entry.name), encoding="utf-8")
+    result = subprocess.run([sys.executable, "-I", "-c",
+        "import runpy,sys; namespace=runpy.run_path(sys.argv[1]); "
+        "assert namespace['RUNTIME_CONFIG']['oci_credential_name']=='AidpRuntime'; "
+        "assert namespace['parse_bbox']('1,2,3,4')==(1,2,3,4)", str(entry)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+
+
+def test_agent_publication_updates_one_agent_and_deployment_on_stable_paths():
+    api = Api()
+    runtime = {**agent_runtime(),
         "unrelated_runtime_field": "must-not-enter-agent-source"}
-    first = bootstrap.publish_agent(api, "ws", bundle, runtime["region"], runtime)
-    repeated = bootstrap.publish_agent(api, "ws", bundle, runtime["region"], runtime)
-    second = bootstrap.publish_agent(api, "ws", bundle, runtime["region"], {**runtime, "model_id": "updated-model"})
+    first = publish_agent(api, runtime)
+    repeated = publish_agent(api, runtime)
+    second = publish_agent(api, {**runtime, "model_id": "updated-model"})
     assert first == repeated and first["revision"] != second["revision"]
-    entries = [value["content"] for value in api.contents.values() if value["path"].endswith(".py")]
+    assert first["agent_key"] == second["agent_key"] and first["deployment_key"] == second["deployment_key"]
+    entries = [payload["content"] for method, _, payload, _ in api.calls if method == "PUT" and isinstance(payload, dict) and payload.get("path") == "/Workspace/medallion/gods_eye_view/40_report/ai_gods_eye_view.py"]
     assert len(entries) == 2
     configs = [ast.literal_eval(ast.parse(source).body[-1].value) for source in entries]
     assert {value["model_id"] for value in configs} == {"governance-model", "updated-model"}
-    assert all(value["oci_credential_name"] == "AidpDataGovernanceExtension" and value["oci_identity_sha256"] == "a" * 64 for value in configs)
+    assert all(value["oci_credential_name"] == "AidpRuntime" and value["oci_identity_sha256"] == "a" * 64 for value in configs)
+    assert all(value["gold_query_compute_id"] == "gold-query-compute" and "reader_credential_name" not in value for value in configs)
     assert all("must-not-enter-agent-source" not in source for source in entries)
     assert not any(method in {"PUT", "DELETE"} and path.startswith("/credentials") for method, path, *_ in api.calls)
+    assert len([1 for method, path, *_ in api.calls if method == "POST" and path.endswith("/agents")]) == 1
+    assert len([1 for method, path, *_ in api.calls if method == "POST" and path.endswith("/actions/redeploy")]) == 1
+
+
+def test_agent_requires_gold_configuration_before_publishing():
+    api = Api()
+    with pytest.raises(RuntimeError, match="Gold agent configuration incomplete"):
+        bootstrap.publish_agent(api, "ws", bootstrap.runtime_archive(), "us-chicago-1", {"reader_credential_name": "PrismaReaderRuntime"})
+    assert api.calls == []
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_final_agent_name_adopts_previous_canonical_id_without_new_agent(explicit):
+    api, runtime = Api(), agent_runtime()
+    previous = publish_agent(api, runtime)
+    detail = api.resources["/workspaces/ws/agents/" + previous["agent_key"]]
+    detail["displayName"] = "territorial_assistant"
+    if explicit:
+        runtime["agent_id"] = previous["agent_key"]
+    updated = publish_agent(api, runtime)
+    assert updated["agent_key"] == previous["agent_key"]
+    assert updated["deployment_key"] == previous["deployment_key"]
+    assert detail["displayName"] == "ai_gods_eye_view"
+    assert detail["entryFilePath"] == "/Workspace/medallion/gods_eye_view/40_report/ai_gods_eye_view.py"
+    assert len([1 for method, path, *_ in api.calls if method == "POST" and path.endswith("/agents")]) == 1
+
+
+def test_explicit_agent_id_does_not_fall_back_to_creating_another():
+    api = Api()
+    api.resources["/workspaces/ws/agents/foreign"] = {"key": "foreign", "displayName": "foreign", "state": "ACTIVE"}
+    with pytest.raises(RuntimeError, match="agent identity differs"):
+        publish_agent(api, {**agent_runtime(), "agent_id": "foreign"})
+    assert not any(method == "POST" and path.endswith("/agents") for method, path, *_ in api.calls)
 
 
 def test_hidden_compute_is_reused_by_scoped_async_resource_key():
@@ -271,6 +425,69 @@ def test_hidden_compute_is_reused_by_scoped_async_resource_key():
     result = bootstrap.ensure(api, "/workspaces/ws/clusters", "prisma_agent_compute", {}, ready=True)
     assert result["key"] == "hidden"
     assert not any(method == "POST" for method, _, _, _ in api.calls)
+
+
+@pytest.mark.parametrize("name", ["territorial_agent_compute", "prisma_agent_compute"])
+def test_explicit_hidden_agent_compute_keeps_identity_without_creating_another(name):
+    api = Api()
+    api.resources["/workspaces/ws/clusters/hidden"] = {"displayName": name, "key": "hidden", "type": "AI_COMPUTE", "state": "ACTIVE"}
+    published = publish_agent(api, {**agent_runtime(), "agent_compute_id": "hidden"})
+    detail = api.resources["/workspaces/ws/agents/" + published["agent_key"]]
+    assert detail["computeKey"] == "hidden"
+    assert all(method == "GET" for method, path, *_ in api.calls if "/clusters" in path)
+    assert not any(path.endswith("/clusters") or path == "/asyncOperations" for _, path, *_ in api.calls)
+
+
+def test_renamed_hidden_compute_is_discovered_from_legacy_create_without_duplicates():
+    api = Api()
+    api.resources["/asyncOperations"] = [{"resourceDisplayName": "prisma_agent_compute", "resourceName": "ws.hidden",
+        "actionType": "CREATE_CLUSTER", "status": "SUCCEEDED"}]
+    api.resources["/workspaces/ws/clusters/hidden"] = {"displayName": "territorial_agent_compute", "key": "hidden", "type": "AI_COMPUTE", "state": "ACTIVE"}
+    assert bootstrap.install_agent_compute(api, "ws")["key"] == "hidden"
+    assert all(method == "GET" for method, *_ in api.calls)
+
+
+def test_both_agent_compute_names_are_ambiguous_without_an_explicit_id():
+    api = Api()
+    api.resources["/workspaces/ws/clusters"] = [{"displayName": name, "key": name, "type": "AI_COMPUTE", "state": "ACTIVE"}
+        for name in ("territorial_agent_compute", "prisma_agent_compute")]
+    with pytest.raises(RuntimeError, match="Duplicate"):
+        bootstrap.install_agent_compute(api, "ws")
+    assert all(method == "GET" for method, *_ in api.calls)
+
+
+@pytest.mark.parametrize("key", [None, 0, False, " "])
+def test_invalid_explicit_agent_compute_id_cannot_create_a_compute(key):
+    api = Api()
+    with pytest.raises(RuntimeError, match="identity is invalid"):
+        bootstrap.install_agent_compute(api, "ws", key)
+    assert api.calls == []
+
+
+@pytest.mark.parametrize("change", [{"displayName": "foreign"}, {"type": "USER"}, {"key": "other"}, {"state": "FAILED"}])
+def test_explicit_compute_never_falls_back_after_identity_or_readiness_failure(change):
+    api = Api()
+    api.resources["/workspaces/ws/clusters/hidden"] = {"displayName": "territorial_agent_compute", "key": "hidden", "type": "AI_COMPUTE", "state": "ACTIVE", **change}
+    with pytest.raises(RuntimeError, match="compute"):
+        bootstrap.install_agent_compute(api, "ws", "hidden")
+    assert [call[:2] for call in api.calls] == [("GET", "/workspaces/ws/clusters/hidden")]
+
+
+@pytest.mark.parametrize("names", [["AidpControlStore"], ["TerritorialWriterRuntime"], ["PrismaWriterRuntime"], []])
+def test_control_store_adopts_one_name_without_secret_reads_or_rotation(names):
+    api = Api()
+    api.resources["/credentials"] = [{"displayName": name, "key": name, "type": "SECRET_TOKEN", "lifeCycleState": "ACTIVE"} for name in names]
+    assert bootstrap.database_credential_name(api) == (names[0] if names else "AidpControlStore")
+    assert all(method == "GET" and path == "/credentials" for method, path, *_ in api.calls)
+
+
+def test_multiple_control_store_aliases_are_rejected_without_rotation():
+    api = Api()
+    api.resources["/credentials"] = [{"displayName": name, "key": name, "type": "SECRET_TOKEN", "lifeCycleState": "ACTIVE"}
+        for name in ("AidpControlStore", "PrismaWriterRuntime")]
+    with pytest.raises(RuntimeError, match="Ambiguous"):
+        bootstrap.database_credential_name(api)
+    assert all(method == "GET" for method, *_ in api.calls)
 
 
 @pytest.mark.parametrize("status,deleted", [("SUCCEEDED", True), ("IN_PROGRESS", False)])
@@ -335,34 +552,41 @@ def test_initial_job_requires_native_run_and_task_success_and_revision_token(mon
 def test_job_publishes_readable_python_files_and_preserves_live_schedule():
     api = Api()
     bundle = bootstrap.runtime_archive()
-    job = bootstrap.install_job(api, "ws", "compute", {"bucket": "gold"}, bundle, ensure_folder=lambda *_: None)
+    job = bootstrap.install_job(api, "ws", "compute", stream_runtime({"bucket": "gold"}), bundle, ensure_folder=lambda *_: None)
     detail = api.resources["/workspaces/ws/jobs/" + job]
     detail["schedule"] = {**detail["schedule"], "pauseStatus": "UNPAUSED"}
-    assert bootstrap.install_job(api, "ws", "compute", {"bucket": "gold"}, bundle, ensure_folder=lambda *_: None) == job
+    assert bootstrap.install_job(api, "ws", "compute", stream_runtime({"bucket": "gold"}), bundle, ensure_folder=lambda *_: None) == job
     assert detail["schedule"]["pauseStatus"] == "UNPAUSED"
     assert not any(method == "PATCH" and "/notebook/api/contents/" in path for method, path, _, _ in api.calls)
     assert not any("/actions/export/contents/" in path for _, path, _, _ in api.calls)
     task = detail["tasks"][0]
-    assert detail["name"] == "territorial_social_network"
+    assert detail["name"] == "wf_ai_gods_eye_view_social_network"
     assert task["type"] == "PYTHON_TASK" and task["source"] == "WORKSPACE"
     assert task["taskKey"] == "social_network" and task["filePath"].endswith("/social_network.py")
-    root = task["filePath"].rsplit("/", 1)[0]
-    assert ast.literal_eval(task["commandLineArguments"]) == [task["filePath"], "--runtime-root", root]
+    root = bootstrap.WORKSPACE_ROOT
+    assert task["filePath"] == root + "/10_bronze/social_network.py"
     files = {value["path"].removeprefix(root + "/"): value["content"] for value in api.contents.values()}
     assert all(value["format"] == "text" and value["type"] == "file" for value in api.contents.values())
-    assert {"social_network.py", "sensor_stream.py", "config.json", "manifest.json", "README.md", "territorial/pipeline.py", "prisma/__init__.py"} <= files.keys()
-    assert "base64" not in files["social_network.py"] and "base64" not in files["sensor_stream.py"]
+    assert set(files) == {"10_bronze/social_network.py", "10_bronze/sensor_stream.py", "manifest.json",
+                          "README.md", "20_silver/README.md", "30_gold/README.md"}
+    for path in ("10_bronze/social_network.py", "10_bronze/sensor_stream.py"):
+        source = files[path]
+        assert "--runtime-root" not in source and "manifest.json" not in source and "sys.path" not in source
+        assert not any(isinstance(node, ast.ImportFrom) and (node.level or (node.module or "").startswith("territorial"))
+                       for node in ast.walk(ast.parse(source)))
     manifest = json.loads(files["manifest.json"])
     assert manifest["bundle_sha256"] == hashlib.sha256(bundle).hexdigest()
-    assert root.rsplit("/", 1)[-1] == hashlib.sha256(files["manifest.json"].encode()).hexdigest()
+    assert ast.literal_eval(task["commandLineArguments"]) == [task["filePath"]]
     assert manifest["files"] == {name: hashlib.sha256(value.encode()).hexdigest() for name, value in files.items() if name != "manifest.json"}
     assert len([1 for method, path, _, _ in api.calls if method == "POST" and path.endswith("/jobs")]) == 1
     assert len([1 for method, path, _, _ in api.calls if method == "PUT" and "/jobs/" in path]) == 1
 
 
 @pytest.mark.parametrize("workflow,legacy,canonical", [
-    ("social", "prisma_bogota_tick", "territorial_social_network"),
-    ("sensors", "prisma_colombia_sensors", "territorial_sensor_stream"),
+    ("social", "prisma_bogota_tick", "wf_ai_gods_eye_view_social_network"),
+    ("sensors", "prisma_colombia_sensors", "wf_ai_gods_eye_view_sensor_stream"),
+    ("social", "territorial_social_network", "wf_ai_gods_eye_view_social_network"),
+    ("sensors", "territorial_sensor_stream", "wf_ai_gods_eye_view_sensor_stream"),
 ])
 @pytest.mark.parametrize("explicit_key", [False, True])
 def test_python_workflow_adopts_the_existing_job_key_without_creating_another(workflow, legacy, canonical, explicit_key):
@@ -374,12 +598,12 @@ def test_python_workflow_adopts_the_existing_job_key_without_creating_another(wo
     config = {"streaming_mode": "persistent"}
     if explicit_key:
         config["sensor_job_key" if workflow == "sensors" else "job_key"] = "existing-job"
-    result = bootstrap.install_job(api, "ws", "same-compute", config, bootstrap.runtime_archive(),
+    result = bootstrap.install_job(api, "ws", "same-compute", stream_runtime(config), bootstrap.runtime_archive(),
                                    ensure_folder=lambda *_: None, workflow=workflow)
     assert result == "existing-job" and old["name"] == canonical
     assert old["tasks"][0]["type"] == "PYTHON_TASK"
     assert not any(method == "POST" and path.endswith("/jobs") for method, path, *_ in api.calls)
-    assert bootstrap.install_job(api, "ws", "same-compute", config, bootstrap.runtime_archive(),
+    assert bootstrap.install_job(api, "ws", "same-compute", stream_runtime(config), bootstrap.runtime_archive(),
                                  ensure_folder=lambda *_: None, workflow=workflow) == result
 
 
@@ -391,7 +615,7 @@ def test_python_workflow_identity_ambiguity_fails_before_any_write(failure):
     api.resources["/workspaces/ws/jobs/existing"] = old
     config = {}
     if failure == "duplicate":
-        api.resources["/workspaces/ws/jobs"].append({"key": "other", "name": "territorial_social_network"})
+        api.resources["/workspaces/ws/jobs"].append({"key": "other", "name": "wf_ai_gods_eye_view_social_network"})
     elif failure == "wrong_key":
         config["job_key"] = "other"
     elif failure == "wrong_name":
@@ -400,33 +624,33 @@ def test_python_workflow_identity_ambiguity_fails_before_any_write(failure):
     else:
         old["lifecycleState"] = "DELETING"
     with pytest.raises(RuntimeError, match="[Ww]orkflow"):
-        bootstrap.install_job(api, "ws", "compute", config, bootstrap.runtime_archive(), ensure_folder=lambda *_: None)
+        bootstrap.install_job(api, "ws", "compute", stream_runtime(config), bootstrap.runtime_archive(), ensure_folder=lambda *_: None)
     assert all(method == "GET" for method, *_ in api.calls)
 
 
 @pytest.mark.parametrize("field,value", [
     ("source", "GIT_PROVIDER"), ("taskKey", "sensor_stream"),
-    ("filePath", "/Workspace/territorial/releases/invalid/social_network.py"),
+    ("filePath", "/Workspace/medallion/gods_eye_view/releases/invalid/social_network.py"),
     ("commandLineArguments", "--runtime-root /Workspace/another-release"),
-    ("commandLineArguments", "--runtime-root /Workspace/territorial/releases/" + "a" * 64 + " --check-runtime"),
+    ("commandLineArguments", "--runtime-root /Workspace/medallion/gods_eye_view/releases/" + "a" * 64 + " --check-runtime"),
 ])
-def test_initial_python_acceptance_rejects_unversioned_or_different_execution(field, value):
+def test_initial_python_acceptance_rejects_unmanaged_or_different_execution(field, value):
     api = Api()
-    root = "/Workspace/territorial/releases/" + "a" * 64
+    root = "/Workspace/medallion/gods_eye_view"
     task = {"type": "PYTHON_TASK", "taskKey": "social_network", "source": "WORKSPACE",
-            "filePath": root + "/social_network.py", "commandLineArguments": json.dumps([root + "/social_network.py", "--runtime-root", root])}
+            "filePath": root + "/10_bronze/social_network.py", "commandLineArguments": json.dumps([root + "/10_bronze/social_network.py"])}
     api.resources["/workspaces/ws/jobs/job"] = {"tasks": [{**task, field: value}]}
-    with pytest.raises(RuntimeError, match="one content-versioned source"):
+    with pytest.raises(RuntimeError, match="one managed source"):
         bootstrap.run_initial_job(api, "ws", "job", "revision")
     assert all(method == "GET" for method, *_ in api.calls)
 
 
 def test_persistent_task_is_explicit_and_reverts_to_finite_without_changing_job_identity():
     api, bundle = Api(), bootstrap.runtime_archive()
-    job = bootstrap.install_job(api, "ws", "compute", {}, bundle, ensure_folder=lambda *_: None)
+    job = bootstrap.install_job(api, "ws", "compute", stream_runtime({}), bundle, ensure_folder=lambda *_: None)
     detail = api.resources["/workspaces/ws/jobs/" + job]
     assert detail["tasks"][0]["isStreaming"] is False and detail["timeoutSeconds"] == 600
-    same = bootstrap.install_job(api, "ws", "compute", {"streaming_mode": "persistent"}, bundle, ensure_folder=lambda *_: None)
+    same = bootstrap.install_job(api, "ws", "compute", stream_runtime({"streaming_mode": "persistent"}), bundle, ensure_folder=lambda *_: None)
     assert same == job and detail["maxConcurrentRuns"] == 1 and detail["queue"] == {"isEnabled": False}
     assert detail["tasks"][0]["isStreaming"] is True and detail["timeoutSeconds"] == 0
     assert "maxRetries" not in detail["tasks"][0]
@@ -434,7 +658,7 @@ def test_persistent_task_is_explicit_and_reverts_to_finite_without_changing_job_
     with pytest.raises(RuntimeError, match="finite job"):
         bootstrap.run_initial_job(api, "ws", job, "persistent-bundle")
     assert not any(call[0] == "POST" and call[1].endswith("/jobRuns") for call in api.calls)
-    bootstrap.install_job(api, "ws", "compute", {}, bundle, ensure_folder=lambda *_: None)
+    bootstrap.install_job(api, "ws", "compute", stream_runtime({}), bundle, ensure_folder=lambda *_: None)
     assert detail["tasks"][0]["isStreaming"] is False and detail["timeoutSeconds"] == 600
     assert len([call for call in api.calls if call[0] == "POST" and call[1].endswith("/jobs")]) == 1
 
@@ -442,18 +666,18 @@ def test_persistent_task_is_explicit_and_reverts_to_finite_without_changing_job_
 @pytest.mark.parametrize("server_default", [None, 0, 600])
 def test_persistent_job_omits_timeout_and_requires_unlimited_roundtrip(server_default):
     api, bundle = Api(), bootstrap.runtime_archive()
-    job = bootstrap.install_job(api, "ws", "compute", {}, bundle, ensure_folder=lambda *_: None)
+    job = bootstrap.install_job(api, "ws", "compute", stream_runtime({}), bundle, ensure_folder=lambda *_: None)
     path = "/workspaces/ws/jobs/" + job
     api.job_timeout_default = server_default
     config = {"streaming_mode": "persistent"}
     if server_default == 600:
         with pytest.raises(RuntimeError, match="did not round-trip"):
-            bootstrap.install_job(api, "ws", "compute", config, bundle, ensure_folder=lambda *_: None)
+            bootstrap.install_job(api, "ws", "compute", stream_runtime(config), bundle, ensure_folder=lambda *_: None)
     else:
-        assert bootstrap.install_job(api, "ws", "compute", config, bundle, ensure_folder=lambda *_: None) == job
+        assert bootstrap.install_job(api, "ws", "compute", stream_runtime(config), bundle, ensure_folder=lambda *_: None) == job
         assert api.resources[path].get("timeoutSeconds") == server_default
         api.resources[path]["timeoutSeconds"] = 600
-        assert bootstrap.install_job(api, "ws", "compute", config, bundle, ensure_folder=lambda *_: None) == job
+        assert bootstrap.install_job(api, "ws", "compute", stream_runtime(config), bundle, ensure_folder=lambda *_: None) == job
         assert api.resources[path].get("timeoutSeconds") == server_default
     updates = [call[2] for call in api.calls if call[:2] == ("PUT", path)]
     assert len(updates) == (2 if server_default == 600 else 3)
@@ -464,7 +688,7 @@ def test_persistent_job_omits_timeout_and_requires_unlimited_roundtrip(server_de
 @pytest.mark.parametrize("second_task,state", [("social_network", "SUCCESS"), ("social_network", "FAILED"), ("other_task", "SUCCESS")])
 def test_initial_job_accepts_successful_native_task_attempts_but_never_hides_failure(monkeypatch, second_task, state):
     api = Api()
-    job = bootstrap.install_job(api, "ws", "compute", {}, bootstrap.runtime_archive(), ensure_folder=lambda *_: None)
+    job = bootstrap.install_job(api, "ws", "compute", stream_runtime({}), bootstrap.runtime_archive(), ensure_folder=lambda *_: None)
     original = api.request
 
     def request(method, path, **kwargs):
@@ -488,7 +712,7 @@ def test_initial_job_accepts_successful_native_task_attempts_but_never_hides_fai
 @pytest.mark.parametrize("etag", [None, "native-version"])
 def test_existing_job_reconciles_without_required_etag_and_defaults_null_schedule(monkeypatch, etag):
     api, bundle = Api(), bootstrap.runtime_archive()
-    job = bootstrap.install_job(api, "ws", "compute", {}, bundle, ensure_folder=lambda *_: None)
+    job = bootstrap.install_job(api, "ws", "compute", stream_runtime({}), bundle, ensure_folder=lambda *_: None)
     path = "/workspaces/ws/jobs/" + job
     api.resources[path].update(schedule=None, timeoutSeconds=42)
     request = api.request
@@ -500,7 +724,7 @@ def test_existing_job_reconciles_without_required_etag_and_defaults_null_schedul
         return response
 
     monkeypatch.setattr(api, "request", with_etag)
-    assert bootstrap.install_job(api, "ws", "compute", {}, bundle, ensure_folder=lambda *_: None) == job
+    assert bootstrap.install_job(api, "ws", "compute", stream_runtime({}), bundle, ensure_folder=lambda *_: None) == job
     updates = [call for call in api.calls if call[:2] == ("PUT", path)]
     assert len(updates) == 2
     assert updates[-1][3] == ({"If-Match": etag} if etag else None)
@@ -508,64 +732,21 @@ def test_existing_job_reconciles_without_required_etag_and_defaults_null_schedul
     assert api.resources[path]["timeoutSeconds"] == 600
 
 
-@pytest.mark.parametrize("injected_globals", [True, False])
-def test_python_uses_native_aidputils_and_versions_the_complete_content(monkeypatch, tmp_path, capsys, injected_globals):
-    api, bundle, calls = Api(), bootstrap.runtime_archive(), []
-    config = {"bucket": "gold"}
-    secret_get = MagicMock(side_effect=AssertionError("Runtime check must not read secrets"))
-    spark = object()
-    monkeypatch.setitem(sys.modules, "aidputils", None)
-    monkeypatch.setattr(sys, "path", list(sys.path))
-    job = bootstrap.install_job(api, "ws", "compute", config, bundle, ensure_folder=lambda *_: None)
-    sources = dict(api.contents)
+def test_python_publication_updates_embedded_config_and_execution_identity():
+    api, bundle = Api(), bootstrap.runtime_archive()
+    job = bootstrap.install_job(api, "ws", "compute", stream_runtime({"bucket": "gold"}), bundle, ensure_folder=lambda *_: None)
     task = api.resources["/workspaces/ws/jobs/" + job]["tasks"][0]
-    root = task["filePath"].rsplit("/", 1)[0]
-    local = tmp_path / root.rsplit("/", 1)[-1]
-    for value in sources.values():
-        path = local / value["path"].removeprefix(root + "/")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(value["content"].encode("utf-8"))
-    # Full-suite compatibility tests also import this top-level namespace from app/.
-    for name in tuple(sys.modules):
-        if name == "territorial" or name.startswith("territorial."):
-            monkeypatch.delitem(sys.modules, name)
-    monkeypatch.setitem(sys.modules, "territorial", SimpleNamespace(__file__=str(local / "territorial/__init__.py")))
-    monkeypatch.setitem(sys.modules, "territorial.pipeline", SimpleNamespace(__file__=str(local / "territorial/pipeline.py"), run=lambda *args: calls.append(args)))
-    source = (local / "social_network.py").read_text(encoding="utf-8")
-    utilities = SimpleNamespace(secrets=SimpleNamespace(get=secret_get))
-    builder = MagicMock()
-    builder.getOrCreate.return_value = spark
-    context = {"__name__": "__main__"}
-    if injected_globals:
-        context.update(spark=spark, aidputils=utilities)
-    else:
-        monkeypatch.setitem(sys.modules, "aidputils", utilities)
-        monkeypatch.setitem(sys.modules, "pyspark.sql", SimpleNamespace(SparkSession=SimpleNamespace(builder=builder)))
-    monkeypatch.setattr(sys, "argv", ["social_network.py", "--runtime-root", str(local), "--check-runtime"])
-    monkeypatch.setitem(sys.modules, "territorial.core", SimpleNamespace(__file__=str(tmp_path / "previous-release/core.py")))
-    with pytest.raises(RuntimeError, match="different Territorial release"):
-        exec(source, context)
-    assert calls == [] and secret_get.call_count == 0
-    monkeypatch.delitem(sys.modules, "territorial.core")
-    exec(source, context)
-    assert json.loads(capsys.readouterr().out)["runtime_ready"] is True
-    assert calls == [] and secret_get.call_count == 0
-    assert builder.getOrCreate.call_count == (0 if injected_globals else 1)
-    monkeypatch.setattr(sys, "argv", sys.argv[:-1])
-    exec(source, context)
-    assert calls == [(spark, secret_get, config)]
-    (local / "config.json").write_text("{}", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="source does not match"):
-        exec(source, context)
-    assert len(calls) == 1 and secret_get.call_count == 0
-    assert bootstrap.install_job(api, "ws", "compute", {"bucket": "updated"}, bundle, ensure_folder=lambda *_: None) == job
-    assert len({value["path"] for value in api.contents.values() if value["name"] == "config.json"}) == 2
-    assert all(api.contents[path] == value for path, value in sources.items())
+    paths = set(api.contents)
     bootstrap.run_initial_job(api, "ws", job, "same-bundle")
     first_token = next(call[3]["opc-retry-token"] for call in reversed(api.calls) if call[:2] == ("POST", "/workspaces/ws/jobRuns"))
     bootstrap.run_initial_job(api, "ws", job, "same-bundle")
     assert next(call[3]["opc-retry-token"] for call in reversed(api.calls) if call[:2] == ("POST", "/workspaces/ws/jobRuns")) == first_token
-    bootstrap.install_job(api, "ws", "compute", {"bucket": "wrapper-only-update"}, bundle, ensure_folder=lambda *_: None)
+    assert bootstrap.install_job(api, "ws", "compute", stream_runtime({"bucket": "updated"}), bundle, ensure_folder=lambda *_: None) == job
+    assert set(api.contents) == paths
+    source = next(item["content"] for item in api.contents.values() if item["path"] == task["filePath"])
+    config = next(ast.literal_eval(node.value) for node in ast.parse(source).body
+                  if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "RUNTIME_CONFIG" for target in node.targets))
+    assert config["bucket"] == "updated" and "writer_credential_name" in config
     bootstrap.run_initial_job(api, "ws", job, "same-bundle")
     assert next(call[3]["opc-retry-token"] for call in reversed(api.calls) if call[:2] == ("POST", "/workspaces/ws/jobRuns")) != first_token
 
@@ -756,6 +937,23 @@ def test_two_dedicated_always_on_clusters_reuse_exact_config_and_reject_drift():
     assert not any(method in {"PUT", "PATCH", "DELETE"} for method, *_ in api.calls)
 
 
+@pytest.mark.parametrize("canonical,legacy", [
+    ("aidp_gods_eye_view_social_compute", "social_stream_compute"),
+    ("aidp_gods_eye_view_sensor_compute", "sensor_stream_compute"),
+    ("aidp_gods_eye_view_query_compute", "territorial_query_compute"),
+])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_final_compute_names_keep_prior_ids_without_creating_duplicates(canonical, legacy, explicit):
+    api = Api()
+    key = bootstrap.install_stream_compute(api, "ws", canonical)
+    api.resources["/workspaces/ws/clusters/" + key]["displayName"] = legacy
+    if explicit:
+        api.resources["/workspaces/ws/clusters"] = []
+    assert bootstrap.install_stream_compute(api, "ws", canonical, key if explicit else "") == key
+    assert len([1 for method, path, *_ in api.calls if method == "POST" and path.endswith("/clusters")]) == 1
+    assert not any(method in {"PUT", "PATCH", "DELETE"} for method, *_ in api.calls)
+
+
 @pytest.mark.parametrize("outcome", ["ACTIVE", "FAILED"])
 def test_stopped_dedicated_stream_compute_starts_once_and_waits_for_active(monkeypatch, outcome):
     api = Api()
@@ -796,20 +994,21 @@ def test_stopped_dedicated_stream_compute_starts_once_and_waits_for_active(monke
 def test_sensor_job_owns_distinct_python_entry_and_compute_with_no_gold_writer():
     api, bundle = Api(), bootstrap.runtime_archive()
     config = {"streaming_mode": "persistent"}
-    social = bootstrap.install_job(api, "ws", "social-compute", config, bundle, ensure_folder=lambda *_: None)
-    sensor = bootstrap.install_job(api, "ws", "sensor-compute", config, bundle, ensure_folder=lambda *_: None, workflow="sensors")
+    social = bootstrap.install_job(api, "ws", "social-compute", stream_runtime(config), bundle, ensure_folder=lambda *_: None)
+    sensor = bootstrap.install_job(api, "ws", "sensor-compute", stream_runtime(config), bundle, ensure_folder=lambda *_: None, workflow="sensors")
     assert social != sensor
     detail = api.resources["/workspaces/ws/jobs/" + sensor]
     task = detail["tasks"][0]
     assert task["taskKey"] == "sensor_stream" and task["cluster"] == {"clusterKey": "sensor-compute"}
     assert task["isStreaming"] is True and detail["timeoutSeconds"] == 0 and detail["maxConcurrentRuns"] == 1
     source = next(value["content"] for value in api.contents.values() if value["path"] == task["filePath"])
-    assert detail["name"] == "territorial_sensor_stream" and task["filePath"].endswith("/sensor_stream.py")
-    assert "from territorial.sensor_pipeline import run" in source and "from territorial.pipeline import run" not in source
+    assert detail["name"] == "wf_ai_gods_eye_view_sensor_stream" and task["filePath"].endswith("/sensor_stream.py")
+    assert "def run_sensor_stream(" in source and "def run_social_network(" not in source
+    assert "def publish(" not in source and "def publish_snapshot(" not in source
     api.resources["/workspaces/ws/jobRuns"] = [{"key": "active-sensors", "jobKey": sensor, "state": {"status": "RUNNING"}}]
     assert bootstrap.start_stream_job(api, "ws", sensor, "sensor_stream") == "active-sensors"
     with pytest.raises(RuntimeError, match="Stop the managed"):
-        bootstrap.install_job(api, "ws", "other-compute", config, bundle, ensure_folder=lambda *_: None, workflow="sensors")
+        bootstrap.install_job(api, "ws", "other-compute", stream_runtime(config), bundle, ensure_folder=lambda *_: None, workflow="sensors")
     assert not any(method == "POST" and path.endswith("/jobRuns") for method, path, *_ in api.calls)
 
 
@@ -873,9 +1072,10 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
         assert (api.api_version, api.resource_segment) == ("20240831", "dataLakes")
         assert config["streaming_mode"] == "persistent" and len(config["pipeline_revision"]) == 64
         workflow = options.get("workflow", "social")
-        assert compute == ("sensor_stream_compute" if workflow == "sensors" else "social_stream_compute")
+        assert compute == ("aidp_gods_eye_view_sensor_compute" if workflow == "sensors" else "aidp_gods_eye_view_social_compute")
         return "job-" + workflow
     monkeypatch.setattr(bootstrap, "database_users", database_users)
+    monkeypatch.setattr(bootstrap, "ensure_oci_credential", lambda *_: {"displayName": "AidpRuntime"})
     monkeypatch.setattr(bootstrap, "install_volumes", lambda *_: None)
     monkeypatch.setattr(bootstrap, "install_stream_compute", lambda _api, _workspace, name: name)
     def install_libraries(api, *_, **__):
@@ -886,7 +1086,7 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
     monkeypatch.setattr(bootstrap, "write_document", lambda _db, _name, data, _revision: runtime_documents.append(data))
     def agent(api, *_):
         assert api is credential_apis[0]
-        return {"state": "ACTIVE", "revision": "bundle", "endpoint": "native"}
+        return {"state": "ACTIVE", "revision": "bundle", "endpoint": "native", "agent_key": "agent"}
     monkeypatch.setattr(bootstrap, "publish_agent", agent)
     def check(phase, result):
         assert all(item[2] != ".control/prisma/agent.json" for item in published)
@@ -919,6 +1119,8 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
         assert result["prisma_snapshot_version"] == "gold-version"
         assert published[-1][:3] == ("ns", "gold", ".control/prisma/agent.json")
     assert runtime_documents[0]["bucket"] == "gold"
+    assert runtime_documents[0]["analytics_store"] == "gold"
+    assert runtime_documents[0]["agent_compute_id"] == "key-aidp_gods_eye_view_agent_compute"
     assert runtime_documents[0]["workbench_base"] == arguments[0].base
     assert runtime_documents[0]["landing_bucket"] == "landing"
     assert runtime_documents[0]["landing_volume_path"] == "/Volumes/catalog/prisma_ingest/landing"

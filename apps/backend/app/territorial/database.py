@@ -44,8 +44,24 @@ PACKAGE_SPEC = """CREATE OR REPLACE PACKAGE ADMIN.PRISMA_CONTROL AUTHID DEFINER 
 END PRISMA_CONTROL;"""
 
 PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
-  FUNCTION RESET_VERSION RETURN NUMBER IS BEGIN RETURN 2; END;
-  FUNCTION SENSOR_RESET_VERSION RETURN NUMBER IS BEGIN RETURN 2; END;
+  FUNCTION RESET_VERSION RETURN NUMBER IS BEGIN RETURN 3; END;
+  FUNCTION SENSOR_RESET_VERSION RETURN NUMBER IS BEGIN RETURN 3; END;
+  FUNCTION gold_replacement(p_old VARCHAR2, p_new VARCHAR2) RETURN BOOLEAN
+  IS v_payload CLOB; v_document JSON_OBJECT_T; v_replacements JSON_OBJECT_T;
+  BEGIN
+    IF p_old IS NULL OR p_new IS NULL OR p_old=p_new THEN RETURN FALSE; END IF;
+    SELECT checkpoint.payload INTO v_payload FROM ADMIN.PRISMA_CONTROL_DOCS checkpoint
+      WHERE checkpoint.name='checkpoint_reset' AND EXISTS (
+        SELECT 1 FROM ADMIN.PRISMA_CONTROL_DOCS runtime WHERE runtime.name='runtime'
+          AND JSON_VALUE(runtime.payload,'$.analytics_store')='gold');
+    v_document:=JSON_OBJECT_T.parse(v_payload);
+    v_replacements:=v_document.get_object('replacements');
+    IF v_replacements IS NULL OR NOT v_replacements.has(p_old) THEN RETURN FALSE; END IF;
+    -- The active reset journals this pair only after Gold and its object publication are durable.
+    IF v_replacements.get_string(p_old)=p_new THEN RETURN TRUE; END IF;
+    RETURN FALSE;
+  EXCEPTION WHEN NO_DATA_FOUND THEN RETURN FALSE;
+  END;
   PROCEDURE require_reset(p_operation_id VARCHAR2) IS v_count NUMBER;
   BEGIN
     SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_CONTROL_DOCS WHERE name='checkpoint_reset'
@@ -76,7 +92,8 @@ PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
     SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_PUBLICATIONS WHERE version=p_new AND version!=p_old
       AND NOT JSON_EXISTS(payload,'$.evidence[*]?(@.mode == "Synthetic" || @.mode == "simulation")')
       AND NOT JSON_EXISTS(payload,'$.incidents[*]?(@.mode == "Synthetic" || @.mode == "simulation")');
-    IF v_count!=1 THEN RAISE_APPLICATION_ERROR(-20002,'Clean replacement publication is missing'); END IF;
+    IF v_count!=1 AND NOT gold_replacement(p_old,p_new)
+    THEN RAISE_APPLICATION_ERROR(-20002,'Clean replacement publication is missing'); END IF;
     DELETE FROM ADMIN.PRISMA_PUBLICATIONS WHERE version=p_old AND (
       JSON_EXISTS(payload,'$.evidence[*]?(@.mode == "Synthetic" || @.mode == "simulation")') OR
       JSON_EXISTS(payload,'$.incidents[*]?(@.mode == "Synthetic" || @.mode == "simulation")'));
@@ -95,7 +112,8 @@ PACKAGE_BODY = """CREATE OR REPLACE PACKAGE BODY ADMIN.PRISMA_CONTROL AS
     SELECT COUNT(*) INTO v_count FROM ADMIN.PRISMA_PUBLICATIONS WHERE version=p_new AND version!=p_old
       AND NOT JSON_EXISTS(payload,'$.sensors[*]?(($kind == "all" || @.sensor_type == $kind) && (@.sensor_type == "river_level" || @.sensor_type == "rainfall" || @.sensor_type == "temperature" || @.sensor_type == "soil_moisture" || @.sensor_type == "wind_speed") && (@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true)'
         PASSING p_sensor_type AS "kind" ERROR ON ERROR);
-    IF v_count!=1 THEN RAISE_APPLICATION_ERROR(-20002,'Clean sensor replacement publication is missing'); END IF;
+    IF v_count!=1 AND NOT gold_replacement(p_old,p_new)
+    THEN RAISE_APPLICATION_ERROR(-20002,'Clean sensor replacement publication is missing'); END IF;
     DELETE FROM ADMIN.PRISMA_PUBLICATIONS WHERE version=p_old
       AND JSON_EXISTS(payload,'$.sensors[*]?(($kind == "all" || @.sensor_type == $kind) && (@.sensor_type == "river_level" || @.sensor_type == "rainfall" || @.sensor_type == "temperature" || @.sensor_type == "soil_moisture" || @.sensor_type == "wind_speed") && (@.mode == "Synthetic" || @.mode == "simulation") && @.is_simulated == true)'
         PASSING p_sensor_type AS "kind" ERROR ON ERROR);

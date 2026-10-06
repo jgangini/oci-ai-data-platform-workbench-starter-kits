@@ -148,6 +148,68 @@ def test_history_batches_delta_writes_and_journal_only_after_all_three_new_copie
     assert not {item["version"] for item in originals}.intersection(publications)
 
 
+@pytest.mark.parametrize("sensor_type", [None, "river_level", "all"])
+def test_gold_history_reset_preserves_durable_recovery_without_recreating_adb_copies(resetting, monkeypatch, sensor_type):
+    _, docs, publications, lake, objects, *_, snapshot = resetting
+    readings = sensors.generate_batch(NOW, sensor_count=5)
+    snapshot["sensors"] = [*readings, {**readings[0], "event_id": "real-reading", "sensor_id": "real-station",
+                                      "mode": "real", "is_simulated": False}]
+    old = history_records(resetting, 1)[0]
+    clean = reset.prune_publication(old, sensor_type)
+    config = {**CONFIG, "analytics_store": "gold"}
+    monkeypatch.setattr(database, "reset_version", lambda _: 3)
+    monkeypatch.setattr(database, "sensor_reset_version", lambda _: 3)
+    docs["runtime"] = {"analytics_store": "gold"}
+    docs["checkpoint_reset"]["sensor_type"] = sensor_type
+    operation = docs["checkpoint_reset"]["operation_id"]
+    replacement_key = reset.HISTORY_PREFIX + clean["version"] + ".json"
+    monkeypatch.setattr(database, "publish", lambda *_: pytest.fail("Gold cleanup must not create analytical ADB copies"))
+    deleted = []
+    def replace(_connection, identifier, *arguments):
+        old_version, new_version = arguments[-2:]
+        assert identifier == operation and docs["checkpoint_reset"]["sensor_type"] == sensor_type
+        assert docs["checkpoint_reset"]["replacements"][old_version] == new_version
+        assert new_version not in publications
+        assert lake.data["gold"][new_version] == {"id": new_version, **clean}
+        assert json.loads(objects.data[replacement_key]) == clean
+        publications.pop(old_version, None)
+        deleted.append(old_version)
+    monkeypatch.setattr(database, "replace_synthetic_publication", replace)
+    monkeypatch.setattr(database, "replace_sensor_publication", replace)
+    objects.fail = replacement_key
+    with pytest.raises(RuntimeError, match="Object Storage"):
+        reset.clean_history(None, objects, lake, config, operation, sensor_type)
+    assert deleted == [] and not docs["checkpoint_reset"].get("replacements")
+    assert publications == {old["version"]: old}
+    assert lake.data["gold"][old["version"]] == {"id": old["version"], **old}
+    assert json.loads(objects.data[reset.HISTORY_PREFIX + old["version"] + ".json"]) == old
+    objects.fail = None
+    reset.clean_history(None, objects, lake, config, operation, sensor_type)
+    assert deleted == [old["version"]] and publications == {}
+    assert lake.data["gold"] == {clean["version"]: {"id": clean["version"], **clean}}
+    assert objects.data == {replacement_key: reset.encoded(clean)}
+    assert docs["checkpoint_reset"]["counts"]["history_rewritten"] == 1
+    assert docs["checkpoint_reset"]["replacements"] == {old["version"]: clean["version"]}
+    assert docs["runtime"] == {"analytics_store": "gold"}
+
+
+@pytest.mark.parametrize("sensor_type,social_version,sensor_version", [(None, 2, 3), ("all", 2, 3), ("all", 3, 2)])
+def test_gold_history_reset_rejects_legacy_database_before_writing(resetting, monkeypatch, sensor_type, social_version, sensor_version):
+    log, docs, publications, lake, objects, *_, snapshot = resetting
+    snapshot["sensors"] = sensors.generate_batch(NOW, sensor_count=5)
+    history_records(resetting, 1)
+    docs["checkpoint_reset"]["sensor_type"] = sensor_type
+    monkeypatch.setattr(database, "reset_version", lambda _: social_version)
+    monkeypatch.setattr(database, "sensor_reset_version", lambda _: sensor_version)
+    before = copy.deepcopy((docs, publications, lake.data, objects.data))
+    log.clear()
+    with pytest.raises(RuntimeError, match="Gold reset database contract"):
+        reset.clean_history(None, objects, lake, {**CONFIG, "analytics_store": "gold"},
+                            docs["checkpoint_reset"]["operation_id"], sensor_type)
+    assert (docs, publications, lake.data, objects.data) == before
+    assert log == []
+
+
 @pytest.mark.parametrize("phase", ["gold", "adb", "object", "journal", "delta_delete", "adb_delete", "object_delete"])
 def test_history_batch_failure_recovers_every_store_without_losing_retained_data(resetting, monkeypatch, phase):
     _, docs, publications, lake, objects, *_ = resetting

@@ -1,5 +1,4 @@
 import json
-import re
 import sqlite3
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -19,8 +18,8 @@ def test_incident_query_binds_filters_and_normalizes_period():
     assert values["date_to"] == "2026-10-02T14:00:00+00:00"
     assert values["platform"] == "x" and values["version"] == "publication-1"
     assert values["locality"] not in sql
-    assert "e.version=i.version" in sql and "e.evidence_id=ids.eid" in sql
-    assert "FETCH FIRST 100 ROWS ONLY" in sql
+    assert "e.publication_version=i.publication_version" in sql and "ARRAY<STRING>" in sql
+    assert "LIMIT 100" in sql
 
 
 def test_incident_period_and_network_match_the_same_publication():
@@ -29,10 +28,10 @@ def test_incident_period_and_network_match_the_same_publication():
     evidence_scope = predicates.split("OR EXISTS (", 1)[1]
     assert "(:platform IS NULL AND :date_from IS NULL AND :date_to IS NULL AND :country IS NULL AND :city IS NULL)" in predicates
     assert all(values[key] is None for key in ("platform", "date_from", "date_to", "country", "city"))
-    assert "WHERE (:platform IS NULL OR e.platform=:platform)" in evidence_scope
-    assert "JSON_VALUE(e.evidence_json,'$.created_at' RETURNING TIMESTAMP WITH TIME ZONE) >= TO_UTC_TIMESTAMP_TZ(:date_from)" in evidence_scope
-    assert "JSON_VALUE(e.evidence_json,'$.created_at' RETURNING TIMESTAMP WITH TIME ZONE) <= TO_UTC_TIMESTAMP_TZ(:date_to)" in evidence_scope
-    assert "JSON_VALUE(i.incident_json,'$.created_at'" not in predicates
+    assert "AND (:platform IS NULL OR get_json_object(e.payload,'$.platform')=:platform)" in evidence_scope
+    assert "to_timestamp(get_json_object(e.payload,'$.created_at')) >= to_timestamp(:date_from)" in evidence_scope
+    assert "to_timestamp(get_json_object(e.payload,'$.created_at')) <= to_timestamp(:date_to)" in evidence_scope
+    assert "get_json_object(i.payload,'$.created_at'" not in predicates
 
 
 @pytest.fixture
@@ -42,8 +41,19 @@ def incident_database():
     connection.execute("CREATE TABLE ADMIN.PRISMA_V_INCIDENTS(version, incident_id, locality, category, severity, source_mode, incident_json)")
     connection.execute("CREATE TABLE ADMIN.PRISMA_V_EVIDENCE(version, evidence_id, platform, evidence_json)")
     connection.execute("CREATE TABLE ADMIN.PRISMA_V_SNAPSHOTS(version, payload)")
+    # Reference rows also expose the Gold contract; assertions execute the production Spark predicates.
+    connection.execute("CREATE TEMP VIEW territorial_incidents AS SELECT version AS publication_version, incident_id AS id, incident_json AS payload FROM ADMIN.PRISMA_V_INCIDENTS")
+    connection.execute("CREATE TEMP VIEW territorial_evidence AS SELECT version AS publication_version, evidence_id AS id, json_set(evidence_json,'$.platform',platform) AS payload FROM ADMIN.PRISMA_V_EVIDENCE")
+    connection.execute("""CREATE TEMP VIEW territorial_event_posts AS
+        SELECT p.version AS publication_version, json_extract(r.value,'$.event_id') AS event_id,
+          json_extract(r.value,'$.post_key') AS post_key, r.value AS payload
+        FROM ADMIN.PRISMA_V_SNAPSHOTS p, json_each(p.payload,'$.event_posts') r""")
     connection.create_function("TO_UTC_TIMESTAMP_TZ", 1,
         lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat() if value else None)
+    connection.create_function("to_timestamp", 1,
+        lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat() if value else None)
+    connection.create_function("from_json", 2, lambda value, schema: value)
+    connection.create_function("array_contains", 2, lambda value, item: item in json.loads(value) if value else None)
     # Each tuple is one linked publication; differing geography/network/time must not be combined.
     cases = [
         ("co-high", "Kennedy", "inundacion", "high", [("Colombia", "Bogotá", "x", "14:00:00")]),
@@ -57,7 +67,7 @@ def incident_database():
     for identifier, locality, category, severity, publications in cases:
         refs = [f"{identifier}-{index}" for index in range(len(publications))]
         incident = dict(id=identifier, locality=locality, category=category, severity=severity,
-            evidence_ids=refs, lat=4.62, lon=-74.15, created_at="2020-01-01T00:00:00Z")
+            evidence_ids=refs, lat=4.62, lon=-74.15, mode="Synthetic", created_at="2020-01-01T00:00:00Z")
         connection.execute("INSERT INTO ADMIN.PRISMA_V_INCIDENTS VALUES (?,?,?,?,?,?,?)",
             ("v1", identifier, locality, category, severity, "Synthetic", json.dumps(incident)))
         for ref, (country, city, platform, at) in zip(refs, publications):
@@ -73,19 +83,8 @@ def incident_database():
 
 
 def sqlite_rows(connection, sql, binds):
-    """Execute production predicates; translate only Oracle JSON/limit syntax for SQLite."""
-    sql = sql.replace("JSON_TABLE(i.incident_json,'$.evidence_ids[*]' COLUMNS (eid VARCHAR2(200) PATH '$')) ids",
-        "json_each(i.incident_json,'$.evidence_ids') ids").replace("e.evidence_id=ids.eid", "e.evidence_id=ids.value")
-    sql = re.sub(r"JSON_TABLE\(p.payload, '\$\.event_posts\[\*\]' COLUMNS \(\s*"
-        r"post_key VARCHAR2\(200\) PATH '\$\.post_key', event_id VARCHAR2\(200\) PATH '\$\.event_id',\s*"
-        r"relation_json CLOB FORMAT JSON PATH '\$'\)\) r", "json_each(p.payload,'$.event_posts') r", sql)
-    sql = sql.replace("r.relation_json", "r.value").replace("r.post_key", "json_extract(r.value,'$.post_key')").replace(
-        "r.event_id", "json_extract(r.value,'$.event_id')")
-    sql = re.sub(r"JSON_VALUE\(([^,]+),('[^']+') RETURNING TIMESTAMP WITH TIME ZONE\)",
-        r"TO_UTC_TIMESTAMP_TZ(json_extract(\1,\2))", sql)
-    sql = sql.replace(" RETURNING NUMBER", "").replace("JSON_VALUE(", "json_extract(")
-    sql = re.sub(r"FETCH FIRST (\d+) ROWS ONLY", r"LIMIT \1", sql)
-    return connection.execute(sql, binds).fetchall()
+    """Execute production predicates; translate JSON extraction syntax for SQLite."""
+    return connection.execute(sql.replace("get_json_object(", "json_extract("), binds).fetchall()
 
 
 @pytest.fixture
@@ -128,10 +127,10 @@ def test_invalid_incident_vocabulary_is_an_error_not_an_empty_result(filters):
 @pytest.mark.parametrize("mode,expected", [("", None), ("simulation", "Synthetic"), ("Synthetic", "Synthetic"), ("real", "real"), ("real' OR 1=1 --", "real' OR 1=1 --")])
 def test_mode_json_field_uses_nonreserved_oracle_column_and_bind(mode, expected):
     sql, values = incident_query("publication-1", mode=mode)
-    assert "i.source_mode=:source_mode" in sql and ":source_mode IS NULL" in sql
+    assert "get_json_object(i.payload,'$.mode')=:source_mode" in sql and ":source_mode IS NULL" in sql
     assert values["source_mode"] == expected and "mode" not in values
     assert ":mode" not in sql and "i.mode" not in sql
-    assert ":source_mode='Synthetic' AND i.source_mode='simulation'" in sql
+    assert ":source_mode='Synthetic' AND get_json_object(i.payload,'$.mode')='simulation'" in sql
     if mode and mode not in {"Synthetic", "simulation"}:
         assert mode not in sql
     for view in VIEWS[1:3]:
@@ -155,10 +154,10 @@ def test_invalid_period_rejected_before_sql_or_gateway(period):
 def test_sensor_query_is_versioned_bounded_and_binds_spatiotemporal_filters():
     sql, binds = sensor_query("v1", sensor_id="sensor' OR 1=1 --", locality="Kennedy", sensor_type="rainfall",
         bbox="-74.2,4.5,-74.1,4.7", date_from="2026-10-03T09:00:00-05:00", date_to="2026-10-03T14:30:00Z")
-    assert "ADMIN.PRISMA_V_SENSOR_EVENTS WHERE version=:version" in sql and "FETCH FIRST 100 ROWS ONLY" in sql
+    assert "territorial_sensors WHERE publication_version=:version" in sql and "LIMIT 100" in sql
     assert binds["sensor_id"] not in sql and binds["locality"] not in sql and binds["sensor_type"] not in sql
     assert binds["date_from"] == "2026-10-03T14:00:00+00:00" and binds["west"] == -74.2
-    assert "TO_UTC_TIMESTAMP_TZ(observed_at)" in sql and "sensor_event_id" in sql
+    assert "to_timestamp(get_json_object(payload,'$.observed_at'))" in sql and "DESC, id" in sql
     assert "is_simulated=true" in PROMPT and "no valida incidentes ni cambia su estado" in PROMPT
     with pytest.raises(ValueError):
         sensor_query("v1", date_from="2026-10-03T14:00:00")

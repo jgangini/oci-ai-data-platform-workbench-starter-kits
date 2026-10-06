@@ -7,10 +7,12 @@ import re
 import uuid
 from typing import Any
 
+from .territorial.runtime_secrets import SHARED_OCI_CREDENTIAL_NAME
+
 
 GOVERNANCE_MODULE_ID = "ai_data_governance_vsc_extension"
 GOVERNANCE_DISPLAY_NAME = "AI Data Governance"
-GOVERNANCE_CREDENTIAL_NAME = "AidpDataGovernanceExtension"
+GOVERNANCE_CREDENTIAL_NAME = SHARED_OCI_CREDENTIAL_NAME
 GOVERNANCE_AGENT_NAME = "ai_data_governance_vsc_extension"
 GOVERNANCE_AGENT_COMPUTE_NAME = "aidp_data_governance_agent_compute"
 GOVERNANCE_JOB_NAME = "wf_ai_data_governance_metadata_sync"

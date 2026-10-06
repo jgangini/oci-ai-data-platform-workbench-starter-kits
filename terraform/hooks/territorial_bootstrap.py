@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import base64
-import ast
 import hashlib
 import io
 import json
@@ -15,13 +14,26 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 from uuid import uuid4
 
+from gods_eye_sources import workflow_source
+from gods_eye_agent_source import agent_source
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "apps/backend"))
 from app.territorial.database import install_schema, read_document, write_document
 from app.territorial.scheduling import RUN_FAILED, RUN_SUCCESS, TASK_RUN_QUERY, run_state, task_outcome
-from app.territorial.runtime_secrets import identity_hash, shared_credential
+from app.territorial.runtime_secrets import CONTROL_CREDENTIAL_NAME, SHARED_OCI_CREDENTIAL_NAME, identity_hash, shared_credential
 
 SESSION_RETENTION = {"retentionPeriodInDays": 7}
+AGENT_NAME = "ai_gods_eye_view"
+WORKSPACE_ROOT = "/Workspace/medallion/gods_eye_view"
+AGENT_COMPUTE_NAME = "aidp_gods_eye_view_agent_compute"
+RESOURCE_ALIASES = {
+    AGENT_NAME: ("territorial_assistant",),
+    AGENT_COMPUTE_NAME: ("territorial_agent_compute", "prisma_agent_compute"),
+    "aidp_gods_eye_view_social_compute": ("social_stream_compute",),
+    "aidp_gods_eye_view_sensor_compute": ("sensor_stream_compute",),
+    "aidp_gods_eye_view_query_compute": ("territorial_query_compute",),
+}
 PIPELINE_REQUIREMENTS = "httpx==0.28.1\noracledb==3.4.2\n"
 _deadline = 0.0
 
@@ -58,7 +70,8 @@ def items(api, path, params=None):
 
 
 def named(api, path, name, params=None):
-    matches = [item for item in items(api, path, params) if (item.get("displayName") or item.get("name")) == name
+    names = {name, *RESOURCE_ALIASES.get(name, ())} if path.endswith(("/clusters", "/agents")) else {name}
+    matches = [item for item in items(api, path, params) if (item.get("displayName") or item.get("name")) in names
                and (item.get("lifecycleState") or item.get("lifeCycleState") or item.get("state")) != "DELETED"]
     if len(matches) > 1:
         raise RuntimeError("Duplicate managed Territorial resource")
@@ -72,8 +85,9 @@ def named(api, path, name, params=None):
 def hidden_compute(api, path, name):
     # AIDP can expose new AI Compute only by key before it appears in the cluster list.
     workspace_prefix = path.split("/")[2] + "."
+    names = {name, *RESOURCE_ALIASES.get(name, ())}
     operations = [item for item in items(api, "/asyncOperations", {"resourceType": "AI_COMPUTE"})
-                  if item.get("resourceDisplayName") == name
+                  if item.get("resourceDisplayName") in names
                   and item.get("actionType") in {"CREATE_CLUSTER", "DELETE_CLUSTER"}
                   and str(item.get("resourceName", "")).startswith(workspace_prefix)]
     if not operations:
@@ -96,7 +110,8 @@ def hidden_compute_detail(api, path, name, key, status):
         if status in {"FAILED", "ERROR", "CANCELED", "CANCELLED"}:
             raise RuntimeError("Territorial compute creation failed without a resource") from None
         return {"key": key, "displayName": name, "type": "AI_COMPUTE", "state": "CREATING"}
-    if ((detail.get("displayName") or detail.get("name")) != name
+    names = {name, *RESOURCE_ALIASES.get(name, ())}
+    if ((detail.get("displayName") or detail.get("name")) not in names
             or (detail.get("type") or detail.get("sourceApi")) != "AI_COMPUTE"):
         raise RuntimeError("Territorial compute operation points to an incompatible resource")
     return detail
@@ -134,7 +149,6 @@ def credential(api, name, values):
 
 def database_users(api, wallet, wallet_password, admin_password, config, outputs, *, wallet_dsn, validate_wallet, generate_password):
     import oracledb
-    oci_credential = shared_credential(items(api, "/credentials"))
     with tempfile.TemporaryDirectory(prefix="territorial-bootstrap-") as directory:
         with zipfile.ZipFile(io.BytesIO(validate_wallet(wallet))) as archive:
             archive.extractall(directory)
@@ -143,168 +157,145 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
                              wallet_location=directory, wallet_password=wallet_password) as connection:
             install_schema(connection)
             cursor = connection.cursor()
-            for user, reader in (("PRISMA_WRITER", False), ("PRISMA_READER", True)):
-                name = database_credential_name(api, reader=reader)
-                if named(api, "/credentials", name):
-                    credential(api, name, None)
-                    if reader:
-                        for view in ("PRISMA_V_SOCIAL_POSTS", "PRISMA_V_SENSOR_EVENTS"):
-                            cursor.execute(f"GRANT SELECT ON ADMIN.{view} TO {user}")
-                    continue
+            user, name = "PRISMA_WRITER", database_credential_name(api)
+            if named(api, "/credentials", name):
+                credential(api, name, None)
+            else:
                 generated_password = generate_password()
                 cursor.execute("SELECT COUNT(*) FROM ALL_USERS WHERE USERNAME=:name", name=user)
                 verb = "ALTER" if cursor.fetchone()[0] else "CREATE"
                 cursor.execute(f'{verb} USER {user} IDENTIFIED BY "{generated_password}"')
                 cursor.execute(f"GRANT CREATE SESSION TO {user}")
-                if reader:
-                    for view in ("PRISMA_V_SNAPSHOTS", "PRISMA_V_INCIDENTS", "PRISMA_V_EVIDENCE", "PRISMA_V_SOCIAL_POSTS", "PRISMA_V_SENSOR_EVENTS"):
-                        cursor.execute(f"GRANT SELECT ON ADMIN.{view} TO {user}")
-                else:
-                    cursor.execute(f"GRANT EXECUTE ON ADMIN.PRISMA_CONTROL TO {user}")
+                cursor.execute(f"GRANT EXECUTE ON ADMIN.PRISMA_CONTROL TO {user}")
                 values = {"db_user": user, "db_password": generated_password, "dsn": dsn,
                     "wallet": base64.b64encode(wallet).decode(), "wallet_password": wallet_password,
                     "region": config["region"], "compartment_id": outputs["compartment_ocid"], "model_id": outputs["agent_model_id"]}
-                if not reader and oci_credential is None:
-                    values.update({key: str(config[key]) for key in ("tenancy", "user", "fingerprint")})
-                    values["private_key"] = Path(config["key_file"]).read_text(encoding="utf-8")
                 credential(api, name, values)
             connection.commit()
+
+
+def ensure_oci_credential(api, config):
+    """Both modules adopt the same API identity; database credentials remain separate."""
+    current = shared_credential(items(api, "/credentials"))
+    if current is not None:
+        return current
+    identity_hash(config)
+    values = {key: str(config[key]) for key in ("tenancy", "user", "fingerprint", "region")}
+    values["private_key"] = Path(config["key_file"]).read_text(encoding="utf-8")
+    if not values["private_key"].strip():
+        raise RuntimeError("Shared OCI credential is incomplete")
+    return credential(api, SHARED_OCI_CREDENTIAL_NAME, values)
 
 
 def database_credential_name(api, *, reader=False):
     """Adopt legacy secrets without recreating them or rotating their database users."""
     role = "Reader" if reader else "Writer"
-    canonical, legacy = f"Territorial{role}Runtime", f"Prisma{role}Runtime"
-    matches = [name for name in (canonical, legacy) if named(api, "/credentials", name)]
+    names = (f"Territorial{role}Runtime", f"Prisma{role}Runtime")
+    if not reader:
+        names = (CONTROL_CREDENTIAL_NAME, *names)
+    matches = [name for name in names if named(api, "/credentials", name)]
     if len(matches) > 1:
         raise RuntimeError("Ambiguous Territorial database credentials; reconcile the existing identities")
-    return matches[0] if matches else canonical
+    return matches[0] if matches else names[0]
 
 
 def runtime_archive():
     buffer = io.BytesIO()
-    names = ("__init__.py", "core.py", "correlation.py", "corpus.py", "media.py", "area.py", "x.py", "database.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "sensor_capture.py", "landing.py", "pipeline.py", "sensors.py", "sensor_pipeline.py", "sensor_reset.py", "synthetic_reset.py", "agent.py")
+    names = ("__init__.py", "core.py", "correlation.py", "corpus.py", "media.py", "area.py", "x.py", "database.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "sensor_capture.py", "landing.py", "pipeline.py", "sensors.py", "sensor_pipeline.py", "sensor_reset.py", "synthetic_reset.py", "gold_reader.py", "agent.py")
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in names:
             info = zipfile.ZipInfo("territorial/" + name, date_time=(2026, 1, 1, 0, 0, 0))
             source = (ROOT / "apps/backend/app/territorial" / name).read_bytes()
-            ast.parse(source, filename=name)
+            compile(source, name, "exec")
             archive.writestr(info, source)
-        shim = (ROOT / "apps/backend/app/prisma/__init__.py").read_bytes()
-        archive.writestr(zipfile.ZipInfo("prisma/__init__.py", date_time=(2026, 1, 1, 0, 0, 0)), shim)
     return buffer.getvalue()
 
 
-def bundle_prelude(bundle):
-    encoded = base64.b64encode(bundle).decode()
-    digest = hashlib.sha256(bundle).hexdigest()
-    return f'''import base64, hashlib, os, sys, tempfile
-_territorial_bundle = base64.b64decode({encoded!r})
-assert hashlib.sha256(_territorial_bundle).hexdigest() == {digest!r}
-_territorial_path = os.path.join(tempfile.gettempdir(), 'territorial-{digest[:16]}.zip')
-with open(_territorial_path, 'wb') as _territorial_file:
-    _territorial_file.write(_territorial_bundle)
-if _territorial_path not in sys.path:
-    sys.path.insert(0, _territorial_path)
-'''
-
-
-def workflow_source(module):
-    return f'''"""Readable Territorial workflow. Validate with --check-runtime before activation."""
-import argparse
-import hashlib
-import json
-import re
-import sys
-from pathlib import Path
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runtime-root", required=True)
-    parser.add_argument("--check-runtime", action="store_true")
-    args = parser.parse_args()
-    root = Path(args.runtime_root).resolve(strict=True)
-    manifest_bytes = (root / "manifest.json").read_bytes()
-    if hashlib.sha256(manifest_bytes).hexdigest() != root.name:
-        raise RuntimeError("Territorial release manifest does not match its version")
-    manifest = json.loads(manifest_bytes)
-    for name, digest in manifest["files"].items():
-        if not re.fullmatch(r"(?:territorial/[a-z_]+\\.py|prisma/__init__\\.py|social_network\\.py|sensor_stream\\.py|config\\.json|README\\.md)", name):
-            raise RuntimeError("Unexpected Territorial release member")
-        path = (root / name).resolve(strict=True)
-        if not path.is_relative_to(root) or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
-            raise RuntimeError("Territorial release source does not match its manifest")
-    config = json.loads((root / "config.json").read_text(encoding="utf-8"))
-    sys.path.insert(0, str(root))
-    from territorial.{module} import run
-    for name, loaded in tuple(sys.modules.items()):
-        if name == "territorial" or name.startswith("territorial."):
-            if not Path(loaded.__file__).resolve().is_relative_to(root):
-                raise RuntimeError("A different Territorial release is already imported")
-    utilities = globals().get("aidputils")
-    if utilities is None:
-        import aidputils as utilities
-    secret_get = utilities.secrets.get
-    if not callable(secret_get):
-        raise RuntimeError("Native AIDP secret access is unavailable")
-    session = globals().get("spark")
-    if session is None:
-        from pyspark.sql import SparkSession
-        session = SparkSession.builder.getOrCreate()
-    if args.check_runtime:
-        print(json.dumps({{"runtime_ready": True, "release": root.name, "workflow": "{module}"}}))
-        return
-    run(session, secret_get, config)
-
-
-if __name__ == "__main__":
-    main()
-'''
-
-
 def publish_runtime_sources(api, workspace, config, bundle, *, ensure_folder):
-    with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
-        names = archive.namelist()
-        if (len(names) != len(set(names)) or not {"territorial/__init__.py", "territorial/pipeline.py", "territorial/sensor_pipeline.py"} <= set(names)
-                or any(not re.fullmatch(r"(?:territorial/[a-z_]+\.py|prisma/__init__\.py)", name) for name in names)):
-            raise ValueError("Invalid Territorial runtime source archive")
-        sources = {name: archive.read(name).decode("utf-8") for name in names}
-    sources.update({"social_network.py": workflow_source("pipeline"), "sensor_stream.py": workflow_source("sensor_pipeline")})
+    sources = {
+        "10_bronze/social_network.py": workflow_source("pipeline", config, bundle),
+        "10_bronze/sensor_stream.py": workflow_source("sensor_pipeline", config, bundle),
+    }
     for name, source in sources.items():
-        ast.parse(source, filename=name)
-    sources["config.json"] = json.dumps(config, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-    sources["README.md"] = """# Territorial workflows
+        compile(source, name, "exec")
+    sources["README.md"] = """# God's Eye View
 
-Open `social_network.py` or `sensor_stream.py` in Workbench to inspect the Python
-entrypoints. Their implementation is in the readable `territorial/` modules.
-`config.json` contains runtime configuration and credential names, never secrets.
-Secrets remain in the AIDP credential store. `prisma/__init__.py` is an import
-compatibility shim for older notebooks; new sources use `territorial`.
+`10_bronze/social_network.py` and `10_bronze/sensor_stream.py` are independent
+Python workflows containing their complete processing logic and nonsecret
+configuration. Open either file to inspect its Bronze, Silver and publication
+stages. AIDP credentials hold secret values; they are never embedded here.
 
-Each release is immutable and checked against `manifest.json` before execution.
-To improve the code, edit a copy, commit the changes to the source repository,
-and redeploy a new release. Editing an active release in place fails its hash
-check instead of silently changing a running workflow.
+`20_silver/` and `30_gold/` document the stages performed by those workflows.
+`40_report/ai_gods_eye_view.py` is the standalone Gold-backed agent.
+The installer verifies uploads against `manifest.json`; execution does not load
+that manifest or other project files. Stop any workflow using these paths before
+replacing its source. Make changes in the source repository and redeploy.
+"""
+    sources["20_silver/README.md"] = """# Silver processing
 
-Both scripts accept `--runtime-root <this-release-directory> --check-runtime`
-for a finite import/Spark/credential-access capability check. That mode does not
-run either pipeline or retrieve secret values. Normal workflow execution omits
-`--check-runtime` and uses the existing capture controls and checkpoints.
+The Silver stages run inside the two files in `../10_bronze/`.
+`social_network.py` normalizes and classifies captured publications, correlates
+evidence and maintains `oci_silver.social_posts`, `oci_silver.events` and
+`oci_silver.event_posts`. `sensor_stream.py` validates readings and maintains
+`oci_silver.sensors_current`, retaining the latest reading for each sensor.
+Existing physical tables and checkpoints are reused to preserve history.
+"""
+    sources["30_gold/README.md"] = """# Gold publication
+
+The publication stage in `../10_bronze/social_network.py` combines processed
+social evidence and current sensors into a versioned snapshot. It exposes
+`oci_gold.events`, `oci_gold.event_posts` and the JSON views
+`oci_gold.territorial_incidents`, `oci_gold.territorial_evidence`,
+`oci_gold.territorial_sensors` and `oci_gold.territorial_event_posts`.
+The agent in `../40_report/ai_gods_eye_view.py` queries these Gold views using the
+separate query compute. Existing publication versions and storage paths remain.
 """
     manifest = json.dumps({"bundle_sha256": hashlib.sha256(bundle).hexdigest(),
         "files": {name: hashlib.sha256(source.encode("utf-8")).hexdigest() for name, source in sorted(sources.items())}},
         sort_keys=True, indent=2) + "\n"
-    root = "/Workspace/territorial/releases/" + hashlib.sha256(manifest.encode("utf-8")).hexdigest()
-    for path in ("/Workspace/territorial", "/Workspace/territorial/releases", root, root + "/territorial", root + "/prisma"):
+    root = WORKSPACE_ROOT
+    endpoint = f"/workspaces/{workspace}/notebook/api/contents/{quote(root + '/manifest.json', safe='')}"
+    try:
+        previous = api.request("GET", endpoint, params={"content": "1"}).body.get("content")
+    except RuntimeError as exc:
+        if getattr(exc, "status_code", None) != 404:
+            raise
+        previous = None
+    changed = previous != manifest
+    if not changed:
+        for name, source in sources.items():
+            path = root + "/" + name
+            try:
+                current = api.request("GET", f"/workspaces/{workspace}/notebook/api/contents/{quote(path, safe='')}", params={"content": "1"}).body.get("content")
+            except RuntimeError as exc:
+                if getattr(exc, "status_code", None) != 404:
+                    raise
+                current = None
+            if current != source:
+                changed = True
+                break
+    if changed:
+        for job in items(api, f"/workspaces/{workspace}/jobs"):
+            if job.get("name") not in {"wf_ai_gods_eye_view_social_network", "wf_ai_gods_eye_view_sensor_stream",
+                    "territorial_social_network", "territorial_sensor_stream", "prisma_bogota_tick", "prisma_colombia_sensors"}:
+                continue
+            if not job.get("key"):
+                raise RuntimeError("Managed Territorial workflow identity is incomplete")
+            detail = api.request("GET", f"/workspaces/{workspace}/jobs/{quote(str(job['key']), safe='')}").body
+            if not any(task.get("filePath") in {root + "/10_bronze/social_network.py", root + "/10_bronze/sensor_stream.py"} for task in detail.get("tasks", [])):
+                continue
+            if any(run_state(run) not in RUN_SUCCESS | RUN_FAILED for run in
+                    items(api, f"/workspaces/{workspace}/jobRuns", {"jobKey": job["key"], "limit": 100})):
+                raise RuntimeError("Stop both managed Territorial workflows before replacing shared sources")
+    for path in ("/Workspace/medallion", root, *(root + "/" + layer for layer in ("10_bronze", "20_silver", "30_gold", "40_report"))):
         ensure_folder(api, workspace, path)
     for name, source in sorted(sources.items()):
-        upload(api, workspace, root + "/" + name, source)
-    upload(api, workspace, root + "/manifest.json", manifest)
+        upload(api, workspace, root + "/" + name, source, replace=True)
+    upload(api, workspace, root + "/manifest.json", manifest, replace=True)
     return root
 
 
-def upload(api, workspace, path, content, kind="file"):
+def upload(api, workspace, path, content, kind="file", *, replace=False):
     if kind == "notebook":
         from app.aidp import AidpClient
     endpoint = f"/workspaces/{workspace}/notebook/api/contents/{quote(path, safe='')}"
@@ -317,7 +308,8 @@ def upload(api, workspace, path, content, kind="file"):
     if existing:
         if (AidpClient._notebook_matches(existing.get("content"), content) if kind == "notebook" else existing.get("content") == content):
             return
-        raise RuntimeError("Territorial versioned workspace path already has different content")
+        if not replace or kind != "file":
+            raise RuntimeError("Territorial versioned workspace path already has different content")
     if kind == "notebook":
         parent = path.rsplit("/", 1)[0]
         created = api.request("POST", f"/workspaces/{workspace}/notebook/api/contents/{quote(parent, safe='')}",
@@ -426,27 +418,36 @@ def install_cluster_libraries(api, workspace, compute, *, ensure_folder):
         pause()
 
 
-def install_stream_compute(api, workspace, name):
+def install_stream_compute(api, workspace, name, key=""):
     """Dedicated small USER cluster; omission of autoTerminationMinutes keeps it always on."""
     from app.aidp import AidpClient
-    if name not in {"social_stream_compute", "sensor_stream_compute"}:
+    name = next((canonical for canonical, aliases in RESOURCE_ALIASES.items() if name in aliases), name)
+    if name not in {"aidp_gods_eye_view_social_compute", "aidp_gods_eye_view_sensor_compute", "aidp_gods_eye_view_query_compute"}:
         raise ValueError("Invalid dedicated streaming compute")
     payload = {"type": "USER", "displayName": name,
-        "description": "Dedicated Territorial Control permanent streaming workflow",
-        "driverConfig": {"driverShape": "amd.generic", "driverShapeConfig": {"ocpus": 2, "memoryInGBs": 32}},
-        "workerConfig": {"workerShape": "amd.generic", "workerShapeConfig": {"ocpus": 2, "memoryInGBs": 32},
+        "description": "God's Eye View Gold queries" if name == "aidp_gods_eye_view_query_compute" else "God's Eye View permanent streaming workflow",
+        "driverConfig": {"driverShape": "amd.generic", "driverShapeConfig": {"ocpus": 2, "memoryInGBs": 16}},
+        "workerConfig": {"workerShape": "amd.generic", "workerShapeConfig": {"ocpus": 2, "memoryInGBs": 16},
                          "minWorkerCount": 1, "maxWorkerCount": 1},
         "clusterRuntimeConfig": {"type": "SPARK", "sparkVersion": "3.5.0",
             "sparkAdvancedConfigurations": {"spark.aidp.lineage.enabled": "true"}, "sparkEnvVariables": {}, "initScripts": []}}
     path = f"/workspaces/{workspace}/clusters"
-    resource = ensure(api, path, name, payload, ready=True)
+    if key != "":
+        if not isinstance(key, str) or not key.strip():
+            raise RuntimeError("Dedicated compute identity is invalid")
+        resource = api.request("GET", path + "/" + quote(key, safe="")).body
+        if resource.get("key") != key:
+            raise RuntimeError("Dedicated compute identity differs")
+    else:
+        resource = ensure(api, path, name, payload, ready=True)
     path += "/" + quote(str(resource["key"]), safe="")
-    expected = {key: value for key, value in payload.items() if key != "description"}
+    expected = {key: value for key, value in payload.items() if key not in {"description", "displayName"}}
     started = False
     while True:
         response = api.request("GET", path)
         detail = response.body
-        if not AidpClient._notebook_matches(detail, expected) or detail.get("autoTerminationMinutes") not in (None, 0):
+        if ((detail.get("displayName") or detail.get("name")) not in {name, *RESOURCE_ALIASES[name]}
+                or not AidpClient._notebook_matches(detail, expected) or detail.get("autoTerminationMinutes") not in (None, 0)):
             raise RuntimeError("Dedicated streaming compute differs from its always-on fixed-size contract")
         state = str(detail.get("state") or detail.get("lifecycleState") or "").upper()
         if state == "ACTIVE":
@@ -463,13 +464,14 @@ def install_stream_compute(api, workspace, name):
 
 def managed_workflow(api, workspace, name, legacy_name, key=None):
     base = f"/workspaces/{workspace}/jobs"
-    matches = [job for job in items(api, base) if job.get("name") in {name, legacy_name}
+    names = {name, *(legacy_name if isinstance(legacy_name, tuple) else (legacy_name,))}
+    matches = [job for job in items(api, base) if job.get("name") in names
                and (job.get("lifecycleState") or job.get("state")) != "DELETED"]
     if len(matches) > 1 or (key and matches and matches[0].get("key") != key):
         raise RuntimeError("Duplicate or mismatched managed Territorial workflow")
     if key:
         current = api.request("GET", base + "/" + quote(key, safe="")).body
-        if (current.get("name") not in {name, legacy_name} or current.get("key") != key
+        if (current.get("name") not in names or current.get("key") != key
                 or (current.get("lifecycleState") or current.get("state")) in {"DELETING", "DELETED"}):
             raise RuntimeError("Configured Territorial workflow identity does not match")
         return current
@@ -486,22 +488,22 @@ def install_job(api, workspace, compute, config, bundle, *, ensure_folder, workf
     if workflow not in {"social", "sensors"} or (workflow == "sensors" and not persistent):
         raise ValueError("Invalid Territorial Control workflow")
     task = "sensor_stream" if workflow == "sensors" else "social_network"
-    name = "territorial_" + task
-    legacy_name = "prisma_colombia_sensors" if workflow == "sensors" else "prisma_bogota_tick"
+    name = "wf_ai_gods_eye_view_" + task
+    legacy_name = ("territorial_" + task, "prisma_colombia_sensors" if workflow == "sensors" else "prisma_bogota_tick")
     current = managed_workflow(api, workspace, name, legacy_name, config.get("sensor_job_key" if workflow == "sensors" else "job_key"))
     root = publish_runtime_sources(api, workspace, config, bundle, ensure_folder=ensure_folder)
-    path = root + "/" + task + ".py"
-    payload = {"name": name, "path": "/Workspace/territorial", "description": "Finite Territorial collection and publication tick",
+    path = root + "/10_bronze/" + task + ".py"
+    payload = {"name": name, "path": WORKSPACE_ROOT, "description": "God's Eye View collection and publication tick",
         "maxConcurrentRuns": 1, "queue": {"isEnabled": False}, "timeoutSeconds": 600,
         "schedule": {"quartzCronExpression": "0 * * * * ?", "timezoneId": "UTC", "pauseStatus": "PAUSED"},
         "jobClusters": [{"clusterKey": compute}], "tasks": [{"type": "PYTHON_TASK", "taskKey": task,
         "dependsOn": [], "runIf": "ALL_SUCCESS", "maxRetries": 0, "isRetryOnTimeout": False,
         # AIDP assigns this string to sys.argv; it expects a list literal, not shell arguments.
-        "source": "WORKSPACE", "filePath": path, "commandLineArguments": json.dumps([path, "--runtime-root", root]),
+        "source": "WORKSPACE", "filePath": path, "commandLineArguments": json.dumps([path]),
         "cluster": {"clusterKey": compute}}]}
     payload["tasks"][0]["isStreaming"] = persistent
     if persistent:
-        payload.update(description="Territorial Control persistent " + ("sensor TXT ingestion" if workflow == "sensors" else "social ingestion and publication"))
+        payload.update(description="God's Eye View persistent " + ("sensor TXT ingestion" if workflow == "sensors" else "social ingestion and publication"))
         payload.pop("timeoutSeconds")
         payload["tasks"][0].pop("maxRetries")
         payload["tasks"][0].pop("isRetryOnTimeout")
@@ -565,36 +567,80 @@ def wait_agent_deployment(api, base, region):
         pause(10)
 
 
+def install_agent_compute(api, workspace, key=""):
+    path = f"/workspaces/{workspace}/clusters"
+    if key != "":
+        if not isinstance(key, str) or not key.strip():
+            raise RuntimeError("Territorial agent compute identity is invalid")
+        compute = api.request("GET", path + "/" + quote(key, safe="")).body
+        if compute.get("key") != key:
+            raise RuntimeError("Territorial agent compute identity differs")
+    else:
+        compute = ensure(api, path, AGENT_COMPUTE_NAME, {
+            "type": "AI_COMPUTE", "displayName": AGENT_COMPUTE_NAME, "description": "God's Eye View conversational agent",
+            "driverConfig": {"driverShapeConfig": {"ocpus": 1, "memoryInGBs": 16}},
+            "replicaConfig": {"minReplica": 1, "maxReplica": 1}}, ready=True)
+    if ((compute.get("type") or compute.get("sourceApi")) != "AI_COMPUTE"
+            or (compute.get("displayName") or compute.get("name")) not in {AGENT_COMPUTE_NAME, *RESOURCE_ALIASES[AGENT_COMPUTE_NAME]}
+            or (compute.get("lifecycleState") or compute.get("state")) not in {"ACTIVE", "STOPPED"}):
+        raise RuntimeError("Existing Territorial agent compute is incompatible or not ready")
+    return compute
+
+
 def publish_agent(api, workspace, bundle, region, runtime=None):
-    root = "/Workspace/territorial"
-    agent_config = {key: runtime[key] for key in ("region", "model_id", "compartment_id", "oci_credential_name", "oci_identity_sha256")} if runtime is not None else None
-    if agent_config is not None:
-        agent_config["reader_credential_name"] = runtime.get("reader_credential_name", "PrismaReaderRuntime")
-    suffix = "\nRUNTIME_CONFIG = " + repr(agent_config) + "\n" if agent_config is not None else ""
-    digest = hashlib.sha256(bundle + suffix.encode()).hexdigest()[:12]
-    entry = root + f"/agent_{digest}.py"
-    dependencies = root + "/requirements_" + digest + ".txt"
-    upload(api, workspace, dependencies, "oracledb==3.4.2\n")
-    upload(api, workspace, entry, bundle_prelude(bundle) + (ROOT / "apps/backend/app/territorial/agent.py").read_text(encoding="utf-8").replace("from __future__ import annotations\n", "") + suffix)
-    compute = ensure(api, f"/workspaces/{workspace}/clusters", "prisma_agent_compute", {
-        "type": "AI_COMPUTE", "displayName": "prisma_agent_compute", "description": "Territorial conversational agent",
-        "driverConfig": {"driverShapeConfig": {"ocpus": 1, "memoryInGBs": 16}}, "replicaConfig": {"minReplica": 1, "maxReplica": 1}}, ready=True)
-    if str(compute.get("type") or compute.get("sourceApi")) != "AI_COMPUTE":
-        raise RuntimeError("Existing Territorial agent compute is not AI_COMPUTE")
-    name = "territorial_assistant_" + digest
-    agent = ensure(api, f"/workspaces/{workspace}/agents", name, {
-        "displayName": name, "description": "Territorial evidence-grounded assistant", "type": "CODE", "pathInfo": "/Workspace",
+    from app.aidp import AidpClient
+    root = WORKSPACE_ROOT
+    fields = ("region", "model_id", "compartment_id", "oci_credential_name", "oci_identity_sha256", "catalog", "gold_query_compute_id")
+    if not runtime or any(not isinstance(runtime.get(key), str) or not runtime[key] for key in fields):
+        raise RuntimeError("Territorial Gold agent configuration incomplete")
+    agent_config = {key: runtime[key] for key in fields}
+    manifest = api.request("GET", f"/workspaces/{workspace}/notebook/api/contents/{quote(root + '/manifest.json', safe='')}", params={"content": "1"}).body["content"]
+    if json.loads(manifest).get("bundle_sha256") != hashlib.sha256(bundle).hexdigest():
+        raise RuntimeError("Publish the matching Territorial runtime before its agent")
+    entry, dependencies = root + "/40_report/ai_gods_eye_view.py", root + "/40_report/requirements.txt"
+    source = agent_source(agent_config, bundle)
+    compile(source, entry, "exec")
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:12]
+    upload(api, workspace, dependencies, "# Dependencies are provided by native AIDP AI Compute.\n", replace=True)
+    upload(api, workspace, entry, source, replace=True)
+    compute = install_agent_compute(api, workspace, runtime.get("agent_compute_id", ""))
+    name = AGENT_NAME
+    payload = {
+        "displayName": name, "description": "God's Eye View evidence-grounded assistant " + digest, "type": "CODE", "pathInfo": "/Workspace",
         "entryFilePath": entry, "dependenciesFilePath": dependencies, "computeKey": compute["key"],
-        "sessionConfig": {"variables": {}, "sessionRetentionConfig": SESSION_RETENTION}})
-    detail = api.request("GET", f"/workspaces/{workspace}/agents/{quote(str(agent['key']), safe='')}").body
-    if (detail.get("type") != "CODE" or str(detail.get("entryFilePath", "")).lstrip("/") != entry.lstrip("/")
-        or detail.get("computeKey") != compute["key"]):
+        "sessionConfig": {"variables": {}, "sessionRetentionConfig": SESSION_RETENTION}}
+    if "agent_id" in runtime:
+        key = runtime["agent_id"]
+        if not isinstance(key, str) or not key.strip():
+            raise RuntimeError("Configured God's Eye View agent identity is invalid")
+        agent = api.request("GET", f"/workspaces/{workspace}/agents/{quote(key, safe='')}").body
+        if (agent.get("key") != key or agent.get("displayName") not in {name, *RESOURCE_ALIASES[name]}
+                or (agent.get("lifecycleState") or agent.get("state")) in {"DELETED", "DELETING"}):
+            raise RuntimeError("Configured God's Eye View agent identity differs")
+    else:
+        agent = ensure(api, f"/workspaces/{workspace}/agents", name, payload)
+    agent_path = f"/workspaces/{workspace}/agents/{quote(str(agent['key']), safe='')}"
+    response = api.request("GET", agent_path)
+    if any(not AidpClient._notebook_matches(response.body.get(field), value) for field, value in payload.items()):
+        operation(api, api.request("PUT", agent_path, payload={key: value for key, value in payload.items() if key not in {"type", "pathInfo"}},
+            headers={"If-Match": response.headers["etag"]} if response.headers.get("etag") else None))
+    detail = api.request("GET", agent_path).body
+    if any(not AidpClient._notebook_matches(detail.get(field), value) for field, value in payload.items()):
         raise RuntimeError("Territorial agent definition did not round-trip")
-    base = f"/workspaces/{workspace}/agents/{agent['key']}/deployments"
-    if not agent_deployments(api, base):
-        operation(api, api.request("POST", base + "/actions/deploy", payload={"displayName": name + "_deployment",
-            "description": "Territorial deployment " + digest, "agentKey": agent["key"], "agentComputeKey": compute["key"],
-            "sessionRetentionConfig": SESSION_RETENTION}))
+    base = agent_path + "/deployments"
+    deployments = agent_deployments(api, base)
+    deployment = {"displayName": name + "_deployment", "description": "God's Eye View deployment " + digest,
+        "agentKey": agent["key"], "agentComputeKey": compute["key"]}
+    if not deployments:
+        operation(api, api.request("POST", base + "/actions/deploy", payload={**deployment, "sessionRetentionConfig": SESSION_RETENTION}))
+    else:
+        current = api.request("GET", base + "/" + quote(str(deployments[0]["key"]), safe=""))
+        if current.body.get("description") != deployment["description"]:
+            if (current.body.get("lifecycleState") or current.body.get("state")) != "ACTIVE":
+                raise RuntimeError("Territorial agent deployment is not ready for an update")
+            operation(api, api.request("POST", base + "/actions/redeploy", payload=deployment,
+                headers={"opc-retry-token": hashlib.sha256(f"{agent['key']}:{digest}".encode()).hexdigest(),
+                    **({"If-Match": current.headers["etag"]} if current.headers.get("etag") else {})}))
     return {"state": "ACTIVE", "agent_key": agent["key"], "revision": digest,
             **wait_agent_deployment(api, base, region)}
 
@@ -607,13 +653,22 @@ def run_initial_job(api, workspace, job, revision):
     tasks = detail.get("tasks", [])
     task = tasks[0] if len(tasks) == 1 else {}
     path = task.get("filePath", "") if task.get("type") == "PYTHON_TASK" else task.get("notebookPath", "")
+    try:
+        arguments = json.loads(task.get("commandLineArguments") or "[]")
+    except (ValueError, TypeError):
+        arguments = []
     python = (task.get("type") == "PYTHON_TASK" and task.get("taskKey") == "social_network" and task.get("source") == "WORKSPACE"
-              and re.fullmatch(r"/Workspace/territorial/releases/[a-f0-9]{64}/social_network\.py", path)
-              and task.get("commandLineArguments") == json.dumps([path, "--runtime-root", path.rsplit("/", 1)[0]]))
+              and path == WORKSPACE_ROOT + "/10_bronze/social_network.py" and arguments == [path])
     legacy = task.get("type") == "NOTEBOOK_TASK" and re.fullmatch(r"/Workspace/medallon/prisma/prisma_tick_[a-f0-9]{12}\.ipynb", path)
     if not python and not legacy:
-        raise RuntimeError("Territorial initial job must reference one content-versioned source")
-    token = hashlib.sha256(f"{api.deployment_id}:prisma:{job}:{revision}:{path}".encode()).hexdigest()
+        raise RuntimeError("Territorial initial job must reference one managed source")
+    source_revision = revision
+    if python:
+        source = api.request("GET", f"/workspaces/{workspace}/notebook/api/contents/{quote(path, safe='')}", params={"content": "1"}).body.get("content")
+        if not isinstance(source, str) or not source.strip():
+            raise RuntimeError("Managed workflow source is missing")
+        source_revision = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    token = hashlib.sha256(f"{api.deployment_id}:territorial:{job}:{revision}:{source_revision}:{path}:{arguments}".encode()).hexdigest()
     response = api.request("POST", base, payload={"jobKey": job, "parameters": []},
                            headers={"opc-retry-token": token})
     operation(api, response)
@@ -705,18 +760,15 @@ def bootstrap_territorial(api, context, outputs, config, signer, storage, wallet
     import oracledb
     agent_api = api.__class__(context["region"], outputs["ai_data_platform_id"], signer, context["deployment_id"],
                              api_version="20260430", resource_segment="aiDataPlatforms")
+    oci_credential = ensure_oci_credential(agent_api, {**config, "region": context["region"]})
     database_users(agent_api, wallet, wallet_password, admin_password, {**config, "region": context["region"]}, outputs,
                    wallet_dsn=wallet_dsn, validate_wallet=validate_wallet, generate_password=generate_password)
-    oci_credential = shared_credential(items(agent_api, "/credentials"))
-    if oci_credential is None:
-        raise RuntimeError("Shared OCI runtime credential is unavailable")
     bundle = runtime_archive()
     runtime = {"namespace": outputs["objectstorage_namespace"], "bucket": outputs["medallion_bucket_names"]["gold"], "workbench_base": api.base,
         "region": context["region"], "model_id": outputs["agent_model_id"], "compartment_id": outputs["compartment_ocid"], "catalog": reconciled["catalog_name"],
-        "streaming_mode": "persistent", "pipeline_revision": hashlib.sha256(bundle).hexdigest(),
+        "streaming_mode": "persistent", "pipeline_revision": hashlib.sha256(bundle).hexdigest(), "analytics_store": "gold",
         "oci_credential_name": oci_credential["displayName"], "oci_identity_sha256": identity_hash(config),
-        "writer_credential_name": database_credential_name(agent_api),
-        "reader_credential_name": database_credential_name(agent_api, reader=True)}
+        "writer_credential_name": database_credential_name(agent_api)}
     runtime.update(landing_bucket=outputs["medallion_bucket_names"]["landing"], landing_prefix="01_landing/prisma/raw/",
         landing_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/landing",
         checkpoint_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/checkpoints/bronze-v1",
@@ -725,8 +777,10 @@ def bootstrap_territorial(api, context, outputs, config, signer, storage, wallet
         sensor_checkpoint_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/checkpoints/sensors-v1")
     workspace = reconciled["workspace_key"]
     install_volumes(agent_api, runtime)
-    social_compute = install_stream_compute(api, workspace, "social_stream_compute")
-    sensor_compute = install_stream_compute(api, workspace, "sensor_stream_compute")
+    social_compute = install_stream_compute(api, workspace, "aidp_gods_eye_view_social_compute")
+    sensor_compute = install_stream_compute(api, workspace, "aidp_gods_eye_view_sensor_compute")
+    runtime["gold_query_compute_id"] = install_stream_compute(api, workspace, "aidp_gods_eye_view_query_compute")
+    runtime["agent_compute_id"] = install_agent_compute(agent_api, workspace)["key"]
     for compute in (social_compute, sensor_compute):
         install_cluster_libraries(agent_api, workspace, compute, ensure_folder=ensure_folder)
     job = install_job(api, workspace, social_compute, runtime, bundle, ensure_folder=ensure_folder)
@@ -734,6 +788,7 @@ def bootstrap_territorial(api, context, outputs, config, signer, storage, wallet
     runtime.update(workspace_key=workspace, job_key=job, sensor_job_key=sensor_job,
                    social_compute_key=social_compute, sensor_compute_key=sensor_compute)
     agent = publish_agent(agent_api, workspace, bundle, context["region"], runtime)
+    runtime["agent_id"] = agent["agent_key"]
     # Materialize empty governed roots; Spark ignores these hidden non-event objects.
     for prefix in (runtime["landing_prefix"], runtime["sensor_landing_prefix"]):
         storage.put_object(runtime["namespace"], runtime["landing_bucket"], prefix + ".keep", b"", content_type="application/octet-stream")

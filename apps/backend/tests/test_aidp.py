@@ -99,16 +99,17 @@ def test_governed_access_accepts_catalog_without_direct_select() -> None:
 
 
 @pytest.mark.parametrize("preferred_present", [True, False])
+@pytest.mark.parametrize("preferred", ["AidpRuntime", "AidpDataGovernanceExtension"])
 @pytest.mark.parametrize("type_field,state_field", [("type", "lifecycleState"), ("credentialType", "lifeCycleState")])
 @pytest.mark.parametrize("writer", ["PrismaWriterRuntime", "TerritorialWriterRuntime"])
 def test_governance_reuses_shared_credential_without_reading_or_rotating_keys(
-    preferred_present, type_field, state_field, writer,
+    preferred_present, type_field, state_field, writer, preferred,
 ) -> None:
     client = bare_client()
     credentials = [{"displayName": writer, "key": "writer-key",
                     type_field: "SECRET_TOKEN", state_field: "ACTIVE"}]
     if preferred_present:
-        credentials.append({"displayName": "AidpDataGovernanceExtension", "key": "governance-key",
+        credentials.append({"displayName": preferred, "key": "governance-key",
                             type_field: "SECRET_TOKEN", state_field: "ACTIVE"})
     client._list = lambda *_args, **_kwargs: credentials
     client._request = lambda *_args, **_kwargs: pytest.fail("Reuse must not mutate credentials")
@@ -119,9 +120,10 @@ def test_governance_reuses_shared_credential_without_reading_or_rotating_keys(
 
 
 @pytest.mark.parametrize("invalid", ["duplicate", "type", "state", "identifier"])
-def test_governance_invalid_preferred_credential_never_falls_back_or_mutates(invalid) -> None:
+@pytest.mark.parametrize("preferred", ["AidpRuntime", "AidpDataGovernanceExtension"])
+def test_governance_invalid_preferred_credential_never_falls_back_or_mutates(invalid, preferred) -> None:
     client = bare_client()
-    governance = {"displayName": "AidpDataGovernanceExtension", "key": "governance-key",
+    governance = {"displayName": preferred, "key": "governance-key",
                   "credentialType": "SECRET_TOKEN", "lifeCycleState": "ACTIVE"}
     if invalid == "type":
         governance["credentialType"] = "OCI_API_KEY"
@@ -143,7 +145,7 @@ def test_governance_invalid_preferred_credential_never_falls_back_or_mutates(inv
 def test_governance_creates_once_only_when_both_shared_credentials_are_missing() -> None:
     client = bare_client()
     credentials, mutations = [], []
-    payload = {"displayName": "AidpDataGovernanceExtension", "type": "SECRET_TOKEN"}
+    payload = {"displayName": "AidpRuntime", "type": "SECRET_TOKEN"}
     client._list = lambda *_args, **_kwargs: list(credentials)
     client._credential_payload = lambda: payload
 

@@ -169,6 +169,9 @@ def _clean_controls(connection, removed_posts, removed_events):
 
 
 def _save_clean_history(connection, objects, lake, config, batch, operation_id, sensor_type=None):
+    if config.get("analytics_store", "autonomous") == "gold" and (
+            database.reset_version(connection) < 3 or sensor_type is not None and database.sensor_reset_version(connection) < 3):
+        raise RuntimeError("Gold reset database contract is not installed")
     replacements = {snapshot["version"]: clean["version"] for snapshot, clean, _, _ in batch}
     def journal(doc):
         if (doc.get("operation_id") != operation_id or doc.get("sensor_type") != sensor_type
@@ -179,9 +182,10 @@ def _save_clean_history(connection, objects, lake, config, batch, operation_id, 
     journal(database.read_document(connection, "checkpoint_reset"))
     lake.put("gold", [{"id": clean["version"], **clean} for _, clean, _, _ in batch])
     for _, clean, body, _ in batch:
-        database.publish(connection, clean)
+        if config.get("analytics_store", "autonomous") != "gold":
+            database.publish(connection, clean)
         objects.put_object(config["namespace"], config["bucket"], HISTORY_PREFIX + clean["version"] + ".json", body, content_type="application/json")
-    # Every replacement exists in all three stores before one durable receipt permits old deletes.
+    # Delta and Object Storage are durable before the receipt; legacy mode also mirrors to ADB.
     database.mutate_document(connection, "checkpoint_reset", journal)
     if sensor_type is None:
         _clean_controls(connection, set().union(*(_synthetic_ids(row["evidence"]) for row, _, _, _ in batch)),

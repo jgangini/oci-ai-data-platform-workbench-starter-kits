@@ -4,6 +4,7 @@
 *.tfplan
 .oci/
 .tmp/
+.aidp/payloads/
 *.pem
 *.key
 *.crt

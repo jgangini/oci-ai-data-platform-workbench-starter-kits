@@ -15,8 +15,8 @@ def test_sensor_reset_capability_is_independent_from_social_reset_and_does_not_c
     assert database.sensor_reset_version(connection) == 1
     assert calls == [("ADMIN.PRISMA_CONTROL.SENSOR_RESET_VERSION", int, [])]
     assert "FUNCTION SENSOR_RESET_VERSION RETURN NUMBER;" in database.PACKAGE_SPEC
-    assert "FUNCTION SENSOR_RESET_VERSION RETURN NUMBER IS BEGIN RETURN 2; END;" in database.PACKAGE_BODY
-    assert "FUNCTION RESET_VERSION RETURN NUMBER IS BEGIN RETURN 2; END;" in database.PACKAGE_BODY
+    assert "FUNCTION SENSOR_RESET_VERSION RETURN NUMBER IS BEGIN RETURN 3; END;" in database.PACKAGE_BODY
+    assert "FUNCTION RESET_VERSION RETURN NUMBER IS BEGIN RETURN 3; END;" in database.PACKAGE_BODY
 
 
 @pytest.mark.parametrize("sensor_type", (*sensors.SENSOR_TYPES, "all"))
@@ -68,3 +68,17 @@ def test_sensor_sql_rejects_unscoped_commands_and_unproven_readings_before_delet
     assert 'PASSING p_sensor_type AS "kind" ERROR ON ERROR' in deletion
     assert "PRISMA_SOCIAL_POSTS" not in procedure and "$.evidence" not in deletion and "$.incidents" not in deletion
     assert "TRUNCATE" not in procedure and "DROP" not in procedure
+
+
+def test_gold_replacement_requires_explicit_mode_and_exact_durable_journal_pair():
+    body = database.PACKAGE_BODY
+    helper = body.split("FUNCTION gold_replacement", 1)[1].split("PROCEDURE require_reset", 1)[0]
+    assert "p_old IS NULL OR p_new IS NULL OR p_old=p_new THEN RETURN FALSE" in helper
+    assert "checkpoint.name='checkpoint_reset'" in helper
+    assert "runtime.name='runtime'" in helper and "JSON_VALUE(runtime.payload,'$.analytics_store')='gold'" in helper
+    assert "v_document.get_object('replacements')" in helper and "v_replacements.has(p_old)" in helper
+    assert "IF v_replacements.get_string(p_old)=p_new THEN RETURN TRUE; END IF;" in helper
+    assert "EXCEPTION WHEN NO_DATA_FOUND THEN RETURN FALSE" in helper
+    for procedure in ("REPLACE_SYNTHETIC_PUBLICATION", "REPLACE_SENSOR_PUBLICATION"):
+        region = body.split("PROCEDURE " + procedure, 1)[1].split("DELETE FROM", 1)[0]
+        assert "IF v_count!=1 AND NOT gold_replacement(p_old,p_new)" in region

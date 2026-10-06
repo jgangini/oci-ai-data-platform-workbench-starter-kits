@@ -21,10 +21,18 @@ from test_territorial_agent import incident_database, sqlite_rows
 def runtime(monkeypatch):
     credentials = {"region": "us-chicago-1", "compartment_id": "test-compartment", "model_id": "test-model",
         "tenancy": "test-tenancy", "user": "test-user", "fingerprint": "test-fingerprint", "private_key": "test-key"}
+    monkeypatch.setattr("app.territorial.agent.RUNTIME_CONFIG", {
+        **{key: credentials[key] for key in ("region", "compartment_id", "model_id")},
+        "oci_credential_name": "AidpRuntime", "oci_identity_sha256": identity_hash(credentials),
+        "catalog": "oci_medallion", "gold_query_compute_id": "gold-query-compute"})
     secret_get = MagicMock(side_effect=lambda *, name, key: credentials[key])
     cursor = MagicMock()
     database = MagicMock()
     database.return_value.__enter__.return_value.cursor.return_value = cursor
+    def read_gold(config, sql, binds):
+        cursor.execute(sql, binds)
+        return [json.loads(row[0].read() if hasattr(row[0], "read") else row[0]) for row in cursor.fetchall()]
+    gold_query = MagicMock(side_effect=read_gold)
     formatter = SimpleNamespace(ainvoke=AsyncMock(return_value={"incident_refs": [],
         "answer": "No matching rows", "version": "v1",
         "evidence_ids": [], "sensor_evidence_ids": [], "actions": []}))
@@ -71,6 +79,7 @@ def runtime(monkeypatch):
         "langchain_core.runnables": SimpleNamespace(RunnableLambda=runnable),
         "langgraph.prebuilt": SimpleNamespace(create_react_agent=create_agent, ToolNode=tool_node),
         "territorial.runtime_secrets": SimpleNamespace(database_connection=database, signer=signer, values=values),
+        "territorial.gold_reader": SimpleNamespace(query=gold_query),
         "oracle_memory_clients.client": SimpleNamespace(AsyncProxyCheckpointClient=checkpoint),
     }
     for name, module in modules.items():
@@ -78,7 +87,7 @@ def runtime(monkeypatch):
     agent = TerritorialAgent()
     agent.llm = llm
     return SimpleNamespace(agent=agent, formatter=formatter, planner=planner, runnable=runnable,
-        cursor=cursor, database=database, secret_get=secret_get,
+        cursor=cursor, database=database, gold_query=gold_query, secret_get=secret_get,
         credentials=credentials, llm=llm, init_llm=init_llm, native_signer=native_signer, inference_client=inference_client,
         memory=memory, checkpoint=checkpoint,
         configuration=configuration, pre_invoke=pre_invoke, graph=graph, create_agent=create_agent, messages=messages,
@@ -91,8 +100,7 @@ def test_setup_and_invoke_keep_configured_model_tools_and_session_memory(monkeyp
     monkeypatch.setenv("MEMORY_URL", "http://unused.test:21100")
     fake.agent.setup()
 
-    assert fake.secret_get.call_args_list == [call(name="PrismaReaderRuntime", key=key)
-        for key in ("region", "compartment_id", "model_id")] + [call(name="PrismaWriterRuntime", key=key)
+    assert fake.secret_get.call_args_list == [call(name="AidpRuntime", key=key)
         for key in ("tenancy", "user", "fingerprint", "private_key")]
     fake.native_signer.assert_called_once_with(tenancy="test-tenancy", user="test-user", fingerprint="test-fingerprint",
         private_key_file_location=None, private_key_content="test-key")
@@ -889,7 +897,8 @@ def test_each_agent_owns_its_inference_client_without_cached_remote_state(monkey
 def test_explicit_model_and_shared_credential_replace_stale_reader_model_only(monkeypatch, reader):
     fake = runtime(monkeypatch)
     config = {"region": "us-chicago-1", "compartment_id": "test-compartment", "model_id": "governance-model",
-        "oci_credential_name": "AidpDataGovernanceExtension", "oci_identity_sha256": identity_hash(fake.credentials)}
+        "oci_credential_name": "AidpDataGovernanceExtension", "oci_identity_sha256": identity_hash(fake.credentials),
+        "catalog": "oci_medallion", "gold_query_compute_id": "gold-query-compute"}
     if reader is not None:
         config["reader_credential_name"] = reader
     monkeypatch.setattr("app.territorial.agent.RUNTIME_CONFIG", config)
@@ -900,12 +909,23 @@ def test_explicit_model_and_shared_credential_replace_stale_reader_model_only(mo
     tools = {tool.__name__: tool for tool in fake.create_agent.call_args.args[1]}
     fake.cursor.fetchall.return_value = []
     tools["consultar_sensores"]("publication")
-    fake.database.assert_called_once_with(fake.secret_get, reader or "PrismaReaderRuntime")
-    fake.database.reset_mock()
-    fake.database.side_effect = PermissionError("Credential unavailable")
+    fake.database.assert_not_called()
+    assert fake.gold_query.call_args.args[0] is config
+    fake.gold_query.reset_mock()
+    fake.gold_query.side_effect = PermissionError("Gold compute unavailable")
     with pytest.raises(PermissionError):
         tools["consultar_sensores"]("publication")
-    fake.database.assert_called_once_with(fake.secret_get, reader or "PrismaReaderRuntime")
+    assert fake.gold_query.call_count == 1
+    fake.database.assert_not_called()
+
+
+def test_agent_missing_deployment_config_never_discovers_a_legacy_reader(monkeypatch):
+    fake = runtime(monkeypatch)
+    monkeypatch.setattr("app.territorial.agent.RUNTIME_CONFIG", None)
+    with pytest.raises(RuntimeError, match="deployment configuration incomplete"):
+        fake.agent.setup()
+    fake.secret_get.assert_not_called()
+    fake.gold_query.assert_not_called()
 
 
 @pytest.mark.parametrize("factory", [signer, runtime_auth])
@@ -987,18 +1007,18 @@ def test_registered_tools_return_sensor_and_social_records_with_exact_scope(monk
     assert incident_binds == {**scope, "incident_id": "incident-42", "category": "inundacion", "severity": "high",
         "source_mode": "Synthetic", "platform": "x", "country": "Colombia", "city": "Bogotá"}
     assert evidence_binds == {"version": "publication-42", "evidence_id": "post-42", "incident_id": None, "platform": None}
-    assert "ADMIN.PRISMA_V_SENSOR_EVENTS WHERE version=:version" in sensor_sql
-    assert "ADMIN.PRISMA_V_INCIDENTS i WHERE i.version=:version" in incident_sql
-    assert "e.version=i.version AND e.evidence_id=ids.eid" in incident_sql
-    assert "ADMIN.PRISMA_V_EVIDENCE e WHERE e.version=:version" in evidence_sql
-    assert "FETCH FIRST 10 ROWS ONLY" in evidence_sql
-    assert "ADMIN.PRISMA_V_SNAPSHOTS p" in relation_sql and "WHERE p.version=:version" in relation_sql
+    assert "territorial_sensors WHERE publication_version=:version" in sensor_sql
+    assert "territorial_incidents i WHERE i.publication_version=:version" in incident_sql
+    assert "e.publication_version=i.publication_version" in incident_sql
+    assert "territorial_evidence e WHERE e.publication_version=:version" in evidence_sql
+    assert "LIMIT 10" in evidence_sql
+    assert "territorial_event_posts r" in relation_sql and "WHERE r.publication_version=:version" in relation_sql
     assert "r.post_key IN (:post_0)" in relation_sql and "r.event_id=:incident_id" in relation_sql
     assert relation_binds == {"version": "publication-42", "incident_id": None, "post_0": "post-42"}
     for sql in (sensor_sql, incident_sql):
-        assert "FETCH FIRST 100 ROWS ONLY" in sql and "publication-42" not in sql and "Kennedy" not in sql
-    assert fake.database.call_args_list == [call(fake.secret_get, "PrismaReaderRuntime")] * 4
-    assert fake.database.return_value.__exit__.call_count == 4
+        assert "LIMIT 100" in sql and "publication-42" not in sql and "Kennedy" not in sql
+    assert fake.gold_query.call_count == 4
+    fake.database.assert_not_called()
 
 
 def test_evidence_tool_executes_linked_versioned_platform_query_and_recovers_unsampled_sources(monkeypatch, incident_database):
@@ -1085,10 +1105,10 @@ def test_evidence_tool_exposes_copy_and_claim_relations_from_exact_snapshot_and_
     for item in fake.cursor.execute.call_args_list:
         sql, binds = item.args
         assert binds["version"] in {"v1", "v2"} and binds["version"] not in sql
-        if "PRISMA_V_SNAPSHOTS" in sql:
-            assert "event_posts" in sql and "WHERE p.version=:version" in sql and "r.event_id=:incident_id" in sql
+        if "territorial_event_posts" in sql:
+            assert "WHERE r.publication_version=:version" in sql and "r.event_id=:incident_id" in sql
             assert all(value not in sql for value in binds.values() if isinstance(value, str))
-    assert all(item == call(fake.secret_get, "PrismaReaderRuntime") for item in fake.database.call_args_list)
+    fake.database.assert_not_called()
 
 
 def test_evidence_relation_database_error_does_not_become_an_empty_relation_list(monkeypatch):
@@ -1098,7 +1118,8 @@ def test_evidence_relation_database_error_does_not_become_an_empty_relation_list
     fake.cursor.fetchall.side_effect = [[(json.dumps({"id": "post-1"}),)], RuntimeError("Snapshot unavailable")]
     with pytest.raises(RuntimeError, match="Snapshot unavailable"):
         evidence("v1", "post-1")
-    assert fake.database.call_count == 2
+    assert fake.gold_query.call_count == 2
+    fake.database.assert_not_called()
 
 
 @pytest.mark.parametrize("filters", [
@@ -1184,24 +1205,25 @@ def test_registered_tools_distinguish_empty_results_from_database_errors(monkeyp
     fake.cursor.fetchall.return_value = []
     assert tool(version="publication-42", **filters) == []
 
-    failure = RuntimeError("ADB query unavailable")
+    failure = RuntimeError("Gold query unavailable")
     fake.cursor.execute.side_effect = failure
     with pytest.raises(RuntimeError) as caught:
         tool(version="publication-42", **filters)
     assert caught.value is failure
     assert fake.cursor.fetchall.call_count == 1
-    assert fake.database.return_value.__exit__.call_args.args[:2] == (RuntimeError, failure)
+    fake.database.assert_not_called()
 
 
 def test_setup_does_not_replace_missing_credentials_or_failed_memory(monkeypatch):
     fake = runtime(monkeypatch)
-    fake.credentials["model_id"] = ""
-    with pytest.raises(RuntimeError, match="runtime credential incomplete"):
+    from app.territorial.agent import RUNTIME_CONFIG
+    RUNTIME_CONFIG["model_id"] = ""
+    with pytest.raises(RuntimeError, match="deployment configuration incomplete"):
         fake.agent.setup()
     fake.init_llm.assert_not_called()
     fake.create_agent.assert_not_called()
 
-    fake.credentials["model_id"] = "test-model"
+    RUNTIME_CONFIG["model_id"] = "test-model"
     fake.checkpoint.side_effect = RuntimeError("Checkpoint unavailable")
     with pytest.raises(RuntimeError, match="Checkpoint unavailable"):
         fake.agent.setup()

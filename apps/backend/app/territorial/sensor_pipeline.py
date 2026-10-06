@@ -147,6 +147,8 @@ class SensorLake:
             # ponytail: 25000 rows per microbatch bounds driver memory; larger batches need distributed validation.
             rows = frame.withColumn("source_object", F.input_file_name()).limit(MAX_BATCH_RECORDS + 1).collect()
             self.put(decode_batch(rows, time.time()))
+            print(json.dumps({"workflow": "sensor_stream", "stage": "silver", "batch_id": _batch_id,
+                              "rows": len(rows), "status": "committed"}), flush=True)
 
         stream = (self.spark.readStream.format("text").option("maxFilesPerTrigger", 5)
             .option("recursiveFileLookup", True).option("pathGlobFilter", "*.txt").load(path))
@@ -194,7 +196,7 @@ def run(spark, secret_get, config, *, clock=time.time, connection=None, lake=Non
     with ExitStack() as stack:
         connection = connection or stack.enter_context(database_connection(secret_get,
             config.get("writer_credential_name", "PrismaWriterRuntime")))
-        if sensor_reset_version(connection) != 2:
+        if sensor_reset_version(connection) < (3 if config.get("analytics_store") == "gold" else 2):
             raise RuntimeError("Sensor reset database contract is not installed")
         lake = lake or SensorLake(spark, config, RLock())
         query, restored = None, False
@@ -225,3 +227,4 @@ def run(spark, secret_get, config, *, clock=time.time, connection=None, lake=Non
         finally:
             if query is not None:
                 query.stop()
+            print(json.dumps({"workflow": "sensor_stream", "status": "stopped"}), flush=True)

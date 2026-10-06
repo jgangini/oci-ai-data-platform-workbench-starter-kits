@@ -184,6 +184,7 @@ def _put_object(objects, config, key, document):
 
 def install_post_views(spark, catalog, tables):
     """Add business names over existing Delta data; keep its paths and publication history."""
+    install_gold_views(spark, catalog, tables["gold"])
     spark.sql(f"""CREATE OR REPLACE VIEW {catalog}.oci_bronze.social_posts_raw AS
       SELECT id AS post_key,get_json_object(payload,'$.platform') AS platform,
         get_json_object(payload,'$.source_id') AS original_id,
@@ -225,6 +226,23 @@ def install_post_views(spark, catalog, tables):
     spark.sql(f"""CREATE OR REPLACE VIEW {catalog}.oci_silver.event_posts AS
       SELECT get_json_object(p.payload,'$.version') AS publication_version,relation.* FROM {tables['current']} p
       LATERAL VIEW explode(from_json(get_json_object(payload,'$.event_posts'),'{relation_schema}')) records AS relation""")
+
+
+def install_gold_views(spark, catalog, publication_table):
+    """Expose exact published records, including fields added by newer producers."""
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", catalog) or not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}", publication_table):
+        raise ValueError("Invalid Gold catalog or publication table")
+    for family in ("incidents", "evidence", "sensors", "event_posts"):
+        identity = ("item.event_id AS event_id,item.post_key AS post_key" if family == "event_posts"
+                    else "item.id AS id")
+        schema = "ARRAY<STRUCT<event_id:STRING,post_key:STRING>>" if family == "event_posts" else "ARRAY<STRUCT<id:STRING>>"
+        # Parse only row identity; extracting by position retains the complete evidence JSON.
+        spark.sql(f"""CREATE OR REPLACE VIEW {catalog}.oci_gold.territorial_{family} AS
+          SELECT p.id AS publication_version,{identity},
+            get_json_object(p.payload,concat('$.{family}[',position,']')) AS payload
+          FROM {publication_table} p
+          LATERAL VIEW posexplode(from_json(get_json_object(p.payload,'$.{family}'),'{schema}')) records AS position,item""")
 
 
 def ingest_page(connection, objects, lake, config, platform, events, checkpoint=None):
@@ -283,6 +301,8 @@ def _consume_format(spark, lake, path, checkpoint, format_name, persistent=False
             lake.put("bronze", events)
             if getattr(lake, "on_ingested", None):
                 lake.on_ingested(events, {"format": format_name, "batch_id": _batch_id})
+        print(json.dumps({"workflow": "social_network", "stage": "bronze", "format": format_name,
+                          "batch_id": _batch_id, "rows": len(events), "status": "committed"}), flush=True)
     reader = (spark.readStream.schema("id STRING, payload STRING").option("maxFilesPerTrigger", 5)
               .option("pathGlobFilter", "*.ndjson" if format_name == "json" else "*.csv").option("mode", "FAILFAST"))
     if path.startswith("/Volumes"):
@@ -404,7 +424,8 @@ def publish_snapshot(connection, objects, lake, config, events, reviews, simulat
     snapshot.update(version=version, published_at=pending["published_at"])
     snapshot = lake.stage_snapshot(snapshot)
     lake.put("gold", [{"id": version, **snapshot}])
-    publish(connection, snapshot)
+    if config.get("analytics_store", "autonomous") != "gold":
+        publish(connection, snapshot)
     key = f"04_gold/prisma/snapshots/{version}.json"
     _put_object(objects, config, key, snapshot)
     # The previous pointer remains usable if any preceding durable write fails.
@@ -482,6 +503,10 @@ def _tick(connection, objects, lake, config, secret_get, now, classifier, client
         "pipeline_revision": config.get("pipeline_revision"),
         "sensor_reset_version": 2,
         "configuration_revision": config["configuration_revision"], "version": snapshot["version"], "stream": progress})
+    print(json.dumps({"workflow": "social_network", "stage": "gold", "version": snapshot["version"],
+                      "incidents": len(snapshot["incidents"]), "evidence": len(snapshot["evidence"]),
+                      "sensors": len(snapshot.get("sensors", [])), "pending": enrichment["pending_count"],
+                      "status": "needs_attention" if enrichment["needs_attention"] else "published"}), flush=True)
     return snapshot
 
 
@@ -539,10 +564,11 @@ def run_persistent(spark, connection, objects, lake, config, secret_get, classif
     finally:
         for _, query in queries:
             query.stop()
+        print(json.dumps({"workflow": "social_network", "status": "stopped"}), flush=True)
 
 
 def run(spark, secret_get, config, *, clock=time.time, classifier=None, connection=None, objects=None, lake=None, client=None):
-    """Production notebook entrypoint; optional injections make durable ordering testable offline."""
+    """Production Python entrypoint; optional injections make durable ordering testable offline."""
     from contextlib import ExitStack
     import oci
     import httpx
@@ -556,9 +582,10 @@ def run(spark, secret_get, config, *, clock=time.time, classifier=None, connecti
         objects = objects or oci.object_storage.ObjectStorageClient(sdk_config, signer=signed)
         client = client or stack.enter_context(httpx.Client())
         lake = lake or DeltaLake(spark, config)
-        if reset_version(connection) != 2:
+        required_reset_version = 3 if config.get("analytics_store") == "gold" else 2
+        if reset_version(connection) < required_reset_version:
             raise RuntimeError("Synthetic reset database contract is not installed")
-        if sensor_reset_version(connection) != 2:
+        if sensor_reset_version(connection) < required_reset_version:
             raise RuntimeError("Sensor reset database contract is not installed")
         if read_document(connection, "runtime").get("synthetic_reset_version") != 2:
             mutate_document(connection, "runtime", lambda doc: {**doc, "synthetic_reset_version": 2})

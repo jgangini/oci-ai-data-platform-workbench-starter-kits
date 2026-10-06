@@ -10,6 +10,7 @@ import pytest
 from app.territorial import capture, landing
 from app.territorial.core import build_snapshot, default_source, normalize_event, utc_text
 from app.territorial.pipeline import DeltaLake, consume_landing, install_post_views, start_landing
+from app.territorial.pipeline import install_gold_views
 
 
 def test_delta_writes_canonical_mode_and_deletes_both_synthetic_spellings(monkeypatch):
@@ -81,6 +82,31 @@ def test_persistent_stream_starts_both_formats_without_awaiting_termination():
     for reader, (_, query) in zip(readers, queries):
         reader.trigger.assert_called_once_with(processingTime="30 seconds")
         query.awaitTermination.assert_not_called()
+
+
+@pytest.mark.skipif(os.getenv("TERRITORIAL_SPARK_INTEGRATION") != "1", reason="Requires Spark 3.5 and a supported JDK")
+def test_gold_views_preserve_complete_json_and_exact_publication(tmp_path):
+    from pyspark.sql import SparkSession
+    spark = (SparkSession.builder.master("local[2]").appName("territorial-gold-contract")
+             .config("spark.sql.warehouse.dir", str(tmp_path / "warehouse")).getOrCreate())
+    current = {"incidents": [{"id": "event-1", "correlation_context": {"novel": ["Bogotá", None]}}],
+               "evidence": [{"id": "post-1", "text": 'lluvia "fuerte" ☔', "new_field": {"nested": True}}],
+               "sensors": [{"id": "sensor-reading-1", "value": 3.75}],
+               "event_posts": [{"event_id": "event-1", "post_key": "post-1", "new_relation": [1, 2]}]}
+    try:
+        spark.sql("CREATE DATABASE IF NOT EXISTS oci_gold")
+        spark.createDataFrame([("old", json.dumps({key: [] for key in current})), ("current", json.dumps(current))],
+                              "id STRING,payload STRING").write.saveAsTable("gold_view_fixture")
+        install_gold_views(spark, "spark_catalog", "gold_view_fixture")
+        for family, expected in current.items():
+            rows = spark.sql(f"SELECT * FROM spark_catalog.oci_gold.territorial_{family} WHERE publication_version=:version",
+                             args={"version": "current"}).collect()
+            assert [json.loads(row.payload) for row in rows] == expected
+            assert spark.sql(f"SELECT * FROM spark_catalog.oci_gold.territorial_{family} WHERE publication_version='old'").count() == 0
+        assert spark.sql("SELECT event_id,post_key FROM spark_catalog.oci_gold.territorial_event_posts").first().asDict() == {
+            "event_id": "event-1", "post_key": "post-1"}
+    finally:
+        spark.stop()
 
 
 @pytest.mark.skipif(os.getenv("PRISMA_SPARK_INTEGRATION") != "1", reason="Requires Spark 3.5, Delta 3.2 and a supported JDK")

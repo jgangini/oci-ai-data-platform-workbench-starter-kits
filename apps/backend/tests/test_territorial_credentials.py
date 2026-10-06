@@ -111,7 +111,7 @@ def test_credential_mapping_rejects_wrong_platform_alias_or_invalid_identifier(r
         aidp_credential_name("x", reference)
 
 
-@pytest.mark.parametrize("writer", [None, "TerritorialWriterRuntime"])
+@pytest.mark.parametrize("writer", [None, "TerritorialWriterRuntime", "AidpControlStore"])
 def test_social_runtime_and_ingestion_callback_keep_selected_database_credential(monkeypatch, writer):
     from app.territorial import pipeline
     names, connections, ingested = [], [], []
@@ -145,7 +145,7 @@ def test_social_runtime_and_ingestion_callback_keep_selected_database_credential
     assert names == [writer or "PrismaWriterRuntime"] * 3  # No alternate credential after a read error.
 
 
-@pytest.mark.parametrize("writer", [None, "TerritorialWriterRuntime"])
+@pytest.mark.parametrize("writer", [None, "TerritorialWriterRuntime", "AidpControlStore"])
 def test_sensor_runtime_uses_selected_database_credential_before_starting_stream(monkeypatch, writer):
     from app.territorial import database as database_api, landing, runtime_secrets, sensor_pipeline
     names = []
