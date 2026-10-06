@@ -46,9 +46,39 @@ After an update, verify `/api/health`, administrator access, installed release/c
 Manage both modules from **Settings → Application**, separately from Users:
 
 - **AI Data Governance:** select a verified platform administrator, install/redeploy the singleton, and confirm metadata synchronization plus agent authorization. [Lifecycle and deletion scope](modules/ai-data-governance.md).
-- **God's Eye View:** configure identity, source modes, schedules and providers; inspect pipeline and publication state. The viewer infrastructure must already be enabled. [Processing, cleanup and migration](modules/gods-eye-view.md).
+- **God's Eye View:** install its private viewer and AIDP resources, then configure identity, source modes, schedules and providers. [Processing, cleanup and migration](modules/gods-eye-view.md).
+
+For a new portal-managed base, use **Install module** and confirm the resource/cost explanation:
+
+```mermaid
+flowchart LR
+    Confirm[Administrator confirms installation] --> Identity[Verify original stack and source receipt]
+    Identity --> Plan[Plan module in the same Resource Manager stack]
+    Plan --> Guard{Only allowed module creates or no-ops?}
+    Guard -->|No| Stop[Stop and report the conflict]
+    Guard -->|Yes| Apply[Apply the checked plan]
+    Apply --> Bootstrap[Prepare AIDP controls, streams, compute and agent]
+    Bootstrap --> Verify[Verify native workflows, publication and private viewer]
+    Verify --> Ready[Installation ready; conversation acceptance remains separate]
+```
+
+The base reserves networking and the private endpoint before installation, keeping the portal VM stable. The installer only adds the viewer VM, its dynamic group and two scoped IAM policies; any other infrastructure write or detected drift stops the operation. The original source archive and commit must match the receipt, and stack variables must remain unchanged between plan and apply. It does not create another stack or an untracked VM.
+
+The selected artifacts bucket holds `.control/modules/installation.json` and `.control/gods_eye_view/install/operation.json`. The first binds the environment and immutable source; the second retains operation/attempt IDs, Resource Manager jobs and phases through restarts. They are separate from the module's data controls in Gold. Preserve both; do not edit them to bypass a mismatch.
+
+The dialog polls status without starting work. **Close** or Escape leaves installation running. Reopen to follow progress; if the worker stopped, **Resume installation** confirms continuation of the same operation. **Retry installation** confirms another attempt using its managed resources; **Verify installation** checks an installed module without reprovisioning it. A lost response is reconciled by GET before another POST is allowed.
+
+Check Resource Manager plan/apply status for infrastructure failures, then AIDP task outputs, agent deployment and publication/viewer readiness for later failures. A timeout can leave OCI work running: resume tracking rather than creating a second job. Resolve drift, foreign resource identities or changed source before retrying. Local fixtures create no cloud resources. Existing bases without portal-managed networking and a matching receipt retain the older activation/verification path and may require deployment separately.
+
+The VM-module registry (`enabled_vm_modules`) currently supports only `gods_eye_view`. Another module requires implementation, packaging, a Terraform resource allowlist and acceptance checks; adding a name does not permit arbitrary VM or code uploads. Sources: [installer](../apps/backend/app/gods_eye_view/installation.py), [status API](../apps/backend/app/gods_eye_view/module.py), [mock plan contract](../terraform/tests/check_module_plan.py).
 
 Changing a schedule, name or registration code requires the portal's confirmation. Saving a schedule preserves paused/completed capture state. Installing a global module does not grant participants administrator rights.
+
+## Destroy and retention boundaries
+
+The private viewer remains owned by the original Terraform stack, including its dynamic group and policies. A completed stack Destroy includes those tracked resources; installation does not create a separate VM outside Terraform state. Verify the actual destroy plan and final resource inventory before declaring removal complete.
+
+This installer adds no general AIDP teardown hook. Participant/Governance cleanup, synthetic deletion and data-retention policies remain separate operations. Review their scope, active writers and retained or reused buckets before destroying an environment; removing a VM is not evidence that every workflow, table or stored object has been cleaned. See [resource ownership](../terraform/FUNCTION_AUDIT.md#module-resource-ownership).
 
 ## Synthetic cleanup
 

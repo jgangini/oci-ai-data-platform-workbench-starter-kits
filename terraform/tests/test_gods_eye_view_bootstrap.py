@@ -1103,7 +1103,7 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
     outputs = {"objectstorage_namespace": "ns", "bucket_name": "landing",
                "medallion_bucket_names": {"gold": "gold", "landing": "landing"}, "agent_model_id": "model",
                "compartment_ocid": "compartment", "ai_data_platform_id": "platform"}
-    published, runtime_documents, credential_apis = [], [], []
+    published, runtime_documents, credential_apis, progress = [], [], [], []
     database = SimpleNamespace(commit=lambda: None)
     monkeypatch.setitem(sys.modules, "oracledb", None)
     monkeypatch.setattr(bootstrap.tempfile, "TemporaryDirectory", lambda **_: nullcontext(str(tmp_path)))
@@ -1146,14 +1146,10 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
     monkeypatch.setattr(bootstrap, "start_stream_job", initial_job)
     monkeypatch.setattr(bootstrap, "wait_stream_jobs", lambda *_: check("snapshot", "gold-version"))
     storage = SimpleNamespace(put_object=lambda *args, **_: published.append(args))
-    wallet = io.BytesIO()
-    with zipfile.ZipFile(wallet, "w") as archive:
-        archive.writestr("tnsnames.ora", "db_low = ()")
     arguments = (Api(), {"region": "us-chicago-1", "deployment_id": "deployment"}, outputs,
-                 {"tenancy": "test-tenancy", "user": "test-user", "fingerprint": "test-id"}, None, storage, wallet.getvalue(), "test-wallet", "test-admin",
+                 {"tenancy": "test-tenancy", "user": "test-user", "fingerprint": "test-id"}, None, storage,
                  {"workspace_key": "ws", "shared_compute_key": "compute", "catalog_name": "catalog"})
-    helpers = dict(wallet_dsn=post_apply._wallet_dsn, validate_wallet=post_apply._validate_wallet,
-                   generate_password=post_apply._generated_database_password, ensure_folder=post_apply.ensure_workspace_folder)
+    helpers = dict(ensure_folder=post_apply.ensure_workspace_folder, progress=lambda phase, message: progress.append((phase, message)))
     if failed_phase:
         with pytest.raises(RuntimeError, match=failed_phase + " failed"):
             bootstrap.bootstrap_gods_eye_view(*arguments, deadline=bootstrap.time.monotonic() + 100, **helpers)
@@ -1162,6 +1158,8 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
         result = bootstrap.bootstrap_gods_eye_view(*arguments, deadline=bootstrap.time.monotonic() + 100, **helpers)
         assert result["prisma_snapshot_version"] == "gold-version"
         assert published[-1][:3] == ("ns", "gold", ".control/prisma/agent.json")
+        assert [phase for phase, _ in progress] == ["controls", "volumes", "computes", "workflows", "agent", "streaming", "publication"]
+        assert all(message for _, message in progress)
     assert runtime_documents[0]["bucket"] == "gold"
     assert runtime_documents[0]["analytics_store"] == "gold"
     assert "writer_credential_name" not in runtime_documents[0] and "reader_credential_name" not in runtime_documents[0]

@@ -146,7 +146,14 @@ async def run_local_gods_eye_view(app):
     """VM source producer only in OCI; classification/publication remain native AIDP work."""
     while True:
         try:
-            await runtime_for(app).tick()
+            runtime = runtime_for(app)
+            if app.state.settings.portal_managed_modules and not app.state.settings.gods_eye_view_local_mode:
+                from .installation import ModuleInstallation
+                state = await asyncio.to_thread(ModuleInstallation(app.state.settings, runtime.aidp_factory, None).read)
+                if not state.get("enabled"):
+                    await asyncio.sleep(60)
+                    continue
+            await runtime.tick()
         except Exception as exc:
             logging.getLogger(__name__).error("Gods Eye View source producer failed (%s); retrying", type(exc).__name__)
         await asyncio.sleep(60)

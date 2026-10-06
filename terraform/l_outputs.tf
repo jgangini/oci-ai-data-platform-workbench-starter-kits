@@ -3,6 +3,29 @@ output "application_url" {
   value       = "https://${data.oci_core_vnic.lab.public_ip_address}"
 }
 
+output "portal_managed_modules" {
+  description = "The portal can install modules by applying this stack at its installed source commit."
+  value       = var.portal_managed_modules
+}
+
+output "enabled_vm_modules" {
+  value = sort(tolist(var.enabled_vm_modules))
+}
+
+output "source_commit_sha" {
+  value = var.source_commit_sha
+}
+
+output "deployment_suffix" {
+  value = local.suffix
+}
+
+output "gods_eye_view_reserved_private_ip" {
+  description = "Reserved private VM2 address for portal-managed installations."
+  sensitive   = true
+  value       = var.portal_managed_modules ? local.gods_eye_view_reserved_private_ip : null
+}
+
 output "public_ip_tls_enabled" {
   value = var.enable_public_ip_tls
 }

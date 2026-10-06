@@ -19,8 +19,10 @@ RUN apt-get update \
 WORKDIR /opt/aidp-lab
 COPY apps/backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
-COPY apps/backend/app ./app
-ENV GODS_EYE_DATASET_ROOT=/opt/aidp-lab/app/labs/gods_eye_view/source/social_networks/v1
+COPY apps/backend/app ./apps/backend/app
+COPY terraform/hooks/post_apply.py terraform/hooks/gods_eye_view_bootstrap.py terraform/hooks/gods_eye_sources.py terraform/hooks/gods_eye_agent_source.py ./terraform/hooks/
+ENV PYTHONPATH=/opt/aidp-lab/apps/backend:/opt/aidp-lab/terraform/hooks \
+    GODS_EYE_DATASET_ROOT=/opt/aidp-lab/apps/backend/app/labs/gods_eye_view/source/social_networks/v1
 COPY --from=frontend /src/apps/frontend/dist /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/entrypoint.sh /usr/local/bin/aidp-lab-entrypoint

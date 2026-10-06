@@ -54,9 +54,9 @@ def test_deploy_studio_manifest_contract() -> None:
     assert manifest["post_apply"]["timeout_seconds"] == 3600
     assert (root / manifest["post_apply"]["entrypoint"]).is_file()
     fields = {field["name"]: field for field in manifest["form"]["fields"]}
-    assert fields["enable_prisma_viewer"]["default"] is False
-    assert fields["enable_prisma_viewer"]["label"] == "Enable God’s Eye View private viewer VM"
-    assert "enable_territorial_viewer" not in fields
+    assert not {"enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer", "enable_public_ip_tls", "enabled_vm_modules", "portal_managed_modules"} & fields.keys()
+    assert re.search(r'variable\s+"portal_managed_modules"\s*\{.*?default\s*=\s*true', variables, re.DOTALL)
+    assert re.search(r'variable\s+"enable_public_ip_tls"\s*\{.*?default\s*=\s*true', variables, re.DOTALL)
     assert "home_region" not in fields
     assert "preferred_vm_shape" not in fields
     assert "vm_ocpus" not in fields

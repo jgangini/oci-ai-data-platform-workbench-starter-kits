@@ -1,19 +1,23 @@
 locals {
-  gods_eye_view_enabled = coalesce(var.enable_gods_eye_view, var.enable_territorial_viewer, var.enable_prisma_viewer)
-  # A reserved private address avoids a bootstrap dependency cycle between the two VMs.
-  gods_eye_view_admin_private_ip = cidrhost(cidrsubnet(var._oci_vcn.cidr_block, 1, 0), 10)
+  gods_eye_view_enabled       = contains(var.enabled_vm_modules, "gods_eye_view") || coalesce(var.enable_gods_eye_view, var.enable_territorial_viewer, var.enable_prisma_viewer)
+  module_network_enabled      = var.portal_managed_modules || local.gods_eye_view_enabled
+  gods_eye_view_resource_name = "${local.name_prefix}-${var.portal_managed_modules ? "gods-eye-view" : "prisma"}"
+  # Reserved endpoints keep VM1 metadata and networking unchanged when a module is installed.
+  gods_eye_view_admin_private_ip    = cidrhost(cidrsubnet(var._oci_vcn.cidr_block, 1, 0), 10)
+  gods_eye_view_reserved_private_ip = cidrhost(cidrsubnet(var._oci_vcn.cidr_block, 1, 1), 10)
+  gods_eye_view_upstream            = var.portal_managed_modules ? "http://${local.gods_eye_view_reserved_private_ip}:8081" : (local.gods_eye_view_enabled ? "http://${oci_core_instance.gods_eye_view[0].private_ip}:8081" : "http://127.0.0.1:8081")
 }
 
-# Physical names below identify existing OCI resources; moved blocks preserve their state.
+# Legacy deployments retain their physical names; portal-managed resources use the current module name.
 resource "oci_core_nat_gateway" "gods_eye_view" {
-  count          = local.gods_eye_view_enabled ? 1 : 0
+  count          = local.module_network_enabled ? 1 : 0
   compartment_id = local.target_compartment
   vcn_id         = oci_core_vcn.lab.id
-  display_name   = "${local.name_prefix}-prisma-nat"
+  display_name   = "${local.gods_eye_view_resource_name}-nat"
 }
 
 resource "oci_core_route_table" "gods_eye_view" {
-  count          = local.gods_eye_view_enabled ? 1 : 0
+  count          = local.module_network_enabled ? 1 : 0
   compartment_id = local.target_compartment
   vcn_id         = oci_core_vcn.lab.id
   route_rules {
@@ -24,10 +28,10 @@ resource "oci_core_route_table" "gods_eye_view" {
 }
 
 resource "oci_core_security_list" "gods_eye_view" {
-  count          = local.gods_eye_view_enabled ? 1 : 0
+  count          = local.module_network_enabled ? 1 : 0
   compartment_id = local.target_compartment
   vcn_id         = oci_core_vcn.lab.id
-  display_name   = "${local.name_prefix}-prisma-egress"
+  display_name   = "${local.gods_eye_view_resource_name}-egress"
   egress_security_rules {
     protocol    = "6"
     destination = "0.0.0.0/0"
@@ -47,11 +51,11 @@ resource "oci_core_security_list" "gods_eye_view" {
 }
 
 resource "oci_core_subnet" "gods_eye_view" {
-  count                      = local.gods_eye_view_enabled ? 1 : 0
+  count                      = local.module_network_enabled ? 1 : 0
   compartment_id             = local.target_compartment
   vcn_id                     = oci_core_vcn.lab.id
   cidr_block                 = cidrsubnet(var._oci_vcn.cidr_block, 1, 1)
-  display_name               = "${local.name_prefix}-prisma-private"
+  display_name               = "${local.gods_eye_view_resource_name}-private"
   prohibit_public_ip_on_vnic = true
   prohibit_internet_ingress  = true
   route_table_id             = oci_core_route_table.gods_eye_view[0].id
@@ -59,21 +63,21 @@ resource "oci_core_subnet" "gods_eye_view" {
 }
 
 resource "oci_core_network_security_group" "gods_eye_view_proxy" {
-  count          = local.gods_eye_view_enabled ? 1 : 0
+  count          = local.module_network_enabled ? 1 : 0
   compartment_id = local.target_compartment
   vcn_id         = oci_core_vcn.lab.id
-  display_name   = "${local.name_prefix}-prisma-proxy"
+  display_name   = "${local.gods_eye_view_resource_name}-proxy"
 }
 
 resource "oci_core_network_security_group" "gods_eye_view" {
-  count          = local.gods_eye_view_enabled ? 1 : 0
+  count          = local.module_network_enabled ? 1 : 0
   compartment_id = local.target_compartment
   vcn_id         = oci_core_vcn.lab.id
-  display_name   = "${local.name_prefix}-prisma-viewer"
+  display_name   = "${local.gods_eye_view_resource_name}-viewer"
 }
 
 resource "oci_core_network_security_group_security_rule" "gods_eye_view" {
-  count                     = local.gods_eye_view_enabled ? 1 : 0
+  count                     = local.module_network_enabled ? 1 : 0
   network_security_group_id = oci_core_network_security_group.gods_eye_view[0].id
   direction                 = "INGRESS"
   protocol                  = "6"
@@ -91,7 +95,7 @@ resource "oci_core_instance" "gods_eye_view" {
   count               = local.gods_eye_view_enabled ? 1 : 0
   compartment_id      = local.target_compartment
   availability_domain = local.availability_domain
-  display_name        = "${local.name_prefix}-prisma-viewer"
+  display_name        = "${local.gods_eye_view_resource_name}-viewer"
   shape               = var.preferred_vm_shape
   shape_config {
     ocpus         = var._oci_instance.shape.ocpus
@@ -100,6 +104,7 @@ resource "oci_core_instance" "gods_eye_view" {
   create_vnic_details {
     subnet_id        = oci_core_subnet.gods_eye_view[0].id
     assign_public_ip = false
+    private_ip       = var.portal_managed_modules ? local.gods_eye_view_reserved_private_ip : null
     nsg_ids          = [oci_core_network_security_group.gods_eye_view[0].id]
   }
   source_details {
@@ -131,7 +136,7 @@ resource "oci_core_instance" "gods_eye_view" {
 }
 
 resource "oci_core_network_security_group_security_rule" "gods_eye_view_admin" {
-  count                     = local.gods_eye_view_enabled ? 1 : 0
+  count                     = local.module_network_enabled ? 1 : 0
   network_security_group_id = oci_core_network_security_group.gods_eye_view_proxy[0].id
   direction                 = "INGRESS"
   protocol                  = "6"
@@ -146,7 +151,7 @@ resource "oci_core_network_security_group_security_rule" "gods_eye_view_admin" {
 }
 
 resource "oci_core_network_security_group_security_rule" "gods_eye_view_admin_egress" {
-  count                     = local.gods_eye_view_enabled ? 1 : 0
+  count                     = local.module_network_enabled ? 1 : 0
   network_security_group_id = oci_core_network_security_group.gods_eye_view[0].id
   direction                 = "EGRESS"
   protocol                  = "6"
@@ -164,7 +169,7 @@ resource "oci_identity_dynamic_group" "gods_eye_view" {
   count          = local.gods_eye_view_enabled ? 1 : 0
   provider       = oci.home
   compartment_id = var.tenancy_ocid
-  name           = "${local.name_prefix}-prisma"
+  name           = local.gods_eye_view_resource_name
   description    = "Read-only published God’s Eye View objects for the private viewer VM"
   matching_rule  = "ALL {instance.id = '${oci_core_instance.gods_eye_view[0].id}'}"
 }
@@ -173,7 +178,7 @@ resource "oci_identity_policy" "gods_eye_view" {
   count          = local.gods_eye_view_enabled ? 1 : 0
   provider       = oci.home
   compartment_id = var.tenancy_ocid
-  name           = "${local.name_prefix}-prisma-read"
+  name           = "${local.gods_eye_view_resource_name}-read"
   description    = "God’s Eye View viewer reads only published evidence and agent endpoint metadata"
   statements = [
     "Allow dynamic-group ${oci_identity_dynamic_group.gods_eye_view[0].name} to read objects in compartment id ${local.target_compartment} where all {target.bucket.name = '${local.medallion_bucket_names["gold"]}', request.permission = 'OBJECT_READ', any {target.object.name = '04_gold/prisma/*', target.object.name = '.control/prisma/agent.json'}}"
@@ -184,7 +189,7 @@ resource "oci_identity_policy" "gods_eye_view_run_command" {
   count          = local.gods_eye_view_enabled ? 1 : 0
   provider       = oci.home
   compartment_id = var.tenancy_ocid
-  name           = "${local.name_prefix}-prisma-update"
+  name           = "${local.gods_eye_view_resource_name}-update"
   description    = "Let the operator deliver pinned viewer updates through native Run Command"
   statements = [
     "Allow group Administrators to manage instance-agent-command-family in compartment id ${local.target_compartment} where target.instance.id = '${oci_core_instance.gods_eye_view[0].id}'",

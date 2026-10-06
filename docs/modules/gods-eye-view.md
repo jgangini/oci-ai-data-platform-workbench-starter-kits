@@ -12,11 +12,19 @@ The new implementation uses readable standalone Python workflows, Gold analytica
 
 Existing installations can still run older jobs and credentials. Follow the [explicit migration procedure](../operations.md#migrate-gods-eye-view-controls) and record acceptance for the deployed revision. A successful candidate-agent conversation does not switch the portal's agent pointer or migrate operational state; an active deployment alone does not permit deleting a dependency.
 
+## Install the shared module
+
+New Deploy Studio bases prepare the HTTPS portal and shared networking; they do not create the viewer VM by default. From **Settings → Application**, select its install icon, choose **Install module** and confirm the private VM, separate social/sensor/query computes, agent compute and their running costs. Existing network and shared credentials are reused.
+
+The installer plans and applies only its allowed resources in the original Resource Manager stack, then runs AIDP bootstrap and native readiness checks. Progress shows actual phases using the registration dialog design. Closing it does not cancel work; reopening recovers status. **Resume installation** continues a stopped worker's operation, **Retry installation** requires renewed confirmation after failure, and **Verify installation** checks a ready installation without creating resources again.
+
+Installation receipts and job tracking live in the selected artifacts bucket; data controls and publication history remain in Gold. Existing bases without the reserved network and receipt use their compatibility path, not an automatic infrastructure migration. See [operations](../operations.md#global-module-lifecycle) for the plan boundary, failure checks and current registry scope. Source: [installer](../../apps/backend/app/gods_eye_view/installation.py), [dialog](../../apps/frontend/src/GodsEyeViewModuleManager.tsx).
+
 ## Administration
 
 | Action | Effect |
 | --- | --- |
-| Install / retry | Reuses the managed module and checks infrastructure, publication, viewer and deployment readiness; conversation acceptance is separate. |
+| Install / retry / resume | Confirms resource creation or recovery, reuses the same stack and tracked operation, and verifies native readiness. Conversation acceptance is separate. |
 | Save Name | Confirms viewer name/description; blank fields restore defaults. Reload the viewer after saving. |
 | Save source / sensor settings | Writes a revision-checked configuration without starting capture. |
 | Test | Checks configuration without creating Landing data. |
@@ -25,7 +33,7 @@ Existing installations can still run older jobs and credentials. Follow the [exp
 | Save schedule | Confirms scope, start, browser time zone and interval; paused/completed sources stay stopped. |
 | Delete Synthetic data | Confirms scope and starts a durable cleanup operation. |
 
-A stale configuration revision returns a conflict and requires reloading. A stopped persistent job is a failed activation prerequisite, not permission to create another job. See [module lifecycle](../../apps/backend/app/gods_eye_view/module.py) and [source controls](../../apps/backend/app/gods_eye_view/cloud.py).
+A stale configuration revision returns a conflict and requires reloading. Native verification requires healthy persistent tasks; bootstrap reconciles the managed jobs rather than creating unrelated replacements. See [module lifecycle](../../apps/backend/app/gods_eye_view/module.py) and [source controls](../../apps/backend/app/gods_eye_view/cloud.py).
 
 ## Capture and schedules
 

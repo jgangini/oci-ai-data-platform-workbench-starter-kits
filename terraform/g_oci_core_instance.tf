@@ -70,8 +70,8 @@ resource "oci_core_instance" "lab" {
   create_vnic_details {
     subnet_id        = oci_core_subnet.public.id
     assign_public_ip = true
-    private_ip       = local.gods_eye_view_enabled ? local.gods_eye_view_admin_private_ip : null
-    nsg_ids          = local.gods_eye_view_enabled ? [oci_core_network_security_group.gods_eye_view_proxy[0].id] : []
+    private_ip       = local.module_network_enabled ? local.gods_eye_view_admin_private_ip : null
+    nsg_ids          = local.module_network_enabled ? [oci_core_network_security_group.gods_eye_view_proxy[0].id] : []
   }
 
   source_details {
@@ -115,8 +115,9 @@ resource "oci_core_instance" "lab" {
       lab_marker                     = local.name_prefix
       source_repo_url                = var.source_repository_url
       source_commit_sha              = var.source_commit_sha
-      gods_eye_view_url              = local.gods_eye_view_enabled ? "http://${oci_core_instance.gods_eye_view[0].private_ip}:8081" : "http://127.0.0.1:8081"
-      enable_gods_eye_view           = local.gods_eye_view_enabled
+      gods_eye_view_url              = local.gods_eye_view_upstream
+      enable_gods_eye_view           = local.module_network_enabled
+      portal_managed_modules         = var.portal_managed_modules
       enable_public_ip_tls           = var.enable_public_ip_tls
       gods_eye_view_admin_private_ip = local.gods_eye_view_admin_private_ip
     }))

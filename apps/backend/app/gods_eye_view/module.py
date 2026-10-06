@@ -1,4 +1,4 @@
-"""Activate the global module on infrastructure provisioned by Deploy Studio."""
+"""Install shared resources or verify a module provisioned by an older release."""
 import asyncio
 import json
 import os
@@ -21,15 +21,22 @@ class GodsEyeViewModule:
     def __init__(self, settings, runtime):
         self.settings, self.runtime = settings, runtime
         self.lock = asyncio.Lock()
+        self.installer = None
 
     async def status(self, deploy=False):
         async with self.lock:
             try:
+                if self.settings.portal_managed_modules and not self.settings.gods_eye_view_local_mode:
+                    if self.installer is None:
+                        from .installation import ModuleInstallation
+                        self.installer = ModuleInstallation(self.settings, self.runtime.aidp_factory, lambda: self._status(True))
+                    state = await self.installer.status(deploy)
+                    return self._response(state, stage=state.get("stage"), resumable=state.get("resumable", False))
                 return await asyncio.to_thread(self._status, deploy)
             except HTTPException:
                 raise
             except Exception as exc:
-                raise HTTPException(503, "The Gods Eye View native runtime is not ready. Check the Deploy Studio post-apply result and retry.") from exc
+                raise HTTPException(503, "The Gods Eye View installation could not be verified. Check the deployment result and retry.") from exc
 
     def _read(self):
         if self.settings.gods_eye_view_local_mode:

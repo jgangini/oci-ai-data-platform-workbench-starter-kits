@@ -86,8 +86,24 @@ variable "deployment_mode" {
   }
 }
 
+variable "portal_managed_modules" {
+  description = "Prepare the central portal and shared private network for module installation in this same stack."
+  type        = bool
+  default     = true
+}
+
+variable "enabled_vm_modules" {
+  description = "Internal module state managed by the central portal, not a deployment form input."
+  type        = set(string)
+  default     = []
+  validation {
+    condition     = alltrue([for module in var.enabled_vm_modules : module == "gods_eye_view"])
+    error_message = "The supported VM module is gods_eye_view."
+  }
+}
+
 variable "enable_gods_eye_view" {
-  description = "Create the private God’s Eye View VM behind the authenticated application."
+  description = "Compatibility input for a viewer provisioned before portal-managed modules."
   type        = bool
   default     = null
 }
@@ -108,7 +124,7 @@ variable "enable_prisma_viewer" {
 variable "enable_public_ip_tls" {
   description = "Obtain and automatically renew a publicly trusted Let's Encrypt certificate for the application IPv4 address."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "registration_code_hash" {

@@ -27,6 +27,8 @@ jobs:
       - run: terraform validate
       - if: matrix.terraform_version == '1.15.7'
         run: terraform test
+      - if: matrix.terraform_version == '1.15.7'
+        run: python tests/check_module_plan.py
 
   backend:
     runs-on: ubuntu-latest

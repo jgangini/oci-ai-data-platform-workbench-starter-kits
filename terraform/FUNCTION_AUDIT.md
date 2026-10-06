@@ -1,44 +1,21 @@
 # Terraform function and resource audit
 
-This ledger maps the two operational stages. It is deliberately conservative: automated
-coverage can justify retaining a deployment contract, but deletion requires both baseline
-and candidate evidence. Deploy Studio recorded the Resource Manager identifiers, plan/apply,
-outputs, post-apply events, AIDP inventory and app health for the first two live runs.
-The `v2.2.0` release retains subscribed-region and Chat-model selection, Autonomous AI
-Database 26ai DW, private participant catalogs and five real medallion-lineage packages, and
-replaces the participant Agent with one production-only global governance module. Local coverage
-is recorded below; live regional, lab-isolation and global Agent RBAC evidence is refreshed during release acceptance. The ADMIN
-database secret is consumed only by `post_apply` for AI enablement and for
-installing the allowlisted `ADMIN.AIDP_LAB_GOVERNANCE` package; it is never delivered to the VM.
-The VM stores the Autonomous wallet and a rotated operator that has only `CREATE SESSION` plus
-`EXECUTE` on that package. The package validates `u101`-style identifiers and can create or drop
-only the matching participant owner and read-only users.
+This ledger maps infrastructure and lifecycle ownership to executable checks. It describes source contracts, not a live deployment certificate. Keep per-environment plans, logs, timings and resource identifiers in protected operational records. The [implementation limits](../docs/getting-started.md#current-implementation-limits), including participant notebook/provisioner alignment, remain acceptance requirements.
 
-Historical baseline evidence follows. The
-`v1.0.0` baseline reached the AIDP create operation but exceeded the provider request deadline
-after 59 minutes; its exact Resource Manager stack was then destroyed successfully (`17
-destroyed`). `v2.0.0-rc.2` completed AIDP creation after `1h44m43s`, Resource Manager APPLY,
-`post_apply`, encrypted credential consumption/deletion, strict HTTPS health, catalog, four
-schemas, compute, workspace, and RBAC. Participant A then exposed a live `400` while creating
-an email-named workspace folder; all four journals remained safely at `workspace`.
-`v2.0.0-rc.3` replaced new and explicitly redeployed participant paths with the already-defined
-opaque `participant_key`. Its infrastructure completed in `16m09s` (AIDP in `7m36s`) from
-commit `a562facc26d2`; plus-address registration created the keyed workspace successfully, then
-failed deterministically while the Banking journal was at `schemas`. Because that checkpoint
-also covers content upload, `v2.0.0-rc.4` reports a redacted method, endpoint, phase, object path,
-and Oracle `code`/`message` so the next live attempt can identify the exact rejected contract.
-That attempt completed infrastructure in `13m11s` from commit `addcb7ffc706`, preserved the then-current participant Agent
-as disabled, and identified the exact shared job defect: task parameters used `key`, while the
-live and published AIDP `Parameter` schema requires `name`. `v2.0.0-rc.5` corrected that single
-job-construction helper for every lab and arbitrary notebook count. Its infrastructure completed
-in `49m33s`; participant A activated four labs after an idempotent retry, participant B activated
-Banking and Retail, and adding Telecommunications completed without affecting either existing
-lab. The subsequent Banking redeploy exposed AIDP delete/recreate eventual consistency: the lab
-root remained unpublished beyond the ten-minute client deadline while Retail, Telecommunications
-and every lab for participant A stayed active. `v2.0.0-rc.6` therefore keeps the validated lab
-container during redeploy and replaces only the lab-owned job, tables, Object Storage data and
-canonical content. Lab deletion and participant deletion still remove the exact workspace root.
-Final workflow and lineage acceptance remains pending.
+## Module resource ownership
+
+New Deploy Studio bases prepare the HTTPS portal and module network without creating the optional viewer VM. The form has no per-VM/TLS switches. A confirmed **Settings → Application → Install module** updates `enabled_vm_modules` in the original Resource Manager stack; it does not call Compute to create an unmanaged instance. Only `gods_eye_view` is supported. Additional modules need explicit source, package and resource-allowlist support, not arbitrary VM uploads.
+
+| Boundary | Contract | Reproducible check |
+| --- | --- | --- |
+| Base network | Reserve portal/viewer endpoints, subnets, NAT and security rules before module installation; keep portal metadata stable. | [Mock transition](tests/portal_modules.tftest.hcl) |
+| Module plan | Permit only viewer VM, dynamic group and two IAM policy creates or managed no-ops; reject drift and unrelated writes. | [Exact delta check](tests/check_module_plan.py), [installer tests](../apps/backend/tests/test_gods_eye_view_installation.py) |
+| Source and ownership | Verify stack identity, source commit/archive, variables and checked plan before apply. | [Installer](../apps/backend/app/gods_eye_view/installation.py) |
+| Durable recovery | Store base receipt and operation/job IDs in the selected artifacts bucket, separately from Gold controls. Closing observes no cancellation; stopped workers need confirmed Resume. | [Post-apply tests](tests/test_post_apply.py), [dialog tests](../apps/frontend/tests/gods-eye-view-module-manager.test.mjs) |
+| Native resources | Bootstrap managed AIDP workflows, compute and agent, then verify tasks, publication and private viewer; conversation acceptance is separate. | [Bootstrap tests](tests/test_gods_eye_view_bootstrap.py), [module tests](../apps/backend/tests/test_gods_eye_view_module.py) |
+| Destroy | The original stack owns VM2 and its IAM resources. Verify the destroy plan/state and final inventory; the installer creates no separate VM to orphan. | Terraform resource addresses in [h_gods_eye_view.tf](h_gods_eye_view.tf) |
+
+The installation path adds no general AIDP teardown hook. Existing participant/Governance cleanup and bucket-retention boundaries are unchanged; infrastructure destruction alone does not prove all API-created content or retained objects were cleaned. Existing unmanaged bases require their compatibility settings and do not acquire the new receipt/network contract through an application-image update.
 
 ## End-to-end chains
 
@@ -46,16 +23,17 @@ Final workflow and lineage acceptance remains pending.
 |---|---|---|---|---|---|
 | Release | `deploy-studio.json`, source context, plan JSON | `release_gate.main → validate_context → validate_source → validate_plan` | `tests/test_release_gate.py`, `tests/test_manifest.py` | Pending baseline/candidate artifacts | Keep: schema-v1/fresh-only trust boundary. |
 | Preflight | OCI config/key paths and Deploy Studio context | `m_preflight.main → _load_sdk_config → select_inputs → compartment/capacity/key validators` | `tests/test_preflight.py` | Pending preflight events | Keep: validates compartment, home region, capacity and unencrypted key before apply. |
-| Terraform | runtime inputs | naming → network → bucket → VM/bootstrap → Identity/IAM → AIDP → outputs | Terraform validate/test and the HCL tests listed below | RC2 APPLY succeeded; AIDP ACTIVE after `1h44m43s`; outputs recorded | Keep addresses unchanged; replacement is not justified. |
+| Terraform | runtime inputs | naming → network → bucket → VM/bootstrap → Identity/IAM → AIDP → outputs | Terraform validate/test and the HCL tests listed below | Native acceptance required | Keep addresses unchanged; module installation preserves the base portal. |
 | Regional discovery | uploaded OCI profile and effective region | `CloudTechNext.oci_inventory → list_region_subscriptions → regional probes → model filter → deployment revalidation` | CloudTechNext `test_oci_inventory.py`, `test_deployment_dependencies.py`, frontend build | v3 live evidence pending | Keep: config region is an initial choice; only compatible READY subscriptions and active Chat models are selectable. |
 | Autonomous and AI | database mode/profile, ECPU count, model | `m_preflight._require_ready_region → _require_agent_model → _require_autonomous → Terraform → post_apply.ensure_ai_features` | `test_preflight.py`, `test_manifest.py`, `test_post_apply.py`, Terraform contract | v3 live evidence pending | Keep: one-region contract, 26ai DW validation and default 4 ECPU. |
-| Bootstrap VM | commit-pinned source and Terraform outputs | `user_data.sh → retry/use_reachable_base_images → release download → Docker → one-use credential → health` | `tests/test_local_bootstrap.py`, `tests/test_identity_runtime.py`, `tests/test_manifest.py` | RC2 encrypted object consumed and deleted; HTTPS health succeeded | Keep: application and credential-consumption boundary. |
-| Post-apply | Terraform outputs and operator credential files | `post_apply.main → reconcile → resources/roles/permissions → deliver_operator_credentials → health → build_success_result` | `tests/test_post_apply.py` | RC2 hook completed; catalog, schemas, compute, workspace and roles created | Keep: idempotent data-plane reconciliation and final artifact. |
-| Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | RC5 participant A activated Banking, Telecommunications, Retail and Healthcare after a safe retry; B activated Banking and Retail; the legacy Agent stayed disabled | Keep: multi-lab assignment, partial-failure recovery and activation boundary proven live. |
-| Lab administration | user, lab, operation UUID | `add_lab/redeploy_lab/delete_lab → per-lab journal → _provision_lab/_cleanup_lab` | `apps/backend/tests/test_api.py`, `test_aidp.py` | RC5 add Telecommunications succeeded; Banking redeploy isolated an AIDP same-path tombstone while other labs stayed active | Keep: isolated journals proven; RC6 preserves the lab container during redeploy and retains exact-root deletion semantics for remove/full cleanup. |
+| Bootstrap VM | commit-pinned source and Terraform outputs | `user_data.sh → release download → verified image → one-use credential → HTTPS health` | `tests/test_local_bootstrap.py`, `tests/test_identity_runtime.py`, `tests/test_manifest.py` | Native acceptance required | Keep: application and credential-consumption boundary. |
+| Post-apply | Terraform outputs and operator credential files | `post_apply.main → reconcile → installation receipt → deliver_operator_credentials → health → build_success_result` | `tests/test_post_apply.py` | Native acceptance required | Keep: idempotent data-plane reconciliation and protected stack receipt. |
+| VM module installation | confirmed administrator request and original stack receipt | `GodsEyeViewModule → ModuleInstallation → checked plan/apply → AIDP bootstrap → native verification` | `apps/backend/tests/test_gods_eye_view_installation.py`, `tests/check_module_plan.py` | Native acceptance required | Keep: one tracked module in the original stack; no portal replacement. |
+| Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | Participant layout acceptance required | Keep: multi-lab assignment and partial-failure recovery. |
+| Lab administration | user, lab, operation UUID | `add_lab/redeploy_lab/delete_lab → per-lab journal → _provision_lab/_cleanup_lab` | `apps/backend/tests/test_api.py`, `test_aidp.py` | Native acceptance required | Keep: preserve the lab container during redeploy; exact-root deletion on removal. |
 | Global governance module | selected `AI_DATA_PLATFORM_ADMIN`, production mode and selected model | `admin module API → AidpClient.install/redeploy/delete_governance_module → control tables/workflow/dedicated AI compute/Agent → exact RBAC` | `apps/backend/tests/test_governance.py`, `test_aidp.py`, `test_api.py` | v3 live evidence pending | Keep candidate: one singleton Agent exposes only catalog inventory and lineage; `AIDP_DEVELOPER` receives `USE`, `AI_DATA_PLATFORM_ADMIN` receives `ADMIN`, and participants receive neither source editing nor direct dedicated-compute access. |
 | Participant deletion | exact Identity user and layout-v4 manifest | `main.admin_delete_user → AidpClient.cleanup_user → _cleanup_lab → catalog/data resources → IdentityClient.delete_lab_user` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_autonomous.py`, `test_governance.py` | v3 live evidence pending | Keep: Identity deletion occurs only after exact participant-lab cleanup, and pending cleanup is retryable; the global governance singleton is independent of participant deletion. |
-| Notebook parameters | task parameters in each canonical notebook | AIDP-injected `oidlUtils → parameters.getParameter → required_parameter` | `apps/backend/tests/test_lab_packs.py` | RC6 Banking Landing failed before parameter lookup because `import oidlUtils` searched for a wheel that the live PySpark runtime does not expose; Oracle examples use the injected global without importing it | Keep native parameterization; RC7 removes only the invalid import from all 20 notebooks and pins the corrected bytes in every package hash. |
+| Notebook parameters | task parameters in each canonical notebook | AIDP-injected `oidlUtils → parameters.getParameter → required_parameter` | `apps/backend/tests/test_lab_packs.py` | Participant layout acceptance required | Keep native parameterization and package hashes aligned with the job contract. |
 
 ## Terraform resources and data sources
 
@@ -77,6 +55,7 @@ Final workflow and lineage acceptance remains pending.
 | `oci_identity_dynamic_group.vm` | bootstrap/run-command policies | `tests/test_identity_runtime.py` | Pending dynamic-group OCID | Keep: no technical user or embedded key. |
 | `oci_identity_policy.vm_bootstrap` | one-use credential object | `tests/test_identity_runtime.py`, `tests/test_post_apply.py` | Pending policy statements | Keep: least-privilege credential delivery. |
 | `oci_core_instance.lab` | application/bootstrap host | `tests/test_identity_runtime.py`, `tests/test_manifest.py` | Pending instance OCID and health | Keep: registration/admin endpoint. |
+| `oci_core_instance.gods_eye_view[0]`, `oci_identity_dynamic_group.gods_eye_view[0]`, `oci_identity_policy.gods_eye_view[0]`, `oci_identity_policy.gods_eye_view_run_command[0]` | portal-managed module installation | `portal_modules.tftest.hcl`, `tests/check_module_plan.py` | Native acceptance required | Keep: exact four-resource module allowlist in the original stack. |
 | `oci_identity_policy.vm_run_command` | post-apply credential delivery | `tests/test_post_apply.py` | Pending run-command logs | Keep: encrypted one-use bootstrap channel. |
 | `data.oci_core_vnic_attachments.lab` | public-IP output | Terraform validate | Pending VNIC attachment | Keep: resolves endpoint. |
 | `data.oci_core_vnic.lab` | public-IP output | Terraform validate | Pending public IP | Keep: resolves endpoint. |
@@ -100,6 +79,7 @@ artifact consumes them. Live values must be stored only in the sanitized deploym
 | Output | Consumer | Automated evidence | Live evidence | Decision |
 |---|---|---|---|---|
 | `application_url` | Deploy Studio/app health | `tests/test_manifest.py`, `tests/test_post_apply.py` | Pending | Keep. |
+| `portal_managed_modules`, `enabled_vm_modules`, `source_commit_sha`, `deployment_suffix` | original-stack installation receipt and module lifecycle | `tests/test_post_apply.py`, `portal_modules.tftest.hcl` | Native acceptance required | Keep: capability, immutable source and deterministic ownership. |
 | `admin_url` | access email/artifact | `tests/test_manifest.py` | Pending | Keep. |
 | `aidp_workbench_url` | UI settings/artifact | `tests/test_post_apply.py` | Pending | Keep. |
 | `aidp_web_socket_endpoint` | Workbench URL resolution | `tests/test_post_apply.py` | Pending | Keep. |
@@ -128,8 +108,8 @@ artifact consumes them. Live values must be stored only in the sanitized deploym
 
 ## Python and shell functions
 
-The following rows cover every top-level callable in `terraform/*.py`,
-`terraform/hooks/*.py` and every named shell function in `templatefile/user_data.sh`.
+The following rows identify the principal callables in `terraform/*.py`,
+`terraform/hooks/*.py` and `templatefile/user_data.sh`.
 Methods on the internal `AidpApi` transport are exercised through the listed post-apply tests
 and are not independent deployment entrypoints.
 
@@ -197,6 +177,7 @@ and are not independent deployment entrypoints.
 | `post_apply.fetch_bootstrap_public_key` | credential delivery | `test_post_apply.py` | Pending | Keep: retry/IAM propagation. |
 | `post_apply.encrypt_bootstrap_credentials` | credential delivery | `test_post_apply.py` | Pending | Keep: RSA-OAEP/AES-GCM. |
 | `post_apply.reconcile` | `main` | `test_post_apply.py` | Pending | Keep: stage-1 data-plane orchestrator. |
+| `post_apply._module_installation_stack`, `_store_module_installation_context`, `write_module_installation_context` | `main` | `test_post_apply.py` | Native acceptance required | Keep: verify exact original stack/archive and persist create-only deployment receipt without credentials. |
 | `post_apply.workbench_url` | URL resolver | `test_post_apply.py` | Pending | Keep. |
 | `post_apply.aidp_alias_endpoint` | URL resolver | `test_post_apply.py` | Pending | Keep. |
 | `post_apply.wait_for_application` | `main` | `test_post_apply.py` | Pending | Keep: HTTPS readiness. |
