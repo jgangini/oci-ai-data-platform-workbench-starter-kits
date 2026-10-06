@@ -100,11 +100,12 @@ def test_governed_access_accepts_catalog_without_direct_select() -> None:
 
 @pytest.mark.parametrize("preferred_present", [True, False])
 @pytest.mark.parametrize("type_field,state_field", [("type", "lifecycleState"), ("credentialType", "lifeCycleState")])
+@pytest.mark.parametrize("writer", ["PrismaWriterRuntime", "TerritorialWriterRuntime"])
 def test_governance_reuses_shared_credential_without_reading_or_rotating_keys(
-    preferred_present, type_field, state_field,
+    preferred_present, type_field, state_field, writer,
 ) -> None:
     client = bare_client()
-    credentials = [{"displayName": "PrismaWriterRuntime", "key": "writer-key",
+    credentials = [{"displayName": writer, "key": "writer-key",
                     type_field: "SECRET_TOKEN", state_field: "ACTIVE"}]
     if preferred_present:
         credentials.append({"displayName": "AidpDataGovernanceExtension", "key": "governance-key",

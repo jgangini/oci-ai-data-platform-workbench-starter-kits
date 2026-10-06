@@ -1,6 +1,8 @@
 import asyncio
 import copy
 import json
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -107,3 +109,70 @@ def test_public_alias_uses_same_aidp_name_for_creation_update_and_spark_read():
 def test_credential_mapping_rejects_wrong_platform_alias_or_invalid_identifier(reference):
     with pytest.raises(ValueError):
         aidp_credential_name("x", reference)
+
+
+@pytest.mark.parametrize("writer", [None, "TerritorialWriterRuntime"])
+def test_social_runtime_and_ingestion_callback_keep_selected_database_credential(monkeypatch, writer):
+    from app.territorial import pipeline
+    names, connections, ingested = [], [], []
+    fail = False
+
+    @contextmanager
+    def database(_secret_get, name):
+        names.append(name)
+        if fail:
+            raise PermissionError("Credential unavailable")
+        connection = object()
+        connections.append(connection)
+        yield connection
+
+    monkeypatch.setattr(pipeline, "database_connection", database)
+    monkeypatch.setattr(pipeline, "reset_version", lambda _connection: 2)
+    monkeypatch.setattr(pipeline, "sensor_reset_version", lambda _connection: 2)
+    monkeypatch.setattr(pipeline, "read_document", lambda *_args: {"synthetic_reset_version": 2})
+    monkeypatch.setattr(pipeline, "process_reset", lambda *_args: None)
+    monkeypatch.setattr(pipeline, "_tick", lambda *_args: {"version": "test"})
+    monkeypatch.setattr(pipeline, "upsert_posts", lambda connection, *_args, **_kwargs: ingested.append(connection))
+    lake = SimpleNamespace()
+    config = {} if writer is None else {"writer_credential_name": writer}
+    pipeline.run(None, None, config, objects=object(), lake=lake, client=object(), classifier=object())
+    lake.on_ingested([], "test-batch")
+    assert names == [writer or "PrismaWriterRuntime"] * 2
+    assert connections[0] is not connections[1] and ingested == [connections[1]]
+    fail = True
+    with pytest.raises(PermissionError):
+        lake.on_ingested([], "test-batch")
+    assert names == [writer or "PrismaWriterRuntime"] * 3  # No alternate credential after a read error.
+
+
+@pytest.mark.parametrize("writer", [None, "TerritorialWriterRuntime"])
+def test_sensor_runtime_uses_selected_database_credential_before_starting_stream(monkeypatch, writer):
+    from app.territorial import database as database_api, landing, runtime_secrets, sensor_pipeline
+    names = []
+
+    @contextmanager
+    def database(_secret_get, name):
+        names.append(name)
+        raise PermissionError("Credential unavailable")
+        yield  # pragma: no cover - the context manager fails before opening a connection.
+
+    monkeypatch.setattr(runtime_secrets, "database_connection", database)
+    monkeypatch.setattr(landing, "ensure_volumes", lambda *_args: None)
+    monkeypatch.setattr(database_api, "sensor_reset_version", lambda *_args: pytest.fail("No connection"))
+    config = {} if writer is None else {"writer_credential_name": writer}
+    with pytest.raises(PermissionError):
+        sensor_pipeline.run(None, None, config)
+    assert names == [writer or "PrismaWriterRuntime"]
+
+
+def test_explicit_oci_credential_failure_never_tries_legacy_name():
+    from app.territorial.runtime_secrets import runtime_auth
+    calls = []
+
+    def secret_get(*, name, key):
+        calls.append((name, key))
+        raise PermissionError("Credential unavailable")
+
+    with pytest.raises(PermissionError):
+        runtime_auth(secret_get, "us-chicago-1", "TerritorialWriterRuntime")
+    assert calls == [("TerritorialWriterRuntime", "tenancy")]

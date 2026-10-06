@@ -192,7 +192,8 @@ def run(spark, secret_get, config, *, clock=time.time, connection=None, lake=Non
 
     ensure_volumes(spark, config)
     with ExitStack() as stack:
-        connection = connection or stack.enter_context(database_connection(secret_get, "PrismaWriterRuntime"))
+        connection = connection or stack.enter_context(database_connection(secret_get,
+            config.get("writer_credential_name", "PrismaWriterRuntime")))
         if sensor_reset_version(connection) != 2:
             raise RuntimeError("Sensor reset database contract is not installed")
         lake = lake or SensorLake(spark, config, RLock())

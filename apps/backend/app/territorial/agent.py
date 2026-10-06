@@ -238,9 +238,10 @@ class TerritorialAgent:
         required = ("region", "compartment_id", "model_id") + (("oci_credential_name", "oci_identity_sha256") if RUNTIME_CONFIG is not None else ())
         if any(not isinstance(config.get(key), str) or not config[key] for key in required):
             raise RuntimeError("Territorial Agent model configuration incomplete")
+        reader_credential = config.get("reader_credential_name", "PrismaReaderRuntime")
 
         def query(sql, binds):
-            with database_connection(aidputils.secrets.get, "PrismaReaderRuntime") as connection:
+            with database_connection(aidputils.secrets.get, reader_credential) as connection:
                 cursor = connection.cursor()
                 cursor.execute(sql, binds)
                 return [json.loads(row[0].read() if hasattr(row[0], "read") else row[0]) for row in cursor.fetchall()]

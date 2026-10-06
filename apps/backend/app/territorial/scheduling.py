@@ -11,6 +11,7 @@ RUN_SUCCESS = {"SUCCESS", "SUCCEEDED"}
 RUN_FAILED = {"FAILED", "ERROR", "CANCELED", "CANCELLED", "TIMED_OUT", "SKIPPED", "BLOCKED",
               "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED"}
 TASK_RUN_QUERY = {"sortBy": "timeCreated", "sortOrder": "ASC", "limit": 100}
+SOCIAL_TASK_KEYS = {"social_network", "prisma_tick"}  # Retain admission for existing job histories.
 
 
 def run_state(document):
@@ -20,7 +21,7 @@ def run_state(document):
 
 
 def task_outcome(tasks):
-    if any(task.get("taskKey") != "prisma_tick" or run_state(task) in RUN_FAILED for task in tasks):
+    if any(task.get("taskKey") not in SOCIAL_TASK_KEYS or run_state(task) in RUN_FAILED for task in tasks):
         return "FAILED"
     if tasks and all(run_state(task) in RUN_SUCCESS for task in tasks):
         return "SUCCESS"

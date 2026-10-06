@@ -87,14 +87,15 @@ def test_agent_is_global_two_tool_read_only_and_uses_official_aidp_api() -> None
 
 @pytest.mark.parametrize("render", [rendered_agent, rendered_sync])
 @pytest.mark.parametrize("drift", [None, "tenancy", "user", "fingerprint", "region"])
-def test_generated_signer_checks_selected_identity_before_reading_private_key(render, drift) -> None:
+@pytest.mark.parametrize("credential", ["PrismaWriterRuntime", "TerritorialWriterRuntime"])
+def test_generated_signer_checks_selected_identity_before_reading_private_key(render, drift, credential) -> None:
     public = {"tenancy": "fixture-tenancy", "user": "fixture-user", "fingerprint": "fixture-fingerprint",
               "region": "us-chicago-1"}
     digest = hashlib.sha256(json.dumps(
         [public[key] for key in ("tenancy", "user", "fingerprint")], separators=(",", ":")
     ).encode()).hexdigest()
-    source = render(credential_name="PrismaWriterRuntime", identity_sha256=digest)
-    assert '"credential_name": "PrismaWriterRuntime"' in source
+    source = render(credential_name=credential, identity_sha256=digest)
+    assert f'"credential_name": "{credential}"' in source
     assert f'"identity_sha256": "{digest}"' in source
     values = {**public, "private_key": "fixture-not-a-private-key"}
     if drift:
@@ -110,7 +111,7 @@ def test_generated_signer_checks_selected_identity_before_reading_private_key(re
         return "fixture-signer"
 
     namespace = {
-        "CONFIG": {"credential_name": "PrismaWriterRuntime", "identity_sha256": digest,
+        "CONFIG": {"credential_name": credential, "identity_sha256": digest,
                    "region": public["region"]},
         "aidputils": SimpleNamespace(secrets=SimpleNamespace(get=secret_get)),
         "oci": SimpleNamespace(signer=SimpleNamespace(Signer=signer)),
@@ -130,8 +131,8 @@ def test_generated_signer_checks_selected_identity_before_reading_private_key(re
         assert signatures == [{"tenancy": public["tenancy"], "user": public["user"],
                                "fingerprint": public["fingerprint"], "private_key_file_location": None,
                                "private_key_content": values["private_key"]}]
-        assert reads[-1] == ("PrismaWriterRuntime", "private_key")
-    assert {name for name, _ in reads} == {"PrismaWriterRuntime"}
+        assert reads[-1] == (credential, "private_key")
+    assert {name for name, _ in reads} == {credential}
 
 
 def test_generated_agent_setup_supplies_owned_client_and_keeps_configured_model() -> None:

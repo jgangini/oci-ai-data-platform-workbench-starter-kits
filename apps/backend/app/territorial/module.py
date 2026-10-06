@@ -9,7 +9,7 @@ import httpx
 from fastapi import HTTPException
 
 from .agent_gateway import checked_endpoint
-from .scheduling import RUN_FAILED, RUN_SUCCESS, TASK_RUN_QUERY, active_run, job_path, run_state, submit_run, task_outcome
+from .scheduling import RUN_FAILED, RUN_SUCCESS, SOCIAL_TASK_KEYS, TASK_RUN_QUERY, active_run, job_path, run_state, submit_run, task_outcome
 
 PACKAGE = {"package_id": "territorial_control", "display_name": "God’s Eye View · Custom layers",
            "bundled_version": "1.0.0", "kind": "module", "scope": "global", "status": "available"}
@@ -54,12 +54,13 @@ class TerritorialModule:
                 or runtime["sensor_job_key"] == runtime["job_key"]):
             raise HTTPException(409, "Both independent persistent workflows must be provisioned before activation.")
         runs = []
-        for field, task_key in (("job_key", "prisma_tick"), ("sensor_job_key", "sensor_stream")):
+        for field, allowed_keys in (("job_key", SOCIAL_TASK_KEYS), ("sensor_job_key", {"sensor_stream"})):
             scoped = {**runtime, "job_key": runtime[field]}
             job = social_job if field == "job_key" else client._request("GET", job_path(scoped))
             tasks = job.get("tasks", [])
-            if len(tasks) != 1 or tasks[0].get("taskKey") != task_key or tasks[0].get("isStreaming") is not True:
+            if len(tasks) != 1 or tasks[0].get("taskKey") not in allowed_keys or tasks[0].get("isStreaming") is not True:
                 raise HTTPException(503, "The provisioned persistent workflow definition is incomplete.")
+            task_key = tasks[0]["taskKey"]
             run = active_run(client._request, scoped)
             if not run or run_state(run) != "RUNNING":
                 raise HTTPException(503, "Both existing native workflows must be running before activation.")
@@ -76,7 +77,7 @@ class TerritorialModule:
         runtime = self.runtime._doc("runtime")
         client = self.runtime.aidp_factory()
         job = client._request("GET", job_path(runtime))
-        if not any(task.get("taskKey") == "prisma_tick" for task in job.get("tasks", [])):
+        if not any(task.get("taskKey") in SOCIAL_TASK_KEYS for task in job.get("tasks", [])):
             raise HTTPException(503, "The provisioned Territorial Control workflow is incomplete.")
         streams = self._stream_runs(client, runtime, job) if any(task.get("isStreaming") for task in job.get("tasks", [])) else []
         if runtime.get("streaming_mode") == "persistent" and not streams:

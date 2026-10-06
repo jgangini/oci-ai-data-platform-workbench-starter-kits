@@ -885,10 +885,13 @@ def test_each_agent_owns_its_inference_client_without_cached_remote_state(monkey
     assert clients[0] is not clients[1] and signers[0] is not signers[1]
 
 
-def test_explicit_model_and_shared_credential_replace_stale_reader_model_only(monkeypatch):
+@pytest.mark.parametrize("reader", [None, "TerritorialReaderRuntime"])
+def test_explicit_model_and_shared_credential_replace_stale_reader_model_only(monkeypatch, reader):
     fake = runtime(monkeypatch)
     config = {"region": "us-chicago-1", "compartment_id": "test-compartment", "model_id": "governance-model",
         "oci_credential_name": "AidpDataGovernanceExtension", "oci_identity_sha256": identity_hash(fake.credentials)}
+    if reader is not None:
+        config["reader_credential_name"] = reader
     monkeypatch.setattr("app.territorial.agent.RUNTIME_CONFIG", config)
     fake.agent.setup()
     assert fake.init_llm.call_args.kwargs["model_id"] == "governance-model"
@@ -897,30 +900,41 @@ def test_explicit_model_and_shared_credential_replace_stale_reader_model_only(mo
     tools = {tool.__name__: tool for tool in fake.create_agent.call_args.args[1]}
     fake.cursor.fetchall.return_value = []
     tools["consultar_sensores"]("publication")
-    fake.database.assert_called_once_with(fake.secret_get, "PrismaReaderRuntime")
+    fake.database.assert_called_once_with(fake.secret_get, reader or "PrismaReaderRuntime")
+    fake.database.reset_mock()
+    fake.database.side_effect = PermissionError("Credential unavailable")
+    with pytest.raises(PermissionError):
+        tools["consultar_sensores"]("publication")
+    fake.database.assert_called_once_with(fake.secret_get, reader or "PrismaReaderRuntime")
 
 
 @pytest.mark.parametrize("factory", [signer, runtime_auth])
-def test_shared_identity_drift_fails_before_private_key_read_without_fallback(monkeypatch, factory):
+@pytest.mark.parametrize("credential", ["AidpDataGovernanceExtension", "TerritorialWriterRuntime", "PrismaWriterRuntime"])
+def test_shared_identity_drift_fails_before_private_key_read_without_fallback(monkeypatch, factory, credential):
     fake = runtime(monkeypatch)
     expected = identity_hash(fake.credentials)
     fake.credentials["user"] = "another-user"
     args = (fake.secret_get,) + (("us-chicago-1",) if factory is runtime_auth else ())
     with pytest.raises(RuntimeError, match="identity mismatch"):
-        factory(*args, credential_name="AidpDataGovernanceExtension", expected_identity=expected)
-    assert fake.secret_get.call_args_list == [call(name="AidpDataGovernanceExtension", key=key)
+        factory(*args, credential_name=credential, expected_identity=expected)
+    assert fake.secret_get.call_args_list == [call(name=credential, key=key)
         for key in ("tenancy", "user", "fingerprint")]
     fake.native_signer.assert_not_called()
 
 
 def test_shared_credential_selector_prefers_governance_and_rejects_invalid_preferred():
     writer = {"displayName": "PrismaWriterRuntime", "credentialType": "SECRET_TOKEN", "lifeCycleState": "ACTIVE", "key": "writer"}
+    canonical = {**writer, "displayName": "TerritorialWriterRuntime", "key": "canonical"}
     governance = {"displayName": "AidpDataGovernanceExtension", "type": "SECRET_TOKEN", "lifecycleState": "ACTIVE", "key": "governance"}
-    assert shared_credential([writer, governance]) is governance
+    assert shared_credential([writer, governance, canonical]) is governance
+    assert shared_credential([writer, canonical]) is canonical
+    assert shared_credential([writer, {**canonical, "lifeCycleState": "DELETED"}]) is writer
     assert shared_credential([writer]) is writer
     assert shared_credential([]) is None
     for invalid in ([writer, governance, dict(governance)], [writer, {**governance, "type": "VAULT_REFERENCE"}],
-                    [writer, {**governance, "lifecycleState": "FAILED"}]):
+                    [writer, {**governance, "lifecycleState": "FAILED"}],
+                    [writer, canonical, dict(canonical)], [writer, {**canonical, "credentialType": "VAULT_REFERENCE"}],
+                    [writer, {**canonical, "lifeCycleState": "FAILED"}], [writer, {**canonical, "key": ""}]):
         with pytest.raises(RuntimeError):
             shared_credential(invalid)
 

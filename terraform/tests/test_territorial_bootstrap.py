@@ -1,5 +1,6 @@
 """Offline native AIDP contract checks; no local test claims remote readiness."""
 import ast
+import hashlib
 from contextlib import nullcontext
 import io
 import json
@@ -47,7 +48,7 @@ def test_sensor_read_grant_is_installed_for_new_and_existing_agent_credentials(m
         assert all(method == "GET" for method, *_ in api.calls)
         assert not any(sql.startswith(("CREATE USER", "ALTER USER")) for sql in statements)
     else:
-        writer = next(payload for method, path, payload, _ in api.calls if method == "POST" and path == "/credentials" and payload["displayName"] == "PrismaWriterRuntime")
+        writer = next(payload for method, path, payload, _ in api.calls if method == "POST" and path == "/credentials" and payload["displayName"] == "TerritorialWriterRuntime")
         fields = {item["secretKey"] for item in writer["credentialDetails"]["secretTokenPair"]}
         assert ("private_key" in fields) is not governance_exists
         assert {"db_user", "db_password", "dsn", "wallet", "wallet_password"} <= fields
@@ -94,7 +95,7 @@ class Api:
             return response({"state": {"status": self.run_state}})
         if path.endswith("/taskRuns"):
             assert params["limit"] == 100, "Native task-run API rejects limit=1000"
-            return response({"items": [{"taskKey": "prisma_tick", "state": {"status": self.run_state}}]})
+            return response({"items": [{"taskKey": "social_network", "state": {"status": self.run_state}}]})
         if method == "PUT" and "/jobs/" in path:
             assert "timeoutSeconds" not in payload or payload["timeoutSeconds"] >= 60
             self.resources[path].update(payload)
@@ -331,7 +332,7 @@ def test_initial_job_requires_native_run_and_task_success_and_revision_token(mon
         bootstrap.run_initial_job(api, "ws", "job", "next-revision")
 
 
-def test_job_uses_native_notebook_create_rename_export_and_preserves_live_schedule(monkeypatch):
+def test_job_publishes_readable_python_files_and_preserves_live_schedule():
     api = Api()
     bundle = bootstrap.runtime_archive()
     job = bootstrap.install_job(api, "ws", "compute", {"bucket": "gold"}, bundle, ensure_folder=lambda *_: None)
@@ -339,10 +340,85 @@ def test_job_uses_native_notebook_create_rename_export_and_preserves_live_schedu
     detail["schedule"] = {**detail["schedule"], "pauseStatus": "UNPAUSED"}
     assert bootstrap.install_job(api, "ws", "compute", {"bucket": "gold"}, bundle, ensure_folder=lambda *_: None) == job
     assert detail["schedule"]["pauseStatus"] == "UNPAUSED"
-    assert any(method == "PATCH" and "/notebook/api/contents/" in path for method, path, _, _ in api.calls)
-    assert any("/actions/export/contents/" in path for _, path, _, _ in api.calls)
+    assert not any(method == "PATCH" and "/notebook/api/contents/" in path for method, path, _, _ in api.calls)
+    assert not any("/actions/export/contents/" in path for _, path, _, _ in api.calls)
+    task = detail["tasks"][0]
+    assert detail["name"] == "territorial_social_network"
+    assert task["type"] == "PYTHON_TASK" and task["source"] == "WORKSPACE"
+    assert task["taskKey"] == "social_network" and task["filePath"].endswith("/social_network.py")
+    root = task["filePath"].rsplit("/", 1)[0]
+    assert ast.literal_eval(task["commandLineArguments"]) == [task["filePath"], "--runtime-root", root]
+    files = {value["path"].removeprefix(root + "/"): value["content"] for value in api.contents.values()}
+    assert all(value["format"] == "text" and value["type"] == "file" for value in api.contents.values())
+    assert {"social_network.py", "sensor_stream.py", "config.json", "manifest.json", "README.md", "territorial/pipeline.py", "prisma/__init__.py"} <= files.keys()
+    assert "base64" not in files["social_network.py"] and "base64" not in files["sensor_stream.py"]
+    manifest = json.loads(files["manifest.json"])
+    assert manifest["bundle_sha256"] == hashlib.sha256(bundle).hexdigest()
+    assert root.rsplit("/", 1)[-1] == hashlib.sha256(files["manifest.json"].encode()).hexdigest()
+    assert manifest["files"] == {name: hashlib.sha256(value.encode()).hexdigest() for name, value in files.items() if name != "manifest.json"}
     assert len([1 for method, path, _, _ in api.calls if method == "POST" and path.endswith("/jobs")]) == 1
     assert len([1 for method, path, _, _ in api.calls if method == "PUT" and "/jobs/" in path]) == 1
+
+
+@pytest.mark.parametrize("workflow,legacy,canonical", [
+    ("social", "prisma_bogota_tick", "territorial_social_network"),
+    ("sensors", "prisma_colombia_sensors", "territorial_sensor_stream"),
+])
+@pytest.mark.parametrize("explicit_key", [False, True])
+def test_python_workflow_adopts_the_existing_job_key_without_creating_another(workflow, legacy, canonical, explicit_key):
+    api = Api()
+    old = {"key": "existing-job", "name": legacy, "path": "/Workspace/medallon/prisma",
+           "schedule": {"pauseStatus": "PAUSED"}, "tasks": [{"type": "NOTEBOOK_TASK"}]}
+    api.resources["/workspaces/ws/jobs"] = [old]
+    api.resources["/workspaces/ws/jobs/existing-job"] = old
+    config = {"streaming_mode": "persistent"}
+    if explicit_key:
+        config["sensor_job_key" if workflow == "sensors" else "job_key"] = "existing-job"
+    result = bootstrap.install_job(api, "ws", "same-compute", config, bootstrap.runtime_archive(),
+                                   ensure_folder=lambda *_: None, workflow=workflow)
+    assert result == "existing-job" and old["name"] == canonical
+    assert old["tasks"][0]["type"] == "PYTHON_TASK"
+    assert not any(method == "POST" and path.endswith("/jobs") for method, path, *_ in api.calls)
+    assert bootstrap.install_job(api, "ws", "same-compute", config, bootstrap.runtime_archive(),
+                                 ensure_folder=lambda *_: None, workflow=workflow) == result
+
+
+@pytest.mark.parametrize("failure", ["duplicate", "wrong_key", "wrong_name", "deleting"])
+def test_python_workflow_identity_ambiguity_fails_before_any_write(failure):
+    api = Api()
+    old = {"key": "existing", "name": "prisma_bogota_tick"}
+    api.resources["/workspaces/ws/jobs"] = [old]
+    api.resources["/workspaces/ws/jobs/existing"] = old
+    config = {}
+    if failure == "duplicate":
+        api.resources["/workspaces/ws/jobs"].append({"key": "other", "name": "territorial_social_network"})
+    elif failure == "wrong_key":
+        config["job_key"] = "other"
+    elif failure == "wrong_name":
+        config["job_key"] = "existing"
+        old["name"] = "unrelated_workflow"
+    else:
+        old["lifecycleState"] = "DELETING"
+    with pytest.raises(RuntimeError, match="[Ww]orkflow"):
+        bootstrap.install_job(api, "ws", "compute", config, bootstrap.runtime_archive(), ensure_folder=lambda *_: None)
+    assert all(method == "GET" for method, *_ in api.calls)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("source", "GIT_PROVIDER"), ("taskKey", "sensor_stream"),
+    ("filePath", "/Workspace/territorial/releases/invalid/social_network.py"),
+    ("commandLineArguments", "--runtime-root /Workspace/another-release"),
+    ("commandLineArguments", "--runtime-root /Workspace/territorial/releases/" + "a" * 64 + " --check-runtime"),
+])
+def test_initial_python_acceptance_rejects_unversioned_or_different_execution(field, value):
+    api = Api()
+    root = "/Workspace/territorial/releases/" + "a" * 64
+    task = {"type": "PYTHON_TASK", "taskKey": "social_network", "source": "WORKSPACE",
+            "filePath": root + "/social_network.py", "commandLineArguments": json.dumps([root + "/social_network.py", "--runtime-root", root])}
+    api.resources["/workspaces/ws/jobs/job"] = {"tasks": [{**task, field: value}]}
+    with pytest.raises(RuntimeError, match="one content-versioned source"):
+        bootstrap.run_initial_job(api, "ws", "job", "revision")
+    assert all(method == "GET" for method, *_ in api.calls)
 
 
 def test_persistent_task_is_explicit_and_reverts_to_finite_without_changing_job_identity():
@@ -385,7 +461,7 @@ def test_persistent_job_omits_timeout_and_requires_unlimited_roundtrip(server_de
     assert all("timeoutSeconds" not in payload for payload in updates[1:])
 
 
-@pytest.mark.parametrize("second_task,state", [("prisma_tick", "SUCCESS"), ("prisma_tick", "FAILED"), ("other_task", "SUCCESS")])
+@pytest.mark.parametrize("second_task,state", [("social_network", "SUCCESS"), ("social_network", "FAILED"), ("other_task", "SUCCESS")])
 def test_initial_job_accepts_successful_native_task_attempts_but_never_hides_failure(monkeypatch, second_task, state):
     api = Api()
     job = bootstrap.install_job(api, "ws", "compute", {}, bootstrap.runtime_archive(), ensure_folder=lambda *_: None)
@@ -402,7 +478,7 @@ def test_initial_job_accepts_successful_native_task_attempts_but_never_hides_fai
 
     monkeypatch.setattr(api, "request", request)
     monkeypatch.setattr(bootstrap, "pause", no_wait)
-    if second_task == "prisma_tick" and state == "SUCCESS":
+    if second_task == "social_network" and state == "SUCCESS":
         assert bootstrap.run_initial_job(api, "ws", job, "same-notebook") == "run-one"
     else:
         with pytest.raises(RuntimeError, match="initial task failed; no readiness claimed"):
@@ -432,26 +508,59 @@ def test_existing_job_reconciles_without_required_etag_and_defaults_null_schedul
     assert api.resources[path]["timeoutSeconds"] == 600
 
 
-def test_notebook_uses_native_aidputils_and_versions_the_complete_content(monkeypatch, tmp_path):
+@pytest.mark.parametrize("injected_globals", [True, False])
+def test_python_uses_native_aidputils_and_versions_the_complete_content(monkeypatch, tmp_path, capsys, injected_globals):
     api, bundle, calls = Api(), bootstrap.runtime_archive(), []
     config = {"bucket": "gold"}
-    secret_get = lambda **_: None
+    secret_get = MagicMock(side_effect=AssertionError("Runtime check must not read secrets"))
     spark = object()
     monkeypatch.setitem(sys.modules, "aidputils", None)
-    monkeypatch.setitem(sys.modules, "territorial.pipeline", SimpleNamespace(run=lambda *args: calls.append(args)))
-    monkeypatch.setattr(bootstrap.tempfile, "gettempdir", lambda: str(tmp_path))
     monkeypatch.setattr(sys, "path", list(sys.path))
     job = bootstrap.install_job(api, "ws", "compute", config, bundle, ensure_folder=lambda *_: None)
-    notebooks = {path: value for path, value in api.contents.items() if value["type"] == "notebook"}
-    cells = next(iter(notebooks.values()))["content"]["cells"]
-    assert len(cells) == 1 and "%pip" not in "".join(cells[0]["source"])
-    cell = cells[0]
-    exec("".join(cell["source"]), {"spark": spark, "oidlUtils": SimpleNamespace(),
-        "aidputils": SimpleNamespace(secrets=SimpleNamespace(get=secret_get))})
+    sources = dict(api.contents)
+    task = api.resources["/workspaces/ws/jobs/" + job]["tasks"][0]
+    root = task["filePath"].rsplit("/", 1)[0]
+    local = tmp_path / root.rsplit("/", 1)[-1]
+    for value in sources.values():
+        path = local / value["path"].removeprefix(root + "/")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(value["content"].encode("utf-8"))
+    # Full-suite compatibility tests also import this top-level namespace from app/.
+    for name in tuple(sys.modules):
+        if name == "territorial" or name.startswith("territorial."):
+            monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setitem(sys.modules, "territorial", SimpleNamespace(__file__=str(local / "territorial/__init__.py")))
+    monkeypatch.setitem(sys.modules, "territorial.pipeline", SimpleNamespace(__file__=str(local / "territorial/pipeline.py"), run=lambda *args: calls.append(args)))
+    source = (local / "social_network.py").read_text(encoding="utf-8")
+    utilities = SimpleNamespace(secrets=SimpleNamespace(get=secret_get))
+    builder = MagicMock()
+    builder.getOrCreate.return_value = spark
+    context = {"__name__": "__main__"}
+    if injected_globals:
+        context.update(spark=spark, aidputils=utilities)
+    else:
+        monkeypatch.setitem(sys.modules, "aidputils", utilities)
+        monkeypatch.setitem(sys.modules, "pyspark.sql", SimpleNamespace(SparkSession=SimpleNamespace(builder=builder)))
+    monkeypatch.setattr(sys, "argv", ["social_network.py", "--runtime-root", str(local), "--check-runtime"])
+    monkeypatch.setitem(sys.modules, "territorial.core", SimpleNamespace(__file__=str(tmp_path / "previous-release/core.py")))
+    with pytest.raises(RuntimeError, match="different Territorial release"):
+        exec(source, context)
+    assert calls == [] and secret_get.call_count == 0
+    monkeypatch.delitem(sys.modules, "territorial.core")
+    exec(source, context)
+    assert json.loads(capsys.readouterr().out)["runtime_ready"] is True
+    assert calls == [] and secret_get.call_count == 0
+    assert builder.getOrCreate.call_count == (0 if injected_globals else 1)
+    monkeypatch.setattr(sys, "argv", sys.argv[:-1])
+    exec(source, context)
     assert calls == [(spark, secret_get, config)]
+    (local / "config.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="source does not match"):
+        exec(source, context)
+    assert len(calls) == 1 and secret_get.call_count == 0
     assert bootstrap.install_job(api, "ws", "compute", {"bucket": "updated"}, bundle, ensure_folder=lambda *_: None) == job
-    assert len({path for path, value in api.contents.items() if value["type"] == "notebook"}) == 2
-    assert all(api.contents[path] == value for path, value in notebooks.items())
+    assert len({value["path"] for value in api.contents.values() if value["name"] == "config.json"}) == 2
+    assert all(api.contents[path] == value for path, value in sources.items())
     bootstrap.run_initial_job(api, "ws", job, "same-bundle")
     first_token = next(call[3]["opc-retry-token"] for call in reversed(api.calls) if call[:2] == ("POST", "/workspaces/ws/jobRuns"))
     bootstrap.run_initial_job(api, "ws", job, "same-bundle")
@@ -684,7 +793,7 @@ def test_stopped_dedicated_stream_compute_starts_once_and_waits_for_active(monke
     assert len([call for call in api.calls if call[0] == "POST" and call[1].endswith("/clusters")]) == 1
 
 
-def test_sensor_job_owns_distinct_notebook_and_compute_with_no_gold_writer():
+def test_sensor_job_owns_distinct_python_entry_and_compute_with_no_gold_writer():
     api, bundle = Api(), bootstrap.runtime_archive()
     config = {"streaming_mode": "persistent"}
     social = bootstrap.install_job(api, "ws", "social-compute", config, bundle, ensure_folder=lambda *_: None)
@@ -694,8 +803,8 @@ def test_sensor_job_owns_distinct_notebook_and_compute_with_no_gold_writer():
     task = detail["tasks"][0]
     assert task["taskKey"] == "sensor_stream" and task["cluster"] == {"clusterKey": "sensor-compute"}
     assert task["isStreaming"] is True and detail["timeoutSeconds"] == 0 and detail["maxConcurrentRuns"] == 1
-    notebook = next(value["content"] for value in api.contents.values() if value["path"] == task["notebookPath"])
-    source = "".join(notebook["cells"][0]["source"])
+    source = next(value["content"] for value in api.contents.values() if value["path"] == task["filePath"])
+    assert detail["name"] == "territorial_sensor_stream" and task["filePath"].endswith("/sensor_stream.py")
     assert "from territorial.sensor_pipeline import run" in source and "from territorial.pipeline import run" not in source
     api.resources["/workspaces/ws/jobRuns"] = [{"key": "active-sensors", "jobKey": sensor, "state": {"status": "RUNNING"}}]
     assert bootstrap.start_stream_job(api, "ws", sensor, "sensor_stream") == "active-sensors"
@@ -788,7 +897,7 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
         return result
     def initial_job(api, _workspace, job, task):
         assert (api.api_version, api.resource_segment) == ("20240831", "dataLakes")
-        assert (job, task) in {("job-social", "prisma_tick"), ("job-sensors", "sensor_stream")}
+        assert (job, task) in {("job-social", "social_network"), ("job-sensors", "sensor_stream")}
         return check("job", "run")
     monkeypatch.setattr(bootstrap, "start_stream_job", initial_job)
     monkeypatch.setattr(bootstrap, "wait_stream_jobs", lambda *_: check("snapshot", "gold-version"))

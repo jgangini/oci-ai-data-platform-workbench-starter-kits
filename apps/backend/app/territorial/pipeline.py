@@ -547,8 +547,10 @@ def run(spark, secret_get, config, *, clock=time.time, classifier=None, connecti
     import oci
     import httpx
     from .classification import classify
+    # Older published notebooks omit this field; never fall back after a credential read fails.
+    writer_credential = config.get("writer_credential_name", "PrismaWriterRuntime")
     with ExitStack() as stack:
-        connection = connection or stack.enter_context(database_connection(secret_get, "PrismaWriterRuntime"))
+        connection = connection or stack.enter_context(database_connection(secret_get, writer_credential))
         sdk_config, signed = runtime_auth(secret_get, config["region"], config.get("oci_credential_name", "PrismaWriterRuntime"),
             config.get("oci_identity_sha256", "")) if objects is None or classifier is None else ({}, None)
         objects = objects or oci.object_storage.ObjectStorageClient(sdk_config, signer=signed)
@@ -562,7 +564,7 @@ def run(spark, secret_get, config, *, clock=time.time, classifier=None, connecti
             mutate_document(connection, "runtime", lambda doc: {**doc, "synthetic_reset_version": 2})
         def on_ingested(events, batch_key):
             # Streaming callbacks run on other threads; never share the enrichment connection.
-            with database_connection(secret_get, "PrismaWriterRuntime") as ingestion_connection:
+            with database_connection(secret_get, writer_credential) as ingestion_connection:
                 upsert_posts(ingestion_connection, events, "ingested", ingested_at=utc_text(clock()), batch_key=batch_key)
         lake.on_ingested = on_ingested
         reset_snapshot = process_reset(connection, objects, lake, config, clock())

@@ -1574,10 +1574,14 @@ class AidpClient:
         expected: dict[str, Any],
         compute_key: str,
     ) -> bool:
+        source_fields = {
+            "NOTEBOOK_TASK": ("notebookPath", "parameters"),
+            "PYTHON_TASK": ("filePath", "source", "commandLineArguments"),
+        }.get(expected.get("type"))
         return bool(
             isinstance(actual, dict)
-            and actual.get("type") == "NOTEBOOK_TASK"
-            and actual.get("taskKey") == expected["taskKey"]
+            and source_fields is not None
+            and all(actual.get(field) == expected[field] for field in ("type", "taskKey", *source_fields))
             and isinstance(actual.get("dependsOn"), list)
             and [
                 dependency.get("taskKey")
@@ -1587,9 +1591,7 @@ class AidpClient:
             ]
             == [dependency["taskKey"] for dependency in expected["dependsOn"]]
             and actual.get("runIf") == "ALL_SUCCESS"
-            and actual.get("notebookPath") == expected["notebookPath"]
             and (actual.get("cluster") or {}).get("clusterKey") == compute_key
-            and actual.get("parameters") == expected["parameters"]
         )
 
     @classmethod

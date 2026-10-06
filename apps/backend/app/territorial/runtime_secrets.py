@@ -8,7 +8,7 @@ import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 
-OCI_CREDENTIALS = ("AidpDataGovernanceExtension", "PrismaWriterRuntime")
+OCI_CREDENTIALS = ("AidpDataGovernanceExtension", "TerritorialWriterRuntime", "PrismaWriterRuntime")
 
 
 def identity_hash(config):
