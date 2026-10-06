@@ -18,9 +18,9 @@ python - <<'PY'
 import os
 import re
 from pathlib import Path
-target = os.environ.get("PRISMA_VIEWER_URL", "http://127.0.0.1:8081")
+target = os.environ.get("GODS_EYE_VIEW_URL", os.environ.get("TERRITORIAL_VIEWER_URL", os.environ.get("PRISMA_VIEWER_URL", "http://127.0.0.1:8081")))
 if not re.fullmatch(r"http://[A-Za-z0-9.-]+:[0-9]{1,5}", target):
-    raise SystemExit("Invalid PRISMA viewer upstream")
+    raise SystemExit("Invalid God's Eye View upstream")
 rendered = Path("/etc/nginx/nginx.conf").read_text().replace("http://127.0.0.1:8081", target)
 Path("/run/nginx.conf").write_text(rendered)
 PY

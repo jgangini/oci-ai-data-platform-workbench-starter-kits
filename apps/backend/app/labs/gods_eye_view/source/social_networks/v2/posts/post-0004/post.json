@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0004",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-bogota-v2-mateo_anden",
+    "username": "mateo_anden",
+    "display_name": "Mateo Cifuentes"
+  },
+  "message": "Acabo de pasar por la esquina de la foto en Kennedy. El agua sigue junto al andén, pero por la mitad de esta cuadra están pasando motos despacio. No vi agua dentro de las casas. Ojalá limpien ese desagüe; no puedo hablar por todo el barrio.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 95,
+  "available_offset_seconds": 180,
+  "attachments": []
+}

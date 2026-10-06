@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from test_prisma_bridge import bridge, HEADERS
+from test_gods_eye_view_bridge import bridge, HEADERS
 
 proxy = bridge.native_proxy
 PUBLIC = "http://localhost:18081"
@@ -25,7 +25,7 @@ def test_native_routes_require_session_before_network(native, monkeypatch):
     async def forbidden(*_args, **_kwargs):
         pytest.fail("Unauthenticated request reached the native provider")
     monkeypatch.setattr(proxy, "proxy", forbidden)
-    for route in ("/", "/api/weather", "/api/setup/status", "/api/setup/browser", "/api/prisma/oci-provider"):
+    for route in ("/", "/api/weather", "/api/setup/status", "/api/setup/browser", "/api/gods-eye-view/oci-provider"):
         assert native.get(route).status_code == 401
 
 
@@ -83,7 +83,7 @@ def test_native_proxy_rejects_nonpublic_paths(native, path):
 
 def test_native_body_limit_and_malformed_chat(native):
     assert native.post("/api/realtime/token", headers={**AUTH, "origin": PUBLIC}, content=b"x" * 1_000_001).status_code == 413
-    assert native.post("/api/prisma/oci-chat", headers={**AUTH, "origin": PUBLIC, "content-type": "application/json"}, content="invalid").status_code == 422
+    assert native.post("/api/gods-eye-view/oci-chat", headers={**AUTH, "origin": PUBLIC, "content-type": "application/json"}, content="invalid").status_code == 422
 
 
 def test_native_health_checks_both_processes(native, monkeypatch):

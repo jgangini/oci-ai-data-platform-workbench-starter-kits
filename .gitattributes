@@ -1,5 +1,8 @@
 *.sh text eol=lf
 apps/backend/app/labs/** text eol=lf
 apps/frontend/public/brand-icons/** text eol=lf
-apps/prisma-viewer/public/brand-icons/** text eol=lf
-datasets/synthetic/** text=auto eol=lf
+apps/gods-eye-view/public/brand-icons/** text eol=lf
+
+# Synthetic media is immutable binary data; preserve manifest SHA-256 values.
+apps/backend/app/labs/gods_eye_view/source/**/*.png -text
+apps/backend/app/labs/gods_eye_view/source/**/*.webp -text

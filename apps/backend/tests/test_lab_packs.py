@@ -2,11 +2,13 @@ import ast
 import csv
 import io
 import json
+import shutil
 from decimal import Decimal
 
 import pytest
 
 from app.lab_packs import lab_catalog, load_lab_pack, module_catalog, public_lab_catalog
+from app import lab_packs
 from scripts.generate_telco_lineage_lab import _source_data, _validate_source_contract
 
 
@@ -14,10 +16,10 @@ LEGACY_LABS = ("banking", "telecommunications", "retail", "healthcare")
 ACTIVE_LABS = ("banking", "telecommunications", "telco_lineage", "retail", "healthcare")
 
 
-def test_catalog_separates_five_participant_labs_from_global_governance_module() -> None:
+def test_catalog_separates_five_participant_labs_from_global_modules() -> None:
     packs = lab_catalog()
     public = public_lab_catalog()
-    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "ai_data_governance_vsc_extension")
+    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "ai_data_governance", "gods_eye_view")
     assert tuple(item["lab_id"] for item in public) == ACTIVE_LABS
     assert all(pack.available for pack in packs[:5])
     assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == dict.fromkeys(
@@ -25,15 +27,16 @@ def test_catalog_separates_five_participant_labs_from_global_governance_module()
     )
     assert all(item["description"].strip() for item in public)
     assert "transactions" in public[0]["description"]
-    assert packs[-1].status == "available"
-    assert packs[-1].pack_version == "3.0.0"
-    assert packs[-1].kind == "governance_extension"
-    assert packs[-1].scope == "global"
-    assert packs[-1].installation_modes == ("laboratory", "production")
-    assert packs[-1].display_name == "AI Data Governance"
-    assert not packs[-1].datasets and not packs[-1].notebooks
-    assert module_catalog() == (packs[-1],)
-    module = load_lab_pack("ai_data_governance_vsc_extension")
+    governance = packs[-2]
+    assert governance.status == "available"
+    assert governance.pack_version == "3.0.2"
+    assert governance.kind == "governance_extension"
+    assert governance.scope == "global"
+    assert governance.installation_modes == ("laboratory", "production")
+    assert governance.display_name == "AI Data Governance"
+    assert not governance.datasets and not governance.notebooks
+    assert module_catalog() == packs[-2:]
+    module = load_lab_pack("ai_data_governance")
     assert module.agent["editable_by"] == "AI_DATA_PLATFORM_ADMIN"
     assert module.agent["tools"] == ["catalog_inventory", "catalog_lineage"]
 
@@ -194,3 +197,35 @@ def test_canonical_assets_are_identical_for_every_participant() -> None:
     assert b"u_0000000000000000" not in rendered
     assert b"canonical-bucket" not in rendered
     assert b"canonical-namespace" not in rendered
+
+
+def test_global_runtime_sources_are_declared_and_not_participant_kits():
+    modules = module_catalog()
+    assert {pack.lab_id for pack in modules} == {"ai_data_governance", "gods_eye_view"}
+    assert {len(pack.runtime_files) for pack in modules} == {2, 3}
+    for pack in modules:
+        assert pack.lab_id not in lab_packs.available_lab_ids()
+        for asset in pack.runtime_files:
+            assert lab_packs.module_runtime_source(pack.lab_id, asset.name) == asset.read_bytes()
+
+
+def test_deploy_bundle_needs_runtime_only_and_rejects_source_drift(tmp_path, monkeypatch):
+    package = "gods_eye_view"
+    origin = lab_packs.LABS_ROOT / package
+    target = tmp_path / package
+    target.mkdir()
+    shutil.copyfile(origin / "lab.json", target / "lab.json")
+    shutil.copytree(origin / "notebooks", target / "notebooks")
+    monkeypatch.setattr(lab_packs, "LABS_ROOT", tmp_path)
+    filename = "notebooks/10_bronze/sensor_stream.py"
+    expected = (target / filename).read_bytes()
+    assert lab_packs.module_runtime_source(package, filename) == expected
+    (target / filename).write_bytes(expected + b"\n# unexpected change\n")
+    with pytest.raises(lab_packs.LabPackError, match="SHA-256 mismatch"):
+        lab_packs.module_runtime_source(package, filename)
+
+
+@pytest.mark.parametrize("filename", ["notebooks/../../outside.py", "notebooks//agent.py", "notebooks/C:/agent.py"])
+def test_module_assets_reject_unsafe_paths(tmp_path, filename):
+    with pytest.raises(lab_packs.LabPackError, match="asset path"):
+        lab_packs._module_assets(tmp_path, [{"file": filename, "sha256": "0" * 64}], "notebooks")

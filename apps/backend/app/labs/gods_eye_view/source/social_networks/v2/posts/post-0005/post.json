@@ -1,0 +1,34 @@
+{
+  "fixture_id": "post-0005",
+  "platform": "facebook",
+  "author": {
+    "id": "fictional-bogota-v2-andres_sierra",
+    "username": "andres_sierra",
+    "display_name": "Andrés Quiroga"
+  },
+  "message": "¿Alguien sabe de dónde sale ese humo en Chapinero? Lo vi detrás del muro y me asusté por los árboles de al lado. Subo la foto que tomé desde enfrente: no alcanzo a ver fuego. Puede ser una parrilla, no quiero asegurar que sea un incendio.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 115,
+  "available_offset_seconds": 115,
+  "attachments": [
+    {
+      "id": "post-0005-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/grill-smoke.png",
+      "sha256": "f0248c879ea13a1cfcce4d3381fdaf75e69a892e5157dda0a98b6684d01361ce",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: cooking smoke above a charcoal grill and intact surroundings; it does not depict a vegetation fire.",
+      "is_simulated": true
+    }
+  ]
+}

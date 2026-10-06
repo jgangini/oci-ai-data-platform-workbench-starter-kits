@@ -1,0 +1,34 @@
+{
+  "fixture_id": "post-0013",
+  "platform": "tiktok",
+  "author": {
+    "id": "fictional-bogota-v2-ines_balcon",
+    "username": "ines_balcon",
+    "display_name": "Inés Duarte"
+  },
+  "message": "Desde mi balcón en Suba quedó así la calle después de la lluvia. Hay charcos pegados al andén y el pavimento está mojado, pero acabo de ver pasar un carro. Me desespera que cualquier foto termine con el título de barrio inundado: yo sólo estoy mostrando esta cuadra.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Suba",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.741,
+    "lon": -74.084
+  },
+  "published_offset_seconds": 365,
+  "available_offset_seconds": 365,
+  "attachments": [
+    {
+      "id": "post-0013-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/wet-passable-street.png",
+      "sha256": "f04fadeb3f0f2b219267797e4f492240e42a3622e5c8c3e9bd35225484798d9f",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a passable wet street with small puddles, viewed from a balcony; it cannot establish conditions across the locality.",
+      "is_simulated": true
+    }
+  ]
+}

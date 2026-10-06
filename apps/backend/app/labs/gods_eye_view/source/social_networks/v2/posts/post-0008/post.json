@@ -1,0 +1,22 @@
+{
+  "fixture_id": "post-0008",
+  "platform": "x",
+  "author": {
+    "id": "fictional-bogota-v2-andres_sierra",
+    "username": "andres_sierra",
+    "display_name": "Andrés Quiroga"
+  },
+  "message": "Corrijo mi publicación de Chapinero: me acerqué por la acera y vi la parrilla del puesto de comida detrás del muro. De ahí salía el humo de mi foto; no vi vegetación ardiendo. Me había asustado desde lejos. Gracias a quienes preguntaron antes de darlo por hecho.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 240,
+  "available_offset_seconds": 240,
+  "attachments": []
+}

@@ -1,3 +1,4 @@
+import ast
 import asyncio
 from types import SimpleNamespace
 
@@ -30,7 +31,7 @@ def module_client() -> AidpClient:
 def manifest(operation_type: str, *, phase: str = "permissions") -> dict:
     return {
         "schema_version": 1,
-        "module_id": "ai_data_governance_vsc_extension",
+        "module_id": "ai_data_governance",
         "status": "error",
         "phase": phase,
         "enabled": True,
@@ -82,7 +83,7 @@ def test_module_status_compares_installed_and_bundled_versions() -> None:
     module = asyncio.run(client.list_modules())[0]
 
     assert module["installed_version"] == "2.0.0"
-    assert module["bundled_version"] == "3.0.0"
+    assert module["bundled_version"] == "3.0.2"
     assert module["update_available"] is True
 
 
@@ -225,7 +226,7 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
                 "allowed_inherited_editors": admin_grantees,
             },
         ),
-        "ai_data_governance_vsc_extension": (
+        "ai_data_governance": (
             (("AI_DATA_PLATFORM_ADMIN", "ADMIN", True),),
             {
                 "inheritable": True,
@@ -526,7 +527,7 @@ def test_failed_delete_resumes_exact_phase_and_operation() -> None:
     client._shared_compute = lambda _workspace: {"key": "shared"}
     client._ensure_governance_job = lambda *_args, **_kwargs: ("job", False)
     client._delete_governance_deployments = lambda *_args: None
-    client._cleanup_agent = lambda *_args: None
+    client._cleanup_agent = lambda *_args, **_kwargs: None
     client._delete_governance_compute = lambda *_args: None
     client._cleanup_lab_job = lambda *_args: None
     client._delete_workspace_path = lambda *_args: None
@@ -576,7 +577,7 @@ def test_failed_install_without_workflow_cleans_up_without_provisioning_one() ->
     client._ensure_governance_job = lambda *_args, **_kwargs: pytest.fail(
         "Delete must not provision a missing workflow"
     )
-    client._cleanup_agent = lambda *_args: None
+    client._cleanup_agent = lambda *_args, **_kwargs: None
     client._delete_governance_compute = lambda *_args: None
     client._cleanup_lab_job = lambda *_args: None
     client._delete_workspace_path = lambda *_args: None
@@ -681,3 +682,60 @@ def test_global_deployment_name_and_retry_scope_are_deterministic() -> None:
     client._ensure_agent_deployment("workspace", "agent", "compute", GOVERNANCE_AGENT_NAME)
     assert captured["payload"]["displayName"] == f"{GOVERNANCE_AGENT_NAME}_deployment"
     assert captured["retry_scope"] == "agent-deploy:agent"
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_governance_rename_preserves_installed_manifest_control_rows_and_agent_identity(legacy):
+    import json
+    from app.aidp import MODULE_CONTROL_ROOT
+    from app.governance import GOVERNANCE_MODULE_ID, LEGACY_GOVERNANCE_MODULE_ID
+
+    client = module_client()
+    persisted_id = LEGACY_GOVERNANCE_MODULE_ID if legacy else GOVERNANCE_MODULE_ID
+    root = f"{MODULE_CONTROL_ROOT}/{persisted_id}"
+    state = {**manifest("install"), "module_id": persisted_id}
+    state["resources"]["agent_key"] = "retained-agent"
+    writes, notebooks = [], []
+    client._workspace_json = lambda _workspace, path, _message: state if path == root + "/manifest.json" else None
+    adopted = client._module_manifest("workspace")
+    assert adopted["module_id"] == GOVERNANCE_MODULE_ID
+    assert adopted["control_module_id"] == persisted_id
+    assert adopted["resources"]["agent_key"] == "retained-agent"
+    assert state["module_id"] == persisted_id
+    client._upload_file = lambda workspace, path, content, **kwargs: writes.append((path, json.loads(content)))
+    client._write_module_manifest("workspace", adopted)
+    assert writes[0][0] == root + "/manifest.json"
+    assert writes[0][1]["control_module_id"] == persisted_id
+    assert writes[0][1]["module_id"] == persisted_id
+    assert adopted["module_id"] == GOVERNANCE_MODULE_ID
+    client._governance_oci_config = lambda: {"credential_name": "AidpRuntime", "identity_sha256": "retained"}
+    client._upload_notebook = lambda workspace, path, notebook, **kwargs: notebooks.append((path, notebook)) or False
+    payload, _ = client._governance_job_payload("workspace", "compute", desired_enabled=None, paused=True)
+    config_line = next(line for line in notebooks[0][1]["cells"][0]["source"] if line.startswith("CONFIG = "))
+    assert ast.literal_eval(config_line.removeprefix("CONFIG = "))["module_id"] == persisted_id
+    assert payload["path"] == root
+    assert client._new_module_manifest(OPERATION_ID, "redeploy")["control_module_id"] == persisted_id
+    client._list = lambda *_args, **_kwargs: [{"displayName": persisted_id, "key": "retained-agent"}]
+    assert client._agents("workspace", GOVERNANCE_AGENT_NAME)[0]["key"] == "retained-agent"
+
+
+def test_governance_alias_conflicts_fail_without_writes():
+    client = module_client()
+    client._workspace_json = lambda *_args: manifest("install")
+    with pytest.raises(AidpProvisionError, match="duplicate governance module manifests"):
+        client._module_manifest("workspace")
+    client._agents = lambda *_args: [{"key": "canonical"}, {"key": "legacy"}]
+    client._request = lambda *_args, **_kwargs: pytest.fail("Ambiguous aliases must not delete an agent")
+    with pytest.raises(AidpProvisionError, match="ambiguous"):
+        client._cleanup_agent("workspace", GOVERNANCE_AGENT_NAME, expected_key="legacy")
+
+
+@pytest.mark.parametrize("agents", [[], [{"key": "unexpected-agent"}], [{"id": "unexpected-agent"}], [{"key": ""}]])
+def test_governance_redeploy_never_replaces_a_recorded_agent(agents):
+    client = module_client()
+    client._upload_file = lambda *_args, **_kwargs: False
+    client._agents = lambda *_args: agents
+    client._request = lambda *_args, **_kwargs: pytest.fail("A recorded agent must not be replaced or updated by identity drift")
+    with pytest.raises(AidpProvisionError, match="recorded governance Agent identity"):
+        client._ensure_agent("workspace", "compute", GOVERNANCE_AGENT_NAME, "/Workspace/agent", b"source", b"{}",
+            repair_drift=True, expected_key="retained-agent")

@@ -43,7 +43,7 @@
     "fields": [
       {
         "name": "enable_prisma_viewer",
-        "label": "Enable PRISMA private viewer VM",
+        "label": "Enable God’s Eye View private viewer VM",
         "type": "boolean",
         "default": false,
         "group": "application_vm"
@@ -304,6 +304,14 @@
     "email_access_fields": ["deployment_mode", "admin_username", "admin_password", "registration_code"]
   },
   "outputs": [
+    "gods_eye_view_enabled",
+    "gods_eye_view_url",
+    "gods_eye_view_instance_id",
+    "gods_eye_view_principal_group",
+    "territorial_viewer_enabled",
+    "territorial_viewer_url",
+    "territorial_viewer_instance_id",
+    "territorial_viewer_principal_group",
     "prisma_viewer_enabled",
     "prisma_viewer_url",
     "prisma_viewer_instance_id",
@@ -345,7 +353,7 @@
   ],
   "artifacts": ["aidp_lab_summary.json"],
   "preflight": {
-    "entrypoint": "terraform/k_preflight.py",
+    "entrypoint": "terraform/m_preflight.py",
     "timeout_seconds": 300,
     "requires_oci_credentials": true,
     "secret_inputs": ["autonomous_database_admin_password", "autonomous_database_wallet_password"],
@@ -401,10 +409,17 @@
   "post_apply": {
     "entrypoint": "terraform/hooks/post_apply.py",
     "include_paths": [
-      "apps/backend/app/prisma",
+      "apps/backend/app/gods_eye_view",
+      "apps/backend/app/labs/gods_eye_view/lab.json",
+      "apps/backend/app/labs/gods_eye_view/notebooks",
+      "apps/backend/app/labs/gods_eye_view/source/social_networks/v1/manifest.json",
+      "apps/backend/app/labs/gods_eye_view/source/social_networks/v2/manifest.json",
+      "apps/backend/app/labs/gods_eye_view/source/sensors/colombia/v1/manifest.json",
+      "apps/backend/app/labs/ai_data_governance",
       "apps/backend/app/__init__.py",
       "apps/backend/app/aidp.py",
       "apps/backend/app/config.py",
+      "apps/backend/app/viewer_identity.py",
       "apps/backend/app/security.py",
       "apps/backend/app/governance.py",
       "apps/backend/app/lab_packs.py",

@@ -9,8 +9,10 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { PrismaAdmin } from "./PrismaAdmin";
-import { LocalPrismaAccess } from "./LocalPrismaAccess";
+import { GodsEyeViewAdmin } from "./GodsEyeViewAdmin";
+import { LoadingIndicator } from "./LoadingIndicator";
+import { GodsEyeViewModuleManager } from "./GodsEyeViewModuleManager";
+import { LocalGodsEyeViewAccess } from "./LocalGodsEyeViewAccess";
 
 import { labAssignmentChanges } from "./labAssignments";
 
@@ -42,7 +44,7 @@ type LabUser = {
   labs: AssignedLab[];
   active: boolean;
   managed?: boolean;
-  prisma_access?: boolean;
+  gods_eye_view_access?: boolean;
   is_aidp_admin: boolean;
   participant_code?: number | null;
 };
@@ -64,7 +66,7 @@ type CatalogLab = {
   status: "available" | "planned";
   available: boolean;
 };
-type UserDraft = { name: string; email: string; lab_ids: string[]; territorial_control?: boolean };
+type UserDraft = { name: string; email: string; lab_ids: string[]; gods_eye_view?: boolean };
 type AdminSettingsResponse = {
   aidp_service_endpoint: string;
   aidp_url: string;
@@ -76,7 +78,7 @@ type AdminSettingsResponse = {
   time_zones: string[];
 };
 type AdminModule = {
-  module_id: "ai_data_governance_vsc_extension" | (string & {});
+  module_id: "ai_data_governance" | (string & {});
   display_name: string;
   status: "not_installed" | "installing" | "active" | "redeploying" | "deleting" | "error" | (string & {});
   installed: boolean;
@@ -138,7 +140,7 @@ const fallbackCatalog: CatalogLab[] = [
 ];
 
 function participantLabCatalog(catalog: CatalogLab[]) {
-  return catalog.filter(({ lab_id }) => !["agent", "ai_data_governance_vsc_extension"].includes(lab_id));
+  return catalog.filter(({ lab_id }) => !["agent", "ai_data_governance"].includes(lab_id));
 }
 
 function moduleOperationKey(moduleId: string, kind: ModuleOperationKind) {
@@ -393,7 +395,7 @@ function ProvisioningOverlay({
     >
       <div className="registration-result">
         <span className="progress-orbit" aria-hidden="true" />
-        <p className="registration-loading-title">Loading...</p>
+        <p className="sr-only">Loading...</p>
         <p className="registration-progress-phase" id={phaseId}>
           {phaseLabel}
         </p>
@@ -568,7 +570,7 @@ function CreateUserModal({
               </tbody>
             </table>
           </div>
-          {localParticipantAccess && <label><input type="checkbox" checked={!!draft.territorial_control} onChange={event => onDraftChange({ ...draft, territorial_control: event.target.checked })} disabled={creating} />Territorial Control · God’s Eye View and local AIDP project access</label>}
+          {localParticipantAccess && <label><input type="checkbox" checked={!!draft.gods_eye_view} onChange={event => onDraftChange({ ...draft, gods_eye_view: event.target.checked })} disabled={creating} />God’s Eye View and local AIDP project access</label>}
           {localParticipantAccess && <p className="settings-help">Local mode: credentials are saved to a welcome file; no email is sent.</p>}
           {error && <p className="lab-manager-error" role="alert">{error}</p>}
           <footer>
@@ -736,127 +738,244 @@ function LabManagerModal({
   );
 }
 
-function GovernanceModuleModal({
-  open,
-  user,
-  module,
-  selected,
-  busy,
-  error,
-  onSelectedChange,
-  onInstall,
-  onResume,
-  onRedeploy,
-  onDelete,
-  onClose,
-}: {
-  open: boolean;
-  user: LabUser | null;
-  module: AdminModule | null;
-  selected: boolean;
-  busy: boolean;
-  error: string;
-  onSelectedChange: (selected: boolean) => void;
-  onInstall: () => void;
-  onResume: (kind: ModuleOperationKind) => void;
-  onRedeploy: () => void;
-  onDelete: () => void;
+function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
+  initialUserId?: string;
   onClose: () => void;
+  onChanged?: () => void;
 }) {
+  const [users, setUsers] = useState<LabUser[]>([]);
+  const [usersLoaded, setUsersLoaded] = useState(false);
+  const [usersError, setUsersError] = useState("");
+  const [modules, setModules] = useState<AdminModule[]>([]);
+  const [moduleManagerUserId, setModuleManagerUserId] = useState(initialUserId);
+  const [moduleLoadError, setModuleLoadError] = useState("");
+  const [moduleOperationError, setModuleOperationError] = useState("");
+  const [moduleOperating, setModuleOperating] = useState(false);
+  const [moduleProgress, setModuleProgress] = useState<RegistrationResponse | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [message, setMessage] = useState("");
+  const moduleAbortRef = useRef<AbortController | null>(null);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const moduleOperationsRef = useRef(new Map<string, ModuleOperation>());
   const titleId = useId();
   const descriptionId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  useDialogFocus(open, busy ? () => undefined : onClose, panelRef, closeRef);
+  useDialogFocus(true, moduleOperating ? () => undefined : onClose, panelRef, closeRef);
 
-  if (!open || !user || !module) return null;
-  const transitioning = ["installing", "redeploying", "deleting"].includes(module.status);
-  const recoverableKind = moduleOperationKind(module.status, module.operation_type);
-  const resumable = Boolean(recoverableKind && module.operation_id);
-  const state = module.status.replaceAll("_", " ");
+  const governanceModule = modules.find(({ module_id }) => module_id === "ai_data_governance") ?? null;
+  const moduleManagerUser = users.find(user => user.id === moduleManagerUserId && user.is_aidp_admin) ?? null;
+  const recoverableKind = governanceModule && moduleOperationKind(governanceModule.status, governanceModule.operation_type);
+  const transitioning = Boolean(governanceModule && ["installing", "redeploying", "deleting"].includes(governanceModule.status));
+  const resumable = Boolean(recoverableKind && governanceModule?.operation_id);
+  const disabled = moduleOperating || !usersLoaded || !moduleManagerUser || !governanceModule || Boolean(moduleLoadError || usersError);
+
+  async function loadAdministrators(signal: AbortSignal) {
+    setUsersError("");
+    setUsersLoaded(false);
+    try {
+      setUsers((await api<{ users: LabUser[] }>("/api/admin/users", { signal })).users);
+    } catch (reason) {
+      if (!signal.aborted) setUsersError(reason instanceof Error ? reason.message : "Unable to load administrators.");
+    } finally {
+      if (!signal.aborted) setUsersLoaded(true);
+    }
+  }
+  async function loadModules(signal = loadAbortRef.current?.signal) {
+    setModuleLoadError("");
+    try {
+      const loaded = (await api<{ modules: AdminModule[] }>("/api/admin/modules", { signal })).modules;
+      if (!loaded.some(module => module.module_id === "ai_data_governance")) throw new Error("AI Data Governance is unavailable.");
+      setModules(loaded);
+      for (const module of loaded) {
+        const recoverableKind = moduleOperationKind(module.status, module.operation_type);
+        for (const kind of ["install", "redeploy", "delete"] as const) {
+          const key = moduleOperationKey(module.module_id, kind);
+          if (recoverableKind === kind) {
+            if (module.operation_id) {
+              const operation = { moduleId: module.module_id, kind, operationId: module.operation_id };
+              moduleOperationsRef.current.set(key, operation);
+              writeStoredModuleOperation(module.module_id, kind, operation);
+            }
+            continue;
+          }
+          moduleOperationsRef.current.delete(key);
+          writeStoredModuleOperation(module.module_id, kind);
+        }
+      }
+      return loaded;
+    } catch (reason) {
+      if (signal?.aborted) return;
+      if (reason instanceof ApiRequestError && reason.status === 401)
+        window.location.assign("/admin/login");
+      else
+        setModuleLoadError(reason instanceof Error ? reason.message : "Unable to load global modules");
+    }
+  }
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    void loadAdministrators(controller.signal);
+    void loadModules(controller.signal);
+    return () => { controller.abort(); moduleAbortRef.current?.abort(); };
+  }, []);
+  useEffect(() => {
+    if (!transitioning || moduleOperating) return;
+    let cancelled = false;
+    let timeout = 0;
+    const refresh = async () => {
+      await loadModules();
+      if (!cancelled) timeout = window.setTimeout(refresh, 2_000);
+    };
+    timeout = window.setTimeout(refresh, 2_000);
+    return () => { cancelled = true; window.clearTimeout(timeout); };
+  }, [transitioning, moduleOperating, governanceModule?.operation_id]);
+  async function runModuleAction(kind: ModuleOperationKind) {
+    if (!usersLoaded || !moduleManagerUser || !moduleManagerUser.is_aidp_admin || !governanceModule || moduleAbortRef.current || moduleLoadError || usersError) return;
+    const recoverableKind = moduleOperationKind(governanceModule.status, governanceModule.operation_type);
+    const operationKey = moduleOperationKey(governanceModule.module_id, kind);
+    let operation;
+    try {
+      operation = getOrCreateModuleOperation(
+        moduleOperationsRef.current.get(operationKey) ??
+          readStoredModuleOperation(governanceModule.module_id, kind),
+        governanceModule.module_id,
+        kind,
+        () => crypto.randomUUID(),
+        recoverableKind === kind ? governanceModule.operation_id || undefined : undefined,
+      );
+      moduleOperationsRef.current.set(operationKey, operation);
+      writeStoredModuleOperation(governanceModule.module_id, kind, operation);
+    } catch (reason) {
+      setModuleOperationError(reason instanceof Error ? reason.message : "Unable to prepare the module operation.");
+      return;
+    }
+
+    const controller = new AbortController();
+    moduleAbortRef.current = controller;
+    setModuleOperating(true);
+    setModuleOperationError("");
+    setMessage("");
+    setModuleProgress({
+      status: "pending",
+      phase: kind === "delete" ? "cleanup" : "content",
+      message: `${kind === "install" ? "Installing" : kind === "redeploy" ? "Redeploying" : "Deleting"} ${governanceModule.display_name}.`,
+    });
+    let operationId = operation.operationId;
+    const moduleBase = `/api/admin/users/${encodeURIComponent(moduleManagerUser.id)}/modules/${encodeURIComponent(governanceModule.module_id)}`;
+    try {
+      const result = await pollRegistration({
+        signal: controller.signal,
+        request: async (signal) => {
+          const response = await (kind === "delete"
+            ? api<AdminModuleOperationResponse>(`${moduleBase}?operation_id=${encodeURIComponent(operationId)}`, {
+                method: "DELETE",
+                signal,
+              })
+            : api<AdminModuleOperationResponse>(kind === "redeploy" ? `${moduleBase}/redeploy` : moduleBase, {
+                method: "POST",
+                body: JSON.stringify({ operation_id: operationId }),
+                signal,
+              }));
+          if (response.operation_id && response.operation_id !== operationId) {
+            operationId = response.operation_id;
+            const serverOperation = {
+              moduleId: governanceModule.module_id,
+              kind,
+              operationId,
+            };
+            moduleOperationsRef.current.set(operationKey, serverOperation);
+            writeStoredModuleOperation(governanceModule.module_id, kind, serverOperation);
+          }
+          const complete = kind === "delete"
+            ? response.status === "not_installed"
+            : response.status === "active";
+          const pending = ["installing", "redeploying", "deleting"].includes(response.status);
+          return {
+            status: complete ? "active" : pending ? "pending" : response.status,
+            phase: response.phase,
+            message: response.message,
+          };
+        },
+        onPending: setModuleProgress,
+      });
+      moduleOperationsRef.current.delete(operationKey);
+      writeStoredModuleOperation(governanceModule.module_id, kind);
+      setConfirmDelete(false);
+      setMessage(result.message || `${governanceModule.display_name} ${kind === "delete" ? "deleted" : "ready"}.`);
+      await loadModules();
+      onChanged?.();
+    } catch (reason) {
+      if (controller.signal.aborted) return;
+      await loadModules();
+      setModuleOperationError(reason instanceof Error ? reason.message : "Unable to update the governance module.");
+    } finally {
+      if (moduleAbortRef.current === controller) moduleAbortRef.current = null;
+      setModuleProgress(null);
+      setModuleOperating(false);
+    }
+  }
+
   return createPortal(
     <div className="lab-manager-overlay">
-      <section
-        className="lab-manager-modal governance-module-modal"
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        aria-busy={busy || transitioning}
-        tabIndex={-1}
-      >
+      <section className="lab-manager-modal governance-module-modal" ref={panelRef} role="dialog"
+        aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} aria-busy={moduleOperating} tabIndex={-1}>
         <header>
           <div>
             <p className="eyebrow">Shared global module</p>
-            <h2 id={titleId}>{module.display_name}</h2>
-            <p id={descriptionId}>Manage the singleton through administrator {user.email}.</p>
+            <h2 id={titleId}>AI Data Governance</h2>
+            <p id={descriptionId}>One shared module for all AIDP developers, managed by AI Data Platform administrators.</p>
           </div>
-          <span className={`lab-state ${module.enabled ? "installed" : module.installed ? "planned" : "unassigned"}`}>
-            {state}
-          </span>
+          {governanceModule && <span className={`lab-state ${governanceModule.enabled ? "installed" : "unassigned"}`}>
+            {governanceModule.status.replaceAll("_", " ")}
+          </span>}
         </header>
         <div className="governance-module-body">
-          <label className="governance-module-option">
-            <input
-              className="lab-assignment-check"
-              type="checkbox"
-              checked={module.installed || selected}
-              disabled={module.installed || busy || transitioning}
-              onChange={(event) => onSelectedChange(event.target.checked)}
-            />
-            <span>
-              <strong>{module.display_name}</strong>
-              <small>Creates the global Agent, dedicated AI Compute and governance control tables in the fixed oci_artifacts bucket.</small>
-            </span>
-          </label>
-          <p className="governance-module-note">
-            One installation serves all AIDP developers across the Master Catalog. Only AI Data Platform administrators can deploy or modify it.
-          </p>
-          <p className="governance-module-note kit-version-copy">
-            <strong>{module.installed_version ? `Installed ${module.installed_version}` : "Not installed"}</strong>
-            <small>Bundled {module.bundled_version || "unknown"}</small>
-            {module.installed && (
-              <span className={`kit-version-state ${module.update_available ? "update" : "current"}`}>
-                {module.update_available ? "Update available" : "Current"}
-              </span>
-            )}
-          </p>
-          {module.status === "error" && module.message && (
-            <p className="lab-manager-error" role="alert">{module.message}</p>
-          )}
-          {error && <p className="lab-manager-error" role="alert">{error}</p>}
+          {!usersLoaded || (!governanceModule && !moduleLoadError) ? <LoadingIndicator label="Loading module settings…" /> : <>
+            <label>AI Data Platform administrator
+              <select value={moduleManagerUserId} disabled={moduleOperating || confirmDelete} onChange={event => {
+                setModuleManagerUserId(event.target.value); setModuleOperationError(""); setMessage("");
+              }}>
+                <option value="">Select an administrator</option>
+                {users.filter(user => user.is_aidp_admin).map(user => <option key={user.id} value={user.id}>{user.email}</option>)}
+              </select>
+            </label>
+            {!usersError && !users.some(user => user.is_aidp_admin) && <p role="alert" className="lab-manager-error">No AI Data Platform administrator is available.</p>}
+            <p className="governance-module-note">Deploy or redeploy the shared Agent, dedicated AI Compute and governance workflow across the Master Catalog. Existing shared OCI credentials are retained; participants are not granted administrator access.</p>
+            {governanceModule && <p className="governance-module-note kit-version-copy">
+              <strong>{governanceModule.installed_version ? `Installed ${governanceModule.installed_version}` : "Not installed"}</strong>
+              <small>Bundled {governanceModule.bundled_version || "unknown"}</small>
+            </p>}
+          </>}
+          {(usersError || moduleLoadError) && <>
+            <p className="lab-manager-error" role="alert">{usersError || moduleLoadError}</p>
+            <button className="secondary" type="button" onClick={() => {
+              if (loadAbortRef.current) void loadAdministrators(loadAbortRef.current.signal);
+              void loadModules();
+            }}>Retry settings</button>
+          </>}
+          {confirmDelete && <p className="lab-manager-warning" role="alert"><strong>Delete global governance module?</strong> This permanently deletes its Agent deployment, dedicated AI Compute, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema, shared Spark compute and shared OCI credentials are retained.</p>}
+          {(moduleOperationError || governanceModule?.status === "error") && <p className="lab-manager-error" role="alert">{moduleOperationError || governanceModule?.message || "The module operation failed. Resume to retry."}</p>}
+          {moduleOperating && <div role="status" className="governance-module-progress"><LoadingIndicator label="Updating module…" inline /><span>{moduleProgress?.message || "Updating the shared module."}</span></div>}
+          {message && <p role="status" className="governance-module-note">{message}</p>}
         </div>
         <footer>
-          <button ref={closeRef} className="secondary" type="button" disabled={busy} onClick={onClose}>
-            Close
+          <button ref={closeRef} className="secondary" type="button" disabled={moduleOperating} onClick={() => confirmDelete ? setConfirmDelete(false) : onClose()}>
+            {confirmDelete ? "Back" : message ? "Close" : "Cancel"}
           </button>
-          {resumable ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => recoverableKind && onResume(recoverableKind)}
-            >
+          {confirmDelete ? <button type="button" disabled={disabled} onClick={() => void runModuleAction("delete")}>Delete module</button>
+            : resumable ? <button type="button" disabled={disabled} onClick={() => recoverableKind && void runModuleAction(recoverableKind)}>
               Resume {recoverableKind === "install" ? "installation" : recoverableKind === "redeploy" ? "redeployment" : "deletion"}
-            </button>
-          ) : module.installed ? (
-            <>
-              <button className="secondary destructive" type="button" disabled={busy || transitioning} onClick={onDelete}>
-                Delete
+            </button> : <>
+              {governanceModule?.installed && <button className="secondary destructive" type="button" disabled={disabled || transitioning} onClick={() => { setConfirmDelete(true); closeRef.current?.focus(); }}>Delete</button>}
+              <button type="button" disabled={disabled || transitioning} onClick={() => void runModuleAction(governanceModule?.installed ? "redeploy" : "install")}>
+                {governanceModule?.installed ? governanceModule.update_available ? "Update" : "Redeploy" : "Deploy"}
               </button>
-              <button type="button" disabled={busy || transitioning} onClick={onRedeploy}>
-                {module.update_available ? "Update" : "Redeploy"}
-              </button>
-            </>
-          ) : (
-            <button type="button" disabled={!selected || busy || transitioning} onClick={onInstall}>
-              Deploy
-            </button>
-          )}
+            </>}
         </footer>
       </section>
-    </div>,
-    document.body,
+    </div>, document.body,
   );
 }
 
@@ -979,6 +1098,13 @@ function RefreshIcon() {
       />
     </svg>
   );
+}
+
+function InstallIcon() {
+  return <svg viewBox="0 0 36 36" fill="currentColor" aria-hidden="true">
+    <path d="M30.92,8H26.55a1,1,0,0,0,0,2H31V30H5V10H9.38a1,1,0,0,0,0-2H5.08A2,2,0,0,0,3,10V30a2,2,0,0,0,2.08,2H30.92A2,2,0,0,0,33,30V10A2,2,0,0,0,30.92,8Z" />
+    <path d="M10.3,18.87l7,6.89a1,1,0,0,0,1.4,0l7-6.89a1,1,0,0,0-1.4-1.43L19,22.65V4a1,1,0,0,0-2,0V22.65l-5.3-5.21a1,1,0,0,0-1.4,1.43Z" />
+  </svg>;
 }
 
 function EditIcon() {
@@ -1639,7 +1765,11 @@ function AdminLoginCard() {
         body: JSON.stringify({ username, password }),
       });
       setPassword("");
-      window.location.assign("/admin/users");
+      window.location.assign(
+        new URLSearchParams(window.location.search).get("next") === "/gods-eye-view/"
+          ? "/gods-eye-view/" + window.location.hash
+          : "/admin/users",
+      );
     } catch (reason) {
       setPassword("");
       setError(reason instanceof Error ? reason.message : "Login failed");
@@ -1713,11 +1843,9 @@ function AdminUsers() {
   const adminSession = useAdminSession();
   const publicConfig = usePublicConfig();
   const catalog = participantLabCatalog(publicConfig?.labs ?? fallbackCatalog);
-  const governanceEntry = new URLSearchParams(window.location.search).get("module") === "ai_data_governance_vsc_extension";
-  const [governanceAdminId, setGovernanceAdminId] = useState("");
-  const [usersLoaded, setUsersLoaded] = useState(false);
   const [users, setUsers] = useState<LabUser[]>([]);
-  const [modules, setModules] = useState<AdminModule[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const usersRequestRef = useRef(0);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
@@ -1729,8 +1857,6 @@ function AdminUsers() {
   const [draft, setDraft] = useState<UserDraft>({ name: "", email: "", lab_ids: ["banking"] as string[] });
   const createAbortRef = useRef<AbortController | null>(null);
   const operationAbortRef = useRef<AbortController | null>(null);
-  const moduleAbortRef = useRef<AbortController | null>(null);
-  const moduleOperationsRef = useRef(new Map<string, ModuleOperation>());
   const [labManagerUserId, setLabManagerUserId] = useState<string | null>(null);
   const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
   const [confirmingLabRemoval, setConfirmingLabRemoval] = useState(false);
@@ -1743,99 +1869,45 @@ function AdminUsers() {
   const [operating, setOperating] = useState(false);
   const [operationProgress, setOperationProgress] = useState<RegistrationResponse | null>(null);
   const [operationError, setOperationError] = useState("");
-  const [moduleManagerUserId, setModuleManagerUserId] = useState<string | null>(null);
-  const [moduleSelected, setModuleSelected] = useState(false);
-  const [moduleLoadError, setModuleLoadError] = useState("");
-  const [moduleOperationError, setModuleOperationError] = useState("");
-  const [moduleOperating, setModuleOperating] = useState(false);
-  const [moduleProgress, setModuleProgress] = useState<RegistrationResponse | null>(null);
-  const [pendingModuleAction, setPendingModuleAction] = useState<ModuleOperationKind | null>(null);
   const [pendingDelete, setPendingDelete] = useState<LabUser | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
   async function loadUsers() {
+    const request = ++usersRequestRef.current;
+    setUsersLoading(true);
     setTableError("");
     try {
       const loaded = (await api<{ users: LabUser[] }>("/api/admin/users")).users;
+      if (request !== usersRequestRef.current) return;
       setUsers(loaded);
-      setUsersLoaded(true);
       return loaded;
     } catch (reason) {
+      if (request !== usersRequestRef.current) return;
       if (reason instanceof ApiRequestError && reason.status === 401)
         window.location.assign("/admin/login");
       else
         setTableError(
           reason instanceof Error ? reason.message : "Unable to load users",
         );
-    }
-  }
-  async function loadModules() {
-    setModuleLoadError("");
-    try {
-      const loaded = (await api<{ modules: AdminModule[] }>("/api/admin/modules")).modules;
-      setModules(loaded);
-      for (const module of loaded) {
-        const recoverableKind = moduleOperationKind(module.status, module.operation_type);
-        for (const kind of ["install", "redeploy", "delete"] as const) {
-          const key = moduleOperationKey(module.module_id, kind);
-          if (recoverableKind === kind) {
-            if (module.operation_id) {
-              const operation = { moduleId: module.module_id, kind, operationId: module.operation_id };
-              moduleOperationsRef.current.set(key, operation);
-              writeStoredModuleOperation(module.module_id, kind, operation);
-            }
-            continue;
-          }
-          moduleOperationsRef.current.delete(key);
-          writeStoredModuleOperation(module.module_id, kind);
-        }
-      }
-      return loaded;
-    } catch (reason) {
-      if (reason instanceof ApiRequestError && reason.status === 401)
-        window.location.assign("/admin/login");
-      else
-        setModuleLoadError(reason instanceof Error ? reason.message : "Unable to load global modules");
+    } finally {
+      if (request === usersRequestRef.current) setUsersLoading(false);
     }
   }
   useEffect(() => {
     void loadUsers();
-    void loadModules();
     return () => {
+      usersRequestRef.current++;
       createAbortRef.current?.abort();
       operationAbortRef.current?.abort();
-      moduleAbortRef.current?.abort();
     };
   }, []);
   const visible = users.filter((user) =>
     `${user.name} ${user.email}`.toLowerCase().includes(query.toLowerCase()),
   );
   const labManagerUser = users.find((user) => user.id === labManagerUserId) ?? null;
-  const moduleManagerUser = users.find((user) => user.id === moduleManagerUserId) ?? null;
-  const governanceModule = modules.find(({ module_id }) => module_id === "ai_data_governance_vsc_extension") ?? null;
   const pendingLabUpdate = Boolean(
     pendingLabAction?.kind === "redeploy" && pendingLabAction.lab.update_available,
   );
-  useEffect(() => {
-    if (
-      !moduleManagerUserId ||
-      !governanceModule ||
-      !["installing", "redeploying", "deleting"].includes(governanceModule.status)
-    )
-      return undefined;
-    let cancelled = false;
-    let timeout = 0;
-    const refresh = async () => {
-      await loadModules();
-      if (!cancelled) timeout = window.setTimeout(refresh, 2_000);
-    };
-    timeout = window.setTimeout(refresh, 2_000);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-    };
-    // An error is terminal until an administrator explicitly resumes its manifest operation.
-  }, [moduleManagerUserId, governanceModule?.module_id, governanceModule?.operation_id, governanceModule?.status]);
   async function logout() {
     await api("/api/admin/logout", { method: "POST" });
     window.location.assign("/");
@@ -2065,128 +2137,14 @@ function AdminUsers() {
     }
   }
 
-  async function openModuleManager(user: LabUser) {
-    if (!user.is_aidp_admin || !governanceModule) return;
-    const refreshed = (await loadModules())?.find(
-      ({ module_id }) => module_id === governanceModule.module_id,
-    ) ?? governanceModule;
-    setModuleManagerUserId(user.id);
-    setModuleSelected(refreshed.installed);
-    setModuleOperationError("");
-  }
-
-  async function runModuleAction(kind: ModuleOperationKind) {
-    if (!moduleManagerUser || !moduleManagerUser.is_aidp_admin || !governanceModule || moduleAbortRef.current) return;
-    const recoverableKind = moduleOperationKind(governanceModule.status, governanceModule.operation_type);
-    const operationKey = moduleOperationKey(governanceModule.module_id, kind);
-    let operation;
-    try {
-      operation = getOrCreateModuleOperation(
-        moduleOperationsRef.current.get(operationKey) ??
-          readStoredModuleOperation(governanceModule.module_id, kind),
-        governanceModule.module_id,
-        kind,
-        () => crypto.randomUUID(),
-        recoverableKind === kind ? governanceModule.operation_id || undefined : undefined,
-      );
-      moduleOperationsRef.current.set(operationKey, operation);
-      writeStoredModuleOperation(governanceModule.module_id, kind, operation);
-    } catch (reason) {
-      setModuleOperationError(reason instanceof Error ? reason.message : "Unable to prepare the module operation.");
-      return;
-    }
-
-    const controller = new AbortController();
-    moduleAbortRef.current = controller;
-    setModuleOperating(true);
-    setModuleOperationError("");
-    setMessage("");
-    setModuleProgress({
-      status: "pending",
-      phase: kind === "delete" ? "cleanup" : "content",
-      message: `${kind === "install" ? "Installing" : kind === "redeploy" ? "Redeploying" : "Deleting"} ${governanceModule.display_name}.`,
-    });
-    let operationId = operation.operationId;
-    const moduleBase = `/api/admin/users/${encodeURIComponent(moduleManagerUser.id)}/modules/${encodeURIComponent(governanceModule.module_id)}`;
-    try {
-      const result = await pollRegistration({
-        signal: controller.signal,
-        request: async (signal) => {
-          const response = await (kind === "delete"
-            ? api<AdminModuleOperationResponse>(`${moduleBase}?operation_id=${encodeURIComponent(operationId)}`, {
-                method: "DELETE",
-                signal,
-              })
-            : api<AdminModuleOperationResponse>(kind === "redeploy" ? `${moduleBase}/redeploy` : moduleBase, {
-                method: "POST",
-                body: JSON.stringify({ operation_id: operationId }),
-                signal,
-              }));
-          if (response.operation_id && response.operation_id !== operationId) {
-            operationId = response.operation_id;
-            const serverOperation = {
-              moduleId: governanceModule.module_id,
-              kind,
-              operationId,
-            };
-            moduleOperationsRef.current.set(operationKey, serverOperation);
-            writeStoredModuleOperation(governanceModule.module_id, kind, serverOperation);
-          }
-          const complete = kind === "delete"
-            ? response.status === "not_installed"
-            : response.status === "active";
-          const pending = ["installing", "redeploying", "deleting"].includes(response.status);
-          return {
-            status: complete ? "active" : pending ? "pending" : response.status,
-            phase: response.phase,
-            message: response.message,
-          };
-        },
-        onPending: setModuleProgress,
-      });
-      moduleOperationsRef.current.delete(operationKey);
-      writeStoredModuleOperation(governanceModule.module_id, kind);
-      setPendingModuleAction(null);
-      setModuleSelected(false);
-      setMessage(result.message || `${governanceModule.display_name} ${kind === "delete" ? "deleted" : "ready"}.`);
-      await loadModules();
-    } catch (reason) {
-      if (controller.signal.aborted) return;
-      await loadModules();
-      setModuleOperationError(reason instanceof Error ? reason.message : "Unable to update the governance module.");
-    } finally {
-      if (moduleAbortRef.current === controller) moduleAbortRef.current = null;
-      setModuleProgress(null);
-      setModuleOperating(false);
-    }
-  }
   return (
     <>
       <Shell
         onSignOut={() => setLogoutOpen(true)}
         operatorUsername={adminSession?.operator_username || adminSession?.username}
       >
-        <section className="admin" aria-busy={operating || creating || moduleOperating} inert={operating || creating || moduleOperating}>
+        <section className="admin" aria-busy={operating || creating} inert={operating || creating}>
           <div className="admin-panel">
-            {governanceEntry && (
-              <div className="governance-module-body">
-                <a href="/admin/settings#application">Return to Settings</a>
-                <h2>AI Data Governance</h2>
-                <p className="governance-module-note">Deploy or redeploy the single shared module using an existing AI Data Platform administrator. This does not grant administrator access to participants.</p>
-                <label className="settings-field">AI Data Platform administrator
-                  <select value={governanceAdminId} onChange={event => setGovernanceAdminId(event.target.value)}>
-                    <option value="">Select an administrator</option>
-                    {users.filter(user => user.is_aidp_admin).map(user => <option key={user.id} value={user.id}>{user.email}</option>)}
-                  </select>
-                </label>
-                {usersLoaded && !users.some(user => user.is_aidp_admin) && <p role="alert">No AI Data Platform administrator is available. Deployment requires an existing AI_DATA_PLATFORM_ADMIN account.</p>}
-                <p role="status">{governanceModule ? governanceModule.status.replaceAll("_", " ") : moduleLoadError ? "Module status unavailable" : "Loading module status…"}</p>
-                <button type="button" disabled={!governanceModule || !users.some(user => user.id === governanceAdminId && user.is_aidp_admin)} onClick={() => {
-                  const user = users.find(user => user.id === governanceAdminId && user.is_aidp_admin);
-                  if (user) void openModuleManager(user);
-                }}>Deploy / Redeploy</button>
-              </div>
-            )}
             <div className="admin-panel-heading">
               <h1>Users</h1>
               <button
@@ -2233,10 +2191,7 @@ function AdminUsers() {
                 <button
                   className="toolbar-icon"
                   type="button"
-                  onClick={() => {
-                    void loadUsers();
-                    void loadModules();
-                  }}
+                  onClick={() => void loadUsers()}
                   aria-label="Refresh users"
                   title="Refresh users"
                 >
@@ -2244,13 +2199,8 @@ function AdminUsers() {
                 </button>
               </div>
             </div>
-            {moduleLoadError && (
-              <p className="notice error admin-module-error" role="alert">
-                {moduleLoadError}
-              </p>
-            )}
             <div className="table-wrap">
-              <table>
+              <table aria-busy={usersLoading}>
                 <thead>
                   <tr>
                     <th>Name</th>
@@ -2262,7 +2212,9 @@ function AdminUsers() {
                   </tr>
                 </thead>
                 <tbody>
-                  {tableError ? (
+                  {usersLoading ? (
+                    <tr><td colSpan={6}><LoadingIndicator label="Loading users…" /></td></tr>
+                  ) : tableError ? (
                     <tr>
                       <td colSpan={6} className="table-error" role="alert">
                         {tableError} Refresh and try again.
@@ -2311,19 +2263,6 @@ function AdminUsers() {
                       </td>
                       <td className="row-actions">
                         <span className="row-action-group">
-                          {user.is_aidp_admin && governanceModule && (
-                            <button
-                              className="table-action table-module"
-                              type="button"
-                              aria-haspopup="dialog"
-                              aria-expanded={moduleManagerUserId === user.id}
-                              onClick={() => void openModuleManager(user)}
-                              aria-label={`Manage ${governanceModule.display_name} as ${user.email}`}
-                              title={`Manage ${governanceModule.display_name}`}
-                            >
-                              <AdminLoginIcon />
-                            </button>
-                          )}
                           {user.managed !== false && (
                             <>
                               <button
@@ -2356,7 +2295,7 @@ function AdminUsers() {
                     </tr>
                     ))
                   )}
-                  {!tableError && !visible.length && (
+                  {!tableError && !visible.length && !usersLoading && (
                     <tr>
                       <td colSpan={6} className="empty">
                         No matching lab users.
@@ -2417,45 +2356,6 @@ function AdminUsers() {
         }}
         onSave={() => void saveLabAssignments()}
       />
-      <GovernanceModuleModal
-        open={Boolean(moduleManagerUser) && !moduleOperating && !pendingModuleAction}
-        user={moduleManagerUser}
-        module={governanceModule}
-        selected={moduleSelected}
-        busy={moduleOperating}
-        error={moduleOperationError}
-        onSelectedChange={(selected) => {
-          setModuleSelected(selected);
-          setModuleOperationError("");
-        }}
-        onInstall={() => setPendingModuleAction("install")}
-        onResume={setPendingModuleAction}
-        onRedeploy={() => setPendingModuleAction("redeploy")}
-        onDelete={() => {
-          setModuleOperationError("");
-          setPendingModuleAction("delete");
-        }}
-        onClose={() => {
-          setModuleManagerUserId(null);
-          setModuleSelected(false);
-          setModuleOperationError("");
-        }}
-      />
-      <ConfirmModal
-        open={Boolean(pendingModuleAction) && !moduleOperating}
-        kind={pendingModuleAction === "delete" ? "delete" : "question"}
-        title={pendingModuleAction === "delete" ? "Delete global governance module?" : pendingModuleAction === "install" ? "Deploy AI Data Governance?" : "Redeploy AI Data Governance?"}
-        description={pendingModuleAction === "delete"
-          ? `This permanently deletes ${governanceModule?.display_name ?? "the module"}, its Agent deployment, dedicated AI Compute, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema, shared Spark compute and shared OCI credentials are retained.`
-          : `${pendingModuleAction === "install" ? "Deploy" : "Redeploy"} the single shared Agent, dedicated AI Compute and governance workflow through administrator ${moduleManagerUser?.email ?? "selected above"}. This affects the global module used by all AIDP developers across the Master Catalog and does not grant administrator access to participants. Existing shared OCI credentials are retained.`}
-        error={moduleOperationError}
-        confirmLabel={pendingModuleAction === "delete" ? "Delete module" : "Accept"}
-        onClose={() => {
-          setPendingModuleAction(null);
-          setModuleOperationError("");
-        }}
-        onConfirm={() => pendingModuleAction && void runModuleAction(pendingModuleAction)}
-      />
       <ConfirmModal
         open={Boolean(pendingLabAction) && !operating}
         kind={pendingLabAction?.kind === "remove" ? "delete" : "reset"}
@@ -2499,14 +2399,6 @@ function AdminUsers() {
           }
         />
       )}
-      {moduleOperating && (
-        <ProvisioningOverlay
-          phase={moduleProgress?.phase}
-          label={pendingModuleAction === "delete" ? "Deleting governance module" : "Reconciling governance module"}
-          indeterminate
-          message={moduleProgress?.message || "Reconciling the shared governance module."}
-        />
-      )}
     </>
   );
 }
@@ -2515,10 +2407,14 @@ function SettingsRegistrationCodeField({
   value,
   configured,
   onChange,
+  busy,
+  action,
 }: {
   value: string;
   configured: boolean;
   onChange: (value: string) => void;
+  busy: boolean;
+  action: ReactNode;
 }) {
   const inputs = useRef<Array<HTMLInputElement | null>>([]);
   const [letters = "", digits = ""] = value.split("-", 2);
@@ -2554,36 +2450,39 @@ function SettingsRegistrationCodeField({
   };
 
   return (
-    <fieldset className="registration-code settings-registration-code">
+    <fieldset className="registration-code settings-registration-code" disabled={busy} aria-busy={busy}>
       <legend>Lab registration code</legend>
-      <div
-        className="code-slots"
-        onPaste={(event) => {
-          event.preventDefault();
-          pasteCode(event.clipboardData.getData("text"));
-        }}
-      >
-        {slots.map((slot, index) => (
-          <span className="code-slot-wrap" key={index}>
-            {index === 4 && <span className="code-separator" aria-hidden="true">-</span>}
-            <input
-              ref={(element) => {
-                inputs.current[index] = element;
-              }}
-              className="code-slot"
-              aria-label={`Lab registration code character ${index + 1} of 8`}
-              aria-describedby="registration-code-settings-help"
-              autoComplete="off"
-              autoCapitalize="characters"
-              inputMode={index < 4 ? "text" : "numeric"}
-              maxLength={1}
-              value={slot}
-              onChange={(event) => setSlot(index, event.target.value)}
-              onKeyDown={(event) => handleKeyDown(index, event)}
-              onFocus={(event) => event.currentTarget.select()}
-            />
-          </span>
-        ))}
+      <div className="settings-registration-controls">
+        <div
+          className="code-slots"
+          onPaste={(event) => {
+            event.preventDefault();
+            pasteCode(event.clipboardData.getData("text"));
+          }}
+        >
+          {slots.map((slot, index) => (
+            <span className="code-slot-wrap" key={index}>
+              {index === 4 && <span className="code-separator" aria-hidden="true">-</span>}
+              <input
+                ref={(element) => {
+                  inputs.current[index] = element;
+                }}
+                className="code-slot"
+                aria-label={`Lab registration code character ${index + 1} of 8`}
+                aria-describedby="registration-code-settings-help"
+                autoComplete="off"
+                autoCapitalize="characters"
+                inputMode={index < 4 ? "text" : "numeric"}
+                maxLength={1}
+                value={slot}
+                onChange={(event) => setSlot(index, event.target.value)}
+                onKeyDown={(event) => handleKeyDown(index, event)}
+                onFocus={(event) => event.currentTarget.select()}
+              />
+            </span>
+          ))}
+        </div>
+        {action}
       </div>
       <span id="registration-code-settings-help" className="settings-help">
         {configured
@@ -2600,12 +2499,14 @@ function RegistrationAccessSettings({
   registrationCodeConfigured,
   onRegistrationCodeChange,
   onSave,
+  busy,
 }: {
   deploymentMode: "laboratory" | "production";
   registrationCode: string;
   registrationCodeConfigured: boolean;
   onRegistrationCodeChange: (value: string) => void;
   onSave: () => void;
+  busy: boolean;
 }) {
   if (deploymentMode === "production") {
     return (
@@ -2616,23 +2517,23 @@ function RegistrationAccessSettings({
   }
 
   return (
-    <>
-      <SettingsRegistrationCodeField
-        value={registrationCode}
-        configured={registrationCodeConfigured}
-        onChange={onRegistrationCodeChange}
-      />
-      <div className="settings-actions">
+    <SettingsRegistrationCodeField
+      value={registrationCode}
+      configured={registrationCodeConfigured}
+      onChange={onRegistrationCodeChange}
+      busy={busy}
+      action={
         <button
           type="button"
           className="settings-save"
           onClick={onSave}
-          disabled={!registrationCode}
+          disabled={busy || !/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)}
+          aria-haspopup="dialog"
         >
-          Save registration code
+          Save Code
         </button>
-      </div>
-    </>
+      }
+    />
   );
 }
 
@@ -2650,11 +2551,13 @@ function ApplicationReleaseSettings({
   busy,
   error,
   onConfigureGovernance,
+  onConfigureGodsEye,
 }: {
   release: AdminApplicationRelease | null;
   busy: boolean;
   error: string;
   onConfigureGovernance: () => void;
+  onConfigureGodsEye: () => void;
 }) {
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
@@ -2676,7 +2579,7 @@ function ApplicationReleaseSettings({
           <h2>Application version</h2>
           <p>Update the VM in place from the latest immutable release without reinstalling it.</p>
         </div>
-        <span className={`prisma-mode release-state ${release?.update_available || operationRunning ? "update" : "current real"}`}>
+        <span className={`gods-eye-view-mode release-state ${release?.update_available || operationRunning ? "update" : "current real"}`}>
           {statusLabel}
         </span>
       </header>
@@ -2739,15 +2642,20 @@ function ApplicationReleaseSettings({
                     <td>{item.bundled_version}</td>
                     <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
                     <td className="release-package-actions">
-                      {item.package_id === "ai_data_governance_vsc_extension" && (
+                      {item.package_id === "ai_data_governance" && (
                         <button type="button" className="module-configure module-deploy" onClick={onConfigureGovernance} aria-label="Deploy or redeploy AI Data Governance" title="Deploy or redeploy AI Data Governance" aria-haspopup="dialog">
-                          <RefreshIcon />
+                          <InstallIcon />
                         </button>
                       )}
-                      {item.package_id === "territorial_control" && (
+                      {item.package_id === "gods_eye_view" && (
+                        <>
+                        <button type="button" className="module-configure module-deploy" onClick={onConfigureGodsEye} aria-label={`Install ${item.display_name}`} title={`Install ${item.display_name}`} aria-haspopup="dialog">
+                          <InstallIcon />
+                        </button>
                         <a className="module-configure" href="/admin/gods-eye-view" aria-label={`Configure ${item.display_name}`} title={`Configure ${item.display_name}`}>
                           <AdminLoginIcon />
                         </a>
+                        </>
                       )}
                     </td>
                   </tr>
@@ -2759,7 +2667,7 @@ function ApplicationReleaseSettings({
       ) : error ? (
         <p className="release-operation error" role="alert">{error}</p>
       ) : (
-        <p className="settings-help" role="status">Loading release metadata…</p>
+        <LoadingIndicator label="Loading release metadata…" />
       )}
     </section>
   );
@@ -2772,10 +2680,15 @@ function AdminSettings() {
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>(configuringModule || window.location.hash === "#application" ? "application" : "workbench");
   const [aidpServiceEndpoint, setAidpServiceEndpoint] = useState("");
   const [aidpUrl, setAidpUrl] = useState("");
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [aidpPlatformId, setAidpPlatformId] = useState("");
   const [deploymentMode, setDeploymentMode] = useState<"laboratory" | "production">("laboratory");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
+  const [confirmRegistrationSave, setConfirmRegistrationSave] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const registrationCodeToSave = useRef<string | null>(null);
+  const settingsSaveRef = useRef(false);
   const [timeZone, setTimeZone] = useState('America/Bogota');
   const [savedTimeZone, setSavedTimeZone] = useState('America/Bogota');
   const [timeZones, setTimeZones] = useState<{ value: string; label: string }[]>([]);
@@ -2783,6 +2696,7 @@ function AdminSettings() {
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [confirmReleaseUpdate, setConfirmReleaseUpdate] = useState(false);
   const [confirmGovernance, setConfirmGovernance] = useState(false);
+  const [confirmGodsEye, setConfirmGodsEye] = useState(false);
   const [releaseError, setReleaseError] = useState("");
   const [releaseProgress, setReleaseProgress] = useState<RegistrationResponse | null>(null);
   const [error, setError] = useState("");
@@ -2838,7 +2752,7 @@ function AdminSettings() {
               ? reason.message
               : "Unable to load settings",
           );
-      });
+      }).finally(() => setSettingsLoading(false));
     void loadApplicationRelease();
     return () => releaseAbortRef.current?.abort();
   }, []);
@@ -2876,13 +2790,26 @@ function AdminSettings() {
     }
     setToast(`${label} copied.`);
   }
-  async function saveSettings(section: "registration" | "timezone") {
+  function requestRegistrationSave() {
+    if (settingsSaveRef.current || settingsLoading || deploymentMode !== "laboratory") return;
+    if (!/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)) {
+      setError("Enter four letters followed by four numbers.");
+      return;
+    }
     setError("");
-    const rotatesRegistrationCode = section === "registration" && Boolean(registrationCode);
+    registrationCodeToSave.current = registrationCode;
+    setConfirmRegistrationSave(true);
+  }
+  async function saveSettings(section: "registration" | "timezone", registrationCode = "") {
+    if (settingsSaveRef.current) return;
+    setError("");
+    const rotatesRegistrationCode = section === "registration";
     if (rotatesRegistrationCode && !/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)) {
       setError("Enter four letters followed by four numbers.");
       return;
     }
+    settingsSaveRef.current = true;
+    setSettingsSaving(true);
     try {
       const result = await api<AdminSettingsResponse>("/api/admin/settings", {
         method: "PUT",
@@ -2892,10 +2819,13 @@ function AdminSettings() {
         }),
       });
       applyAdminSettings(result, section);
-      if (rotatesRegistrationCode) setRegistrationCode("");
+      if (rotatesRegistrationCode) setRegistrationCode(current => current === registrationCode ? "" : current);
       setToast(section === "registration" ? "Registration code saved." : "Time zone saved.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save settings");
+    } finally {
+      settingsSaveRef.current = false;
+      setSettingsSaving(false);
     }
   }
   async function updateApplication() {
@@ -3026,14 +2956,14 @@ function AdminSettings() {
             <label className="settings-field">
               AI Data Platform Workbench URL
               <span className="settings-url-control settings-url-control-actions">
-                <input
+                {settingsLoading ? <LoadingIndicator label="Loading configuration…" inline /> : <input
                   ref={urlRef}
                   value={aidpUrl}
                   readOnly
                   spellCheck={false}
                   aria-label="AI Data Platform Workbench URL"
-                  placeholder="Loading configuration…"
-                />
+                  placeholder="Not configured"
+                />}
                 <button
                   type="button"
                   className="copy-url"
@@ -3086,7 +3016,8 @@ function AdminSettings() {
               registrationCode={registrationCode}
               registrationCodeConfigured={registrationCodeConfigured}
               onRegistrationCodeChange={setRegistrationCode}
-              onSave={() => void saveSettings("registration")}
+              onSave={requestRegistrationSave}
+              busy={settingsSaving}
             />
           </section>
           <section
@@ -3110,7 +3041,7 @@ function AdminSettings() {
                   <RefreshIcon />{releaseBusy ? "Updating…" : "Update from GitHub"}
                 </button>}
             </div>
-            {configuringModule ? <PrismaAdmin api={api} timeZone={savedTimeZone} searchIcon={<SearchIcon />} refreshIcon={<RefreshIcon />} viewerUrlControl={
+            {configuringModule ? <GodsEyeViewAdmin api={api} timeZone={savedTimeZone} searchIcon={<SearchIcon />} refreshIcon={<RefreshIcon />} viewerUrlControl={
               <label className="settings-field">
                 God’s Eye View URL
                 <span className="settings-url-control settings-url-control-actions">
@@ -3124,10 +3055,11 @@ function AdminSettings() {
               busy={releaseBusy}
               error={releaseError}
               onConfigureGovernance={() => setConfirmGovernance(true)}
+              onConfigureGodsEye={() => setConfirmGodsEye(true)}
             />
               <div className="settings-time-zone-controls">
                 <label className="settings-field">Display time zone<select value={timeZone} onChange={event => setTimeZone(event.target.value)}>{timeZones.map(zone => <option key={zone.value} value={zone.value}>{zone.label}</option>)}</select></label>
-                <button type="button" className="settings-save" disabled={timeZone === savedTimeZone} onClick={() => void saveSettings('timezone')}>Save time zone</button>
+                <button type="button" className="settings-save" disabled={settingsSaving || timeZone === savedTimeZone} onClick={() => void saveSettings('timezone')}>Save time zone</button>
               </div>
             </>}
           </section>
@@ -3139,14 +3071,26 @@ function AdminSettings() {
         </div>
       </section>
       <Toast message={toast} onDismiss={() => setToast("")} />
+      {confirmGovernance && <GovernanceModuleManager onClose={() => setConfirmGovernance(false)} />}
+      {confirmGodsEye && <GodsEyeViewModuleManager api={api} onClose={() => setConfirmGodsEye(false)} />}
       <ConfirmModal
-        open={confirmGovernance}
+        open={confirmRegistrationSave}
         kind="question"
-        title="AI Data Governance"
-        description="Open the shared module manager to deploy or redeploy one Agent, dedicated AI Compute and governance workflow for all AIDP developers across the Master Catalog. Select an existing AI Data Platform administrator there. Deployment starts only after you confirm its action; participants are not granted administrator access."
-        confirmLabel="Accept"
-        onClose={() => setConfirmGovernance(false)}
-        onConfirm={() => window.location.assign("/admin/users?module=ai_data_governance_vsc_extension")}
+        title="Save registration code?"
+        description={registrationCodeConfigured
+          ? "Replace the current registration code? The previous code will stop working for new registrations. Existing participants keep their access."
+          : "Save this code to enable participant registration? Share it only with the people you want to register for the lab."}
+        confirmLabel="Save Code"
+        onClose={() => {
+          registrationCodeToSave.current = null;
+          setConfirmRegistrationSave(false);
+        }}
+        onConfirm={() => {
+          const code = registrationCodeToSave.current;
+          registrationCodeToSave.current = null;
+          setConfirmRegistrationSave(false);
+          if (code) void saveSettings("registration", code);
+        }}
       />
       <ConfirmModal
         open={confirmReleaseUpdate}
@@ -3170,8 +3114,8 @@ function AdminSettings() {
 }
 
 export function App() {
-  if (window.location.pathname === "/local/gods-eye-view/login") return <Shell><LocalPrismaAccess api={api} /></Shell>;
-  if (window.location.pathname === "/local/gods-eye-view/workspace") return <Shell><LocalPrismaAccess api={api} workspace /></Shell>;
+  if (window.location.pathname === "/local/gods-eye-view/login") return <Shell><LocalGodsEyeViewAccess api={api} /></Shell>;
+  if (window.location.pathname === "/local/gods-eye-view/workspace") return <Shell><LocalGodsEyeViewAccess api={api} workspace /></Shell>;
   if (window.location.pathname === "/admin/gods-eye-view") return <AdminSettings />;
   if (window.location.pathname === "/admin/settings") return <AdminSettings />;
   if (window.location.pathname === "/admin/login")

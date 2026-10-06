@@ -7,8 +7,8 @@ services:
       dockerfile: docker/Dockerfile
     env_file: ../.env.dev
     environment:
-      PRISMA_VIEWER_URL: http://prisma-viewer:8081
-      PRISMA_VIEWER_ENABLED: "true"
+      GODS_EYE_VIEW_URL: http://gods-eye-view:8081
+      GODS_EYE_VIEW_ENABLED: "true"
       COOKIE_SECURE: "false"
       LOCAL_IDENTITY_ARTIFACT_DIR: /var/lib/aidp-lab/local-artifacts
     ports:
@@ -21,13 +21,13 @@ services:
       test: ["CMD", "curl", "-f", "http://127.0.0.1/api/health"]
     restart: unless-stopped
 
-  prisma-viewer:
+  gods-eye-view:
     build:
       context: ..
-      dockerfile: apps/prisma-viewer/Dockerfile
+      dockerfile: apps/gods-eye-view/Dockerfile
     environment:
-      PRISMA_MODE: local
-      PRISMA_ADMIN_URL: http://aidp-lab:8000
+      GODS_EYE_VIEW_MODE: local
+      GODS_EYE_VIEW_ADMIN_URL: http://aidp-lab:8000
     expose:
       - "8081"
     read_only: true

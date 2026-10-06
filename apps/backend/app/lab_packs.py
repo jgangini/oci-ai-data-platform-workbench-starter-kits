@@ -8,7 +8,7 @@ import io
 import json
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -51,6 +51,8 @@ class LabPack:
     formats: dict[str, str]
     expected_results: dict[str, Any]
     agent: dict[str, Any]
+    runtime_files: tuple[LabAsset, ...] = ()
+    source_manifests: tuple[LabAsset, ...] = ()
 
     @property
     def available(self) -> bool:
@@ -153,7 +155,7 @@ def _pack_contract(
     if require_available and status != "available":
         raise LabPackError(f"Lab {lab_id} is not available yet")
     kind = str(metadata.get("kind") or "data_pipeline")
-    if kind not in {"data_pipeline", "governance_extension"}:
+    if kind not in {"data_pipeline", "governance_extension", "global_module"}:
         raise LabPackError(f"Invalid lab kind: {lab_id}")
     pack_version = str(metadata.get("pack_version") or "")
     if PACK_VERSION_PATTERN.fullmatch(pack_version) is None:
@@ -192,6 +194,35 @@ def _pack_assets(
             raise LabPackError(f"Notebook dependency must reference an earlier task: {item.name}")
         seen.add(item.task_key)
     return datasets, notebooks
+
+
+def _module_assets(root: Path, entries: Any, folder: str) -> tuple[LabAsset, ...]:
+    """Verify the exact files published by a global module, including nested paths."""
+    if not isinstance(entries, list):
+        raise LabPackError("Global module assets must be a list")
+    assets = []
+    for raw in entries:
+        if not isinstance(raw, dict):
+            raise LabPackError("Invalid global module asset")
+        name = str(raw.get("file") or "")
+        relative = PurePosixPath(name)
+        if (not name.startswith(folder + "/") or re.fullmatch(r"[A-Za-z0-9_./-]+", name) is None or ".." in relative.parts
+                or relative.as_posix() != name):
+            raise LabPackError("Invalid global module asset path")
+        path = (root / name).resolve()
+        if not path.is_relative_to(root.resolve()):
+            raise LabPackError("Global module asset escapes its package")
+        try:
+            content = path.read_bytes()
+        except OSError as exc:
+            raise LabPackError(f"Missing global module asset: {name}") from exc
+        digest = str(raw.get("sha256") or "")
+        if not re.fullmatch(r"[0-9a-f]{64}", digest) or _sha256(content) != digest:
+            raise LabPackError(f"SHA-256 mismatch for {name}")
+        assets.append(LabAsset(name, path, digest))
+    if len({asset.name for asset in assets}) != len(assets):
+        raise LabPackError("Duplicate global module asset")
+    return tuple(assets)
 
 
 def _pack_tables(
@@ -266,7 +297,7 @@ def _agent_evaluation_case_valid(case: Any) -> bool:
 def _governance_extension_contract_valid(agent: Any) -> bool:
     if not isinstance(agent, dict):
         return False
-    if agent.get("name") != "ai_data_governance_vsc_extension":
+    if agent.get("name") != "ai_data_governance":
         return False
     if (
         agent.get("editable") is not True
@@ -289,6 +320,9 @@ def _governance_extension_contract_valid(agent: Any) -> bool:
 
 
 def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
+    # Accept recorded package selections from installations before the public-name correction.
+    if lab_id == "ai_data_governance_vsc_extension":
+        lab_id = "ai_data_governance"
     if LAB_ID_PATTERN.fullmatch(lab_id) is None:
         raise LabPackError("Invalid lab_id")
     root = LABS_ROOT / lab_id
@@ -303,7 +337,7 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
         mode not in {"laboratory", "production"} for mode in installation_modes
     ):
         raise LabPackError(f"Invalid lab scope: {lab_id}")
-    if kind == "governance_extension" and (
+    if kind in {"governance_extension", "global_module"} and (
         scope != "global" or installation_modes != ("laboratory", "production")
     ):
         raise LabPackError(f"Invalid governance extension scope: {lab_id}")
@@ -325,7 +359,25 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
         formats=_pack_formats(metadata, status, kind, lab_id),
         expected_results=_pack_expected_results(metadata, status, kind, lab_id),
         agent=dict(agent) if isinstance(agent, dict) else {},
+        runtime_files=_module_assets(root, metadata.get("runtime_files", []), "notebooks"),
+        source_manifests=_module_assets(root, metadata.get("source_manifests", []), "source"),
     )
+
+
+def module_runtime_source(lab_id: str, name: str) -> bytes:
+    """Read a declared, hash-verified runtime file; deployment only fills its config."""
+    if LAB_ID_PATTERN.fullmatch(lab_id) is None:
+        raise LabPackError("Invalid lab_id")
+    root = LABS_ROOT / lab_id
+    metadata = _object(root / "lab.json")
+    _pack_contract(metadata, lab_id, True)
+    if metadata.get("scope") != "global":
+        raise LabPackError("Runtime assets belong to a global module")
+    assets = _module_assets(root, metadata.get("runtime_files", []), "notebooks")
+    for asset in assets:
+        if asset.name == name:
+            return asset.read_bytes()
+    raise LabPackError(f"Undeclared runtime file: {lab_id}/{name}")
 
 
 def _catalog_manifest() -> tuple[tuple[str, ...], dict[str, str]]:

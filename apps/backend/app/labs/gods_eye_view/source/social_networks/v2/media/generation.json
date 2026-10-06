@@ -1,0 +1,65 @@
+{
+  "generator": "OpenAI image_gen",
+  "generated_at": "2026-10-05",
+  "origin": "ai_generated",
+  "is_simulated": true,
+  "license": "CC0-1.0",
+  "assets": [
+    {
+      "dataset_path": "media/flood-doorway.png",
+      "sha256": "46dedc386bc817073d466174fa6ff04bdebd224d2d18c93e1b2681e44e1b84d7",
+      "mime_type": "image/png",
+      "width": 1254,
+      "height": 1254,
+      "prompt": "Use case: photorealistic-natural. Asset type: explicitly fictional synthetic social-media photograph for testing an emergency-report verification system, not documentation of a real event. Create one square 1024px candid phone photo in a fictional residential neighborhood visually inspired by Bogotá, Colombia. Scene: heavy rain has caused shallow muddy street flooding reaching the curb in front of brick homes; one partly blocked drain and floating leaves visible, no collapsed buildings. Perspective from a concerned resident standing safely in a doorway. Overcast afternoon, imperfect handheld framing, realistic phone compression and water droplets at edge, ordinary everyday visual quality rather than cinematic. No people identifiable, no injuries, no readable addresses, plates, logos or written overlays. The picture must only show the limited visible water and street; no exaggerated disaster. Synthetic provenance will be stored in the dataset metadata.",
+      "alt_text": "AI-generated synthetic scene: shallow muddy water beside a residential curb, viewed from a doorway; locality anchor only.",
+      "encoding": {
+        "original_bytes": true,
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "dataset_path": "media/grill-smoke.png",
+      "sha256": "f0248c879ea13a1cfcce4d3381fdaf75e69a892e5157dda0a98b6684d01361ce",
+      "mime_type": "image/png",
+      "width": 1254,
+      "height": 1254,
+      "prompt": "Use case: photorealistic-natural. One fictional synthetic social-media phone photograph for a verification test dataset; not a real incident. Square image. Scene: an ordinary small outdoor food stall in a fictional Bogotá neighborhood, seen at a distance from across the street. A light gray plume of cooking smoke rises from a charcoal grill behind a low brick wall; trees and intact brick buildings beyond. Someone might mistake the cropped view for a fire, but the visible grill and undamaged scene offer a normal explanation. Overcast daylight, hurried slightly tilted framing, mild phone blur, normal realistic colors, no cinematic effects. No identifiable people, readable signs, addresses, license plates, logos or written labels. Synthetic origin is recorded outside the pixels in dataset metadata. No flames spreading, no disaster, no victims.",
+      "alt_text": "AI-generated synthetic scene: cooking smoke above a charcoal grill and intact surroundings; it does not depict a vegetation fire.",
+      "encoding": {
+        "original_bytes": true,
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "dataset_path": "media/slope-debris.png",
+      "sha256": "1a6ccf47bae6504459f953e0d542e31461f413ca2759626a5f81dc77510c72a8",
+      "mime_type": "image/png",
+      "width": 1254,
+      "height": 1254,
+      "prompt": "Use case: photorealistic-natural. Generate a fictional synthetic photograph for testing verification of citizen reports, never evidence of an actual event. Square candid phone photo of a small localized soil slip on a roadside slope in a fictional hillside Bogotá neighborhood after rain. The photographer stands safely across the narrow paved road; damp brown soil and a few loose stones partly cover the road edge, nearby brick homes remain intact, grass and shrubs on the slope. Limited angle does not reveal whether the slope is still moving. Diffuse morning light, slightly uneven exposure and ordinary phone grain. No dramatic disaster, casualties, vehicles buried, identifiable faces, readable addresses, logos, captions or labels. Keep natural physical scale and ambiguity; metadata will clearly label this AI-generated synthetic scenario.",
+      "alt_text": "AI-generated synthetic scene: a small soil slip partly covers a road edge; intact homes and a limited view do not establish ongoing movement.",
+      "encoding": {
+        "original_bytes": true,
+        "resized": false,
+        "cropped": false
+      }
+    },
+    {
+      "dataset_path": "media/wet-passable-street.png",
+      "sha256": "f04fadeb3f0f2b219267797e4f492240e42a3622e5c8c3e9bd35225484798d9f",
+      "mime_type": "image/png",
+      "width": 1448,
+      "height": 1086,
+      "prompt": "Generate one fictional synthetic smartphone photograph for an internal emergency-reporting evaluation dataset. Colombian city neighborhood inspired by Bogotá, without depicting a specific real address or incident. A resident looks from a second-floor balcony at an ordinary wet asphalt street after rain. Small puddles beside an intact curb and a visible clear storm drain, normal parked unbranded cars, intact brick homes, subdued overcast daylight. The road is passable; no widespread flooding, no flames, no casualties, no responders. Natural handheld framing, slightly imperfect focus and exposure, realistic amateur phone photograph, no cinematic grading. This is an ambiguous/low-risk counterexample for comparing alarmist captions to visible evidence: show only what a phone could see, no graphic labels, timestamps, news branding, watermarks, legible license plates or identifiable faces. Landscape composition. Do not imply that an image proves the condition across a whole neighborhood.",
+      "alt_text": "AI-generated synthetic scene: a passable wet street with small puddles, viewed from a balcony; it cannot establish conditions across the locality.",
+      "encoding": {
+        "original_bytes": true,
+        "resized": false,
+        "cropped": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "fixture_id": "post-0006",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-bogota-v2-camila_mirada",
+    "username": "camila_mirada",
+    "display_name": "Camila Pardo"
+  },
+  "message": "Reenvío la foto de @andres_sierra, no es una segunda toma. A mí también me inquietó la columna de humo junto a los árboles en Chapinero, pero él dice que no vio llamas. Mejor esperar a quien pueda mirar de cerca antes de anunciar un incendio.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Chapinero",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.649,
+    "lon": -74.063
+  },
+  "published_offset_seconds": 145,
+  "available_offset_seconds": 145,
+  "attachments": [
+    {
+      "id": "post-0006-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/grill-smoke.png",
+      "sha256": "f0248c879ea13a1cfcce4d3381fdaf75e69a892e5157dda0a98b6684d01361ce",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: cooking smoke above a charcoal grill and intact surroundings; it does not depict a vegetation fire.",
+      "is_simulated": true,
+      "reused_from": "post-0005-image-01"
+    }
+  ]
+}

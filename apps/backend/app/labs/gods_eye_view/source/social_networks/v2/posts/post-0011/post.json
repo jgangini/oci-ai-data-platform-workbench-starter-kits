@@ -1,0 +1,35 @@
+{
+  "fixture_id": "post-0011",
+  "platform": "x",
+  "author": {
+    "id": "fictional-bogota-v2-nora_sendero",
+    "username": "nora_sendero",
+    "display_name": "Nora Valencia"
+  },
+  "message": "Ojo, esta imagen que me enviaron es la de @elena_ladera: no representa otro derrumbe. Se ve tierra sobre parte del borde de una vía en Ciudad Bolívar. No tengo novedades propias y la foto por sí sola no dice si la ladera continúa moviéndose.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 315,
+  "available_offset_seconds": 315,
+  "attachments": [
+    {
+      "id": "post-0011-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/slope-debris.png",
+      "sha256": "1a6ccf47bae6504459f953e0d542e31461f413ca2759626a5f81dc77510c72a8",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a small soil slip partly covers a road edge; intact homes and a limited view do not establish ongoing movement.",
+      "is_simulated": true,
+      "reused_from": "post-0009-image-01"
+    }
+  ]
+}

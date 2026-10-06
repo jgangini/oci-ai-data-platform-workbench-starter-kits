@@ -45,10 +45,10 @@ Final workflow and lineage acceptance remains pending.
 | Step | Inputs | Call chain | Automated evidence | Live evidence | Decision and reason |
 |---|---|---|---|---|---|
 | Release | `deploy-studio.json`, source context, plan JSON | `release_gate.main → validate_context → validate_source → validate_plan` | `tests/test_release_gate.py`, `tests/test_manifest.py` | Pending baseline/candidate artifacts | Keep: schema-v1/fresh-only trust boundary. |
-| Preflight | OCI config/key paths and Deploy Studio context | `k_preflight.main → _load_sdk_config → select_inputs → compartment/capacity/key validators` | `tests/test_preflight.py` | Pending preflight events | Keep: validates compartment, home region, capacity and unencrypted key before apply. |
+| Preflight | OCI config/key paths and Deploy Studio context | `m_preflight.main → _load_sdk_config → select_inputs → compartment/capacity/key validators` | `tests/test_preflight.py` | Pending preflight events | Keep: validates compartment, home region, capacity and unencrypted key before apply. |
 | Terraform | runtime inputs | naming → network → bucket → VM/bootstrap → Identity/IAM → AIDP → outputs | Terraform validate/test and the HCL tests listed below | RC2 APPLY succeeded; AIDP ACTIVE after `1h44m43s`; outputs recorded | Keep addresses unchanged; replacement is not justified. |
 | Regional discovery | uploaded OCI profile and effective region | `CloudTechNext.oci_inventory → list_region_subscriptions → regional probes → model filter → deployment revalidation` | CloudTechNext `test_oci_inventory.py`, `test_deployment_dependencies.py`, frontend build | v3 live evidence pending | Keep: config region is an initial choice; only compatible READY subscriptions and active Chat models are selectable. |
-| Autonomous and AI | database mode/profile, ECPU count, model | `k_preflight._require_ready_region → _require_agent_model → _require_autonomous → Terraform → post_apply.ensure_ai_features` | `test_preflight.py`, `test_manifest.py`, `test_post_apply.py`, Terraform contract | v3 live evidence pending | Keep: one-region contract, 26ai DW validation and default 4 ECPU. |
+| Autonomous and AI | database mode/profile, ECPU count, model | `m_preflight._require_ready_region → _require_agent_model → _require_autonomous → Terraform → post_apply.ensure_ai_features` | `test_preflight.py`, `test_manifest.py`, `test_post_apply.py`, Terraform contract | v3 live evidence pending | Keep: one-region contract, 26ai DW validation and default 4 ECPU. |
 | Bootstrap VM | commit-pinned source and Terraform outputs | `user_data.sh → retry/use_reachable_base_images → release download → Docker → one-use credential → health` | `tests/test_local_bootstrap.py`, `tests/test_identity_runtime.py`, `tests/test_manifest.py` | RC2 encrypted object consumed and deleted; HTTPS health succeeded | Keep: application and credential-consumption boundary. |
 | Post-apply | Terraform outputs and operator credential files | `post_apply.main → reconcile → resources/roles/permissions → deliver_operator_credentials → health → build_success_result` | `tests/test_post_apply.py` | RC2 hook completed; catalog, schemas, compute, workspace and roles created | Keep: idempotent data-plane reconciliation and final artifact. |
 | Registration | `lab_ids[]`, canonical packs | `main.provision_user → Identity pending → AidpClient.provision_user → _provision_lab(each) → permissions → activation` | `apps/backend/tests/test_api.py`, `test_aidp.py`, `test_lab_packs.py` | RC5 participant A activated Banking, Telecommunications, Retail and Healthcare after a safe retry; B activated Banking and Retail; the legacy Agent stayed disabled | Keep: multi-lab assignment, partial-failure recovery and activation boundary proven live. |
@@ -151,22 +151,22 @@ and are not independent deployment entrypoints.
 | `release_gate._forbidden_plan_type` | plan validation | `test_release_gate.py` | Pending | Keep. |
 | `release_gate.validate_plan` | CLI/Deploy Studio gate | `test_release_gate.py` | Pending | Keep: create-only candidate. |
 | `release_gate.main` | CLI/Deploy Studio | `test_release_gate.py` | Pending | Keep: entrypoint. |
-| `k_preflight._safe_error_message` | `main` | `test_preflight.py` | Pending | Keep: prevents secret leakage. |
-| `k_preflight._home_region` | `select_inputs` | `test_preflight.py` | Pending | Keep. |
-| `k_preflight._require_ready_region` | `select_inputs` | `test_preflight.py` | v3 live evidence pending | Keep: effective region must remain subscribed and READY. |
-| `k_preflight._model_is_selectable` | `_require_agent_model` | `test_preflight.py` | v3 live evidence pending | Keep: rejects inactive, non-Chat, deprecated or retired models. |
-| `k_preflight._require_agent_model` | `select_inputs` | `test_preflight.py` | v3 live evidence pending | Keep: revalidates the selected model in the effective region. |
-| `k_preflight._require_autonomous` | `select_inputs` | `test_preflight.py` | v3 live evidence pending | Keep: validates 26ai DW availability or the selected existing database. |
-| `k_preflight._candidate_shapes` | `select_inputs` | `test_preflight.py` | Pending | Keep: E5/E4/E3 fallback. |
-| `k_preflight._list_all` | compartment/work-request discovery | `test_preflight.py` | Pending | Keep: pagination. |
-| `k_preflight._has_active_aidp_work_request` | compartment validator | `test_preflight.py` | Pending | Keep: recovery/idempotence. |
-| `k_preflight._require_compartment_target` | `select_inputs` | `test_preflight.py` | Pending | Keep. |
-| `k_preflight.select_inputs` | `main` | `test_preflight.py` | Pending | Keep: main selection logic. |
-| `k_preflight._read_json_env` | `main` | `test_preflight.py` | Pending | Keep: Deploy Studio input. |
-| `k_preflight._write_result` | `main` | `test_preflight.py` | Pending | Keep: Deploy Studio output. |
-| `k_preflight._require_unencrypted_private_key` | SDK config loader | `test_preflight.py` | Pending | Keep: fail closed. |
-| `k_preflight._load_sdk_config` | `main` | `test_preflight.py` | Pending | Keep: credential boundary. |
-| `k_preflight.main` | Deploy Studio | `test_preflight.py` | Pending | Keep: entrypoint. |
+| `m_preflight._safe_error_message` | `main` | `test_preflight.py` | Pending | Keep: prevents secret leakage. |
+| `m_preflight._home_region` | `select_inputs` | `test_preflight.py` | Pending | Keep. |
+| `m_preflight._require_ready_region` | `select_inputs` | `test_preflight.py` | v3 live evidence pending | Keep: effective region must remain subscribed and READY. |
+| `m_preflight._model_is_selectable` | `_require_agent_model` | `test_preflight.py` | v3 live evidence pending | Keep: rejects inactive, non-Chat, deprecated or retired models. |
+| `m_preflight._require_agent_model` | `select_inputs` | `test_preflight.py` | v3 live evidence pending | Keep: revalidates the selected model in the effective region. |
+| `m_preflight._require_autonomous` | `select_inputs` | `test_preflight.py` | v3 live evidence pending | Keep: validates 26ai DW availability or the selected existing database. |
+| `m_preflight._candidate_shapes` | `select_inputs` | `test_preflight.py` | Pending | Keep: E5/E4/E3 fallback. |
+| `m_preflight._list_all` | compartment/work-request discovery | `test_preflight.py` | Pending | Keep: pagination. |
+| `m_preflight._has_active_aidp_work_request` | compartment validator | `test_preflight.py` | Pending | Keep: recovery/idempotence. |
+| `m_preflight._require_compartment_target` | `select_inputs` | `test_preflight.py` | Pending | Keep. |
+| `m_preflight.select_inputs` | `main` | `test_preflight.py` | Pending | Keep: main selection logic. |
+| `m_preflight._read_json_env` | `main` | `test_preflight.py` | Pending | Keep: Deploy Studio input. |
+| `m_preflight._write_result` | `main` | `test_preflight.py` | Pending | Keep: Deploy Studio output. |
+| `m_preflight._require_unencrypted_private_key` | SDK config loader | `test_preflight.py` | Pending | Keep: fail closed. |
+| `m_preflight._load_sdk_config` | `main` | `test_preflight.py` | Pending | Keep: credential boundary. |
+| `m_preflight.main` | Deploy Studio | `test_preflight.py` | Pending | Keep: entrypoint. |
 | `post_apply._sleep` | retry/wait helpers | `test_post_apply.py` | Pending | Keep: global deadline aware. |
 | `post_apply.read_json_env` | `main` | `test_post_apply.py` | Pending | Keep. |
 | `post_apply.write_result` | `main` | `test_manifest.py` | Pending | Keep: artifact contract. |

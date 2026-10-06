@@ -427,6 +427,12 @@ class LocalIdentityClient:
                 "group_members": {key: sorted(value) for key, value in self.group_members.items()},
             })
 
+    @staticmethod
+    def _project_user(user: dict[str, Any]) -> dict[str, Any]:
+        # Existing local grants and old portal clients retain their exact compatibility fields.
+        enabled = bool(user.get("gods_eye_view_access", user.get("prisma_access", False)))
+        return {**user, "gods_eye_view_access": enabled, "territorial_access": enabled, "prisma_access": enabled}
+
     async def close(self) -> None:
         return None
 
@@ -465,7 +471,7 @@ class LocalIdentityClient:
             "status": "pending",
             "active": True,
             "managed": True,
-            "prisma_access": False,
+            "gods_eye_view_access": False,
         }
         self._save()
         return RegistrationResult("created", user_id, user_ocid, email)
@@ -480,24 +486,26 @@ class LocalIdentityClient:
     async def authenticate(self, email: str, password: str) -> str | None:
         for user_id, user in self.users.items():
             if (user["email"].casefold() == email.strip().casefold()
-                    and user.get("active") and user.get("status") == "active" and user.get("prisma_access")
+                    and user.get("active") and user.get("status") == "active" and self._project_user(user)["gods_eye_view_access"]
                     and verify_secret(password, self.password_hashes.get(user_id, ""))):
                 return user_id
         return None
 
-    async def prisma_user(self, user_id: str) -> dict[str, Any] | None:
+    async def gods_eye_view_user(self, user_id: str) -> dict[str, Any] | None:
         user = self.users.get(user_id)
-        if not user or not user.get("active") or user.get("status") != "active" or not user.get("prisma_access"):
+        if not user or not user.get("active") or user.get("status") != "active" or not self._project_user(user)["gods_eye_view_access"]:
             return None
-        return {**user, "mode": "SIMULADO"}
+        return {**self._project_user(user), "mode": "SIMULADO"}
 
-    async def grant_prisma(self, user_id: str, enabled: bool) -> None:
+    async def grant_gods_eye_view(self, user_id: str, enabled: bool) -> None:
         if type(enabled) is not bool:
-            raise ValueError("Territorial Control permission must be a boolean")
+            raise ValueError("Gods Eye View permission must be a boolean")
         user = self.users.get(user_id)
         if not user:
             raise IdentityPending("Local lab user is not ready")
-        user["prisma_access"] = enabled
+        user["gods_eye_view_access"] = enabled
+        if "prisma_access" in user:
+            user["prisma_access"] = enabled  # Preserve rollback of a previously persisted grant.
         self._save()
 
     async def record_material(self, user_id: str, material: dict[str, Any]) -> None:
@@ -514,11 +522,12 @@ class LocalIdentityClient:
             _write_private_json(path, {**welcome, "material": public})
 
     async def list_lab_users(self) -> list[dict[str, Any]]:
-        return sorted(self.users.values(), key=lambda item: item["email"].casefold())
+        return sorted((self._project_user(user)
+                       for user in self.users.values()), key=lambda item: item["email"].casefold())
 
     async def list_users_by_ocids(self, user_ocids: set[str]) -> list[dict[str, Any]]:
         return [
-            user
+            self._project_user(user)
             for user in self.users.values()
             if str(user.get("ocid") or "") in user_ocids
         ]

@@ -12,6 +12,7 @@ from app.governance import (
     governance_sync_notebook,
     resolve_column_identities,
 )
+from app.lab_packs import module_runtime_source
 
 
 def rendered_agent(**kwargs) -> str:
@@ -36,6 +37,38 @@ def rendered_sync(*, desired_enabled=None, bootstrap_snapshot=False, **kwargs) -
         **kwargs,
     )
     return "".join(notebook["cells"][0]["source"])
+
+
+def rendered_config(source):
+    node = next(node for node in ast.parse(source).body if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "CONFIG" for target in node.targets))
+    return ast.literal_eval(node.value)
+
+
+@pytest.mark.parametrize("render,filename", [
+    (rendered_agent, "notebooks/agent/governance_agent.py"),
+    (rendered_sync, "notebooks/data_governance_sync.ipynb"),
+])
+def test_deployed_governance_body_matches_its_canonical_file(render, filename):
+    canonical = module_runtime_source("ai_data_governance", filename).decode("utf-8")
+    if filename.endswith(".ipynb"):
+        canonical = "".join(json.loads(canonical)["cells"][0]["source"])
+    rendered = render()
+    lines = rendered.splitlines(keepends=True)
+    config_line = next(index for index, line in enumerate(lines) if line.startswith("CONFIG = "))
+    lines[config_line] = "CONFIG = {}\n"
+    assert "".join(lines) == canonical
+
+
+@pytest.mark.parametrize("enabled", [None, False, True])
+def test_sync_configuration_executes_python_literals_without_json_names(enabled):
+    source = rendered_sync(desired_enabled=enabled, bootstrap_snapshot=True)
+    node = next(node for node in ast.parse(source).body if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "CONFIG" for target in node.targets))
+    namespace = {}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), "config.py", "exec"), namespace)
+    assert namespace["CONFIG"]["desired_enabled"] is enabled
+    assert namespace["CONFIG"]["bootstrap_snapshot"] is True
 
 
 def _function(source: str, name: str, namespace: dict) -> object:
@@ -87,15 +120,16 @@ def test_agent_is_global_two_tool_read_only_and_uses_official_aidp_api() -> None
 
 @pytest.mark.parametrize("render", [rendered_agent, rendered_sync])
 @pytest.mark.parametrize("drift", [None, "tenancy", "user", "fingerprint", "region"])
-def test_generated_signer_checks_selected_identity_before_reading_private_key(render, drift) -> None:
+@pytest.mark.parametrize("credential", ["PrismaWriterRuntime", "TerritorialWriterRuntime"])
+def test_generated_signer_checks_selected_identity_before_reading_private_key(render, drift, credential) -> None:
     public = {"tenancy": "fixture-tenancy", "user": "fixture-user", "fingerprint": "fixture-fingerprint",
               "region": "us-chicago-1"}
     digest = hashlib.sha256(json.dumps(
         [public[key] for key in ("tenancy", "user", "fingerprint")], separators=(",", ":")
     ).encode()).hexdigest()
-    source = render(credential_name="PrismaWriterRuntime", identity_sha256=digest)
-    assert '"credential_name": "PrismaWriterRuntime"' in source
-    assert f'"identity_sha256": "{digest}"' in source
+    source = render(credential_name=credential, identity_sha256=digest)
+    assert rendered_config(source)["credential_name"] == credential
+    assert rendered_config(source)["identity_sha256"] == digest
     values = {**public, "private_key": "fixture-not-a-private-key"}
     if drift:
         values[drift] = "different-fixture-identity"
@@ -110,7 +144,7 @@ def test_generated_signer_checks_selected_identity_before_reading_private_key(re
         return "fixture-signer"
 
     namespace = {
-        "CONFIG": {"credential_name": "PrismaWriterRuntime", "identity_sha256": digest,
+        "CONFIG": {"credential_name": credential, "identity_sha256": digest,
                    "region": public["region"]},
         "aidputils": SimpleNamespace(secrets=SimpleNamespace(get=secret_get)),
         "oci": SimpleNamespace(signer=SimpleNamespace(Signer=signer)),
@@ -130,8 +164,8 @@ def test_generated_signer_checks_selected_identity_before_reading_private_key(re
         assert signatures == [{"tenancy": public["tenancy"], "user": public["user"],
                                "fingerprint": public["fingerprint"], "private_key_file_location": None,
                                "private_key_content": values["private_key"]}]
-        assert reads[-1] == ("PrismaWriterRuntime", "private_key")
-    assert {name for name, _ in reads} == {"PrismaWriterRuntime"}
+        assert reads[-1] == (credential, "private_key")
+    assert {name for name, _ in reads} == {credential}
 
 
 def test_generated_agent_setup_supplies_owned_client_and_keeps_configured_model() -> None:
@@ -300,8 +334,8 @@ def test_disabled_sync_records_disabled_without_snapshot_or_policy_mutation() ->
 def test_vm_disable_does_not_self_pause_but_external_config_disable_does() -> None:
     vm_source = rendered_sync(desired_enabled=False)
     external_source = rendered_sync(desired_enabled=None)
-    assert '"desired_enabled": false' in vm_source
-    assert '"desired_enabled": null' in external_source
+    assert rendered_config(vm_source)["desired_enabled"] is False
+    assert rendered_config(external_source)["desired_enabled"] is None
     disabled_start = vm_source.index("if SHOULD_DISABLE:")
     disabled_block = vm_source[disabled_start:vm_source.index("\ntry:", disabled_start)]
     assert 'if CONFIG["desired_enabled"] is None:\n        _pause_workflow()' in disabled_block

@@ -1,0 +1,34 @@
+{
+  "fixture_id": "post-0009",
+  "platform": "instagram",
+  "author": {
+    "id": "fictional-bogota-v2-elena_ladera",
+    "username": "elena_ladera",
+    "display_name": "Elena Robles"
+  },
+  "message": "En esta vía de Ciudad Bolívar se soltó tierra de la ladera después del aguacero. Tomé la foto desde el otro lado; hay piedras en el borde, las casas que alcanzo a ver siguen en pie. Me da miedo acercarme y no sé si todavía se está moviendo.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Ciudad Bolívar",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.506,
+    "lon": -74.148
+  },
+  "published_offset_seconds": 260,
+  "available_offset_seconds": 260,
+  "attachments": [
+    {
+      "id": "post-0009-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/slope-debris.png",
+      "sha256": "1a6ccf47bae6504459f953e0d542e31461f413ca2759626a5f81dc77510c72a8",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: a small soil slip partly covers a road edge; intact homes and a limited view do not establish ongoing movement.",
+      "is_simulated": true
+    }
+  ]
+}

@@ -6,7 +6,9 @@
 .aidp/
 graphify-out/
 datasets/
-apps/prisma-viewer/.upstream/
+**/.upstream/
+openwiki/
+.sentrux/
 **/node_modules/
 **/dist/
 **/__pycache__/

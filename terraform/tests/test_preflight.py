@@ -19,7 +19,7 @@ release_gate = importlib.util.module_from_spec(RELEASE_GATE_SPEC)
 sys.modules[RELEASE_GATE_SPEC.name] = release_gate
 RELEASE_GATE_SPEC.loader.exec_module(release_gate)
 
-MODULE_PATH = TERRAFORM_ROOT / "k_preflight.py"
+MODULE_PATH = TERRAFORM_ROOT / "m_preflight.py"
 SPEC = importlib.util.spec_from_file_location("aidp_deploy_preflight", MODULE_PATH)
 assert SPEC and SPEC.loader
 preflight = importlib.util.module_from_spec(SPEC)
@@ -369,9 +369,10 @@ def test_preflight_rejects_zero_or_missing_capacity() -> None:
 
 
 @pytest.mark.parametrize("enabled", [True, "true", False, "false"])
-def test_preflight_counts_viewer_with_deploy_studio_serialized_boolean(enabled) -> None:
+@pytest.mark.parametrize("field", ["enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer"])
+def test_preflight_counts_viewer_with_deploy_studio_serialized_boolean(enabled, field) -> None:
     result, _ = _select({preflight.E5_SHAPE: ("AVAILABLE", "1"), preflight.E4_SHAPE: ("AVAILABLE", "2")},
-                        input_overrides={"enable_prisma_viewer": enabled})
+                        input_overrides={field: enabled})
     assert result["inputs"]["preferred_vm_shape"] == (preflight.E4_SHAPE if enabled in (True, "true") else preflight.E5_SHAPE)
 
 

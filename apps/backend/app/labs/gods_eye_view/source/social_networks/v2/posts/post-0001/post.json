@@ -1,0 +1,34 @@
+{
+  "fixture_id": "post-0001",
+  "platform": "x",
+  "author": {
+    "id": "fictional-bogota-v2-lina_portal",
+    "username": "lina_portal",
+    "display_name": "Lina Salcedo"
+  },
+  "message": "Estoy en la puerta de mi casa en Kennedy y el agua ya tapó el borde del andén. Me preocupa que siga subiendo; veo hojas amontonadas en el desagüe. Desde aquí no sé cómo están las otras cuadras. La foto es de hace un momento.",
+  "country": "Colombia",
+  "city": "Bogotá",
+  "locality": "Kennedy",
+  "location": {
+    "precision": "locality_anchor",
+    "provenance": "synthetic_scenario",
+    "lat": 4.627,
+    "lon": -74.155
+  },
+  "published_offset_seconds": 0,
+  "available_offset_seconds": 0,
+  "attachments": [
+    {
+      "id": "post-0001-image-01",
+      "type": "image",
+      "mime_type": "image/png",
+      "dataset_path": "media/flood-doorway.png",
+      "sha256": "46dedc386bc817073d466174fa6ff04bdebd224d2d18c93e1b2681e44e1b84d7",
+      "license": "CC0-1.0",
+      "origin": "ai_generated",
+      "alt_text": "AI-generated synthetic scene: shallow muddy water beside a residential curb, viewed from a doorway; locality anchor only.",
+      "is_simulated": true
+    }
+  ]
+}

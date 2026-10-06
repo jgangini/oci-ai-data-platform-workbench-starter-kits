@@ -243,7 +243,8 @@ def test_candidate_mount_and_runtime_hardening_are_explicit(
     assert "--cap-drop" in observed and "ALL" in observed
     assert "--read-only" in observed
     assert "/var/run/docker.sock" not in " ".join(observed)
-    assert observed[observed.index("-e") + 1] == "PRISMA_VIEWER_ENABLED=false"
+    assert observed[observed.index("-e") + 1] == "GODS_EYE_VIEW_ENABLED=false"
+    assert "PRISMA_VIEWER_ENABLED=false" in observed
     assert observed.index("-e") > observed.index("--env-file")
     observed.clear()
     updater._run_container(tmp_path, updater.APP_NAME, "aidp-lab:" + "b" * 40, candidate=False)

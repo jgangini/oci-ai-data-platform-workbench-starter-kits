@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from pytz import all_timezones_set, common_timezones
 
 from .security import hash_secret
+from .viewer_identity import DEFAULT_IDENTITY, ViewerIdentity
 
 
 def _deployment_mode(value: str) -> str:
@@ -73,6 +74,7 @@ class Settings:
     oci_config_file: str = "/etc/aidp-lab/oci/config"
     objectstorage_namespace: str = ""
     bucket_name: str = ""
+    gods_eye_control_bucket: str = ""
     artifacts_bucket_name: str = "oci_artifacts"
     aidp_settings_file: str = "/var/lib/aidp-lab/settings.json"
     lab_marker: str = "aidp-lab"
@@ -84,20 +86,20 @@ class Settings:
     vm_update_enabled: bool = False
     cookie_secure: bool = True
     local_development_mode: bool = False
-    prisma_mode: str | None = None
-    prisma_enabled: bool = False
+    gods_eye_view_mode: str | None = None
+    gods_eye_view_enabled: bool = False
     gods_eye_oci_text_model: str = "xai.grok-4.6"
     gods_eye_oci_voice_model: str = "google.gemini-2.5-flash-lite"
     gods_eye_oci_voice: str = "ara"
     local_identity_artifact_dir: str = ""
 
     def __post_init__(self):
-        if self.prisma_mode not in {None, "local", "oci"}:
-            raise ValueError("PRISMA_MODE must be local or oci")
+        if self.gods_eye_view_mode not in {None, "local", "oci"}:
+            raise ValueError("GODS_EYE_VIEW_MODE must be local or oci")
 
     @property
-    def prisma_local_mode(self) -> bool:
-        return self.local_development_mode if self.prisma_mode is None else self.prisma_mode == "local"
+    def gods_eye_view_local_mode(self) -> bool:
+        return self.local_development_mode if self.gods_eye_view_mode is None else self.gods_eye_view_mode == "local"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -125,6 +127,7 @@ class Settings:
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
             objectstorage_namespace=os.getenv("OBJECTSTORAGE_NAMESPACE", ""),
             bucket_name=os.getenv("BUCKET_NAME", ""),
+            gods_eye_control_bucket=os.getenv("GODS_EYE_CONTROL_BUCKET", ""),
             artifacts_bucket_name=_artifacts_bucket_name(
                 os.getenv("ARTIFACTS_BUCKET_NAME", "oci_artifacts")
             ),
@@ -147,8 +150,9 @@ class Settings:
             in {"1", "true", "yes"},
             cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
             local_development_mode=os.getenv("LOCAL_DEVELOPMENT_MODE", "false").lower() in {"1", "true", "yes"},
-            prisma_mode=os.getenv("PRISMA_MODE"),
-            prisma_enabled=os.getenv("PRISMA_VIEWER_ENABLED", "false").lower() in {"1", "true", "yes"},
+            # Deployment aliases are read-only compatibility; new installations use GODS_EYE_VIEW_*.
+            gods_eye_view_mode=os.getenv("GODS_EYE_VIEW_MODE", os.getenv("TERRITORIAL_MODE", os.getenv("PRISMA_MODE"))),
+            gods_eye_view_enabled=os.getenv("GODS_EYE_VIEW_ENABLED", os.getenv("TERRITORIAL_VIEWER_ENABLED", os.getenv("PRISMA_VIEWER_ENABLED", "false"))).lower() in {"1", "true", "yes"},
             gods_eye_oci_text_model=os.getenv("GODS_EYE_OCI_TEXT_MODEL", "xai.grok-4.6").strip(),
             gods_eye_oci_voice_model=os.getenv("GODS_EYE_OCI_VOICE_MODEL", "google.gemini-2.5-flash-lite").strip(),
             gods_eye_oci_voice=os.getenv("GODS_EYE_OCI_VOICE", "ara").strip().lower(),
@@ -209,24 +213,37 @@ class SettingsStore:
     def get_workbench_url(self) -> str:
         return self._load()["aidp_workbench_url"]
 
+    def get_viewer_identity(self) -> dict[str, str]:
+        values = self._load()["viewer_identity"]
+        return {key: values[key] or default for key, default in DEFAULT_IDENTITY.items()}
+
+    def update_viewer_identity(self, identity: dict) -> dict[str, str]:
+        identity = ViewerIdentity.model_validate(identity).model_dump()
+        with self._lock:
+            values = self._load()
+            values["viewer_identity"] = identity
+            self._write(values)
+        return self.get_viewer_identity()
+
     def update(self, aidp_url: str | None, registration_code: str | None, time_zone: str | None = None) -> dict[str, object]:
         if aidp_url is None and registration_code is None and time_zone is None:
             raise ValueError("Update the AI Data Platform URL, lab registration code or time zone")
-        values = self._load()
-        if aidp_url is not None:
-            normalized = aidp_url.strip()
-            if not _valid_workbench_url(normalized):
-                raise ValueError("Enter a valid HTTPS Oracle AI Data Platform Workbench URL")
-            values["aidp_workbench_url"] = normalized
-        if registration_code is not None:
-            if self._settings.deployment_mode != "laboratory":
-                raise ValueError("Registration codes are available only in Laboratory mode")
-            values["registration_code_hash"] = hash_secret(registration_code)
-        if time_zone is not None:
-            if time_zone not in all_timezones_set:
-                raise ValueError("Select a valid IANA time zone")
-            values["time_zone"] = time_zone
-        self._write(values)
+        with self._lock:
+            values = self._load()
+            if aidp_url is not None:
+                normalized = aidp_url.strip()
+                if not _valid_workbench_url(normalized):
+                    raise ValueError("Enter a valid HTTPS Oracle AI Data Platform Workbench URL")
+                values["aidp_workbench_url"] = normalized
+            if registration_code is not None:
+                if self._settings.deployment_mode != "laboratory":
+                    raise ValueError("Registration codes are available only in Laboratory mode")
+                values["registration_code_hash"] = hash_secret(registration_code)
+            if time_zone is not None:
+                if time_zone not in all_timezones_set:
+                    raise ValueError("Select a valid IANA time zone")
+                values["time_zone"] = time_zone
+            self._write(values)
         return self.get_admin_settings()
 
     def participant_code(self, email: str) -> int:
@@ -254,6 +271,7 @@ class SettingsStore:
             "next_participant_code": 101,
             "participant_codes": {},
             "time_zone": "America/Bogota",
+            "viewer_identity": {"name": "", "description": ""},
         }
         path = Path(self._settings.aidp_settings_file)
         if path.is_file():
@@ -284,6 +302,8 @@ class SettingsStore:
                         values["next_participant_code"] = max(101, next_code, minimum_next)
                     else:
                         values["next_participant_code"] = minimum_next
+                if "viewer_identity" in stored:
+                    values["viewer_identity"] = ViewerIdentity.model_validate(stored["viewer_identity"]).model_dump()
             except (OSError, ValueError, TypeError):
                 pass
 
