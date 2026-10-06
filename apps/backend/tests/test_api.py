@@ -303,9 +303,18 @@ def test_participant_codes_start_at_101_and_are_stable_by_email(tmp_path: Path) 
     assert reloaded.participant_code("third@example.com") == 103
 
 
-def test_artifacts_bucket_name_is_fixed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ARTIFACTS_BUCKET_NAME", "renamed-artifacts")
-    with pytest.raises(ValueError, match="must be oci_artifacts"):
+@pytest.mark.parametrize("name", [None, "environment-artifacts.01", "a" * 128])
+def test_artifacts_bucket_name_supports_default_and_selected_bucket(monkeypatch, name) -> None:
+    monkeypatch.delenv("ARTIFACTS_BUCKET_NAME", raising=False)
+    if name is not None:
+        monkeypatch.setenv("ARTIFACTS_BUCKET_NAME", name)
+    assert Settings.from_env().artifacts_bucket_name == (name or "oci_artifacts")
+
+
+@pytest.mark.parametrize("name", ["", " ", "oci://bucket", "bucket/path", "bucket name", "bucket'", "a" * 129])
+def test_artifacts_bucket_name_rejects_invalid_storage_names(monkeypatch, name) -> None:
+    monkeypatch.setenv("ARTIFACTS_BUCKET_NAME", name)
+    with pytest.raises(ValueError, match="ARTIFACTS_BUCKET_NAME"):
         Settings.from_env()
 
 

@@ -21,7 +21,7 @@ Use the [Deploy Studio package](../terraform/deploy-studio.json) from a validate
 Before deployment, have an OCI operator profile and RSA API key, a target compartment choice, and sufficient permissions for the resources declared in Terraform. Supply credentials through Deploy Studio's protected upload flow; they must not be committed or included in Terraform source/state. Select a subscribed region with the required AIDP, database and Chat-model capabilities offered by the form.
 
 1. Select a new or existing compartment and the deployment mode.
-2. Select or create the four medallion buckets. `oci_artifacts` is a separate fixed-name bucket for governance; existing buckets must belong to the selected compartment.
+2. Select or create the four medallion buckets and a separate artifacts bucket for Governance (default `oci_artifacts`). All five buckets must be distinct; existing buckets must belong to the selected compartment.
 3. Choose the database and regional model offered by the deployment form. The current platform still provisions Autonomous for its existing contracts.
 4. Enable the private God's Eye View VM if that module is needed. Its network topology is established by Terraform; enabling it is not a documented in-place migration of an arbitrary older stack.
 5. Follow preflight, plan, apply and post-apply progress. A successful Terraform apply alone does not certify workspace, model, workflow or participant readiness.

@@ -85,7 +85,7 @@ def test_release_snapshot_uses_image_metadata_and_pack_manifests(tmp_path: Path)
         ("telco_lineage", "2.0.0"),
         ("retail", "2.0.0"),
         ("healthcare", "2.0.0"),
-        ("ai_data_governance", "3.0.2"),
+        ("ai_data_governance", "3.0.3"),
         ("gods_eye_view", "1.0.1"),
     }
 

@@ -135,8 +135,8 @@
       }
     ]
   },
-  "pack_sha256": "a2d406450df46fe953eb9f0d2f1777b62f0af70e14e392c244f7a7fd30a655c0",
-  "pack_version": "3.0.2",
+  "pack_sha256": "c24d66774177f7e331a15013e2f5ca800ed3fa2f2d5d87563a29af7a9291b640",
+  "pack_version": "3.0.3",
   "schema_version": 1,
   "status": "available",
   "tables": {},
@@ -149,7 +149,7 @@
     {
       "file": "notebooks/data_governance_sync.ipynb",
       "workspace_path": "data_governance_sync.ipynb",
-      "sha256": "dbb86540758ef063faba7667c3fb0284a9a665f7c0ea91c406cd428b5b34944a"
+      "sha256": "4c6201c78b49626360bf13e3846a3114c7276f26c94df00cb1b13b79c67ecb3f"
     }
   ],
   "source_manifests": []

@@ -20,7 +20,6 @@ from .config import Settings
 from .governance import (
     GOVERNANCE_AGENT_COMPUTE_NAME,
     GOVERNANCE_AGENT_NAME,
-    GOVERNANCE_BUCKET_NAME,
     GOVERNANCE_CREDENTIAL_NAME,
     GOVERNANCE_DISPLAY_NAME,
     GOVERNANCE_JOB_NAME,
@@ -2806,8 +2805,6 @@ class AidpClient:
         return [await asyncio.to_thread(self._module_status)]
 
     def _ensure_governance_bucket(self) -> bool:
-        if self.settings.artifacts_bucket_name != GOVERNANCE_BUCKET_NAME:
-            raise AidpProvisionError("The governance artifacts bucket must be named oci_artifacts.")
         try:
             self.object_storage.head_bucket(
                 self.settings.objectstorage_namespace, self.settings.artifacts_bucket_name
@@ -2815,12 +2812,12 @@ class AidpClient:
             return False
         except self._oci.exceptions.ServiceError as exc:
             if exc.status != 404:
-                raise AidpProvisionError("The fixed governance artifacts bucket is unavailable.") from exc
+                raise AidpProvisionError("The configured governance artifacts bucket is unavailable.") from exc
         self.object_storage.create_bucket(
             self.settings.objectstorage_namespace,
             {"name": self.settings.artifacts_bucket_name, "compartment_id": self.settings.compartment_id},
         )
-        raise AidpProvisionPending("The fixed oci_artifacts bucket is being created.", "control")
+        raise AidpProvisionPending("The configured governance artifacts bucket is being created.", "control")
 
     def _credential_payload(self) -> dict[str, Any]:
         key_path = Path(str(self._oci_config.get("key_file") or ""))
@@ -2887,6 +2884,7 @@ class AidpClient:
         notebook_path = f"{self._module_root}/data_governance_sync.ipynb"
         notebook = governance_sync_notebook(
             namespace=self.settings.objectstorage_namespace,
+            artifacts_bucket_name=self.settings.artifacts_bucket_name,
             platform_id=self.settings.aidp_platform_id,
             region=self.settings.aidp_region,
             desired_enabled=desired_enabled,

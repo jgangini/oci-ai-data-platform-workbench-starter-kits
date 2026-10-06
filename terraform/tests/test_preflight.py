@@ -175,7 +175,7 @@ def test_preflight_selects_e5_and_discovers_home_region() -> None:
     assert compute.details.shape_availabilities[0].instance_shape_config.memory_in_gbs == 16
 
 
-def test_preflight_rejects_creating_the_fixed_artifacts_bucket_when_it_exists() -> None:
+def test_preflight_rejects_creating_the_legacy_artifacts_bucket_when_it_exists() -> None:
     available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
     with pytest.raises(RuntimeError, match="oci_artifacts already exists"):
         _select(
@@ -183,6 +183,31 @@ def test_preflight_rejects_creating_the_fixed_artifacts_bucket_when_it_exists() 
             input_overrides={"artifacts_bucket_mode": "new"},
             object_storage=ObjectStorage(bucket_exists=True),
         )
+
+
+def test_preflight_checks_only_the_selected_new_artifacts_bucket() -> None:
+    class SelectedBucket(ObjectStorage):
+        def get_bucket(self, **kwargs: Any) -> Any:
+            assert kwargs == {"namespace_name": "testnamespace", "bucket_name": "artifacts-second-lab"}
+            return super().get_bucket(**kwargs)
+
+    available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
+    inputs = {"artifacts_bucket_mode": "new", "artifacts_new_bucket_name": "artifacts-second-lab"}
+    result, _ = _select(
+        {preflight.E5_SHAPE: (available, "1")}, input_overrides=inputs, object_storage=SelectedBucket(),
+    )
+    assert any("artifacts-second-lab is available" in event["message"] for event in result["events"])
+    with pytest.raises(RuntimeError, match="artifacts-second-lab already exists"):
+        _select(
+            {preflight.E5_SHAPE: (available, "1")}, input_overrides=inputs,
+            object_storage=SelectedBucket(bucket_exists=True),
+        )
+
+
+@pytest.mark.parametrize("name", ["", "../other", "oci://other", "x" * 129])
+def test_preflight_rejects_invalid_artifacts_bucket_names_before_oci(name: str) -> None:
+    with pytest.raises(ValueError, match="artifacts bucket name"):
+        preflight._require_new_bucket_available(None, name)
 
 
 def test_preflight_rejects_occupied_new_compartment_across_pages() -> None:

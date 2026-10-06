@@ -7,6 +7,7 @@ import re
 import uuid
 from typing import Any
 
+from .config import _artifacts_bucket_name
 from .gods_eye_view.runtime_secrets import SHARED_OCI_CREDENTIAL_NAME
 from .lab_packs import module_runtime_source
 
@@ -198,6 +199,7 @@ def governance_sync_notebook(
     credential_name: str = GOVERNANCE_CREDENTIAL_NAME,
     identity_sha256: str = "",
     control_module_id: str = GOVERNANCE_MODULE_ID,
+    artifacts_bucket_name: str = GOVERNANCE_BUCKET_NAME,
 ) -> dict[str, Any]:
     """Return the protected Spark notebook used by the single continuous workflow."""
     if not all((namespace, platform_id, region)):
@@ -209,6 +211,7 @@ def governance_sync_notebook(
         "credential_name": credential_name,
         "identity_sha256": identity_sha256,
         "namespace": namespace,
+        "artifacts_bucket_name": _artifacts_bucket_name(artifacts_bucket_name),
         "platform_id": platform_id,
         "region": region,
         "desired_enabled": desired_enabled,

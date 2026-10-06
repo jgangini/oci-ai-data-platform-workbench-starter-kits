@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.aidp import AidpClient, AidpProvisionConflict, AidpProvisionError, AidpProvisionPending
-from app.governance import GOVERNANCE_AGENT_NAME
+from app.governance import GOVERNANCE_AGENT_NAME, GOVERNANCE_TABLES
 
 
 USER_OCID = "ocid1.user.oc1..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -22,6 +22,7 @@ def module_client() -> AidpClient:
         compartment_id="ocid1.compartment.oc1..example",
         aidp_platform_id="ocid1.aidataplatform.oc1..example",
         objectstorage_namespace="namespace",
+        artifacts_bucket_name="oci_artifacts",
     )
     client._role_user_ocids = lambda _role: {USER_OCID}
     client._workspace = lambda: {"key": "workspace"}
@@ -83,7 +84,7 @@ def test_module_status_compares_installed_and_bundled_versions() -> None:
     module = asyncio.run(client.list_modules())[0]
 
     assert module["installed_version"] == "2.0.0"
-    assert module["bundled_version"] == "3.0.2"
+    assert module["bundled_version"] == "3.0.3"
     assert module["update_available"] is True
 
 
@@ -691,6 +692,7 @@ def test_governance_rename_preserves_installed_manifest_control_rows_and_agent_i
     from app.governance import GOVERNANCE_MODULE_ID, LEGACY_GOVERNANCE_MODULE_ID
 
     client = module_client()
+    client.settings.artifacts_bucket_name = "environment-artifacts.01"
     persisted_id = LEGACY_GOVERNANCE_MODULE_ID if legacy else GOVERNANCE_MODULE_ID
     root = f"{MODULE_CONTROL_ROOT}/{persisted_id}"
     state = {**manifest("install"), "module_id": persisted_id}
@@ -712,11 +714,36 @@ def test_governance_rename_preserves_installed_manifest_control_rows_and_agent_i
     client._upload_notebook = lambda workspace, path, notebook, **kwargs: notebooks.append((path, notebook)) or False
     payload, _ = client._governance_job_payload("workspace", "compute", desired_enabled=None, paused=True)
     config_line = next(line for line in notebooks[0][1]["cells"][0]["source"] if line.startswith("CONFIG = "))
-    assert ast.literal_eval(config_line.removeprefix("CONFIG = "))["module_id"] == persisted_id
+    config = ast.literal_eval(config_line.removeprefix("CONFIG = "))
+    assert config["module_id"] == persisted_id
+    assert config["artifacts_bucket_name"] == "environment-artifacts.01"
     assert payload["path"] == root
     assert client._new_module_manifest(OPERATION_ID, "redeploy")["control_module_id"] == persisted_id
     client._list = lambda *_args, **_kwargs: [{"displayName": persisted_id, "key": "retained-agent"}]
     assert client._agents("workspace", GOVERNANCE_AGENT_NAME)[0]["key"] == "retained-agent"
+
+
+def test_governance_storage_checks_and_cleanup_use_only_selected_bucket():
+    client = module_client()
+    bucket = client.settings.artifacts_bucket_name = "environment-artifacts.01"
+    deleted, checked, listed = [], [], []
+
+    def list_objects(namespace, bucket_name, *, prefix, start):
+        listed.append((namespace, bucket_name, prefix))
+        name = prefix + "part-0000.parquet"
+        objects = [] if (namespace, bucket_name, name) in deleted else [SimpleNamespace(name=name)]
+        return SimpleNamespace(data=SimpleNamespace(objects=objects, next_start_with=None))
+
+    client.object_storage = SimpleNamespace(
+        head_bucket=lambda *args: checked.append(args),
+        list_objects=list_objects,
+        delete_object=lambda *args: deleted.append(args),
+    )
+    assert client._ensure_governance_bucket() is False
+    client._delete_governance_prefixes()
+    assert checked == [("namespace", bucket)]
+    assert deleted == [("namespace", bucket, f"oci_artifacts/{table}/part-0000.parquet") for table in GOVERNANCE_TABLES]
+    assert listed == [("namespace", bucket, f"oci_artifacts/{table}/") for table in GOVERNANCE_TABLES for _ in range(2)]
 
 
 def test_governance_alias_conflicts_fail_without_writes():

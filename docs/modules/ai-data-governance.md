@@ -114,8 +114,8 @@ The Delta access-policy table records mappings; neither synchronization nor the 
 
 ## Delta storage and synchronization
 
-The fixed bucket is `oci_artifacts`; the logical schema is `oci_medallion.oci_artifacts`.
-Each table uses `oci://oci_artifacts@<namespace>/oci_artifacts/<table>`.
+The physical bucket is selected during deployment through `ARTIFACTS_BUCKET_NAME` (default `oci_artifacts`). The logical schema remains `oci_medallion.oci_artifacts`.
+Each table uses `oci://<artifacts_bucket_name>@<namespace>/oci_artifacts/<table>`. Changing the bucket selection does not migrate an existing table's data or catalog location.
 
 | Table | Stored contract |
 | --- | --- |

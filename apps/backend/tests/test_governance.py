@@ -266,12 +266,15 @@ def test_catalog_lineage_removes_control_nodes_descendants_and_links() -> None:
     assert '"lineage": _filter_control_lineage(graph)' in source
 
 
-def test_sync_notebook_declares_exact_delta_contract_and_continuous_delay() -> None:
-    source = rendered_sync(bootstrap_snapshot=True)
+@pytest.mark.parametrize("bucket", ["oci_artifacts", "environment-artifacts.01"])
+def test_sync_notebook_declares_exact_delta_contract_and_continuous_delay(bucket) -> None:
+    source = rendered_sync(bootstrap_snapshot=True, artifacts_bucket_name=bucket)
     compile(source, "data_governance_sync.py", "exec")
+    location = _function(source, "_location", {"CONFIG": rendered_config(source)})
     for table in GOVERNANCE_TABLES:
         assert f".{table}" in source
-    assert 'return f"oci://oci_artifacts@{CONFIG[\'namespace\']}/oci_artifacts/{table}"' in source
+        assert location(table) == f"oci://{bucket}@namespace/oci_artifacts/{table}"
+    assert 'CONTROL_SCHEMA = "oci_medallion.oci_artifacts"' in source
     assert "has_access INT" in source
     assert "enabled INT" in source
     assert "time.sleep(max(0, 30 - elapsed))" in source

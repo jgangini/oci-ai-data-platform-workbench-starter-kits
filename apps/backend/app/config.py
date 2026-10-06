@@ -22,9 +22,10 @@ def _deployment_mode(value: str) -> str:
 
 
 def _artifacts_bucket_name(value: str) -> str:
-    if value.strip() != "oci_artifacts":
-        raise ValueError("ARTIFACTS_BUCKET_NAME must be oci_artifacts")
-    return "oci_artifacts"
+    normalized = value.strip()
+    if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", normalized) is None:
+        raise ValueError("ARTIFACTS_BUCKET_NAME must contain 1–128 letters, digits, dots, underscores or hyphens")
+    return normalized
 
 
 _RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")

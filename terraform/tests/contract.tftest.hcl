@@ -89,7 +89,7 @@ run "resolved_compartment_contract" {
 
   assert {
     condition     = oci_objectstorage_bucket.artifacts[0].name == "oci_artifacts"
-    error_message = "The artifacts bucket name is fixed for extension discovery."
+    error_message = "Existing deployment inputs must preserve the legacy artifacts bucket name."
   }
 
   assert {
@@ -294,6 +294,105 @@ run "rejects_reserved_artifacts_name_for_existing_medallion_bucket" {
     source_commit_sha         = "0123456789abcdef0123456789abcdef01234567"
     gold_bucket_mode          = "existing"
     gold_existing_bucket_name = "oci_artifacts"
+  }
+
+  expect_failures = [terraform_data.validate_medallion_buckets]
+}
+
+run "custom_artifacts_bucket_is_resolved" {
+  command = plan
+
+  variables {
+    tenancy_ocid              = "ocid1.tenancy.oc1..test"
+    home_region               = "us-ashburn-1"
+    operator_user_ocid        = "ocid1.user.oc1..operator"
+    compartment_ocid          = "ocid1.compartment.oc1..test"
+    objectstorage_namespace   = "testnamespace"
+    deployment_suffix         = "test1234"
+    admin_password_hash       = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash    = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha         = "0123456789abcdef0123456789abcdef01234567"
+    artifacts_new_bucket_name = "artifacts-second-lab"
+  }
+
+  assert {
+    condition     = oci_objectstorage_bucket.artifacts[0].name == "artifacts-second-lab" && local.medallion_bucket_names.artifacts == "artifacts-second-lab"
+    error_message = "A separate environment must own the selected artifacts bucket."
+  }
+}
+
+run "existing_artifacts_bucket_is_reused_without_creation" {
+  command = plan
+
+  override_data {
+    target = data.oci_objectstorage_bucket.artifacts[0]
+    values = {
+      name           = "artifacts-second-lab"
+      compartment_id = "ocid1.compartment.oc1..test"
+    }
+  }
+  variables {
+    tenancy_ocid                   = "ocid1.tenancy.oc1..test"
+    home_region                    = "us-ashburn-1"
+    operator_user_ocid             = "ocid1.user.oc1..operator"
+    compartment_ocid               = "ocid1.compartment.oc1..test"
+    objectstorage_namespace        = "testnamespace"
+    deployment_suffix              = "test1234"
+    admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    artifacts_bucket_mode          = "existing"
+    artifacts_existing_bucket_name = "artifacts-second-lab"
+  }
+
+  assert {
+    condition     = length(oci_objectstorage_bucket.artifacts) == 0 && local.medallion_bucket_names.artifacts == "artifacts-second-lab"
+    error_message = "Reusing this environment's bucket must not create or rename an artifacts resource."
+  }
+}
+
+run "rejects_artifacts_bucket_from_another_compartment" {
+  command = plan
+
+  override_data {
+    target = data.oci_objectstorage_bucket.artifacts[0]
+    values = {
+      name           = "artifacts-other-lab"
+      compartment_id = "ocid1.compartment.oc1..other"
+    }
+  }
+  variables {
+    tenancy_ocid                   = "ocid1.tenancy.oc1..test"
+    home_region                    = "us-ashburn-1"
+    operator_user_ocid             = "ocid1.user.oc1..operator"
+    compartment_ocid               = "ocid1.compartment.oc1..test"
+    objectstorage_namespace        = "testnamespace"
+    deployment_suffix              = "test1234"
+    admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    artifacts_bucket_mode          = "existing"
+    artifacts_existing_bucket_name = "artifacts-other-lab"
+  }
+
+  expect_failures = [terraform_data.validate_resolved_medallion_buckets]
+}
+
+run "rejects_shared_artifacts_and_layer_bucket" {
+  command = plan
+
+  variables {
+    tenancy_ocid              = "ocid1.tenancy.oc1..test"
+    home_region               = "us-ashburn-1"
+    operator_user_ocid        = "ocid1.user.oc1..operator"
+    compartment_ocid          = "ocid1.compartment.oc1..test"
+    objectstorage_namespace   = "testnamespace"
+    deployment_suffix         = "test1234"
+    admin_password_hash       = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash    = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha         = "0123456789abcdef0123456789abcdef01234567"
+    artifacts_new_bucket_name = "shared-bucket"
+    gold_new_bucket_name      = "shared-bucket"
   }
 
   expect_failures = [terraform_data.validate_medallion_buckets]

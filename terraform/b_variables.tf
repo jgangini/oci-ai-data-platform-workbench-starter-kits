@@ -288,6 +288,26 @@ variable "artifacts_bucket_mode" {
   }
 }
 
+variable "artifacts_new_bucket_name" {
+  description = "Dedicated Governance bucket; choose a distinct name for each environment."
+  type        = string
+  default     = "oci_artifacts"
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._-]{1,128}$", trimspace(var.artifacts_new_bucket_name)))
+    error_message = "The artifacts bucket name must contain 1-128 letters, numbers, dots, underscores, or hyphens."
+  }
+}
+
+variable "artifacts_existing_bucket_name" {
+  description = "Existing Governance bucket owned by this deployment; defaults to the legacy name."
+  type        = string
+  default     = "oci_artifacts"
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._-]{1,128}$", trimspace(var.artifacts_existing_bucket_name)))
+    error_message = "The artifacts bucket name must contain 1-128 letters, numbers, dots, underscores, or hyphens."
+  }
+}
+
 variable "preferred_vm_shape" {
   description = "Server-selected E5/E4/E3 Flex shape from the trusted capacity preflight."
   type        = string
