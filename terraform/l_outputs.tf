@@ -3,6 +3,18 @@ output "application_url" {
   value       = "https://${data.oci_core_vnic.lab.public_ip_address}"
 }
 
+output "application_login_url" {
+  description = "Administrator login URL included in the deployment access email."
+  value       = "https://${data.oci_core_vnic.lab.public_ip_address}/admin/login"
+}
+
+output "database_actions_url" {
+  description = "Native Database Actions URL returned by OCI for the selected database."
+  value = var.autonomous_database_mode == "new" ? (
+    oci_database_autonomous_database.agent[0].connection_urls[0].sql_dev_web_url
+  ) : data.oci_database_autonomous_database.existing_agent[0].connection_urls[0].sql_dev_web_url
+}
+
 output "portal_managed_modules" {
   description = "The portal can install modules by applying this stack at its installed source commit."
   value       = var.portal_managed_modules

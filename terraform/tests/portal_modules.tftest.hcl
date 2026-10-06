@@ -1,5 +1,8 @@
 # Mock state transition: installing a module must leave the central portal untouched.
 mock_provider "oci" {
+  mock_resource "oci_database_autonomous_database" {
+    defaults = { connection_urls = [{ sql_dev_web_url = "https://database.example.test/ords/sql-developer" }] }
+  }
   mock_resource "oci_ai_data_platform_ai_data_platform" {
     defaults = { alias_key = "testalias", web_socket_endpoint = "" }
   }
@@ -50,6 +53,10 @@ variables {
 
 run "base_portal" {
   command = apply
+  assert {
+    condition     = output.application_login_url == "https://192.0.2.10/admin/login" && output.database_actions_url == "https://database.example.test/ords/sql-developer"
+    error_message = "The deployment email must use the portal login and the native OCI Database Actions URL."
+  }
   assert {
     condition     = output.portal_managed_modules && output.public_ip_tls_enabled && length(oci_core_instance.gods_eye_view) == 0 && length(oci_core_nat_gateway.gods_eye_view) == 1
     error_message = "A new deployment must prepare shared infrastructure and trusted HTTPS without installing the module VM."

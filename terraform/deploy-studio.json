@@ -306,7 +306,38 @@
         "visible_when": {"field": "artifacts_bucket_mode", "equals": "existing"}
       }
     ],
-    "email_access_fields": ["deployment_mode", "admin_username", "admin_password", "registration_code"]
+    "email_access_fields": ["deployment_mode", "admin_username", "admin_password", "registration_code", "autonomous_database_admin_password", "autonomous_database_wallet_password"]
+  },
+  "email": {
+    "services": [
+      {
+        "title": "Application: Starter Kits Portal",
+        "fields": [
+          {"label": "Access URL", "output": "application_login_url", "link": true},
+          {"label": "Username", "input": "admin_username"},
+          {"label": "Password", "input": "admin_password"},
+          {"label": "Registration code", "input": "registration_code", "required": false}
+        ]
+      },
+      {
+        "title": "Database: Oracle Autonomous AI Database",
+        "fields": [
+          {"label": "Access URL", "output": "database_actions_url", "link": true},
+          {"label": "Username", "value": "ADMIN"},
+          {"label": "Password", "input": "autonomous_database_admin_password"},
+          {"label": "Wallet password", "input": "autonomous_database_wallet_password"}
+        ]
+      },
+      {
+        "title": "Data platform: Oracle AI Data Platform Workbench",
+        "fields": [
+          {"label": "Access URL", "output": "aidp_workbench_url", "link": true},
+          {"label": "Workspace", "output": "default_workspace_name"},
+          {"label": "Authentication", "value": "Sign in through the configured identity domain."}
+        ]
+      }
+    ],
+    "attachments": ["adb_wallet.zip", "resource-manager-terraform-source.zip", "deployment.log"]
   },
   "outputs": [
     "portal_managed_modules",
@@ -326,6 +357,8 @@
     "prisma_viewer_instance_id",
     "prisma_viewer_principal_group",
     "application_url",
+    "application_login_url",
+    "database_actions_url",
     "public_ip_tls_enabled",
     "admin_url",
     "aidp_workbench_url",
@@ -360,7 +393,7 @@
     "public_ip",
     "vm_shape"
   ],
-  "artifacts": ["aidp_lab_summary.json"],
+  "artifacts": ["aidp_lab_summary.json", "adb_wallet.zip"],
   "preflight": {
     "entrypoint": "terraform/m_preflight.py",
     "timeout_seconds": 300,
