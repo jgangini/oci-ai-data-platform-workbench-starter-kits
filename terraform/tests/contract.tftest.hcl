@@ -71,6 +71,8 @@ run "resolved_compartment_contract" {
   }
 
   variables {
+    portal_managed_modules  = false
+    enable_public_ip_tls    = false
     tenancy_ocid            = "ocid1.tenancy.oc1..test"
     home_region             = "us-ashburn-1"
     operator_user_ocid      = "ocid1.user.oc1..operator"
@@ -467,6 +469,7 @@ run "gods_eye_view_private_viewer" {
   }
 
   variables {
+    portal_managed_modules  = false
     tenancy_ocid            = "ocid1.tenancy.oc1..test"
     home_region             = "us-chicago-1"
     operator_user_ocid      = "ocid1.user.oc1..operator"
@@ -483,6 +486,20 @@ run "gods_eye_view_private_viewer" {
   assert {
     condition     = length(oci_core_instance.gods_eye_view) == 1 && !oci_core_instance.gods_eye_view[0].create_vnic_details[0].assign_public_ip && oci_core_subnet.gods_eye_view[0].prohibit_public_ip_on_vnic
     error_message = "God’s Eye View must create one private viewer with no public address."
+  }
+
+  assert {
+    condition = oci_identity_dynamic_group.gods_eye_view[0].name == "aidp-lab-test1234-prisma" && [
+      oci_core_nat_gateway.gods_eye_view[0].display_name,
+      oci_core_security_list.gods_eye_view[0].display_name,
+      oci_core_subnet.gods_eye_view[0].display_name,
+      oci_core_network_security_group.gods_eye_view_proxy[0].display_name,
+      oci_core_network_security_group.gods_eye_view[0].display_name,
+      oci_core_instance.gods_eye_view[0].display_name,
+      oci_identity_policy.gods_eye_view[0].name,
+      oci_identity_policy.gods_eye_view_run_command[0].name,
+    ] == [for suffix in ["nat", "egress", "private", "proxy", "viewer", "viewer", "read", "update"] : "aidp-lab-test1234-prisma-${suffix}"]
+    error_message = "Legacy deployments must retain every existing physical resource name."
   }
 
   assert {

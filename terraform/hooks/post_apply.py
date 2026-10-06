@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import re
 import secrets
 import string
 import sys
@@ -1560,6 +1561,71 @@ def bootstrap_autonomous_governance(
     return DATABASE_OPERATOR, operator_password, dsn
 
 
+def _module_installation_stack(oci_module, config, signer, context, compartment_id):
+    client = oci_module.resource_manager.ResourceManagerClient({**config, "region": context["region"]}, signer=signer)
+    tags = {"deployment": context["deployment_id"], "catalog_item": context["project_id"]}
+    candidates = oci_module.pagination.list_call_get_all_results(client.list_stacks, compartment_id=compartment_id).data
+    matches = [item for item in candidates if all((item.freeform_tags or {}).get(key) == value for key, value in tags.items())]
+    if len(matches) != 1:
+        raise ReconcileError("Module installation requires exactly one Resource Manager stack with this deployment identity")
+    stack = client.get_stack(matches[0].id).data
+    if (stack.id != matches[0].id or stack.compartment_id != compartment_id or stack.lifecycle_state != "ACTIVE"
+            or any((stack.freeform_tags or {}).get(key) != value for key, value in tags.items())
+            or (stack.variables or {}).get("source_commit_sha") != context["source"]["commit_sha"]):
+        raise ReconcileError("Module installation stack ownership or immutable source does not match this deployment")
+    archive = client.get_stack_tf_config(stack.id).data.content
+    if not isinstance(archive, bytes) or not archive:
+        raise ReconcileError("Module installation stack source archive is unavailable")
+    return stack.id, hashlib.sha256(archive).hexdigest()
+
+
+def _store_module_installation_context(oci_module, storage, receipt):
+    scope = (receipt["namespace"], receipt["artifacts_bucket"], ".control/modules/installation.json")
+    body = json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    try:
+        storage.put_object(*scope, body, content_type="application/json", if_none_match="*")
+    except oci_module.exceptions.ServiceError as exc:
+        if exc.status != 412:
+            raise
+        existing = json.loads(storage.get_object(*scope).data.content)
+        if existing != receipt:
+            raise ReconcileError("Module installation context already belongs to a different deployment or immutable source") from None
+
+
+def write_module_installation_context(oci_module, config, signer, storage, context, outputs, reconciled):
+    """Record only verified deployment identifiers; never credentials or Terraform variables."""
+    if outputs.get("portal_managed_modules") is not True:
+        return False
+    buckets = {layer: outputs["medallion_bucket_names"][layer] for layer in (*LAYERS, "artifacts")}
+    receipt = {
+        "schema_version": 1,
+        "deployment_id": context["deployment_id"],
+        "project_id": context["project_id"],
+        "source_commit_sha": context["source"]["commit_sha"],
+        "region": context["region"],
+        "compartment_id": outputs["compartment_ocid"],
+        "platform_id": outputs["ai_data_platform_id"],
+        "namespace": outputs["objectstorage_namespace"],
+        "buckets": buckets,
+        "artifacts_bucket": buckets["artifacts"],
+        "workspace_key": reconciled["workspace_key"],
+        "catalog_name": reconciled["catalog_name"],
+        "agent_model_id": outputs["agent_model_id"],
+    }
+    identifiers = [value for key, value in receipt.items() if key not in {"schema_version", "buckets"}] + list(buckets.values())
+    if (not all(isinstance(value, str) and value.strip() == value and value for value in identifiers)
+            or re.fullmatch(r"[0-9a-f]{40}", receipt["source_commit_sha"]) is None
+            or len({name.casefold() for name in buckets.values()}) != len(buckets)):
+        raise ReconcileError("Module installation context identifiers are incomplete or conflicting")
+    try:
+        receipt["stack_id"], receipt["terraform_config_sha256"] = _module_installation_stack(
+            oci_module, config, signer, context, receipt["compartment_id"])
+        _store_module_installation_context(oci_module, storage, receipt)
+    except oci_module.exceptions.ServiceError as exc:
+        raise ReconcileError(f"Module installation context verification failed with OCI {exc.status}") from exc
+    return True
+
+
 def main() -> int:
     global _post_apply_deadline
     output_path = os.environ.get("DEPLOY_STUDIO_OUTPUT")
@@ -1591,6 +1657,8 @@ def main() -> int:
         api = AidpApi(context["region"], outputs["ai_data_platform_id"], signer, context["deployment_id"])
         reconciled, reconcile_messages = reconcile(api, outputs)
         messages.extend(reconcile_messages)
+        if write_module_installation_context(oci, oci_config, signer, object_storage, context, outputs, reconciled):
+            messages.append("Private module installation context verified for the existing Resource Manager stack")
         key_text = Path(key_path).read_text(encoding="utf-8")
         aidp_url = resolve_workbench_url(outputs, oci_config, signer)
         if not aidp_url:
@@ -1644,11 +1712,9 @@ def main() -> int:
             from gods_eye_view_bootstrap import bootstrap_gods_eye_view
             try:
                 reconciled.update(bootstrap_gods_eye_view(
-                    api, context, outputs, oci_config, signer, object_storage,
-                    wallet, wallet_password, admin_password, reconciled,
+                    api, context, outputs, oci_config, signer, object_storage, reconciled,
                     deadline=_post_apply_deadline,
-                    wallet_dsn=_wallet_dsn, validate_wallet=_validate_wallet,
-                    generate_password=_generated_database_password, ensure_folder=ensure_workspace_folder,
+                    ensure_folder=ensure_workspace_folder,
                 ))
             except Exception as exc:
                 # Database/SDK exceptions may contain secret-bearing request details.

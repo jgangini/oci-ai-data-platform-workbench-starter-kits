@@ -29,6 +29,7 @@ Each participant receives a separate workflow and table namespace, using the sam
 ## Shared global modules
 
 Administrators manage these once for the installation, separately from participant kit selection.
+Deploy Studio prepares the central HTTPS portal and shared infrastructure. Install modules from **Settings → Application**; God's Eye View adds its private VM through the same Resource Manager stack after confirmation. See the [installation and recovery flow](docs/operations.md#global-module-lifecycle).
 
 | Module | Purpose |
 | --- | --- |

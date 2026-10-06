@@ -758,10 +758,11 @@ def initialize_controls(api, agent_api, storage, runtime, workspace):
     return connection
 
 
-def bootstrap_gods_eye_view(api, context, outputs, config, signer, storage, wallet, wallet_password, admin_password, reconciled,
-                     *, deadline, wallet_dsn, validate_wallet, generate_password, ensure_folder):
+def bootstrap_gods_eye_view(api, context, outputs, config, signer, storage, reconciled,
+                     *, deadline, ensure_folder, progress=None):
     global _deadline
     _deadline = deadline
+    report = progress or (lambda _phase, _message: None)
     agent_api = api.__class__(context["region"], outputs["ai_data_platform_id"], signer, context["deployment_id"],
                              api_version="20260430", resource_segment="aiDataPlatforms")
     bundle = runtime_archive()
@@ -776,20 +777,25 @@ def bootstrap_gods_eye_view(api, context, outputs, config, signer, storage, wall
         sensor_landing_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/landing/sensors",
         sensor_checkpoint_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/checkpoints/sensors-v1")
     workspace = reconciled["workspace_key"]
+    report("controls", "Verifying module controls and shared runtime credentials")
     connection = initialize_controls(api, agent_api, storage, runtime, workspace)
     oci_credential = ensure_oci_credential(agent_api, {**config, "region": context["region"]})
     runtime["oci_credential_name"] = oci_credential["displayName"]
+    report("volumes", "Preparing the managed Landing volume")
     install_volumes(agent_api, runtime)
+    report("computes", "Preparing separate social, sensor, query and agent compute")
     social_compute = install_stream_compute(api, workspace, "aidp_gods_eye_view_social_compute")
     sensor_compute = install_stream_compute(api, workspace, "aidp_gods_eye_view_sensor_compute")
     runtime["gold_query_compute_id"] = install_stream_compute(api, workspace, "aidp_gods_eye_view_query_compute")
     runtime["agent_compute_id"] = install_agent_compute(agent_api, workspace)["key"]
     for compute in (social_compute, sensor_compute):
         install_cluster_libraries(agent_api, workspace, compute, ensure_folder=ensure_folder)
+    report("workflows", "Publishing the versioned social and sensor workflows")
     job = install_job(api, workspace, social_compute, runtime, bundle, ensure_folder=ensure_folder)
     sensor_job = install_job(api, workspace, sensor_compute, runtime, bundle, ensure_folder=ensure_folder, workflow="sensors")
     runtime.update(workspace_key=workspace, job_key=job, sensor_job_key=sensor_job,
                    social_compute_key=social_compute, sensor_compute_key=sensor_compute)
+    report("agent", "Preparing the shared God's Eye View agent deployment")
     agent = publish_agent(agent_api, workspace, bundle, context["region"], runtime)
     runtime["agent_id"] = agent["agent_key"]
     # Materialize empty governed roots; Spark ignores these hidden non-event objects.
@@ -800,8 +806,10 @@ def bootstrap_gods_eye_view(api, context, outputs, config, signer, storage, wall
                if key not in {"writer_credential_name", "reader_credential_name"}}
     if current != desired:
         write_document(connection, "runtime", desired, current["revision"])
+    report("streaming", "Starting the two managed workflows for native acceptance")
     sensor_run = start_stream_job(api, workspace, sensor_job, "sensor_stream")
     run_key = start_stream_job(api, workspace, job, "social_network")
+    report("publication", "Waiting for workflow task output and a verified Gold publication")
     version = wait_stream_jobs(api, storage, runtime, [(run_key, "social_network"), (sensor_run, "sensor_stream")], connection)
     storage.put_object(runtime["namespace"], runtime["bucket"], ".control/prisma/agent.json", json.dumps(agent).encode(), content_type="application/json")
     result = {"job_ready": True, "agent_ready": True, "revision": agent["revision"],

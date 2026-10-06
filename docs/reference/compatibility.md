@@ -9,6 +9,12 @@ uses `ai_data_governance` in its package, catalog and module identity. Old names
 below identify existing installation contracts, not active source packages.
 Renaming source files does not migrate cloud data or retire resources.
 
+## Deployment capability
+
+Fresh bases set `portal_managed_modules=true`, reserve module networking and record the immutable Resource Manager source in the selected artifacts bucket. The portal can then enable `gods_eye_view` through `enabled_vm_modules` without changing VM1. This is not a migration switch for an arbitrary existing stack.
+
+Existing unmanaged infrastructure retains `portal_managed_modules=false` and its recognized viewer-enable inputs/private endpoint. Older application environments default this capability to false when `PORTAL_MANAGED_MODULES` is absent. An image update alone does not create the required network or receipt. Preserve existing resource addresses and `moved` chains; use the [installation procedure](../operations.md#global-module-lifecycle) only on a matching prepared base.
+
 ## Routes and identity during rolling upgrades
 
 | Current interface | Retained interface |

@@ -10,6 +10,7 @@ Check the selected release's package contracts and deployment acceptance before 
 | --- | --- |
 | Participant layout | The provisioner supplies `/Workspace/<lab_id>/<participant_key>_<email>` and catalog `oci_medallion`. The bundled 2.0.0 notebooks still validate `/Workspace/medallon/` and `<participant_key>_aidp`. New jobs using the current provisioner can fail those guards before ingestion. This contract must be reconciled and accepted before treating new participant runs as ready. |
 | God's Eye View upgrades | Standalone workflows and the Object-control runtime require an explicit migration for existing installations. Verify Gold-agent behavior, activate migrated controls, switch consumers and retire unused credentials as separate steps. Existing installations retain their legacy dependencies until those steps finish. See the [migration procedure](operations.md#migrate-gods-eye-view-controls). |
+| Portal-managed installation | New environments reserve module networking and record the original Resource Manager stack. Existing bases without that receipt/topology cannot gain this capability by updating the application image alone. Mock plans and local tests do not establish live installation acceptance. |
 | Historical evidence | The Telco lineage validation report describes package 1.1.2. Its results do not certify the current 2.0.0 package or a new installation. |
 
 The layout discrepancy is visible in [naming](../apps/backend/app/notebooks.py), [job provisioning](../apps/backend/app/aidp.py), and the [Banking notebook](../apps/backend/app/labs/banking/notebooks/01_landing_banking.ipynb). Do not bypass notebook guards or substitute another participant's catalog to make a run appear successful.
@@ -23,7 +24,7 @@ Before deployment, have an OCI operator profile and RSA API key, a target compar
 1. Select a new or existing compartment and the deployment mode.
 2. Select or create the four medallion buckets and a separate artifacts bucket for Governance (default `oci_artifacts`). All five buckets must be distinct; existing buckets must belong to the selected compartment.
 3. Choose the database and regional model offered by the deployment form. The current platform still provisions Autonomous for its existing contracts.
-4. Enable the private God's Eye View VM if that module is needed. Its network topology is established by Terraform; enabling it is not a documented in-place migration of an arbitrary older stack.
+4. Deploy the central portal. The current form has no per-module VM or TLS checkbox: the base prepares shared private networking and configures automatic public-IP HTTPS. God's Eye View is installed later from the portal.
 5. Follow preflight, plan, apply and post-apply progress. A successful Terraform apply alone does not certify workspace, model, workflow or participant readiness.
 6. Retain the protected access summary and the `application_url`, `admin_url` and `aidp_workbench_url` outputs.
 
@@ -33,6 +34,8 @@ Before deployment, have an OCI operator profile and RSA API key, a target compar
 | Production | Public registration is disabled; administrators provision participants from Users. |
 
 The deployment package and discovery contract are defined in [`terraform/deploy-studio.json`](../terraform/deploy-studio.json); resolved endpoints and bucket names are defined in [`l_outputs.tf`](../terraform/l_outputs.tf).
+
+To add God's Eye View, open **Settings → Application → Install**, review and confirm its private VM and AIDP compute requirements, then follow the installation phases. The portal applies a restricted module plan in the original stack and bootstraps its workflows and agent. Closing the dialog does not cancel installation. See [module lifecycle](operations.md#global-module-lifecycle) for retries, acceptance and legacy bases. AI Data Governance retains its separate administrator-selected installation flow.
 
 ## Register and activate a participant
 
@@ -81,4 +84,4 @@ The workflow supplies `participant_key`, `lab_id`, `workspace_root`, `bucket_nam
 
 Start with [Banking](kits/banking.md), [Telecommunications](kits/telecommunications.md), [Retail](kits/retail.md) or [Healthcare](kits/healthcare.md) for a five-task medallion pipeline. Use [Telco Customer 360 Lineage](kits/telco-lineage.md) for branching and convergence across 14 tasks.
 
-Administrators install [AI Data Governance](modules/ai-data-governance.md) and configure [God's Eye View](modules/gods-eye-view.md) from **Settings → Application**. These modules are shared; adding them is not a participant starter-kit assignment.
+Administrators install [AI Data Governance](modules/ai-data-governance.md) and [God's Eye View](modules/gods-eye-view.md) from **Settings → Application**. These modules are shared; adding them is not a participant starter-kit assignment.

@@ -78,6 +78,8 @@ docker build -f apps/gods-eye-view/Dockerfile -t gods-eye-view:test .
 
 Run `terraform test` with the newer CI-tested Terraform version. The viewer image runs native integration tests against its pinned upstream dependencies; testing an unrelated root `node_modules` tree is not equivalent. If Graphify or Sentrux is unavailable or a gate fails, report it explicitly. Do not reset a baseline to hide degradation.
 
+For portal-managed module changes, also run `python terraform/tests/check_module_plan.py`. It uses mock providers to compare the installed base with the module plan and permits exactly the viewer VM, dynamic group and two policy creates. [Installer tests](../apps/backend/tests/test_gods_eye_view_installation.py) cover source/stack identity, recovery and plan guards; [frontend tests](../apps/frontend/tests/gods-eye-view-module-manager.test.mjs) cover approval and progress. These checks make no live acceptance claim. The `enabled_vm_modules` registry currently allows only `gods_eye_view`; adding a module requires explicit Terraform resources, lifecycle code, packaging and a checked allowlist, not a new deployment checkbox or arbitrary uploaded VM.
+
 For a documentation-only change, check links, headings, diagrams and claims against source. Runtime builds and architecture gates are not required unless executable/configuration/package files also change. The canonical automation is [CI](../.github/workflows/ci.yml); the stricter tag and artifact rules live in [Release](../.github/workflows/release.yml).
 
 ## Check Object controls and migration

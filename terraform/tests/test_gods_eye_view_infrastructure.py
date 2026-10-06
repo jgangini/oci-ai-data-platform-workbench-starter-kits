@@ -27,7 +27,7 @@ def test_terraform_preserves_both_prior_state_addresses_without_resource_recreat
         intermediate = f"{kind}.{name.replace('gods_eye_view', 'territorial', 1)}"
         original = f"{kind}.{name.replace('gods_eye_view', 'prisma', 1)}"
         assert moves[original] == intermediate and moves[intermediate] == current
-    assert '${local.name_prefix}-prisma-viewer' in source and '04_gold/prisma/*' in source
+    assert 'var.portal_managed_modules ? "gods-eye-view" : "prisma"' in source and '04_gold/prisma/*' in source
     assert 'coalesce(var.enable_gods_eye_view, var.enable_territorial_viewer, var.enable_prisma_viewer)' in source
 
 

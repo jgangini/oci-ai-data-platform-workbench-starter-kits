@@ -42,20 +42,6 @@
   "form": {
     "fields": [
       {
-        "name": "enable_prisma_viewer",
-        "label": "Enable God’s Eye View private viewer VM",
-        "type": "boolean",
-        "default": false,
-        "group": "application_vm"
-      },
-      {
-        "name": "enable_public_ip_tls",
-        "label": "Publicly trusted HTTPS certificate for the application IP",
-        "type": "boolean",
-        "default": false,
-        "group": "application_vm"
-      },
-      {
         "name": "admin_username",
         "label": "Username",
         "type": "text",
@@ -323,6 +309,10 @@
     "email_access_fields": ["deployment_mode", "admin_username", "admin_password", "registration_code"]
   },
   "outputs": [
+    "portal_managed_modules",
+    "enabled_vm_modules",
+    "source_commit_sha",
+    "deployment_suffix",
     "gods_eye_view_enabled",
     "gods_eye_view_url",
     "gods_eye_view_instance_id",

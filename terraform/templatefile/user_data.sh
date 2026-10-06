@@ -170,6 +170,7 @@ COOKIE_SECURE=true
 GODS_EYE_VIEW_URL=${gods_eye_view_url}
 TERRITORIAL_VIEWER_URL=${gods_eye_view_url}
 GODS_EYE_VIEW_ENABLED=${enable_gods_eye_view}
+PORTAL_MANAGED_MODULES=${portal_managed_modules}
 TERRITORIAL_VIEWER_ENABLED=${enable_gods_eye_view}
 PRISMA_VIEWER_URL=${gods_eye_view_url}
 PRISMA_VIEWER_ENABLED=${enable_gods_eye_view}

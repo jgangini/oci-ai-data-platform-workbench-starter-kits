@@ -21,6 +21,8 @@ flowchart TB
     Infra --> Public
     Infra --> Storage[Private Object Storage]
     Infra --> ADB[Autonomous: separate platform and legacy contracts]
+    Public --> Install[Confirmed module installer]
+    Install --> Deploy
     Public --> Controls[Object Storage: module controls and post journal]
     Spark --> Controls
     Workbench --> Spark[Spark workflows]
@@ -31,11 +33,13 @@ flowchart TB
     Viewer --> Public
 ```
 
-The public application VM authenticates users and proxies the separate private viewer VM in the same VCN. The viewer VM is not a public administration endpoint. Its source and network rules are defined in [nginx](../docker/nginx.conf), [viewer infrastructure](../terraform/h_gods_eye_view.tf) and the [viewer integration](../apps/gods-eye-view/README.md).
+The new base creates the public portal with automatic public-IP TLS and reserves private module networking. The portal authenticates users and proxies the separate private viewer VM in the same VCN after installation. The viewer VM is not a public administration endpoint. Its source and network rules are defined in [nginx](../docker/nginx.conf), [viewer infrastructure](../terraform/h_gods_eye_view.tf) and the [viewer integration](../apps/gods-eye-view/README.md).
 
 The release build verifies the viewer's pinned upstream archive and nine source patches, builds the native application and packages the integration in an immutable image. VM bootstrap installs that verified release image; it does not reconstruct the application from an upstream branch. The original modular viewer remains the application shell, with the custom layers and assistants extending its catalog.
 
 Terraform creates infrastructure; [post-apply](../terraform/hooks/post_apply.py) reconciles AIDP and identity resources. The [application API](../apps/backend/app/aidp.py) subsequently manages participant and global-module lifecycle. Resource existence, successful provisioning, successful processing and successful agent inference are separate acceptance steps.
+
+The [God's Eye View installer](../apps/backend/app/gods_eye_view/installation.py) verifies the base's source receipt and updates `enabled_vm_modules` in that same Resource Manager stack. Its checked plan permits only the module's VM/group/policy creates or existing no-ops before apply; AIDP bootstrap and native readiness follow. The portal's IP, metadata and shared network remain unchanged by this transition. Only `gods_eye_view` is implemented in this registry; the mechanism is not a general VM-upload service. See [lifecycle and recovery](operations.md#global-module-lifecycle).
 
 ## Storage responsibilities
 
@@ -45,8 +49,8 @@ Terraform creates infrastructure; [post-apply](../terraform/hooks/post_apply.py)
 | AIDP workspace | Participant content, jobs and module source files | Installed package and protected operation manifests |
 | Master Catalog / Delta | Governed tables, data processing and lineage | Declared schema/table identity and successful native writes |
 | Four medallion buckets | Configurable Landing, Bronze, Silver and Gold storage roles | Terraform's resolved `medallion_bucket_names` |
-| Selected artifacts bucket (default `oci_artifacts`) | Four Governance control tables | Fixed logical schema and table paths |
-| Object control prefix | God's Eye View configuration, reviews, checkpoints, status and immutable post journal | Conditional object writes under `.control/gods_eye_view/` |
+| Selected artifacts bucket (default `oci_artifacts`) | Four Governance control tables, base installation receipt and durable module-installation journal | Fixed table paths; `.control/modules/installation.json` and `.control/gods_eye_view/install/operation.json` |
+| Gold bucket Object control prefix | God's Eye View configuration, reviews, checkpoints, status and immutable post journal | Conditional object writes under `.control/gods_eye_view/` |
 | VM private state | Application settings, sessions, protected files and a disposable SQLite post index | Application state is persistent; the post index rebuilds from its Object journal |
 | Autonomous | Separate platform contracts and the legacy source during explicit migration | Retain until its remaining consumers are verified; new module controls do not use it |
 

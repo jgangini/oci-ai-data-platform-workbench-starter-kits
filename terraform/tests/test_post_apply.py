@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
 import io
 import json
@@ -1427,3 +1428,101 @@ def test_gods_eye_view_bootstrap_reports_only_bounded_numeric_oracle_code(monkey
     result = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
     assert result["events"] == [{"level": "error", "message": "God’s Eye View bootstrap failed: DatabaseError" + suffix}]
     assert result["outputs"] == {} and result["artifacts"] == []
+
+
+@pytest.fixture
+def module_installation(monkeypatch):
+    import oci
+
+    context = {"deployment_id": "deployment-1", "project_id": "project-1", "region": "us-chicago-1",
+               "source": {"commit_sha": "a" * 40}, "inputs": {"private_value": "DO_NOT_EXPORT"}}
+    buckets = {layer: "environment-" + layer for layer in (*post_apply.LAYERS, "artifacts")}
+    outputs = {"portal_managed_modules": True, "medallion_bucket_names": buckets, "compartment_ocid": "compartment",
+               "ai_data_platform_id": "platform", "objectstorage_namespace": "namespace", "agent_model_id": "model"}
+    tags = {"deployment": "deployment-1", "catalog_item": "project-1"}
+    summary = SimpleNamespace(id="stack", freeform_tags=dict(tags))
+    stack = SimpleNamespace(id="stack", compartment_id="compartment", lifecycle_state="ACTIVE", freeform_tags=dict(tags),
+                            variables={"source_commit_sha": "a" * 40, "private_value": "DO_NOT_EXPORT"})
+    state = {"summaries": [summary], "stack": stack, "archive": b"immutable terraform source", "stored": None,
+             "created": [], "reads": [], "list_calls": []}
+
+    def list_stacks(*, compartment_id, **kwargs):
+        state["list_calls"].append((compartment_id, kwargs.get("page")))
+        # The matching deployment lives on the second page.
+        return oci.response.Response(200, {} if kwargs.get("page") else {"opc-next-page": "second"},
+                                     state["summaries"] if kwargs.get("page") else [], None)
+
+    client = SimpleNamespace(list_stacks=list_stacks, get_stack=lambda _id: SimpleNamespace(data=state["stack"]),
+                             get_stack_tf_config=lambda _id: SimpleNamespace(data=SimpleNamespace(content=state["archive"])))
+    monkeypatch.setattr(oci.resource_manager, "ResourceManagerClient", lambda config, **kwargs: client)
+
+    def put_object(namespace, bucket, key, body, **kwargs):
+        assert kwargs == {"content_type": "application/json", "if_none_match": "*"}
+        if state["stored"] is not None:
+            raise oci.exceptions.ServiceError(412, "PreconditionFailed", {}, "Already exists")
+        state["stored"] = json.loads(body)
+        state["created"].append((namespace, bucket, key))
+
+    def get_object(*scope):
+        state["reads"].append(scope)
+        return SimpleNamespace(data=SimpleNamespace(content=json.dumps(state["stored"]).encode()))
+
+    storage = SimpleNamespace(put_object=put_object, get_object=get_object)
+    arguments = (oci, {"private_value": "DO_NOT_EXPORT"}, object(), storage, context, outputs,
+                 {"workspace_key": "workspace", "catalog_name": "oci_medallion"})
+    return arguments, state
+
+
+def test_module_installation_receipt_is_private_immutable_and_idempotent(module_installation):
+    arguments, state = module_installation
+    assert post_apply.write_module_installation_context(*arguments) is True
+    assert post_apply.write_module_installation_context(*arguments) is True
+    scope = ("namespace", "environment-artifacts", ".control/modules/installation.json")
+    assert state["created"] == [scope] and state["reads"] == [scope]
+    assert state["list_calls"] == [("compartment", None), ("compartment", "second")] * 2
+    assert state["stored"] == {
+        "schema_version": 1, "deployment_id": "deployment-1", "project_id": "project-1", "source_commit_sha": "a" * 40,
+        "stack_id": "stack", "terraform_config_sha256": hashlib.sha256(state["archive"]).hexdigest(),
+        "region": "us-chicago-1", "compartment_id": "compartment", "platform_id": "platform", "namespace": "namespace",
+        "buckets": arguments[5]["medallion_bucket_names"], "artifacts_bucket": "environment-artifacts",
+        "workspace_key": "workspace", "catalog_name": "oci_medallion", "agent_model_id": "model",
+    }
+    assert "DO_NOT_EXPORT" not in json.dumps(state["stored"])
+
+
+@pytest.mark.parametrize("mismatch", ["missing", "duplicate", "identity", "source", "compartment", "tags", "inactive", "archive"])
+def test_module_installation_requires_exact_stack_without_guessing(module_installation, mismatch):
+    arguments, state = module_installation
+    if mismatch == "missing":
+        state["summaries"] = []
+    elif mismatch == "duplicate":
+        state["summaries"] *= 2
+    elif mismatch == "identity":
+        state["stack"].id = "other-stack"
+    elif mismatch == "source":
+        state["stack"].variables["source_commit_sha"] = "b" * 40
+    elif mismatch == "compartment":
+        state["stack"].compartment_id = "other-compartment"
+    elif mismatch == "tags":
+        state["stack"].freeform_tags["deployment"] = "other-deployment"
+    elif mismatch == "inactive":
+        state["stack"].lifecycle_state = "DELETED"
+    else:
+        state["archive"] = b""
+    with pytest.raises(post_apply.ReconcileError, match="Module installation"):
+        post_apply.write_module_installation_context(*arguments)
+    assert not state["created"]
+
+
+@pytest.mark.parametrize("field", ["deployment_id", "source_commit_sha", "terraform_config_sha256", "buckets"])
+def test_module_installation_never_overwrites_an_existing_receipt(module_installation, field):
+    arguments, state = module_installation
+    post_apply.write_module_installation_context(*arguments)
+    state["stored"][field] = "changed"
+    with pytest.raises(post_apply.ReconcileError, match="already belongs"):
+        post_apply.write_module_installation_context(*arguments)
+    assert len(state["created"]) == 1 and state["stored"][field] == "changed"
+
+
+def test_legacy_post_apply_does_not_resolve_or_write_module_receipts():
+    assert post_apply.write_module_installation_context(None, None, None, None, {}, {}, {}) is False

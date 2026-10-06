@@ -89,6 +89,7 @@ class Settings:
     local_development_mode: bool = False
     gods_eye_view_mode: str | None = None
     gods_eye_view_enabled: bool = False
+    portal_managed_modules: bool = False
     gods_eye_oci_text_model: str = "xai.grok-4.6"
     gods_eye_oci_voice_model: str = "google.gemini-2.5-flash-lite"
     gods_eye_oci_voice: str = "ara"
@@ -154,6 +155,7 @@ class Settings:
             # Deployment aliases are read-only compatibility; new installations use GODS_EYE_VIEW_*.
             gods_eye_view_mode=os.getenv("GODS_EYE_VIEW_MODE", os.getenv("TERRITORIAL_MODE", os.getenv("PRISMA_MODE"))),
             gods_eye_view_enabled=os.getenv("GODS_EYE_VIEW_ENABLED", os.getenv("TERRITORIAL_VIEWER_ENABLED", os.getenv("PRISMA_VIEWER_ENABLED", "false"))).lower() in {"1", "true", "yes"},
+            portal_managed_modules=os.getenv("PORTAL_MANAGED_MODULES", "false").lower() in {"1", "true", "yes"},
             gods_eye_oci_text_model=os.getenv("GODS_EYE_OCI_TEXT_MODEL", "xai.grok-4.6").strip(),
             gods_eye_oci_voice_model=os.getenv("GODS_EYE_OCI_VOICE_MODEL", "google.gemini-2.5-flash-lite").strip(),
             gods_eye_oci_voice=os.getenv("GODS_EYE_OCI_VOICE", "ara").strip().lower(),

@@ -300,9 +300,9 @@ def test_runtime_docker_excludes_offline_evaluation_from_the_canonical_corpus():
     root = Path(__file__).resolve().parents[3]
     dockerfile = (root / "docker/Dockerfile").read_text()
     ignored = set((root / ".dockerignore").read_text().splitlines())
-    assert "COPY apps/backend/app ./app" in dockerfile
+    assert "COPY apps/backend/app ./apps/backend/app" in dockerfile
     assert "COPY datasets/" not in dockerfile
-    assert "ENV GODS_EYE_DATASET_ROOT=/opt/aidp-lab/app/labs/gods_eye_view/source/social_networks/v1" in dockerfile
+    assert "GODS_EYE_DATASET_ROOT=/opt/aidp-lab/apps/backend/app/labs/gods_eye_view/source/social_networks/v1" in dockerfile
     assert "apps/backend/app/labs/gods_eye_view/source/**/evaluation/" in ignored
     for version in ("v1", "v2"):
         path = root / "apps/backend/app/labs/gods_eye_view/source/social_networks" / version
