@@ -87,9 +87,11 @@ def test_fragment_preserves_multiline_literals_comments_and_decorators(bundle):
 
 
 def test_only_nonsecret_deployment_fields_are_embedded(bundle):
-    config = {**CONFIG, "private_key": "not-for-publishing", "db_password": "not-for-publishing"}
+    # ponytail: a non-JSON sentinel fails immediately if credentials reach serialization.
+    private_value = object()
+    config = {**CONFIG, "private_key": private_value, "db_password": private_value}
     source = workflow_source("pipeline", config, bundle)
-    assert "not-for-publishing" not in source and config["private_key"] == "not-for-publishing"
+    assert config["private_key"] is private_value and config["db_password"] is private_value
     assert "AidpControlStore" in source and "AidpRuntime" in source
     with pytest.raises(ValueError, match="explicit"):
         workflow_source("pipeline", {"pipeline_revision": "a"}, bundle)
