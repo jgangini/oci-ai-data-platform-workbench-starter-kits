@@ -11,6 +11,33 @@ from app.territorial.cloud import CloudRuntime
 from app.territorial.core import default_source
 
 
+def test_cloud_controls_use_explicit_gold_bucket_and_persistent_derived_index(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from app.config import Settings
+    from app.territorial.control_store import ObjectControlStore, ControlConflict
+    from test_territorial_control_store import Objects, ready
+    objects = Objects()
+    settings = Settings(objectstorage_namespace="namespace", bucket_name="landing",
+                        gods_eye_control_bucket="gold", aidp_settings_file=str(tmp_path / "settings.json"))
+    runtime = CloudRuntime(settings, lambda: SimpleNamespace(object_storage=objects))
+    monkeypatch.setitem(__import__("sys").modules, "oracledb", None)
+    with pytest.raises(RuntimeError, match="migration"):
+        runtime._connect()
+    ready(ObjectControlStore(objects, "namespace", "gold"))
+    store = runtime._connect()
+    assert store.bucket == "gold" and store.index_path == tmp_path / "gods-eye-view-posts.sqlite3"
+    assert not hasattr(runtime, "database")
+    def conflict():
+        raise ControlConflict("changed")
+    with pytest.raises(HTTPException) as failure:
+        asyncio.run(runtime._io(conflict))
+    assert failure.value.status_code == 409
+    from dataclasses import replace
+    runtime.settings = replace(settings, gods_eye_control_bucket="")
+    with pytest.raises(ValueError, match="scope"):
+        runtime._connect()
+
+
 class Aidp:
     def __init__(self):
         self.calls = []
@@ -184,6 +211,51 @@ def test_explicit_finite_run_is_queued_after_idle_schedule_is_paused():
     assert body["tasks"] == [{"key": "tick"}] and body["timeoutSeconds"] == 900 and "key" not in body
 
 
+@pytest.mark.parametrize("mode", ["finite", "persistent"])
+def test_idle_wake_does_not_contact_native_but_explicit_run_starts_workers(mode):
+    runtime = Runtime()
+    runtime.documents["runtime"].update(streaming_mode=mode, sensor_job_key="sensors")
+    runtime.documents.update(configuration={"sources": {"x": {"enabled": True, "capture_running": False}},
+        "sensors": {"capture_running": False}}, simulation={"status": "completed", "capture_complete": True},
+        checkpoint_reset={"operation_id": "cancelled-operation", "status": "cancelled", "ready": True})
+    before = copy.deepcopy(runtime.documents)
+    factory = runtime.aidp_factory
+    runtime.aidp_factory = lambda: pytest.fail("Idle wake must not create a native client")
+    runtime._wake("idle-save", only_if_active=True)
+    assert runtime.client.calls == [] and runtime.documents == before
+    runtime.aidp_factory = factory
+    runtime._wake("explicit-run")
+    jobs = [options["payload"]["jobKey"] for method, _, options in runtime.client.calls if method == "POST"]
+    assert jobs == (["job", "sensors"] if mode == "persistent" else ["job"])
+    assert runtime.documents == before
+
+
+@pytest.mark.parametrize("document,value,starts", [
+    ("configuration", {"sources": {"x": {"enabled": True, "capture_running": True}}}, True),
+    ("configuration", {"sources": {"x": {"enabled": False, "capture_running": True}}}, False),
+    ("configuration", {"sensors": {"capture_running": True}}, True),
+    ("simulation", {"status": "running", "started_at": 0, "elapsed_seconds": 600, "capture_complete": False}, True),
+    ("status_pipeline", {"pending_count": 1, "needs_attention": False}, True),
+    ("status_pipeline", {"pending_count": 1, "needs_attention": True}, False),
+    ("checkpoint_reset", {"status": "pending", "ready": True}, True),
+    ("checkpoint_reset", {"status": "pending", "ready": False}, False),
+    ("checkpoint_reset", {"status": "error", "ready": True}, False),
+    ("checkpoint_reset", {"status": "cancelled", "ready": True}, False),
+    ("checkpoint_reset", {"status": "completed", "ready": True}, False),
+])
+def test_persistent_tick_admits_only_capture_drain_or_ready_reset(monkeypatch, document, value, starts):
+    from app.territorial import cloud
+    runtime = Runtime()
+    runtime.documents["runtime"].update(streaming_mode="persistent", sensor_job_key="sensors")
+    runtime.documents[document] = value
+    before = copy.deepcopy(runtime.documents)
+    monkeypatch.setattr(cloud.sensor_capture, "cloud_tick", lambda _: False)
+    asyncio.run(runtime.tick())
+    jobs = [options["payload"]["jobKey"] for method, _, options in runtime.client.calls if method == "POST"]
+    assert jobs == (["job", "sensors"] if starts else [])
+    assert runtime.documents == before
+
+
 @pytest.mark.parametrize("state", ["PENDING", "RUNNING", "QUEUED", "CANCELING", "PAUSED_MAINTENANCE", ""])
 def test_persistent_wake_reuses_nonterminal_or_unknown_run_without_cron_or_queue(state):
     runtime = Runtime()
@@ -281,8 +353,9 @@ def test_save_only_queues_a_run_when_capture_is_active(active):
     runtime.documents["configuration"] = {"sources": {"x": {**default_source("x"), "capture_running": active}}}
     result = asyncio.run(runtime.update_source("x", {"interval_minutes": 7}))
     assert result["interval_minutes"] == 7 and result["capture_running"] is active
-    assert [call[0] for call in runtime.client.calls] == (["GET", "PUT", "POST"] if active else ["GET", "PUT"])
-    assert runtime.client.calls[1][2]["payload"]["schedule"]["pauseStatus"] == ("UNPAUSED" if active else "PAUSED")
+    assert [call[0] for call in runtime.client.calls] == (["GET", "PUT", "POST"] if active else [])
+    if active:
+        assert runtime.client.calls[1][2]["payload"]["schedule"]["pauseStatus"] == "UNPAUSED"
 
 
 @pytest.mark.parametrize("job_timeout,task_timeout", [(None, 0), (0, None), (600, 300)])
@@ -322,7 +395,7 @@ def test_stopping_capture_queues_one_final_drain_then_idle_save_does_not(mode, o
     assert runtime.documents["checkpoint_synthetic"] == checkpoint
     runtime.client.calls.clear()
     asyncio.run(runtime.update_source("x", {"enabled": False}))
-    assert [call[0] for call in runtime.client.calls] == (["GET", "PUT", "POST"] if other_active else ["GET", "PUT"])
+    assert [call[0] for call in runtime.client.calls] == (["GET", "PUT", "POST"] if other_active else [])
 
 
 def test_mode_switch_stops_capture_and_queues_final_drain():
@@ -397,7 +470,7 @@ def test_explicit_run_waiting_behind_disable_save_reactivates_after_save(monkeyp
     source = runtime.documents["configuration"]["sources"]["x"]
     assert source["enabled"] and source["capture_running"] and not source["capture_paused"]
     assert runtime.documents["checkpoint_controls"]["x"]["run_id"]
-    assert [call[0] for call in runtime.client.calls] == ["GET", "PUT", "GET", "PUT", "POST"]
+    assert [call[0] for call in runtime.client.calls] == ["GET", "PUT", "POST"]
 
 
 @pytest.mark.parametrize("running", [False, True])

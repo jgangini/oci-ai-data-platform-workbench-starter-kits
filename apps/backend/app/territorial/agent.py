@@ -312,7 +312,7 @@ class TerritorialAgent:
             compartment_id=config["compartment_id"], service_endpoint=endpoint, client=client, is_stream=False,
             model_kwargs={"temperature": 0, "max_tokens": 2048}, guardrails_config={"policies": []})
         from oracle_memory_clients.client import AsyncProxyCheckpointClient
-        memory = AsyncProxyCheckpointClient(base_url=os.getenv("MEMORY_SERVER_URL") or os.getenv("MEMORY_URL") or "http://127.0.0.1:21100", agent="prisma_bogota")
+        memory = AsyncProxyCheckpointClient(base_url=os.getenv("MEMORY_SERVER_URL") or os.getenv("MEMORY_URL") or "http://127.0.0.1:21100", agent="ai_gods_eye_view")
         tools = [consultar_incidentes, consultar_evidencia, consultar_sensores]
         names = ("consultar_incidentes", "consultar_evidencia", "consultar_sensores")
         parameters = {name: set(inspect.signature(getattr(item, "func", item)).parameters) - {"version"}

@@ -54,7 +54,7 @@ def test_control_writer_is_separate_and_legacy_reader_is_preserved(monkeypatch, 
 
 
 def stream_runtime(values=None):
-    return {"writer_credential_name": "AidpControlStore", "pipeline_revision": "a" * 64,
+    return {"namespace": "namespace", "bucket": "gold", "pipeline_revision": "a" * 64,
             "oci_credential_name": "AidpRuntime", "oci_identity_sha256": "b" * 64, **(values or {})}
 
 
@@ -126,14 +126,15 @@ def test_shared_api_credential_is_created_once_or_adopted_without_rotation(tmp_p
     if existing:
         api.resources["/credentials"] = [{"key": "existing", "displayName": existing, "type": "SECRET_TOKEN", "lifeCycleState": "ACTIVE"}]
     key = tmp_path / "fixture.pem"
-    if not existing:
+    adopted = existing in {"AidpRuntime", "AidpDataGovernanceExtension"}
+    if not adopted:
         key.write_text("fixture only", encoding="utf-8")
     config = {"tenancy": "tenancy", "user": "user", "fingerprint": "fingerprint", "region": "region", "key_file": str(key)}
     first = bootstrap.ensure_oci_credential(api, config)
     assert bootstrap.ensure_oci_credential(api, config) == first
-    assert first["displayName"] == (existing or "AidpRuntime")
+    assert first["displayName"] == (existing if adopted else "AidpRuntime")
     writes = [payload for method, path, payload, _ in api.calls if method != "GET"]
-    assert len(writes) == (0 if existing else 1)
+    assert len(writes) == (0 if adopted else 1)
     if writes:
         keys = {item["secretKey"] for item in writes[0]["credentialDetails"]["secretTokenPair"]}
         assert keys == {"tenancy", "user", "fingerprint", "region", "private_key"}
@@ -746,7 +747,7 @@ def test_python_publication_updates_embedded_config_and_execution_identity():
     source = next(item["content"] for item in api.contents.values() if item["path"] == task["filePath"])
     config = next(ast.literal_eval(node.value) for node in ast.parse(source).body
                   if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "RUNTIME_CONFIG" for target in node.targets))
-    assert config["bucket"] == "updated" and "writer_credential_name" in config
+    assert config["bucket"] == "updated" and "writer_credential_name" not in config
     bootstrap.run_initial_job(api, "ws", job, "same-bundle")
     assert next(call[3]["opc-retry-token"] for call in reversed(api.calls) if call[:2] == ("POST", "/workspaces/ws/jobRuns")) != first_token
 
@@ -782,7 +783,7 @@ def test_cluster_libraries_install_once_then_reuse_without_restart(monkeypatch, 
     assert bootstrap.install_cluster_libraries(api, "ws", "compute", ensure_folder=lambda *_: None) == installed
     assert len([call for call in api.calls if call[:2] == ("PATCH", base + "/libraries")]) == int(initial_status is None)
     assert len([call for call in api.calls if call[:2] == ("POST", base + "/actions/restart")]) == int(initial_status != "INSTALLED")
-    assert next(iter(api.contents.values()))["content"] == "httpx==0.28.1\noracledb==3.4.2\n"
+    assert next(iter(api.contents.values()))["content"] == "httpx==0.28.1\n"
 
 
 @pytest.mark.parametrize("drift", [None, "location", "type", "schema"])
@@ -1055,6 +1056,45 @@ def test_existing_api_preserves_explicit_revision_retry_token(monkeypatch):
     assert len(seen) == 2 and all(headers["opc-retry-token"] == "a" * 32 for headers in seen)
 
 
+@pytest.mark.parametrize("previous", [None, "migrated", "unmigrated", "job", "agent", "credential", "objects", "denied"])
+def test_object_controls_require_proven_fresh_install_or_verified_migration(monkeypatch, previous):
+    monkeypatch.syspath_prepend(str(bootstrap.ROOT / "apps/backend/tests"))
+    from test_territorial_control_store import Objects, ready
+    storage, api = Objects(), Api()
+    runtime = {"namespace": "namespace", "bucket": "gold", "landing_bucket": "landing",
+               "landing_prefix": "01_landing/prisma/raw/", "analytics_store": "gold"}
+    connection = bootstrap.ObjectControlStore(storage, "namespace", "gold")
+    if previous == "migrated":
+        ready(connection)
+    elif previous == "unmigrated":
+        bootstrap.write_document(connection, "runtime", {"analytics_store": "gold"}, 0)
+    elif previous == "job":
+        api.resources["/workspaces/ws/jobs"] = [{"name": "prisma_bogota_tick"}]
+    elif previous == "agent":
+        api.resources["/agents"] = [{"displayName": "prisma_bogota_agent_legacy"}]
+    elif previous == "credential":
+        api.resources["/credentials"] = [{"displayName": "PrismaWriterRuntime"}]
+    def listed(*_, **__):
+        if previous == "denied":
+            raise PermissionError("Cannot prove an empty deployment")
+        return SimpleNamespace(data=SimpleNamespace(objects=[object()] if previous == "objects" else [], next_start_with=None))
+    storage.list_objects = listed
+    before = list(storage.calls)
+    monkeypatch.setitem(sys.modules, "oracledb", None)
+    if previous in {None, "migrated"}:
+        result = bootstrap.initialize_controls(api, api, storage, runtime, "ws")
+        result.require_ready()
+        document = bootstrap.read_document(result, "runtime")
+        assert document.get("control_new_install") is (True if previous is None else None)
+        if previous is None:
+            assert storage.calls[-1][1]["if_none_match"] == "*"
+    else:
+        with pytest.raises((RuntimeError, PermissionError)):
+            bootstrap.initialize_controls(api, api, storage, runtime, "ws")
+        assert storage.calls == before
+    assert all(call[0] == "GET" for call in api.calls)
+
+
 @pytest.mark.parametrize("failed_phase", ["job", "snapshot", None])
 def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypatch, tmp_path, failed_phase):
     outputs = {"objectstorage_namespace": "ns", "bucket_name": "landing",
@@ -1062,19 +1102,20 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
                "compartment_ocid": "compartment", "ai_data_platform_id": "platform"}
     published, runtime_documents, credential_apis = [], [], []
     database = SimpleNamespace(commit=lambda: None)
-    monkeypatch.setitem(sys.modules, "oracledb", SimpleNamespace(connect=lambda **_: nullcontext(database)))
+    monkeypatch.setitem(sys.modules, "oracledb", None)
     monkeypatch.setattr(bootstrap.tempfile, "TemporaryDirectory", lambda **_: nullcontext(str(tmp_path)))
-    def database_users(api, *_, **__):
-        assert (api.api_version, api.resource_segment) == ("20260430", "aiDataPlatforms")
-        credential_apis.append(api)
-        api.resources["/credentials"] = [{"key": "writer", "displayName": "PrismaWriterRuntime", "credentialType": "SECRET_TOKEN", "lifeCycleState": "ACTIVE"}]
+    def initialize_controls(api, agent_api, storage, runtime, workspace):
+        assert (agent_api.api_version, agent_api.resource_segment) == ("20260430", "aiDataPlatforms")
+        credential_apis.append(agent_api)
+        return database
     def install_job(api, _workspace, compute, config, _bundle, **options):
         assert (api.api_version, api.resource_segment) == ("20240831", "dataLakes")
         assert config["streaming_mode"] == "persistent" and len(config["pipeline_revision"]) == 64
         workflow = options.get("workflow", "social")
         assert compute == ("aidp_gods_eye_view_sensor_compute" if workflow == "sensors" else "aidp_gods_eye_view_social_compute")
         return "job-" + workflow
-    monkeypatch.setattr(bootstrap, "database_users", database_users)
+    monkeypatch.setattr(bootstrap, "database_users", lambda *_args, **_kwargs: pytest.fail("No database provisioning"))
+    monkeypatch.setattr(bootstrap, "initialize_controls", initialize_controls)
     monkeypatch.setattr(bootstrap, "ensure_oci_credential", lambda *_: {"displayName": "AidpRuntime"})
     monkeypatch.setattr(bootstrap, "install_volumes", lambda *_: None)
     monkeypatch.setattr(bootstrap, "install_stream_compute", lambda _api, _workspace, name: name)
@@ -1120,6 +1161,7 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
         assert published[-1][:3] == ("ns", "gold", ".control/prisma/agent.json")
     assert runtime_documents[0]["bucket"] == "gold"
     assert runtime_documents[0]["analytics_store"] == "gold"
+    assert "writer_credential_name" not in runtime_documents[0] and "reader_credential_name" not in runtime_documents[0]
     assert runtime_documents[0]["agent_compute_id"] == "key-aidp_gods_eye_view_agent_compute"
     assert runtime_documents[0]["workbench_base"] == arguments[0].base
     assert runtime_documents[0]["landing_bucket"] == "landing"

@@ -289,7 +289,8 @@ def execute(connection, objects, lake, config, now, command, publish_snapshot):
         database.mutate_document(connection, "checkpoint_reset", lambda doc: {**doc, "stage": "database"})
         counts.update(posts=database.purge_synthetic_posts(connection, operation_id), landing_files=landing_count)
         database.mutate_document(connection, "checkpoint_reset", lambda doc: {**doc, "stage": "publishing", "counts": {
-            **doc.get("counts", {}), **{key: doc.get("counts", {}).get(key, 0) + value for key, value in counts.items()}}})
+            **doc.get("counts", {}), **{key: None if value is None or doc.get("counts", {}).get(key, 0) is None
+                else doc.get("counts", {}).get(key, 0) + value for key, value in counts.items()}}})
         sources = database.read_document(connection, "configuration").get("sources", {})
         reviews = database.read_document(connection, "reviews").get("items", {})
         state = simulation_state(database.read_document(connection, "simulation"), command["reset_at"])

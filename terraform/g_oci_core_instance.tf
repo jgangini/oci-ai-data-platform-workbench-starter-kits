@@ -103,6 +103,7 @@ resource "oci_core_instance" "lab" {
       tenancy_ocid                 = var.tenancy_ocid
       objectstorage_namespace      = var.objectstorage_namespace
       bucket_name                  = local.bootstrap_bucket_name
+      gods_eye_control_bucket      = local.medallion_bucket_names["gold"]
       aidp_workbench_url           = local.aidp_workbench_url
       aidp_platform_id             = oci_ai_data_platform_ai_data_platform.lab.id
       aidp_workspace_name          = oci_ai_data_platform_ai_data_platform.lab.default_workspace_name

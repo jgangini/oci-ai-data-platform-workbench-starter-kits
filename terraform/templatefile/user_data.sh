@@ -160,6 +160,7 @@ ARTIFACTS_BUCKET_NAME=${artifacts_bucket_name}
 OCI_CONFIG_FILE=/etc/aidp-lab/oci/config
 OBJECTSTORAGE_NAMESPACE=${objectstorage_namespace}
 BUCKET_NAME=${bucket_name}
+GODS_EYE_CONTROL_BUCKET=${gods_eye_control_bucket}
 AIDP_SETTINGS_FILE=/var/lib/aidp-lab/settings.json
 LAB_MARKER=${lab_marker}
 SESSION_SECRET_FILE=/var/lib/aidp-lab/session.key

@@ -11,7 +11,8 @@ from threading import RLock
 from .core import SYNTHETIC_MODES, canonical_mode, PLATFORMS, build_snapshot, default_source, simulation_state, utc_text, aidp_credential_name
 from .database import mutate_document, publish, read_document, upsert_posts, reset_version, sensor_reset_version
 from .landing import decode_record, write_objects, ensure_volumes, stream_progress
-from .runtime_secrets import database_connection, runtime_auth
+from .runtime_secrets import runtime_auth
+from .control_store import ObjectControlStore
 from .x import XFailure, poll_queries
 from .sensor_pipeline import SensorLake
 from .capture import schedule_at
@@ -234,15 +235,13 @@ def install_gold_views(spark, catalog, publication_table):
             r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}", publication_table):
         raise ValueError("Invalid Gold catalog or publication table")
     for family in ("incidents", "evidence", "sensors", "event_posts"):
-        identity = ("item.event_id AS event_id,item.post_key AS post_key" if family == "event_posts"
-                    else "item.id AS id")
-        schema = "ARRAY<STRUCT<event_id:STRING,post_key:STRING>>" if family == "event_posts" else "ARRAY<STRUCT<id:STRING>>"
-        # Parse only row identity; extracting by position retains the complete evidence JSON.
+        identity = ("get_json_object(item,'$.event_id') AS event_id,get_json_object(item,'$.post_key') AS post_key"
+                    if family == "event_posts" else "get_json_object(item,'$.id') AS id")
+        # ponytail: parse the publication array once; indexed extraction reparses its full JSON for every row (O(n²)).
         spark.sql(f"""CREATE OR REPLACE VIEW {catalog}.oci_gold.territorial_{family} AS
-          SELECT p.id AS publication_version,{identity},
-            get_json_object(p.payload,concat('$.{family}[',position,']')) AS payload
+          SELECT p.id AS publication_version,{identity},item AS payload
           FROM {publication_table} p
-          LATERAL VIEW posexplode(from_json(get_json_object(p.payload,'$.{family}'),'{schema}')) records AS position,item""")
+          LATERAL VIEW explode(from_json(get_json_object(p.payload,'$.{family}'),'ARRAY<STRING>')) records AS item""")
 
 
 def ingest_page(connection, objects, lake, config, platform, events, checkpoint=None):
@@ -573,25 +572,26 @@ def run(spark, secret_get, config, *, clock=time.time, classifier=None, connecti
     import oci
     import httpx
     from .classification import classify
-    # Older published notebooks omit this field; never fall back after a credential read fails.
-    writer_credential = config.get("writer_credential_name", "PrismaWriterRuntime")
     with ExitStack() as stack:
-        connection = connection or stack.enter_context(database_connection(secret_get, writer_credential))
-        sdk_config, signed = runtime_auth(secret_get, config["region"], config.get("oci_credential_name", "PrismaWriterRuntime"),
+        sdk_config, signed = runtime_auth(secret_get, config["region"], config.get("oci_credential_name", "AidpRuntime"),
             config.get("oci_identity_sha256", "")) if objects is None or classifier is None else ({}, None)
         objects = objects or oci.object_storage.ObjectStorageClient(sdk_config, signer=signed)
+        connection = connection or stack.enter_context(ObjectControlStore(objects, config["namespace"], config["bucket"]))
+        if isinstance(connection, ObjectControlStore):
+            connection.require_ready()
         client = client or stack.enter_context(httpx.Client())
-        lake = lake or DeltaLake(spark, config)
         required_reset_version = 3 if config.get("analytics_store") == "gold" else 2
         if reset_version(connection) < required_reset_version:
-            raise RuntimeError("Synthetic reset database contract is not installed")
+            raise RuntimeError("Synthetic reset control contract is not installed")
         if sensor_reset_version(connection) < required_reset_version:
-            raise RuntimeError("Sensor reset database contract is not installed")
+            raise RuntimeError("Sensor reset control contract is not installed")
+        lake = lake or DeltaLake(spark, config)
         if read_document(connection, "runtime").get("synthetic_reset_version") != 2:
             mutate_document(connection, "runtime", lambda doc: {**doc, "synthetic_reset_version": 2})
         def on_ingested(events, batch_key):
-            # Streaming callbacks run on other threads; never share the enrichment connection.
-            with database_connection(secret_get, writer_credential) as ingestion_connection:
+            # Each callback commits its index event through the same conditional object journal.
+            with ObjectControlStore(objects, config["namespace"], config["bucket"]) as ingestion_connection:
+                ingestion_connection.require_ready()
                 upsert_posts(ingestion_connection, events, "ingested", ingested_at=utc_text(clock()), batch_key=batch_key)
         lake.on_ingested = on_ingested
         reset_snapshot = process_reset(connection, objects, lake, config, clock())
@@ -611,7 +611,7 @@ def run(spark, secret_get, config, *, clock=time.time, classifier=None, connecti
                 from .scheduling import reconcile_after_tick, workbench_request
                 from .runtime_secrets import signer
                 request = workbench_request(config["workbench_base"], config["region"], signed or signer(secret_get,
-                    config.get("oci_credential_name", "PrismaWriterRuntime"), config.get("oci_identity_sha256", "")))
+                    config.get("oci_credential_name", "AidpRuntime"), config.get("oci_identity_sha256", "")))
                 reconcile_after_tick(connection, request, clock())
             return snapshot
         except Exception as exc:

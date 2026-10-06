@@ -139,7 +139,7 @@ def test_sensor_entrypoint_rejects_old_contract_before_restoring_or_ingesting(mo
     monkeypatch.setattr(database, "sensor_reset_version", lambda _: version)
     monkeypatch.setattr(database, "mutate_document", lambda *_: pytest.fail("Old contract must not change controls"))
     monkeypatch.setattr(landing, "ensure_volumes", lambda *_: None)
-    with pytest.raises(RuntimeError, match="Sensor reset database contract"):
+    with pytest.raises(RuntimeError, match="Sensor reset control contract"):
         sensor_pipeline.run(None, None, {**CONFIG, "analytics_store": store}, connection=object(), lake=lake)
     lake.restore_history.assert_not_called()
     lake.start.assert_not_called()

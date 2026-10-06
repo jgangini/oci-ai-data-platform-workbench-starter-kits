@@ -74,6 +74,7 @@ class Settings:
     oci_config_file: str = "/etc/aidp-lab/oci/config"
     objectstorage_namespace: str = ""
     bucket_name: str = ""
+    gods_eye_control_bucket: str = ""
     artifacts_bucket_name: str = "oci_artifacts"
     aidp_settings_file: str = "/var/lib/aidp-lab/settings.json"
     lab_marker: str = "aidp-lab"
@@ -126,6 +127,7 @@ class Settings:
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
             objectstorage_namespace=os.getenv("OBJECTSTORAGE_NAMESPACE", ""),
             bucket_name=os.getenv("BUCKET_NAME", ""),
+            gods_eye_control_bucket=os.getenv("GODS_EYE_CONTROL_BUCKET", ""),
             artifacts_bucket_name=_artifacts_bucket_name(
                 os.getenv("ARTIFACTS_BUCKET_NAME", "oci_artifacts")
             ),

@@ -20,6 +20,7 @@ from gods_eye_agent_source import agent_source
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "apps/backend"))
 from app.territorial.database import install_schema, read_document, write_document
+from app.territorial.control_store import ObjectControlStore
 from app.territorial.scheduling import RUN_FAILED, RUN_SUCCESS, TASK_RUN_QUERY, run_state, task_outcome
 from app.territorial.runtime_secrets import CONTROL_CREDENTIAL_NAME, SHARED_OCI_CREDENTIAL_NAME, identity_hash, shared_credential
 
@@ -34,7 +35,7 @@ RESOURCE_ALIASES = {
     "aidp_gods_eye_view_sensor_compute": ("sensor_stream_compute",),
     "aidp_gods_eye_view_query_compute": ("territorial_query_compute",),
 }
-PIPELINE_REQUIREMENTS = "httpx==0.28.1\noracledb==3.4.2\n"
+PIPELINE_REQUIREMENTS = "httpx==0.28.1\n"
 _deadline = 0.0
 
 
@@ -175,7 +176,7 @@ def database_users(api, wallet, wallet_password, admin_password, config, outputs
 
 
 def ensure_oci_credential(api, config):
-    """Both modules adopt the same API identity; database credentials remain separate."""
+    """Share the OCI-only identity; never adopt a legacy combined database secret."""
     current = shared_credential(items(api, "/credentials"))
     if current is not None:
         return current
@@ -201,7 +202,7 @@ def database_credential_name(api, *, reader=False):
 
 def runtime_archive():
     buffer = io.BytesIO()
-    names = ("__init__.py", "core.py", "correlation.py", "corpus.py", "media.py", "area.py", "x.py", "database.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "sensor_capture.py", "landing.py", "pipeline.py", "sensors.py", "sensor_pipeline.py", "sensor_reset.py", "synthetic_reset.py", "gold_reader.py", "agent.py")
+    names = ("__init__.py", "core.py", "correlation.py", "corpus.py", "media.py", "area.py", "x.py", "database.py", "control_store.py", "post_index.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "sensor_capture.py", "landing.py", "pipeline.py", "sensors.py", "sensor_pipeline.py", "sensor_reset.py", "synthetic_reset.py", "gold_reader.py", "agent.py")
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in names:
             info = zipfile.ZipInfo("territorial/" + name, date_time=(2026, 1, 1, 0, 0, 0))
@@ -753,22 +754,42 @@ def wait_stream_jobs(api, storage, runtime, runs, connection):
         pause(10)
 
 
+def initialize_controls(api, agent_api, storage, runtime, workspace):
+    """Create controls only when the managed deployment has no prior resources or data."""
+    connection = ObjectControlStore(storage, runtime["namespace"], runtime["bucket"])
+    current = read_document(connection, "runtime")
+    if current != {"revision": 0}:
+        connection.require_ready()
+        return connection
+    job_names = {"wf_ai_gods_eye_view_social_network", "wf_ai_gods_eye_view_sensor_stream", "territorial_social_network",
+                 "territorial_sensor_stream", "prisma_bogota_tick", "prisma_colombia_sensors"}
+    agent_names = {AGENT_NAME, *RESOURCE_ALIASES.get(AGENT_NAME, ())}
+    if (any(item.get("name") in job_names for item in items(api, f"/workspaces/{workspace}/jobs"))
+            or any(item.get("displayName") in agent_names or str(item.get("displayName", "")).startswith("prisma_bogota")
+                   for item in items(agent_api, "/agents"))
+            or any(item.get("displayName") in {"AidpControlStore", "TerritorialWriterRuntime", "PrismaWriterRuntime", "PrismaReaderRuntime"}
+                   for item in items(agent_api, "/credentials"))):
+        raise RuntimeError("Territorial existing controls require a verified Object Storage migration")
+    for bucket, prefix in ((runtime["bucket"], ".control/"), (runtime["bucket"], "04_gold/prisma/"),
+                           (runtime["landing_bucket"], runtime["landing_prefix"])):
+        result = storage.list_objects(runtime["namespace"], bucket, prefix=prefix, limit=1).data
+        if result.objects or result.next_start_with:
+            raise RuntimeError("Territorial existing data requires a verified Object Storage migration")
+    write_document(connection, "runtime", {**runtime, "control_new_install": True}, 0)
+    return connection
+
+
 def bootstrap_territorial(api, context, outputs, config, signer, storage, wallet, wallet_password, admin_password, reconciled,
                      *, deadline, wallet_dsn, validate_wallet, generate_password, ensure_folder):
     global _deadline
     _deadline = deadline
-    import oracledb
     agent_api = api.__class__(context["region"], outputs["ai_data_platform_id"], signer, context["deployment_id"],
                              api_version="20260430", resource_segment="aiDataPlatforms")
-    oci_credential = ensure_oci_credential(agent_api, {**config, "region": context["region"]})
-    database_users(agent_api, wallet, wallet_password, admin_password, {**config, "region": context["region"]}, outputs,
-                   wallet_dsn=wallet_dsn, validate_wallet=validate_wallet, generate_password=generate_password)
     bundle = runtime_archive()
     runtime = {"namespace": outputs["objectstorage_namespace"], "bucket": outputs["medallion_bucket_names"]["gold"], "workbench_base": api.base,
         "region": context["region"], "model_id": outputs["agent_model_id"], "compartment_id": outputs["compartment_ocid"], "catalog": reconciled["catalog_name"],
         "streaming_mode": "persistent", "pipeline_revision": hashlib.sha256(bundle).hexdigest(), "analytics_store": "gold",
-        "oci_credential_name": oci_credential["displayName"], "oci_identity_sha256": identity_hash(config),
-        "writer_credential_name": database_credential_name(agent_api)}
+        "oci_identity_sha256": identity_hash(config)}
     runtime.update(landing_bucket=outputs["medallion_bucket_names"]["landing"], landing_prefix="01_landing/prisma/raw/",
         landing_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/landing",
         checkpoint_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/checkpoints/bronze-v1",
@@ -776,6 +797,9 @@ def bootstrap_territorial(api, context, outputs, config, signer, storage, wallet
         sensor_landing_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/landing/sensors",
         sensor_checkpoint_volume_path=f"/Volumes/{runtime['catalog']}/prisma_ingest/checkpoints/sensors-v1")
     workspace = reconciled["workspace_key"]
+    connection = initialize_controls(api, agent_api, storage, runtime, workspace)
+    oci_credential = ensure_oci_credential(agent_api, {**config, "region": context["region"]})
+    runtime["oci_credential_name"] = oci_credential["displayName"]
     install_volumes(agent_api, runtime)
     social_compute = install_stream_compute(api, workspace, "aidp_gods_eye_view_social_compute")
     sensor_compute = install_stream_compute(api, workspace, "aidp_gods_eye_view_sensor_compute")
@@ -792,19 +816,14 @@ def bootstrap_territorial(api, context, outputs, config, signer, storage, wallet
     # Materialize empty governed roots; Spark ignores these hidden non-event objects.
     for prefix in (runtime["landing_prefix"], runtime["sensor_landing_prefix"]):
         storage.put_object(runtime["namespace"], runtime["landing_bucket"], prefix + ".keep", b"", content_type="application/octet-stream")
-    with tempfile.TemporaryDirectory(prefix="territorial-config-") as directory:
-        with zipfile.ZipFile(io.BytesIO(wallet)) as archive:
-            archive.extractall(directory)
-        with oracledb.connect(user="ADMIN", password=admin_password, dsn=wallet_dsn(Path(directory)),
-            config_dir=directory, wallet_location=directory, wallet_password=wallet_password) as connection:
-            current = read_document(connection, "runtime")
-            desired = {**current, **runtime}
-            if any(current.get(key) != value for key, value in desired.items()):
-                write_document(connection, "runtime", desired, current["revision"])
-            connection.commit()
-            sensor_run = start_stream_job(api, workspace, sensor_job, "sensor_stream")
-            run_key = start_stream_job(api, workspace, job, "social_network")
-            version = wait_stream_jobs(api, storage, runtime, [(run_key, "social_network"), (sensor_run, "sensor_stream")], connection)
+    current = read_document(connection, "runtime")
+    desired = {key: value for key, value in {**current, **runtime}.items()
+               if key not in {"writer_credential_name", "reader_credential_name"}}
+    if current != desired:
+        write_document(connection, "runtime", desired, current["revision"])
+    sensor_run = start_stream_job(api, workspace, sensor_job, "sensor_stream")
+    run_key = start_stream_job(api, workspace, job, "social_network")
+    version = wait_stream_jobs(api, storage, runtime, [(run_key, "social_network"), (sensor_run, "sensor_stream")], connection)
     storage.put_object(runtime["namespace"], runtime["bucket"], ".control/prisma/agent.json", json.dumps(agent).encode(), content_type="application/json")
     result = {"job_ready": True, "agent_ready": True, "revision": agent["revision"],
               "acceptance_run": run_key, "sensor_run": sensor_run, "snapshot_version": version}

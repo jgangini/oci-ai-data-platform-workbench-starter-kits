@@ -113,7 +113,7 @@ def test_setup_and_invoke_keep_configured_model_tools_and_session_memory(monkeyp
     fake.init_llm.assert_called_once_with(provider="generic", model_id="test-model", auth_type="API_KEY",
         compartment_id="test-compartment", service_endpoint=endpoint, client=client, is_stream=False,
         model_kwargs={"temperature": 0, "max_tokens": 2048}, guardrails_config={"policies": []})
-    fake.checkpoint.assert_called_once_with(base_url="http://checkpoint.test:21100", agent="prisma_bogota")
+    fake.checkpoint.assert_called_once_with(base_url="http://checkpoint.test:21100", agent="ai_gods_eye_view")
     args, kwargs = fake.create_agent.call_args
     assert callable(args[0])
     assert [tool.__name__ for tool in args[1]] == ["consultar_incidentes", "consultar_evidencia", "consultar_sensores"]
@@ -929,7 +929,7 @@ def test_agent_missing_deployment_config_never_discovers_a_legacy_reader(monkeyp
 
 
 @pytest.mark.parametrize("factory", [signer, runtime_auth])
-@pytest.mark.parametrize("credential", ["AidpDataGovernanceExtension", "TerritorialWriterRuntime", "PrismaWriterRuntime"])
+@pytest.mark.parametrize("credential", ["AidpDataGovernanceExtension", "AidpRuntime"])
 def test_shared_identity_drift_fails_before_private_key_read_without_fallback(monkeypatch, factory, credential):
     fake = runtime(monkeypatch)
     expected = identity_hash(fake.credentials)
@@ -947,16 +947,28 @@ def test_shared_credential_selector_prefers_governance_and_rejects_invalid_prefe
     canonical = {**writer, "displayName": "TerritorialWriterRuntime", "key": "canonical"}
     governance = {"displayName": "AidpDataGovernanceExtension", "type": "SECRET_TOKEN", "lifecycleState": "ACTIVE", "key": "governance"}
     assert shared_credential([writer, governance, canonical]) is governance
-    assert shared_credential([writer, canonical]) is canonical
-    assert shared_credential([writer, {**canonical, "lifeCycleState": "DELETED"}]) is writer
-    assert shared_credential([writer]) is writer
+    assert shared_credential([writer, canonical]) is None
+    assert shared_credential([writer, {**canonical, "lifeCycleState": "DELETED"}]) is None
+    assert shared_credential([writer]) is None
     assert shared_credential([]) is None
+    canonical = {"displayName": "AidpRuntime", "credentialType": "SECRET_TOKEN", "lifeCycleState": "ACTIVE", "key": "oci"}
+    assert shared_credential([writer, governance, canonical]) is canonical
     for invalid in ([writer, governance, dict(governance)], [writer, {**governance, "type": "VAULT_REFERENCE"}],
                     [writer, {**governance, "lifecycleState": "FAILED"}],
                     [writer, canonical, dict(canonical)], [writer, {**canonical, "credentialType": "VAULT_REFERENCE"}],
                     [writer, {**canonical, "lifeCycleState": "FAILED"}], [writer, {**canonical, "key": ""}]):
         with pytest.raises(RuntimeError):
             shared_credential(invalid)
+
+
+@pytest.mark.parametrize("factory", [signer, runtime_auth])
+@pytest.mark.parametrize("credential", ["AidpControlStore", "TerritorialWriterRuntime", "PrismaWriterRuntime"])
+def test_runtime_auth_rejects_database_credentials_before_any_secret_read(monkeypatch, factory, credential):
+    secret_get = MagicMock(side_effect=AssertionError("No database secret should be read"))
+    args = (secret_get,) + (("us-chicago-1",) if factory is runtime_auth else ())
+    with pytest.raises(RuntimeError, match="Unsupported OCI"):
+        factory(*args, credential_name=credential)
+    secret_get.assert_not_called()
 
 
 @pytest.mark.parametrize("failure", ["missing_credential", "invalid_signer", "client_initialization"])

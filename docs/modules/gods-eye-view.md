@@ -1,0 +1,128 @@
+# God's Eye View · Custom layers
+
+[Documentation](../README.md) · [Architecture](../architecture.md) · [Operations](../operations.md) · [Compatibility](../reference/compatibility.md)
+
+God's Eye View combines social reports, sensor readings, source evidence and human review on a shared map. It helps operators examine what was reported and what needs verification. A marker, model answer or synthetic photograph is not proof of a real emergency.
+
+Administrators configure this shared module through **Settings → Application → God's Eye View · Custom layers**, at `/admin/gods-eye-view`. The authenticated viewer opens at `/gods-eye-view/`; viewing and source administration are separate permissions.
+
+## Implementation and rollout status
+
+The new implementation uses readable standalone Python workflows, Gold analytical queries and Object Storage operational controls. It does not require a database writer/reader credential for these paths. The VM's SQLite post index is a disposable projection of the Object journal, not another authoritative store.
+
+**Cloud cutover and native Gold-agent conversation acceptance remain pending.** Existing installations can still run older jobs and credentials. Follow the [explicit migration procedure](../operations.md#migrate-gods-eye-view-controls); neither a source rename nor an active deployment proves acceptance or permits deleting a dependency.
+
+## Administration
+
+| Action | Effect |
+| --- | --- |
+| Install / retry | Reuses the managed module and checks infrastructure, publication, viewer and deployment readiness; conversation acceptance is separate. |
+| Save Name | Confirms viewer name/description; blank fields restore defaults. Reload the viewer after saving. |
+| Save source / sensor settings | Writes a revision-checked configuration without starting capture. |
+| Test | Checks configuration without creating Landing data. |
+| Run now | Activates the selected producer, respecting its schedule and remaining Synthetic input. |
+| Pause | Stops new capture while retaining data/checkpoints; it does not stop compute. |
+| Save schedule | Confirms scope, start, browser time zone and interval; paused/completed sources stay stopped. |
+| Delete Synthetic data | Confirms scope and starts a durable cleanup operation. |
+
+A stale configuration revision returns a conflict and requires reloading. A stopped persistent job is a failed activation prerequisite, not permission to create another job. See [module lifecycle](../../apps/backend/app/territorial/module.py) and [source controls](../../apps/backend/app/territorial/cloud.py).
+
+## Capture and schedules
+
+Social Networks includes X, Facebook, Instagram and TikTok. Only X implements credential-backed `real` capture; the other networks use `Synthetic`. Real X requires valid API access and quota. Upstream failures stay errors, and original platform IDs deduplicate overlapping search results.
+
+One schedule controls all four social sources. Sensors has a separate schedule for river level, rainfall, temperature, soil moisture and wind speed. Sensor capture currently supports Synthetic mode only; station count is a per-family setting with a total running limit.
+
+Forms display the browser's time zone and store the selected start in UTC. The first schedule save requires a start; intervals range from 1 to 1440 minutes. Captures align to the scheduled slots, skip missed slots and respect a future start even after Run. Saving a schedule preserves cursors and prepared retry batches; X rate limits may postpone a capture further.
+
+Synthetic social captures select unseen eligible corpus records in bounded batches. The corpus is finite: exhaustion survives Run, query edits and restart. A separate new run supplies new input. Durable batch journals retain exact Landing bytes across retries, while unfinished downstream work can still resume. The capture interval is not an end-to-end publication latency guarantee.
+
+Source: [capture](../../apps/backend/app/territorial/capture.py), [sensor capture](../../apps/backend/app/territorial/sensor_capture.py), [X connector](../../apps/backend/app/territorial/x.py).
+
+## Processing and publication
+
+```mermaid
+flowchart LR
+    Producers[Scheduled producers] --> Landing[Immutable Landing files]
+    Landing --> Bronze[Bronze: original records]
+    Bronze --> Silver[Silver: classification and current readings]
+    Reviews[Human review controls] --> Silver
+    Silver --> Gold[Gold: versioned publications]
+    Gold --> Objects[Private snapshot and current pointer]
+    Objects --> Viewer[Authenticated map]
+    Gold --> Query[Dedicated Spark query compute]
+    Query --> Agent[Version-scoped agent answers]
+    Controls[Object controls: revisions and ETags] --> Producers
+    Producers --> Journal[Immutable post journal]
+    Journal --> Index[VM SQLite projection]
+    Index --> Table[Paginated publications table]
+```
+
+Social Landing contains UTF-8 CSV envelopes with `id` and JSON `payload`; sensors use UTF-8 NDJSON TXT files. Governed volumes and separate Spark file checkpoints support ingestion; this does not deploy OCI Streaming.
+
+Bronze retains original records. Social enrichment is journaled per post, so recovery can finish an interrupted projection without reclassifying a completed prefix. Repeated failures retain pending work and expose a circuit state. Sensor event IDs deduplicate history; timestamp and event ID select the latest reading per station in Silver. Late readings cannot replace newer ones.
+
+The publisher writes durable Gold and Object snapshots before advancing the current pointer. Human reviews remain separate from model classification: a review can be saved before it appears in a published version. The viewer polls capture metadata and publication revisions, then retrieves the relevant completed snapshot. A new publication does not mean the processing backlog is empty.
+
+The agent reads four views in `oci_gold`: `territorial_incidents`, `territorial_evidence`, `territorial_sensors` and `territorial_event_posts`. Queries always use the requested `publication_version`. Older rows remain history; they are not current review state. Gold mode does not recreate Autonomous analytical copies.
+
+Source: [pipeline](../../apps/backend/app/territorial/pipeline.py), [sensor pipeline](../../apps/backend/app/territorial/sensor_pipeline.py), [Gold reader](../../apps/backend/app/territorial/gold_reader.py).
+
+## Durable controls and local index
+
+Under `.control/gods_eye_view/`, `docs/` holds configuration, reviews, status and checkpoints with their revisions. Each write uses an Object Storage ETag precondition; stale administration changes return 409 instead of silently overwriting another change.
+
+Posts are appended as immutable events under `posts/nodes/`; a conditional update advances `posts/head.json`. Spark needs no local SQLite database. The VM verifies journal hashes and ancestry and incrementally builds its SQLite projection for ordered pages. That local file can be rebuilt from the journal; deleting the journal cannot be repaired from a disposable index alone.
+
+New installations require proof that no previous module state exists. Existing installations require the explicit migration receipt before Object controls are ready. Individual object writes are durable; `commit` and `rollback` do not provide a multi-object SQL transaction. See [control store](../../apps/backend/app/territorial/control_store.py), [post index](../../apps/backend/app/territorial/post_index.py) and [migration](../../apps/backend/app/territorial/control_migration.py).
+
+## Workspace and compute
+
+The stable Workspace root is `/Workspace/medallion/gods_eye_view/`:
+
+| Path | Purpose |
+| --- | --- |
+| `10_bronze/social_network.py` | Self-contained social ingestion, enrichment and publication. |
+| `10_bronze/sensor_stream.py` | Self-contained sensor ingestion and current-state processing. |
+| `20_silver/README.md`, `30_gold/README.md` | Explain actual stages and tables. |
+| `40_report/ai_gods_eye_view.py` | Standalone, version-scoped Gold agent. |
+| `40_report/requirements.txt` | Agent dependencies. |
+| `README.md`, `manifest.json` | Usage guidance and deployment integrity record. |
+
+The files contain readable logic and nonsecret configuration, without runtime project extraction or sibling-module discovery. The manifest verifies uploads; streams do not load it to execute. Stop affected consumers before replacing a stable source path.
+
+Jobs are `wf_ai_gods_eye_view_social_network` and `wf_ai_gods_eye_view_sensor_stream`, with task keys `social_network` and `sensor_stream`. Installers adopt recognized existing IDs rather than duplicate jobs. A native `PYTHON_TASK` receives the Workspace path in its JSON argument array. AIDP injects `aidputils`; Spark uses `SparkSession.builder.getOrCreate()`.
+
+The agent is `ai_gods_eye_view`. Compute names follow `aidp_gods_eye_view_{social,sensor,query,agent}_compute`: two stream computes, a separate Spark query compute and AI Compute for model orchestration. SQLTool requires the query compute to be running. Source definitions do not prove existing resources were renamed or resized.
+
+See [bootstrap](../../terraform/hooks/territorial_bootstrap.py), [workflow renderer](../../terraform/hooks/gods_eye_sources.py) and [agent renderer](../../terraform/hooks/gods_eye_agent_source.py).
+
+## Evidence and human decisions
+
+The assistant receives the publication version and applicable filters. Its references and map actions must resolve within that version; stale context is rejected. Fixed SELECTs and validated parameters bound Gold queries. Inventory answers bind incident IDs to the same records, while selected-incident and sensor questions explain their evidence. See [agent](../../apps/backend/app/territorial/agent.py).
+
+Ask what was reported, by whom, when, where and what still needs confirmation. “No results” applies to the selected version and filters. Draft reports are not sent automatically. Confidence, severity, activity, content diversity and human validation are different concepts; repeated photographs or multiple platforms do not prove independent corroboration.
+
+Synthetic corpora include fictional viewpoints, copies, uncertainty and contradictions. Their images are generated attachments, not documentary proof. Classification reads text, not image pixels; attachment hashes identify copies without proving a shared incident. Evaluation labels stay outside runtime inputs.
+
+Administrators confirm validation/rejection, notes and location overrides. A concurrent change in reviewed evidence membership returns a conflict. Validated locations must be unvalidated before editing; approximate locality anchors remain approximate. General OCI assistance and upstream voice are separate from incident evidence.
+
+## Synthetic cleanup and cancellation
+
+Social cleanup covers synthetic social data across all networks, regardless of table filters, and preserves sensor history. Global sensor cleanup covers all five families, preserving social records, real data and saved station locations. An older family-scoped operation retains its original scope.
+
+New deletions and destructive retries require confirmation. Requests include `confirm: true` and a UUID operation ID; retries retain that ID and scope. Completed IDs cannot delete newer data. Progress reports durable stages/counts rather than an invented percentage; closing the dialog does not cancel execution.
+
+Terminal cancellation is recorded only after the native writer stops. It retains partial progress, does not roll back deletion and never reports completion. Cancelled IDs cannot be retried; a new deletion needs a new confirmation and ID. Captures remain paused.
+
+Cleanup preserves real rows in mixed files/publications and journals durable replacements before removing originals. Object mode validates the exact active receipt, scope, replacement hash and stored snapshot; a cancelled or changed journal cannot authorize a replacement. Bounded history batches retain one writer. Do not clear checkpoints to dismiss an incomplete operation.
+
+Source: [social cleanup](../../apps/backend/app/territorial/synthetic_reset.py), [sensor cleanup](../../apps/backend/app/territorial/sensor_reset.py), [confirmation UI](../../apps/frontend/src/SyntheticDataReset.tsx).
+
+## Security and acceptance
+
+The public application authenticates viewer/API traffic; the viewer VM remains private. OCI private keys and source tokens stay outside browser assets and published source. `AidpRuntime` supplies OCI API access; the new module does not use database-bearing credentials as a fallback. Native AIDP conversation memory remains a separate platform service.
+
+Local checks cover [control CAS](../../apps/backend/tests/test_territorial_control_store.py), [migration](../../apps/backend/tests/test_territorial_control_migration.py), [post indexing](../../apps/backend/tests/test_territorial_object_post_index.py), [agent grounding](../../apps/backend/tests/test_territorial_agent_tools.py), [cancelled operations](../../apps/backend/tests/test_territorial_reset_cancelled.py) and [standalone workflows](../../terraform/tests/test_gods_eye_sources.py).
+
+Use [Development](../development.md) for reproducible checks. Local tests do not certify native permissions, model access, tool execution or conversations. Acceptance must verify actual task output and publication/evidence agreement before cutover and removal of unused credentials. See the [viewer integration](../../apps/territorial-viewer/README.md) for upstream licensing and builds.

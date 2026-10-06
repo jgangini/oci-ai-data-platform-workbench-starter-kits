@@ -315,14 +315,14 @@ test('a fast local reset hides its progress after completion and explicitly excl
 test('AIDP progress follows reported stages and history remains pending until confirmed completion', async t => {
   const view = harness(t, undefined, 'aidp');
   view.click('Delete Synthetic data');
-  assert.match(view.markup(), /including Delta tables, Autonomous Database and Object Storage/);
+  assert.match(view.markup(), /including Delta tables, publication indexes and Object Storage history/);
   view.confirm();
   const { operation_id } = JSON.parse(view.requests[0].body);
   view.requests[0].resolve({ operation_id, status: 'pending', stage: 'waiting_for_aidp' }); await view.settle();
   assert.match(view.progress(), /Waiting for the AIDP cleanup job/);
   for (const [stage, description] of [
     ['draining', 'Waiting for active captures'], ['landing', 'Deleting Synthetic Landing files'],
-    ['delta', 'Deleting Synthetic rows from Delta tables'], ['database', 'Deleting Synthetic records from Autonomous Database'],
+    ['delta', 'Deleting Synthetic rows from Delta tables'], ['database', 'Synchronizing the cleaned publication index'],
     ['publishing', 'Publishing the cleaned events'], ['history', 'Cleaning Synthetic publication history'],
   ]) {
     view.poll(); view.requests.at(-1).resolve({ operation_id, status: 'pending', stage }); await view.settle();
@@ -331,7 +331,7 @@ test('AIDP progress follows reported stages and history remains pending until co
     assert.equal(view.completed(), 0);
   }
   for (const count of [159, 166]) {
-    view.poll(); view.requests.at(-1).resolve({ operation_id, status: 'pending', stage: 'history', replacements: Object.fromEntries(Array.from({ length: count }, (_, index) => [`old-${index}`, `new-${index}`])) }); await view.settle();
+    view.poll(); view.requests.at(-1).resolve({ operation_id, status: 'pending', stage: 'history', counts: { posts: null }, replacements: Object.fromEntries(Array.from({ length: count }, (_, index) => [`old-${index}`, `new-${index}`])) }); await view.settle();
     assert.ok(view.markup().includes(`Historical publications rebuilt: ${count}.`));
     assert.equal(view.modal(), true); assert.equal(view.completed(), 0);
     assert.doesNotMatch(view.markup(), /old-\d|new-\d|\d+%/);

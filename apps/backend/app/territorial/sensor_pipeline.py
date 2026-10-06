@@ -184,20 +184,28 @@ def reset_barrier(connection, lake, config, query):
     return None, True
 
 
-def run(spark, secret_get, config, *, clock=time.time, connection=None, lake=None):
+def run(spark, secret_get, config, *, clock=time.time, connection=None, lake=None, objects=None):
     """Independent permanent TXT workflow: only Sensor Delta and its own heartbeat are writable."""
     from contextlib import ExitStack
     from threading import RLock
     from .database import mutate_document, sensor_reset_version
     from .landing import ensure_volumes, stream_progress
-    from .runtime_secrets import database_connection
+    from .runtime_secrets import runtime_auth
+    from .control_store import ObjectControlStore
 
-    ensure_volumes(spark, config)
     with ExitStack() as stack:
-        connection = connection or stack.enter_context(database_connection(secret_get,
-            config.get("writer_credential_name", "PrismaWriterRuntime")))
+        if connection is None:
+            if objects is None:
+                import oci
+                sdk_config, signed = runtime_auth(secret_get, config["region"], config.get("oci_credential_name", "AidpRuntime"),
+                    config.get("oci_identity_sha256", ""))
+                objects = oci.object_storage.ObjectStorageClient(sdk_config, signer=signed)
+            connection = stack.enter_context(ObjectControlStore(objects, config["namespace"], config["bucket"]))
+        if isinstance(connection, ObjectControlStore):
+            connection.require_ready()
         if sensor_reset_version(connection) < (3 if config.get("analytics_store") == "gold" else 2):
-            raise RuntimeError("Sensor reset database contract is not installed")
+            raise RuntimeError("Sensor reset control contract is not installed")
+        ensure_volumes(spark, config)
         lake = lake or SensorLake(spark, config, RLock())
         query, restored = None, False
         try:

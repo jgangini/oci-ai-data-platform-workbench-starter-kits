@@ -1,4 +1,5 @@
 """Bridge contract checks use fake publications and clients; no cloud or database."""
+import asyncio
 import importlib.util
 import json
 import sys
@@ -440,7 +441,33 @@ def test_gateway_hides_tools_and_scopes_sessions_to_authenticated_cookie():
     assert keys[0] == keys[1] and keys[0] != keys[2] and keys[0] != PUBLIC_ID
     assert requests[0][1]["json"]["isStreamEnabled"] is False
     assert requests[0][1]["json"]["trace"] is False
+    assert all(request[1]["timeout"] == (10, 240) for request in requests)
     assert agent_gateway.assistant_texts({"role": "tool", "text": "secret"}) == []
+
+
+@pytest.mark.parametrize("method,path,expected_read", [
+    ("POST", "/api/admin/territorial/chat", 250), ("POST", "/api/admin/prisma/chat", 250),
+    ("GET", "/api/territorial/snapshot", 100), ("POST", "/api/territorial/oci-chat", 100),
+])
+@pytest.mark.parametrize("fail", [False, True])
+def test_bridge_reserves_cold_start_budget_only_for_gold_chat_without_retry(monkeypatch, method, path, expected_read, fail):
+    calls = []
+    def respond(request):
+        calls.append(request)
+        assert request.extensions["timeout"] == {"connect": 10, "read": expected_read, "write": 100, "pool": 100}
+        if fail:
+            raise httpx.ReadTimeout("private provider detail", request=request)
+        return httpx.Response(200, json={"answer": "grounded"})
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(bridge.httpx, "AsyncClient", lambda **kwargs: client_type(transport=httpx.MockTransport(respond), **kwargs))
+    request = bridge.Request({"type": "http", "headers": [(b"cookie", b"fixture-cookie")]})
+    if fail:
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(bridge.admin_request(request, method, path, {}))
+        assert error.value.status_code == 503 and "private" not in error.value.detail
+    else:
+        assert asyncio.run(bridge.admin_request(request, method, path, {})) == {"answer": "grounded"}
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("kind", ["social", "sensors"])

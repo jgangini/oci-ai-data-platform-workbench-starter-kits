@@ -8,12 +8,13 @@ import json
 import time
 import threading
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 
-from ..autonomous import AutonomousGovernanceClient
+from .control_store import ControlConflict, ObjectControlStore
 from .core import SYNTHETIC_MODES, canonical_mode, PLATFORMS, utc_text, default_source, simulation_state, source_migration, aidp_credential_name, validate_review, review_location
 from . import capture, landing, sensor_capture, sensors, sensor_reset
 from .database import read_document, read_documents, mutate_document, upsert_posts, query_posts
@@ -24,21 +25,26 @@ from .scheduling import needs_schedule, set_schedule, submit_run, keep_streams_r
 class CloudRuntime:
     def __init__(self, settings, aidp_factory):
         self.settings, self.aidp_factory = settings, aidp_factory
-        self.database = AutonomousGovernanceClient(settings.autonomous_runtime_file)
         self.capture_lock = threading.RLock()
         self._snapshot_lock = threading.Lock()
         self._snapshot_cache = (None, None)
 
     def _connect(self):
-        return self.database._connect(self.database._runtime())
+        store = ObjectControlStore(self.aidp_factory().object_storage, self.settings.objectstorage_namespace,
+            self.settings.gods_eye_control_bucket,
+            index_path=Path(self.settings.aidp_settings_file).parent / "gods-eye-view-posts.sqlite3")
+        store.require_ready()
+        return store
 
     async def _io(self, function, *args):
         try:
             return await asyncio.to_thread(function, *args)
         except HTTPException:
             raise
+        except ControlConflict as exc:
+            raise HTTPException(409, "Control revision changed; reload before retrying") from exc
         except Exception as exc:
-            raise HTTPException(503, "The Territorial Control AIDP/Autonomous runtime is not ready; check deployment") from exc
+            raise HTTPException(503, "The God's Eye View Object Storage runtime is not ready; check migration and deployment") from exc
 
     def _doc(self, name):
         with self._connect() as connection:
@@ -221,13 +227,17 @@ class CloudRuntime:
         return await self._io(save)
 
     def _wake(self, request_id, only_if_active=False):
-        runtime = self._doc("runtime")
+        documents = self._documents(("runtime", "configuration", "simulation", "status_pipeline", "checkpoint_reset"))
+        runtime, pipeline, reset = (documents[name] for name in ("runtime", "status_pipeline", "checkpoint_reset"))
+        active = (needs_schedule(documents["configuration"], documents["simulation"])
+            or (pipeline.get("pending_count", 0) > 0 and not pipeline.get("needs_attention"))
+            or (reset.get("status") == "pending" and reset.get("ready") is True))
+        if only_if_active and not active:
+            return
         client = self.aidp_factory()
         if runtime.get("streaming_mode") == "persistent":
             keep_streams_running(client._request, runtime, request_id)
             return
-        pipeline = self._doc("status_pipeline")
-        active = needs_schedule(self._doc("configuration"), self._doc("simulation")) or (pipeline.get("pending_count", 0) > 0 and not pipeline.get("needs_attention"))
         persistent = set_schedule(client._request, runtime, active)
         # Explicit Run/Test and publication controls still enqueue a finite run while the schedule is paused.
         if active or not only_if_active:
@@ -499,7 +509,7 @@ class CloudRuntime:
         def keep_alive():
             runtime = self._doc("runtime")
             if runtime.get("streaming_mode") == "persistent":
-                keep_streams_running(self.aidp_factory()._request, runtime, "keepalive-" + str(int(time.time() // 60)))
+                self._wake("keepalive-" + str(int(time.time() // 60)), only_if_active=True)
         def sensor_tick():
             with self.capture_lock:
                 return sensor_capture.cloud_tick(self)

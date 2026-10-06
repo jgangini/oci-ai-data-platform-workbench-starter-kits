@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { territorialEndpoint, territorialError, type TerritorialApi } from './territorialAdminState';
 
-export type SyntheticReset = { operation_id?: string; sensor_type?: string; status?: 'pending' | 'completed' | 'cancelled' | 'error'; stage?: string; error?: string; counts?: Record<string, number>; replacements?: Record<string, string>; revision?: number; completed_at?: string; cancelled_at?: string };
+export type SyntheticReset = { operation_id?: string; sensor_type?: string; status?: 'pending' | 'completed' | 'cancelled' | 'error'; stage?: string; error?: string; counts?: Record<string, number | null>; replacements?: Record<string, string>; revision?: number; completed_at?: string; cancelled_at?: string };
 
 const trash = <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 7h14m-9 4v6m4-6v6M9 7l.7-3h4.6l.7 3m-8.2 0 .7 13h9.2l.7-13" /></svg>;
 
@@ -20,7 +20,7 @@ export function SyntheticDataResetStatus({ state, error, runtime, sensorLabel }:
   } : aidp ? {
     preparing: 'Preparing the Synthetic cleanup…', waiting_for_aidp: 'Waiting for the AIDP cleanup job…',
     draining: 'Waiting for active captures to finish…', landing: 'Deleting Synthetic Landing files…',
-    delta: 'Deleting Synthetic rows from Delta tables…', database: 'Deleting Synthetic records from Autonomous Database…',
+    delta: 'Deleting Synthetic rows from Delta tables…', database: 'Synchronizing the cleaned publication index…',
     publishing: 'Publishing the cleaned events and publications…', history: 'Cleaning Synthetic publication history…',
   } : local ? {
     preparing: 'Preparing the local Synthetic cleanup…', landing: 'Deleting local Synthetic files…',
@@ -36,7 +36,7 @@ export function SyntheticDataResetStatus({ state, error, runtime, sensorLabel }:
     {state.status === 'pending' && <p className="registration-progress-detail">{stages[state.stage || ''] || (aidp ? 'Waiting for the AIDP cleanup to finish…' : local ? `Deleting local ${subject} data…` : 'Waiting for cleanup to finish…')}</p>}
     {state.stage === 'history' && <p className="registration-progress-detail">Historical publications rebuilt: {Object.keys(state.replacements || {}).length || state.counts?.history_rewritten || 0}.</p>}
     {local && <p className="registration-progress-detail">Local records and generated files only. No AIDP job or Delta tables are involved.</p>}
-    {aidp && <p className="registration-progress-detail">Cleanup includes Delta tables, Autonomous Database and Object Storage. Completion is confirmed by the AIDP job.</p>}
+    {aidp && <p className="registration-progress-detail">Cleanup updates Delta tables, publication indexes and Object Storage history. Completion is confirmed by the AIDP job.</p>}
     {state.status === 'error' && <p>{state.error || `Use Retry ${subject} reset to continue.`}</p>}
     {error && <p>{error}</p>}
     {['pending', 'error'].includes(state.status || '') && <p className="registration-progress-detail">Capture controls stay paused until cleanup finishes.{failed && ` If interrupted, Retry ${subject} reset resumes the same request.`}</p>}
@@ -184,7 +184,7 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
           ? 'This pauses Synthetic capture for all five sensor types and permanently deletes their Synthetic readings, generated files and reading history. Real readings, social network data, saved sensor locations and sensor configuration are kept.'
           : `This pauses ${subject} capture and permanently deletes its Synthetic readings, generated files and reading history. Other sensor types, real readings, social network data, saved sensor locations and sensor configuration are kept.` : <>{runtime === 'local_fixture'
           ? 'This stops Synthetic capture and permanently deletes its local publications, events and generated files across all networks. No AIDP job or Delta tables are involved.'
-          : runtime === 'aidp' ? 'This stops Synthetic capture and runs an AIDP cleanup for Synthetic publications, events and generated data across all networks, including Delta tables, Autonomous Database and Object Storage.'
+          : runtime === 'aidp' ? 'This stops Synthetic capture and runs an AIDP cleanup for Synthetic publications, events and generated data across all networks, including Delta tables, publication indexes and Object Storage history.'
           : 'This stops Synthetic capture and permanently deletes its publications, events and generated data across all networks.'} Real data, source configuration and credentials are kept.</>}</p>
         {retry && <p>This resumes the same reset request if it was interrupted.</p>}
         <p>After the reset, choose Run now to start a new demonstration.</p></div>

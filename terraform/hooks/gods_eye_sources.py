@@ -10,9 +10,9 @@ import zipfile
 SENSOR_EXPORTS = {
     "core": "utc_text",
     "sensors": "SENSOR_TYPES validate_record",
-    "database": "DOCUMENT_NAME _valid_name read_document write_document mutate_document sensor_reset_version",
+    "control_store": "DOCUMENT_NAME ControlConflict ObjectControlStore _valid_name read_document write_document mutate_document sensor_reset_version reset_version",
     "landing": "ensure_volumes stream_progress",
-    "runtime_secrets": "values database_connection",
+    "runtime_secrets": "SHARED_OCI_CREDENTIAL_NAME OCI_CREDENTIALS identity_hash values _oci_values _signer runtime_auth",
     "sensor_pipeline": "MAX_BATCH_RECORDS MAX_VISIBLE_SENSORS SENSOR_SCHEMA decode_batch SensorLake reset_barrier run",
 }
 SOCIAL_EXPORTS = {
@@ -20,9 +20,10 @@ SOCIAL_EXPORTS = {
     "core": "PLATFORMS SYNTHETIC_MODES LOCALITIES CATEGORIES SEVERITIES CATEGORY_NAMES canonical_mode publication_revisions default_source aidp_credential_name utc_text simulation_state folded _event_location normalize_event image_hashes corroboration legacy_groups review_location incident_summary build_snapshot",
     "correlation": "timestamp identity nearby distance_km expanded_claims retained_memberships nearest_group group_events activity relations jurisdiction same_jurisdiction social_context sensor_context sensor_index add_context",
     "classification": "PROMPT_VERSION _NON_LITERAL_QUOTE _DUPLICATE_RISK _LABEL_PROPERTIES _CLASSIFICATION_SCHEMA _labels _claims classify",
-    "database": "DOCUMENT_NAME published_time _valid_name read_document write_document mutate_document publish purge_synthetic_posts reset_version sensor_reset_version publications replace_synthetic_publication replace_sensor_publication upsert_posts",
+    "control_store": "DOCUMENT_NAME ControlConflict ObjectControlStore _valid_name read_document write_document mutate_document publish reset_version sensor_reset_version publications validate_replacement replace_synthetic_publication replace_sensor_publication upsert_posts",
+    "post_index": "POST_HEAD POST_RANK published_time _post_json _post_hash _post_integer _post_head _post_append _post_document upsert_posts append_purge",
     "landing": "ensure_volumes stream_progress page decode_record records write_objects",
-    "runtime_secrets": "SHARED_OCI_CREDENTIAL_NAME OCI_CREDENTIALS identity_hash values database_connection signer _oci_values _signer runtime_auth",
+    "runtime_secrets": "SHARED_OCI_CREDENTIAL_NAME OCI_CREDENTIALS identity_hash values signer _oci_values _signer runtime_auth",
     "capture": "schedule schedule_at query_lines",
     "x": "THIRD_PARTY XFailure retry_time fetch_page _post_event query_checkpoint poll_queries _poll_status",
     "sensors": "SENSOR_TYPES validate_record apply_locations",
@@ -34,6 +35,7 @@ SOCIAL_EXPORTS = {
     "pipeline": "encoded DeltaLake _put_object install_post_views install_gold_views ingest_page start_landing consume_landing _consume_format _status _due _source_token _poll_x poll_source publish_snapshot _finish_enrichment enrich_pending _tick process_reset stop_streams run_persistent run",
 }
 RENAMES = {
+    "post_index": {"upsert_posts": "append_posts", "append_purge": "purge_synthetic_posts"},
     "pipeline": {"encoded": "encode_publication", "run": "run_social_network"},
     "sensor_pipeline": {"run": "run_sensor_stream"},
     "synthetic_reset": {"encoded": "encode_reset_publication", "clean_landing": "clean_social_landing", "execute": "execute_social_reset"},
@@ -41,7 +43,7 @@ RENAMES = {
 }
 MODULE_ALIASES = {"synthetic_reset": {"database", "landing"},
                   "sensor_reset": {"database", "sensor_capture", "sensors", "synthetic_reset"}}
-RUNTIME_FIELDS = frozenset("namespace bucket catalog region model_id compartment_id streaming_mode pipeline_revision analytics_store oci_credential_name oci_identity_sha256 writer_credential_name workbench_base landing_bucket landing_prefix landing_volume_path checkpoint_volume_path sensor_landing_prefix sensor_landing_volume_path sensor_checkpoint_volume_path workspace_key job_key sensor_job_key gold_query_compute_id agent_compute_id".split())
+RUNTIME_FIELDS = frozenset("namespace bucket catalog region model_id compartment_id streaming_mode pipeline_revision analytics_store oci_credential_name oci_identity_sha256 workbench_base landing_bucket landing_prefix landing_volume_path checkpoint_volume_path sensor_landing_prefix sensor_landing_volume_path sensor_checkpoint_volume_path workspace_key job_key sensor_job_key gold_query_compute_id agent_compute_id".split())
 
 
 def source_fragments(bundle, module, names):
@@ -78,16 +80,23 @@ def _standalone_fragment(bundle, module, names, exports):
     # These imports name definitions already printed in this same file. Preserve
     # branch-local aliases (notably the two different reset executors).
     tree = ast.parse(source)
+    targets = {(origin, name): RENAMES.get(origin, {}).get(name, name)
+               for origin, selected in exports.items() for name in selected.split()}
+    # The installed package keeps a legacy database facade; native programs print
+    # only its Object Storage implementation, never the Oracle migration branch.
+    targets.update({("database", name): target for (origin, name), target in list(targets.items()) if origin == "control_store"})
+    if "post_index" in exports:
+        targets["database", "purge_synthetic_posts"] = "purge_synthetic_posts"
     single_imports = {id(value[0]) for node in ast.walk(tree) for _, value in ast.iter_fields(node)
                       if isinstance(value, list) and len(value) == 1 and isinstance(value[0], ast.ImportFrom)}
     for node in sorted((node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.level), key=lambda node: node.lineno, reverse=True):
-        if node.level != 1 or node.module not in exports:
+        if node.level != 1:
             raise ValueError("Unexpected standalone runtime dependency")
         assignments = []
         for alias in node.names:
-            if alias.name not in exports[node.module].split():
+            if (node.module, alias.name) not in targets:
                 raise ValueError("Missing standalone runtime dependency")
-            target = RENAMES.get(node.module, {}).get(alias.name, alias.name)
+            target = targets[node.module, alias.name]
             if (alias.asname or alias.name) != target:
                 assignments.append((alias.asname or alias.name) + " = " + target)
         replacement = "; ".join(assignments) or ("pass" if id(node) in single_imports else "")
@@ -105,9 +114,9 @@ def _standalone_fragment(bundle, module, names, exports):
         if token.type == tokenize.NAME and (index == 0 or tokens[index - 1].string != "."):
             if token.string in MODULE_ALIASES.get(module, ()) and index + 2 < len(tokens) and tokens[index + 1].string == ".":
                 member = tokens[index + 2]
-                if member.type != tokenize.NAME or member.string not in exports[token.string].split():
+                if member.type != tokenize.NAME or (token.string, member.string) not in targets:
                     raise ValueError("Unexpected standalone module member: " + token.string + "." + member.string)
-                replacement = RENAMES.get(token.string, {}).get(member.string, member.string)
+                replacement = targets[token.string, member.string]
                 last = member
                 index += 2
             elif token.string in RENAMES.get(module, {}):
@@ -123,7 +132,7 @@ def _standalone_fragment(bundle, module, names, exports):
 def workflow_source(module, config, bundle):
     if module not in {"pipeline", "sensor_pipeline"}:
         raise ValueError("Unknown standalone workflow")
-    required = ("writer_credential_name", "pipeline_revision") + (("oci_credential_name", "oci_identity_sha256") if module == "pipeline" else ())
+    required = ("namespace", "bucket", "pipeline_revision", "oci_credential_name", "oci_identity_sha256")
     if not isinstance(config, dict) or any(not isinstance(config.get(key), str) or not config[key] for key in required):
         raise ValueError("Standalone workflow requires explicit deployment configuration")
     config = {key: value for key, value in config.items() if key in RUNTIME_FIELDS}
@@ -134,7 +143,6 @@ def workflow_source(module, config, bundle):
              "# Deployment configuration contains credential names, never credential values.\nRUNTIME_CONFIG = " + pprint.pformat(config, sort_dicts=True, width=100) + "\n"]
     for name, selected in exports.items():
         parts.append("\n# ---- " + name.replace("_", " ") + " ----\n" + _standalone_fragment(bundle, name, selected, exports))
-    # Wallet decoding in database_connection handles credential DATA, never source code.
     parts.append('''
 def main():
     import argparse

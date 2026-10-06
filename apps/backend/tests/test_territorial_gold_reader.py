@@ -53,9 +53,10 @@ def test_gold_reader_uses_configured_spark_contract_and_preserves_full_payload(m
     assert query(config, *incident_query("v1")) == [row]
     actual = factory.call_args.args[0]
     assert actual["tool_class"] == "SQLTool" and actual["params"] == []
-    assert actual["conf"]["queryType"] == "SPARK" and actual["conf"]["sparkComputeKey"] == "existing-gold-compute"
-    assert actual["conf"]["catalogKey"] == "oci_medallion" and actual["conf"]["schemaKey"] == "oci_gold"
-    assert actual["conf"]["isRowLimitEnabled"] is True and actual["conf"]["maxRows"] == 101
+    # The installed executor reads clusterKey; SDK queryType/sparkComputeKey are ignored here.
+    assert actual["conf"] == {"catalogType": "STANDARD", "clusterKey": "existing-gold-compute",
+        "catalogKey": "oci_medallion", "schemaKey": "oci_gold", "isRowLimitEnabled": True, "maxRows": 101,
+        "query": actual["conf"]["query"]}
     assert "`oci_medallion`.`oci_gold`.`territorial_incidents`" in actual["conf"]["query"]
     assert "ADMIN" not in actual["conf"]["query"] and ":version" not in actual["conf"]["query"]
     tool.invoke.assert_called_once_with({})

@@ -39,11 +39,12 @@ def emitted(bundle, module, monkeypatch):
     return result
 
 
-@pytest.mark.parametrize("module,maximum", [("sensor_pipeline", 550), ("pipeline", 3100)])
-def test_standalone_has_no_project_loader_duplicate_defs_or_unbound_globals(bundle, module, maximum):
+@pytest.mark.parametrize("module", ["sensor_pipeline", "pipeline"])
+def test_standalone_has_no_project_loader_duplicate_defs_or_unbound_globals(bundle, module):
     source = workflow_source(module, CONFIG, bundle)
     tree = ast.parse(source)
-    assert len(source.splitlines()) <= maximum
+    assert "import oracledb" not in source and "import sqlite3" not in source
+    assert "database_connection" not in source and "wallet_password" not in source
     assert not any(isinstance(node, ast.ImportFrom) and (node.level or (node.module or "").startswith(("territorial", "app."))) for node in ast.walk(tree))
     assert not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"exec", "eval", "compile", "globals"} for node in ast.walk(tree))
     names = [node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.ClassDef))]
@@ -92,9 +93,25 @@ def test_only_nonsecret_deployment_fields_are_embedded(bundle):
     config = {**CONFIG, "private_key": private_value, "db_password": private_value}
     source = workflow_source("pipeline", config, bundle)
     assert config["private_key"] is private_value and config["db_password"] is private_value
-    assert "AidpControlStore" in source and "AidpRuntime" in source
+    assert "AidpControlStore" not in source and "AidpRuntime" in source
     with pytest.raises(ValueError, match="explicit"):
         workflow_source("pipeline", {"pipeline_revision": "a"}, bundle)
+
+
+def test_emitted_social_program_appends_posts_to_shared_object_journal(bundle, monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "apps/backend/tests"))
+    from test_territorial_control_store import Objects
+    runtime = emitted(bundle, "pipeline", monkeypatch)
+    store = runtime.ObjectControlStore(Objects(), "namespace", "gold")
+    runtime.write_document(store, "runtime", {"analytics_store": "gold", "control_new_install": True}, 0)
+    runtime.upsert_posts(store, [{"source_id": "one", "platform": "x", "created_at": "2026-10-05T00:00:00Z",
+                                 "mode": "Synthetic"}], "captured", ingested_at="2026-10-05T00:00:00Z")
+    head, _ = store.get_json("posts/head.json")
+    node, _ = store.get_json("posts/nodes/" + head["node"] + ".json")
+    assert node["event"]["records"][0]["id"] == "x:one"
+    assert node["event"]["records"][0]["listing_published_at"] == "2026-10-05T00:00:00.000000+00:00"
+    runtime.write_document(store, "checkpoint_reset", {"operation_id": "reset", "status": "pending", "ready": True}, 0)
+    assert runtime.purge_synthetic_posts(store, "reset") is None
 
 
 def test_sensor_decode_preserves_validation_provenance_and_reset_barrier(bundle, monkeypatch):

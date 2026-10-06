@@ -84,6 +84,20 @@ def test_persistent_stream_starts_both_formats_without_awaiting_termination():
         query.awaitTermination.assert_not_called()
 
 
+def test_gold_views_expand_full_objects_without_reparsing_publications_per_record():
+    spark = MagicMock()
+    install_gold_views(spark, "oci_medallion", "oci_medallion.oci_gold.prisma_publications")
+    assert spark.sql.call_count == 4
+    for call, family in zip(spark.sql.call_args_list, ("incidents", "evidence", "sensors", "event_posts")):
+        sql = call.args[0]
+        assert f"CREATE OR REPLACE VIEW oci_medallion.oci_gold.territorial_{family}" in sql
+        assert "SELECT p.id AS publication_version" in sql and "item AS payload" in sql
+        assert f"explode(from_json(get_json_object(p.payload,'$.{family}'),'ARRAY<STRING>'))" in sql
+        assert "posexplode" not in sql and "concat(" not in sql
+        identities = ("event_id", "post_key") if family == "event_posts" else ("id",)
+        assert all(f"get_json_object(item,'$.{field}') AS {field}" in sql for field in identities)
+
+
 @pytest.mark.skipif(os.getenv("TERRITORIAL_SPARK_INTEGRATION") != "1", reason="Requires Spark 3.5 and a supported JDK")
 def test_gold_views_preserve_complete_json_and_exact_publication(tmp_path):
     from pyspark.sql import SparkSession
@@ -91,8 +105,8 @@ def test_gold_views_preserve_complete_json_and_exact_publication(tmp_path):
              .config("spark.sql.warehouse.dir", str(tmp_path / "warehouse")).getOrCreate())
     current = {"incidents": [{"id": "event-1", "correlation_context": {"novel": ["Bogotá", None]}}],
                "evidence": [{"id": "post-1", "text": 'lluvia "fuerte" ☔', "new_field": {"nested": True}}],
-               "sensors": [{"id": "sensor-reading-1", "value": 3.75}],
-               "event_posts": [{"event_id": "event-1", "post_key": "post-1", "new_relation": [1, 2]}]}
+               "sensors": [{"id": "sensor-reading-1", "value": 3.75, "future": {"enabled": False, "values": [None, {"text": "雪"}]}}],
+               "event_posts": [{"event_id": "event-1", "post_key": "post-1", "new_relation": [1, 2], "unknown": {"nested": [True, None]}}]}
     try:
         spark.sql("CREATE DATABASE IF NOT EXISTS oci_gold")
         spark.createDataFrame([("old", json.dumps({key: [] for key in current})), ("current", json.dumps(current))],
@@ -102,6 +116,8 @@ def test_gold_views_preserve_complete_json_and_exact_publication(tmp_path):
             rows = spark.sql(f"SELECT * FROM spark_catalog.oci_gold.territorial_{family} WHERE publication_version=:version",
                              args={"version": "current"}).collect()
             assert [json.loads(row.payload) for row in rows] == expected
+            if family != "event_posts":
+                assert [row.id for row in rows] == [item["id"] for item in expected]
             assert spark.sql(f"SELECT * FROM spark_catalog.oci_gold.territorial_{family} WHERE publication_version='old'").count() == 0
         assert spark.sql("SELECT event_id,post_key FROM spark_catalog.oci_gold.territorial_event_posts").first().asDict() == {
             "event_id": "event-1", "post_key": "post-1"}

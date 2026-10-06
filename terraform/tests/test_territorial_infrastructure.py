@@ -39,6 +39,14 @@ def test_cloud_init_retains_equal_legacy_environment_values_for_image_rollback(t
         assert values[f"TERRITORIAL_{key}"] == values[f"PRISMA_{key}"]
 
 
+def test_portal_control_bucket_is_explicit_gold_not_bootstrap_landing():
+    instance = (ROOT / "terraform/g_oci_core_instance.tf").read_text()
+    template = (ROOT / "terraform/templatefile/user_data.sh").read_text()
+    assert 'gods_eye_control_bucket      = local.medallion_bucket_names["gold"]' in instance
+    assert 'GODS_EYE_CONTROL_BUCKET=${gods_eye_control_bucket}' in template
+    assert 'bucket_name                  = local.bootstrap_bucket_name' in instance
+
+
 def release(component="prisma-viewer"):
     return {
         "tag_name": "v2.3.0", "immutable": True, "draft": False, "prerelease": False,

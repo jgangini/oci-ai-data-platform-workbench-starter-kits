@@ -10,7 +10,7 @@ from pathlib import Path
 
 SHARED_OCI_CREDENTIAL_NAME = "AidpRuntime"
 CONTROL_CREDENTIAL_NAME = "AidpControlStore"
-OCI_CREDENTIALS = (SHARED_OCI_CREDENTIAL_NAME, "AidpDataGovernanceExtension", "TerritorialWriterRuntime", "PrismaWriterRuntime")
+OCI_CREDENTIALS = (SHARED_OCI_CREDENTIAL_NAME, "AidpDataGovernanceExtension")
 
 
 def identity_hash(config):
@@ -63,7 +63,7 @@ def database_connection(secret_get, credential):
             yield connection
 
 
-def signer(secret_get, credential_name="PrismaWriterRuntime", expected_identity=""):
+def signer(secret_get, credential_name=SHARED_OCI_CREDENTIAL_NAME, expected_identity=""):
     config = _oci_values(secret_get, credential_name, expected_identity)
     return _signer(config)
 
@@ -84,7 +84,7 @@ def _signer(config):
                             private_key_file_location=None, private_key_content=config["private_key"])
 
 
-def runtime_auth(secret_get, region, credential_name="PrismaWriterRuntime", expected_identity=""):
+def runtime_auth(secret_get, region, credential_name=SHARED_OCI_CREDENTIAL_NAME, expected_identity=""):
     """Ordinary OCI Signer clients still validate a complete SDK config; keep it only in memory."""
     credential = _oci_values(secret_get, credential_name, expected_identity)
     config = {key: credential[key] for key in ("tenancy", "user", "fingerprint")}

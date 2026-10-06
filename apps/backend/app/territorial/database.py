@@ -1,13 +1,13 @@
-"""Small Autonomous document contract, separate from AIDP's conversation memory."""
+"""Operational store facade; Autonomous procedures remain for legacy migration only."""
 from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
 
 from .core import canonical_mode
-
-DOCUMENT_NAME = re.compile(r"(?:configuration|simulation|reviews|runtime|event_registry|status_[a-z]+|checkpoint_[a-z]+)")
+from . import control_store
+from .post_index import published_time
+from .control_store import DOCUMENT_NAME, ObjectControlStore, _valid_name
 
 TABLES = (
     "CREATE TABLE ADMIN.PRISMA_CONTROL_DOCS (name VARCHAR2(100) PRIMARY KEY, payload CLOB NOT NULL CHECK (payload IS JSON))",
@@ -328,19 +328,11 @@ def install_schema(connection):
     connection.commit()
 
 
-def published_time(value):
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds") if parsed.tzinfo is not None else None
-    except (ValueError, OverflowError):
-        return None
-
-
 def read_document(connection, name: str) -> dict:
-    import oracledb
     _valid_name(name)
+    if isinstance(connection, ObjectControlStore):
+        return control_store.read_document(connection, name)
+    import oracledb
     result = connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.READ_DOC", oracledb.DB_TYPE_CLOB, [name])
     if result is None:
         return {"revision": 0}
@@ -351,12 +343,14 @@ def read_document(connection, name: str) -> dict:
 
 
 def read_documents(connection, names) -> dict:
-    import oracledb
     names = tuple(names)
     if not names or len(names) > 32 or len(set(names)) != len(names):
         raise ValueError("Invalid Territorial document batch")
     for name in names:
         _valid_name(name)
+    if isinstance(connection, ObjectControlStore):
+        return control_store.read_documents(connection, names)
+    import oracledb
     try:
         result = connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.READ_DOCS", oracledb.DB_TYPE_CLOB, [json.dumps(names)])
     except oracledb.DatabaseError as exc:
@@ -370,24 +364,21 @@ def read_documents(connection, names) -> dict:
                    for doc in documents.values())):
         raise ValueError("Invalid Territorial document batch response")
     return {name: documents.get(name, {"revision": 0}) for name in names}
-
-
-def _valid_name(name):
-    if not isinstance(name, str) or len(name) > 100 or not DOCUMENT_NAME.fullmatch(name):
-        raise ValueError("Invalid Territorial document name")
-
-
 def write_document(connection, name: str, data: dict, expected: int) -> dict:
     _valid_name(name)
     if not isinstance(data, dict) or type(expected) is not int or expected < 0:
         raise ValueError("Invalid Territorial document revision")
     document = {**data, "revision": expected + 1}
+    if isinstance(connection, ObjectControlStore):
+        return control_store.write_document(connection, name, data, expected)
     serialized = json.dumps(document, ensure_ascii=False, allow_nan=False)
     connection.cursor().callproc("ADMIN.PRISMA_CONTROL.WRITE_DOC", [name, serialized, expected])
     return document
 
 
 def mutate_document(connection, name: str, change) -> dict:
+    if isinstance(connection, ObjectControlStore):
+        return control_store.mutate_document(connection, name, change)
     current = read_document(connection, name)
     updated = change(dict(current))
     result = write_document(connection, name, updated, int(current.get("revision", 0)))
@@ -396,6 +387,8 @@ def mutate_document(connection, name: str, change) -> dict:
 
 
 def publish(connection, snapshot: dict):
+    if isinstance(connection, ObjectControlStore):
+        return control_store.publish(connection, snapshot)
     if (not isinstance(snapshot, dict) or not isinstance(snapshot.get("version"), str)
             or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", snapshot["version"])
             or not isinstance(snapshot.get("incidents"), list) or not isinstance(snapshot.get("evidence"), list)):
@@ -407,20 +400,29 @@ def publish(connection, snapshot: dict):
 
 
 def purge_synthetic_posts(connection, operation_id):
+    if isinstance(connection, ObjectControlStore):
+        return control_store.purge_synthetic_posts(connection, operation_id)
     result = connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.PURGE_SYNTHETIC_POSTS", int, [operation_id])
     connection.commit()
     return result
 
 
 def reset_version(connection):
+    if isinstance(connection, ObjectControlStore):
+        return control_store.reset_version(connection)
     return connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.RESET_VERSION", int, [])
 
 
 def sensor_reset_version(connection):
+    if isinstance(connection, ObjectControlStore):
+        return control_store.sensor_reset_version(connection)
     return connection.cursor().callfunc("ADMIN.PRISMA_CONTROL.SENSOR_RESET_VERSION", int, [])
 
 
 def publications(connection):
+    if isinstance(connection, ObjectControlStore):
+        yield from control_store.publications(connection)
+        return
     import oracledb
     after = None
     while True:
@@ -436,6 +438,8 @@ def publications(connection):
 
 
 def replace_synthetic_publication(connection, operation_id, old, new):
+    if isinstance(connection, ObjectControlStore):
+        return control_store.replace_synthetic_publication(connection, operation_id, old, new)
     connection.cursor().callproc("ADMIN.PRISMA_CONTROL.REPLACE_SYNTHETIC_PUBLICATION", [operation_id, old, new])
     connection.commit()
 
@@ -444,12 +448,16 @@ def replace_sensor_publication(connection, operation_id, sensor_type, old, new):
     from .sensors import SENSOR_TYPES
     if not isinstance(sensor_type, str) or sensor_type not in (*SENSOR_TYPES, "all"):
         raise ValueError("Invalid sensor reset type")
+    if isinstance(connection, ObjectControlStore):
+        return control_store.replace_sensor_publication(connection, operation_id, sensor_type, old, new)
     connection.cursor().callproc("ADMIN.PRISMA_CONTROL.REPLACE_SENSOR_PUBLICATION", [operation_id, sensor_type, old, new])
     connection.commit()
 
 
 def upsert_posts(connection, records, analysis_status, ingested_at=None, batch_key=None):
     """Project durable capture/ingestion/analysis progress without replacing a later state."""
+    if isinstance(connection, ObjectControlStore):
+        return control_store.upsert_posts(connection, records, analysis_status, ingested_at, batch_key)
     if analysis_status not in {"captured", "ingested", "processed"}:
         raise ValueError("Invalid post analysis status")
     documents = {}
@@ -484,6 +492,8 @@ def upsert_posts(connection, records, analysis_status, ingested_at=None, batch_k
 
 def query_posts(connection, platform, limit, before_seq=None, max_seq=None):
     """Stable insertion-order page; the first page fixes the capture sequence ceiling."""
+    if isinstance(connection, ObjectControlStore):
+        return control_store.query_posts(connection, platform, limit, before_seq, max_seq)
     import oracledb
     if (platform is not None and platform not in ("x", "facebook", "instagram", "tiktok")
             or type(limit) is not int or not 1 <= limit <= 100
@@ -500,6 +510,8 @@ def query_posts(connection, platform, limit, before_seq=None, max_seq=None):
 
 
 def query_ordered_posts(connection, platform, limit, position=None, maximum=None, sort="published_at", order="desc"):
+    if isinstance(connection, ObjectControlStore):
+        return control_store.query_ordered_posts(connection, platform, limit, position, maximum, sort, order)
     import oracledb
     if (platform is not None and platform not in ("x", "facebook", "instagram", "tiktok")
             or type(limit) is not int or not 1 <= limit <= 100 or sort not in {"published_at", "captured_at"}

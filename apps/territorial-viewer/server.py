@@ -126,7 +126,9 @@ async def admin_request(request: Request, method: str, path: str, payload=None):
     # The private wire contract works with either VM upgrade order; never retry a mutation.
     wire_path = path.replace("/territorial/", "/prisma/", 1) if path.startswith(("/api/territorial/", "/api/admin/territorial/")) else path
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(100, connect=10)) as client:
+        # Only grounded chat needs the native Gold cold-start budget; ordinary administration stays bounded at 100s.
+        timeout = httpx.Timeout(100, connect=10, read=250 if method == "POST" and wire_path == "/api/admin/prisma/chat" else 100)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.request(method, base + wire_path,
                 headers={"Cookie": request.headers.get("cookie", "")}, json=payload)
         if method == "GET" and wire_path == "/api/prisma/identity" and response.status_code == 404:

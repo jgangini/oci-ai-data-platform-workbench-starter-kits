@@ -55,7 +55,8 @@ def test_agent_is_portable_one_file_with_fixed_gold_queries(tmp_path, monkeypatc
     assert namespace["gold_query"](configuration(), "SELECT payload FROM territorial_sensors WHERE publication_version=:version",
         {"version": "published' OR 1=1"}) == [{"id": "sensor-1", "value": 2.3}]
     request = submitted[0]["conf"]
-    assert request["queryType"] == "SPARK" and request["sparkComputeKey"] == "query-compute"
+    assert request["catalogType"] == "STANDARD" and request["clusterKey"] == "query-compute"
+    assert "queryType" not in request and "sparkComputeKey" not in request
     assert "`oci_medallion`.`oci_gold`.`territorial_sensors`" in request["query"]
     assert "OR 1=1" not in request["query"]
     with pytest.raises(ValueError, match="fixed SELECT"):

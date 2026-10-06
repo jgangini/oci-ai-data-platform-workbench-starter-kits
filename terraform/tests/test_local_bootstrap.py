@@ -12,6 +12,7 @@ from scripts.bootstrap_local_oci_env import (
     platform_workspace_name,
 )
 from apps.backend.app.security import verify_secret
+from scripts import bootstrap_local_oci_env as bootstrap
 
 
 def test_compose_local_profile_defaults_and_overrides_are_parameterized() -> None:
@@ -42,6 +43,57 @@ def test_local_bootstrap_uses_exact_bucket_name() -> None:
     ]
 
     assert one_named("bucket", buckets, "aidp-data-selected").name == "aidp-data-selected"
+
+
+@pytest.mark.parametrize("requested,names,expected", [
+    (None, ["aidp-data-selected"], None),
+    ("custom-gold", ["aidp-data-selected", "custom-gold"], "custom-gold"),
+    ("missing", ["aidp-data-selected", "custom-gold"], "error"),
+    ("custom-gold", ["aidp-data-selected", "custom-gold", "custom-gold"], "error"),
+])
+def test_local_bootstrap_discovers_only_the_explicit_control_bucket(monkeypatch, requested, names, expected):
+    def listed(**kwargs):
+        assert kwargs == {"namespace_name": "namespace", "compartment_id": "compartment"}
+        return [SimpleNamespace(name=name) for name in names]
+    identity = SimpleNamespace(
+        list_domains=lambda *_, **__: SimpleNamespace(data=[SimpleNamespace(url="https://example.invalid", display_name="Default")]),
+        list_compartments=lambda **_: [],
+        get_tenancy=lambda _: SimpleNamespace(data=SimpleNamespace(name="example")),
+    )
+    domain = SimpleNamespace(list_groups=lambda **kwargs: [SimpleNamespace(id="group", display_name=(
+        "aidp-lab-pending-selected" if "pending" in kwargs["filter"] else "aidp-lab-developers-selected"))])
+    platform = SimpleNamespace(id="platform", display_name="aidp-lab-selected", lifecycle_state="ACTIVE", compartment_id="compartment", alias_key="example")
+    monkeypatch.setattr(bootstrap, "home_config", lambda config: config)
+    monkeypatch.setattr(bootstrap, "resources", lambda method, **kwargs: method(**kwargs))
+    monkeypatch.setattr(bootstrap.oci.identity, "IdentityClient", lambda _: identity)
+    monkeypatch.setattr(bootstrap.oci.identity_domains, "IdentityDomainsClient", lambda *_, **__: domain)
+    monkeypatch.setattr(bootstrap.oci.ai_data_platform, "AiDataPlatformClient", lambda _: SimpleNamespace(
+        list_ai_data_platforms=lambda **_: [platform], get_ai_data_platform=lambda _: SimpleNamespace(data=platform)))
+    monkeypatch.setattr(bootstrap.oci.object_storage, "ObjectStorageClient", lambda _: SimpleNamespace(
+        get_namespace=lambda: SimpleNamespace(data="namespace"), list_buckets=listed))
+    if expected == "error":
+        with pytest.raises(RuntimeError, match="God's Eye View Gold bucket"):
+            bootstrap.discover({"tenancy": "tenancy", "region": "us-chicago-1"}, "selected", requested)
+    else:
+        values = bootstrap.discover({"tenancy": "tenancy", "region": "us-chicago-1"}, "selected", requested)
+        assert values.get("GODS_EYE_CONTROL_BUCKET") == expected
+        assert values["BUCKET_NAME"] == "aidp-data-selected"
+        assert "TERRITORIAL_VIEWER_ENABLED" not in values
+
+
+def test_local_bootstrap_renders_explicit_control_bucket_without_activation(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["bootstrap_local_oci_env.py", "--gods-eye-control-bucket", "custom-gold"])
+    assert parse_args().gods_eye_control_bucket == "custom-gold"
+    render_env = bootstrap.render_env
+    def check(values):
+        assert "GODS_EYE_CONTROL_BUCKET" not in render_env(values)
+        assert "GODS_EYE_CONTROL_BUCKET=custom-gold\n" in render_env({**values, "GODS_EYE_CONTROL_BUCKET": "custom-gold"})
+        for invalid in ("", "gold\nTERRITORIAL_VIEWER_ENABLED=true"):
+            with pytest.raises(RuntimeError, match="GODS_EYE_CONTROL_BUCKET"):
+                render_env({**values, "GODS_EYE_CONTROL_BUCKET": invalid})
+        return render_env(values)
+    monkeypatch.setattr(bootstrap, "render_env", check)
+    bootstrap.self_check()
 
 
 def test_local_bootstrap_uses_alias_and_deterministic_workspace_fallbacks() -> None:

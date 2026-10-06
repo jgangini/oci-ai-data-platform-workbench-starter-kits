@@ -597,3 +597,33 @@ def test_retry_after_completed_history_preserves_rewrite_count(resetting, monkey
     run_reset(resetting)
     assert docs["checkpoint_reset"]["status"] == "completed"
     assert docs["checkpoint_reset"]["counts"]["history_rewritten"] == rewritten
+
+
+def test_object_reset_without_sqlite_preserves_unknown_post_count_on_retry(monkeypatch):
+    from app.territorial.control_store import ObjectControlStore
+    from test_territorial_control_store import Objects
+
+    store = ObjectControlStore(Objects(), "namespace", "bucket")
+    database.write_document(store, "runtime", {"analytics_store": "gold", "control_new_install": True}, 0)
+    operation = str(uuid4())
+    database.write_document(store, "checkpoint_reset", {
+        "operation_id": operation, "status": "pending", "ready": True}, 0)
+    lake = SimpleNamespace(consume=lambda _: None, synthetic_ids=lambda: set(),
+                           delete_synthetic=lambda: {"bronze": 0, "silver": 0}, visible=lambda *_: [])
+    monkeypatch.setattr(reset, "clean_landing", lambda *_: 0)
+    monkeypatch.setattr(reset, "clean_history", lambda *_: None)
+    version = "gold-" + "0" * 32
+    publisher = MagicMock(side_effect=[RuntimeError("Interrupted publication"), {"version": version}])
+    command = database.read_document(store, "checkpoint_reset")
+    with pytest.raises(RuntimeError, match="incomplete"):
+        reset.execute(store, store.objects, lake, CONFIG, NOW, command, publisher)
+    failed = database.read_document(store, "checkpoint_reset")
+    assert failed["stage"] == "publishing" and failed["counts"]["posts"] is None
+    head = store.get_json("posts/head.json")[0]
+    assert store.index_path is None and head is not None
+    command = database.mutate_document(store, "checkpoint_reset", lambda doc: {**doc, "status": "pending"})
+    assert reset.execute(store, store.objects, lake, CONFIG, NOW, command, publisher) == {"version": version}
+    completed = database.read_document(store, "checkpoint_reset")
+    assert completed["status"] == "completed" and completed["counts"] == {
+        "bronze": 0, "silver": 0, "posts": None, "landing_files": 0}
+    assert store.get_json("posts/head.json")[0] == head

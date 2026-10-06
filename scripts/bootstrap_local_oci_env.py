@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--key", type=Path, required=False)
     parser.add_argument("--profile", default="DEFAULT")
     parser.add_argument("--suffix", help="Explicit AIDP lab suffix when several labs exist.")
+    parser.add_argument("--gods-eye-control-bucket", help="Explicit Gold bucket from medallion_bucket_names.gold for God's Eye View.")
     parser.add_argument("--output", type=Path, default=Path(".env"))
     parser.add_argument(
         "--local-config-output",
@@ -212,7 +213,7 @@ def build_workbench_url(endpoint: str, tenancy_name: str, domain_name: str) -> s
     return f"https://{host}#?tenant={tenancy_name}&domain={domain_name}"
 
 
-def discover(config: dict[str, str], suffix: str | None) -> dict[str, str]:
+def discover(config: dict[str, str], suffix: str | None, gods_eye_control_bucket: str | None = None) -> dict[str, str]:
     home = home_config(config)
     identity = oci.identity.IdentityClient(home)
     domains = identity.list_domains(home["tenancy"], display_name="Default", lifecycle_state="ACTIVE").data
@@ -270,15 +271,10 @@ def discover(config: dict[str, str], suffix: str | None) -> dict[str, str]:
     platform = aidp.get_ai_data_platform(platform_summary.id).data
     object_storage = oci.object_storage.ObjectStorageClient(config)
     namespace = str(object_storage.get_namespace().data)
-    bucket = one_named(
-        "AIDP data bucket",
-        resources(
-            object_storage.list_buckets,
-            namespace_name=namespace,
-            compartment_id=platform.compartment_id,
-        ),
-        f"aidp-data-{selected_suffix}",
-    )
+    buckets = resources(object_storage.list_buckets, namespace_name=namespace, compartment_id=platform.compartment_id)
+    bucket = one_named("AIDP data bucket", buckets, f"aidp-data-{selected_suffix}")
+    controls = {} if gods_eye_control_bucket is None else {"GODS_EYE_CONTROL_BUCKET": str(
+        one_named("God's Eye View Gold bucket", buckets, gods_eye_control_bucket).name)}
     return {
         "IDENTITY_DOMAIN_URL": domain.url.rstrip("/"),
         "IDENTITY_DEVELOPER_GROUP_ID": developer_group.id,
@@ -295,6 +291,7 @@ def discover(config: dict[str, str], suffix: str | None) -> dict[str, str]:
         "BUCKET_NAME": str(bucket.name),
         "AIDP_SETTINGS_FILE": "/var/lib/aidp-lab/settings.json",
         "LAB_MARKER": f"aidp-lab-{selected_suffix}",
+        **controls,
     }
 
 
@@ -320,6 +317,8 @@ def render_env(values: dict[str, str]) -> str:
         "COOKIE_SECURE",
         "LOCAL_DEVELOPMENT_MODE",
     )
+    if "GODS_EYE_CONTROL_BUCKET" in values:
+        required += ("GODS_EYE_CONTROL_BUCKET",)
     for key in required:
         if not values.get(key):
             raise RuntimeError(f"Missing generated environment value: {key}")
@@ -399,7 +398,7 @@ def main() -> None:
     else:
         admin_username = "admin"
         admin_hash, registration_hash = template_hashes(args.template)
-    discovered = discover(config, args.suffix)
+    discovered = discover(config, args.suffix, args.gods_eye_control_bucket)
     selected_suffix = discovered["LAB_MARKER"].removeprefix(LAB_PREFIX)
     local_config = args.local_config_output or Path(".tmp") / "oci-local" / selected_suffix / "config"
     if not args.force:

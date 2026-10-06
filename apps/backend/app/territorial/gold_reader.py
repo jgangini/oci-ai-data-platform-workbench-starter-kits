@@ -36,7 +36,7 @@ def query(config, sql, binds):
     if not isinstance(compute, str) or not compute or len(compute) > 200:
         raise RuntimeError("Gold query compute is not configured")
     native = create_langgraph_tool(AIDPToolConf(name="gods_eye_view_gold", description="Read the requested Gold publication",
-        tool_class="SQLTool", conf={"queryType": "SPARK", "sparkComputeKey": compute,
+        tool_class="SQLTool", conf={"catalogType": "STANDARD", "clusterKey": compute,
             "catalogKey": config["catalog"], "schemaKey": "oci_gold",
             "query": statement(sql, binds, config.get("catalog")), "isRowLimitEnabled": True, "maxRows": 101}, params=[]).model_dump())
     response = native.invoke({})

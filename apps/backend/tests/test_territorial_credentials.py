@@ -112,57 +112,56 @@ def test_credential_mapping_rejects_wrong_platform_alias_or_invalid_identifier(r
 
 
 @pytest.mark.parametrize("writer", [None, "TerritorialWriterRuntime", "AidpControlStore"])
-def test_social_runtime_and_ingestion_callback_keep_selected_database_credential(monkeypatch, writer):
-    from app.territorial import pipeline
-    names, connections, ingested = [], [], []
-    fail = False
-
-    @contextmanager
-    def database(_secret_get, name):
-        names.append(name)
-        if fail:
-            raise PermissionError("Credential unavailable")
-        connection = object()
-        connections.append(connection)
-        yield connection
-
-    monkeypatch.setattr(pipeline, "database_connection", database)
-    monkeypatch.setattr(pipeline, "reset_version", lambda _connection: 2)
-    monkeypatch.setattr(pipeline, "sensor_reset_version", lambda _connection: 2)
-    monkeypatch.setattr(pipeline, "read_document", lambda *_args: {"synthetic_reset_version": 2})
-    monkeypatch.setattr(pipeline, "process_reset", lambda *_args: None)
-    monkeypatch.setattr(pipeline, "_tick", lambda *_args: {"version": "test"})
-    monkeypatch.setattr(pipeline, "upsert_posts", lambda connection, *_args, **_kwargs: ingested.append(connection))
+def test_social_runtime_and_callback_use_object_controls_even_with_stale_writer_config(monkeypatch, writer):
+    from app.territorial import pipeline, database
+    from app.territorial.control_store import ObjectControlStore
+    from test_territorial_control_store import Objects, ready
+    objects = Objects()
+    store = ObjectControlStore(objects, "namespace", "gold")
+    ready(store, synthetic_reset_version=2)
+    monkeypatch.setitem(__import__("sys").modules, "oracledb", None)
+    monkeypatch.setattr(pipeline, "process_reset", lambda *_: None)
+    monkeypatch.setattr(pipeline, "_tick", lambda *_: {"version": "test"})
+    seen = []
+    monkeypatch.setattr(pipeline, "upsert_posts", lambda connection, *_args, **_kwargs: seen.append(connection))
     lake = SimpleNamespace()
-    config = {} if writer is None else {"writer_credential_name": writer}
-    pipeline.run(None, None, config, objects=object(), lake=lake, client=object(), classifier=object())
+    config = {"namespace": "namespace", "bucket": "gold", "analytics_store": "gold", "writer_credential_name": writer}
+    pipeline.run(None, lambda **_: pytest.fail("No credential needed for injected clients"), config,
+                 objects=objects, lake=lake, client=object(), classifier=object())
     lake.on_ingested([], "test-batch")
-    assert names == [writer or "PrismaWriterRuntime"] * 2
-    assert connections[0] is not connections[1] and ingested == [connections[1]]
-    fail = True
-    with pytest.raises(PermissionError):
-        lake.on_ingested([], "test-batch")
-    assert names == [writer or "PrismaWriterRuntime"] * 3  # No alternate credential after a read error.
+    assert len(seen) == 1 and isinstance(seen[0], ObjectControlStore)
+    assert seen[0].objects is objects and seen[0].bucket == "gold"
+    assert database.read_document(store, "runtime")["control_migration_complete"] is True
 
 
-@pytest.mark.parametrize("writer", [None, "TerritorialWriterRuntime", "AidpControlStore"])
-def test_sensor_runtime_uses_selected_database_credential_before_starting_stream(monkeypatch, writer):
-    from app.territorial import database as database_api, landing, runtime_secrets, sensor_pipeline
+@pytest.mark.parametrize("workflow", ["social", "sensors"])
+def test_stream_entrypoints_fail_before_spark_when_object_migration_is_missing(monkeypatch, workflow):
+    from app.territorial import pipeline, sensor_pipeline, landing
+    from test_territorial_control_store import Objects
+    monkeypatch.setitem(__import__("sys").modules, "oracledb", None)
+    monkeypatch.setattr(landing, "ensure_volumes", lambda *_: pytest.fail("No Spark mutation before migration"))
+    monkeypatch.setattr(pipeline, "DeltaLake", lambda *_: pytest.fail("No Spark mutation before migration"))
+    config = {"namespace": "namespace", "bucket": "gold", "analytics_store": "gold"}
+    arguments = {"objects": Objects()}
+    if workflow == "social":
+        arguments.update(client=object(), classifier=object())
+    with pytest.raises(RuntimeError, match="migration"):
+        (pipeline if workflow == "social" else sensor_pipeline).run(None, None, config, **arguments)
+
+
+@pytest.mark.parametrize("workflow", ["social", "sensors"])
+def test_both_streams_use_only_shared_oci_credentials_without_database_fallback(monkeypatch, workflow):
+    from app.territorial import pipeline, sensor_pipeline, runtime_secrets
     names = []
-
-    @contextmanager
-    def database(_secret_get, name):
+    def failed_auth(_get, region, name, identity):
         names.append(name)
-        raise PermissionError("Credential unavailable")
-        yield  # pragma: no cover - the context manager fails before opening a connection.
-
-    monkeypatch.setattr(runtime_secrets, "database_connection", database)
-    monkeypatch.setattr(landing, "ensure_volumes", lambda *_args: None)
-    monkeypatch.setattr(database_api, "sensor_reset_version", lambda *_args: pytest.fail("No connection"))
-    config = {} if writer is None else {"writer_credential_name": writer}
+        raise PermissionError("Shared OCI credential unavailable")
+    monkeypatch.setattr(pipeline, "runtime_auth", failed_auth)
+    monkeypatch.setattr(runtime_secrets, "runtime_auth", failed_auth)
+    monkeypatch.setattr(runtime_secrets, "database_connection", lambda *_: pytest.fail("No database credential"))
     with pytest.raises(PermissionError):
-        sensor_pipeline.run(None, None, config)
-    assert names == [writer or "PrismaWriterRuntime"]
+        (pipeline if workflow == "social" else sensor_pipeline).run(None, None, {"region": "us-chicago-1"})
+    assert names == ["AidpRuntime"]
 
 
 def test_explicit_oci_credential_failure_never_tries_legacy_name():
@@ -174,5 +173,5 @@ def test_explicit_oci_credential_failure_never_tries_legacy_name():
         raise PermissionError("Credential unavailable")
 
     with pytest.raises(PermissionError):
-        runtime_auth(secret_get, "us-chicago-1", "TerritorialWriterRuntime")
-    assert calls == [("TerritorialWriterRuntime", "tenancy")]
+        runtime_auth(secret_get, "us-chicago-1", "AidpRuntime")
+    assert calls == [("AidpRuntime", "tenancy")]

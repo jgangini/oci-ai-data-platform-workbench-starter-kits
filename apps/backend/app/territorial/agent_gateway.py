@@ -86,7 +86,8 @@ def invoke(client, endpoint, payload, cookie, key, snapshot):
     content = query_content(payload, snapshot)
     session = scoped_session(payload, cookie, key)
     endpoint = checked_endpoint(endpoint, client.settings.aidp_region)
-    response = client.session.post(endpoint, auth=client.signer, timeout=(10, 90),
+    # Native Gold cold starts can exceed 90s; stay inside the viewer's 250s and ingress's 300s budgets.
+    response = client.session.post(endpoint, auth=client.signer, timeout=(10, 240),
         headers={"x-session-id": session}, json={"sessionKey": session, "isStreamEnabled": False, "trace": False,
         "input": [{"role": "User", "content": [{"type": "INPUT_TEXT", "text": content}]}]})
     response.raise_for_status()
