@@ -68,7 +68,7 @@ Final workflow and lineage acceptance remains pending.
 | `oci_core_internet_gateway.lab` | public route | Terraform validate | Pending gateway OCID | Keep: VM/package reachability. |
 | `oci_core_route_table.public` | public subnet | Terraform validate | Pending route inventory | Keep: internet route. |
 | `oci_objectstorage_bucket.data` | post-apply and participant medallion paths | `tests/test_release_gate.py`, `tests/test_manifest.py` | Pending bucket OCID/prefixes | Keep: private Oracle-managed-key medallion bucket. |
-| `oci_objectstorage_bucket.artifacts` | fixed bucket for governance Delta tables and runtime artifacts | `tests/test_manifest.py`, `contract.tftest.hcl` | Live AIDP external-table acceptance pending | Keep: create or reuse only `oci_artifacts`; the governance module owns its exact `oci_artifacts/data_governance_*` table prefixes. |
+| `oci_objectstorage_bucket.artifacts` | selected bucket for governance Delta tables and runtime artifacts | `tests/test_manifest.py`, `contract.tftest.hcl` | Live AIDP external-table acceptance pending | Keep: use a dedicated bucket per environment, defaulting to `oci_artifacts`; the governance module owns its exact `oci_artifacts/data_governance_*` table prefixes within that bucket. |
 | `data.oci_identity_availability_domains.lab` | VM placement | `tests/test_preflight.py` | Pending selected AD | Keep: capacity-aware placement. |
 | `terraform_data.vm_release` | instance replacement trigger | Terraform validate | Pending release SHA | Keep: pins bootstrap to immutable commit. |
 | `data.oci_core_images.oracle_linux` | VM source image | Terraform validate | Pending image OCID | Keep: supported VM image lookup. |

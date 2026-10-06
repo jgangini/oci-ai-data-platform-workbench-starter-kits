@@ -23,6 +23,8 @@ DEFAULT_ARTIFACTS_BUCKET = "oci_artifacts"
 
 
 def _require_new_bucket_available(object_storage: Any, bucket_name: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", bucket_name) is None:
+        raise ValueError("The artifacts bucket name must contain 1-128 letters, numbers, dots, underscores, or hyphens")
     namespace = str(object_storage.get_namespace().data or "").strip()
     if not namespace:
         raise RuntimeError("OCI did not return an Object Storage namespace")
@@ -37,7 +39,7 @@ def _require_new_bucket_available(object_storage: Any, bucket_name: str) -> str:
         raise
     raise RuntimeError(
         f"{bucket_name} already exists in this Object Storage namespace; "
-        "select Use existing bucket"
+        "choose a different name for a new environment, or select Use existing bucket for this environment's own bucket"
     )
 
 
@@ -242,7 +244,7 @@ def select_inputs(
     artifacts_bucket_message = (
         _require_new_bucket_available(
             object_storage_factory(regional_config),
-            DEFAULT_ARTIFACTS_BUCKET,
+            str(inputs.get("artifacts_new_bucket_name", DEFAULT_ARTIFACTS_BUCKET)).strip(),
         )
         if artifacts_mode == "new"
         else ""

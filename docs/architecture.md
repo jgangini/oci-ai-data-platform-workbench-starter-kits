@@ -45,7 +45,7 @@ Terraform creates infrastructure; [post-apply](../terraform/hooks/post_apply.py)
 | AIDP workspace | Participant content, jobs and module source files | Installed package and protected operation manifests |
 | Master Catalog / Delta | Governed tables, data processing and lineage | Declared schema/table identity and successful native writes |
 | Four medallion buckets | Configurable Landing, Bronze, Silver and Gold storage roles | Terraform's resolved `medallion_bucket_names` |
-| `oci_artifacts` | Four Governance control tables | Governance's fixed table contract |
+| Selected artifacts bucket (default `oci_artifacts`) | Four Governance control tables | Fixed logical schema and table paths |
 | Object control prefix | God's Eye View configuration, reviews, checkpoints, status and immutable post journal | Conditional object writes under `.control/gods_eye_view/` |
 | VM private state | Application settings, sessions, protected files and a disposable SQLite post index | Application state is persistent; the post index rebuilds from its Object journal |
 | Autonomous | Separate platform contracts and the legacy source during explicit migration | Retain until its remaining consumers are verified; new module controls do not use it |

@@ -29,7 +29,7 @@ def test_catalog_separates_five_participant_labs_from_global_modules() -> None:
     assert "transactions" in public[0]["description"]
     governance = packs[-2]
     assert governance.status == "available"
-    assert governance.pack_version == "3.0.2"
+    assert governance.pack_version == "3.0.3"
     assert governance.kind == "governance_extension"
     assert governance.scope == "global"
     assert governance.installation_modes == ("laboratory", "production")

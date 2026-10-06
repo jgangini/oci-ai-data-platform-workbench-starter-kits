@@ -61,7 +61,7 @@ def test_source_tree_and_catalog_have_one_canonical_project_identity():
     assert (app_root / "labs" / "ai_data_governance" / "lab.json").is_file()
     module = load_lab_pack("ai_data_governance_vsc_extension")
     assert module.lab_id == module.agent["name"] == "ai_data_governance"
-    assert module.pack_version == "3.0.2"
+    assert module.pack_version == "3.0.3"
     assert "ai_data_governance_vsc_extension" not in json.dumps(public_lab_catalog())
 
 

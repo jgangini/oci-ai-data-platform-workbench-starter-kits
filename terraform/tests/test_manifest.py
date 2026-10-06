@@ -86,17 +86,21 @@ def test_deploy_studio_manifest_contract() -> None:
         "field": "autonomous_database_mode",
         "equals": "existing",
     }
-    for layer in ("landing", "bronze", "silver", "gold"):
+    for layer in ("landing", "bronze", "silver", "gold", "artifacts"):
         assert fields[f"{layer}_bucket_mode"]["group"] == "medallion"
         assert fields[f"{layer}_new_bucket_name"]["default"] == f"oci_{layer}"
         assert fields[f"{layer}_existing_bucket_name"]["options_source"] == "oci_active_buckets"
-    assert fields["artifacts_bucket_mode"]["group"] == "medallion"
-    assert "artifacts_new_bucket_name" not in fields
-    assert "artifacts_existing_bucket_name" not in fields
-    assert storage.count('name           = "oci_artifacts"') == 1
-    assert storage.count('name      = "oci_artifacts"') == 1
-    assert 'variable "artifacts_new_bucket_name"' not in variables
-    assert 'variable "artifacts_existing_bucket_name"' not in variables
+    assert fields["artifacts_new_bucket_name"]["pattern"] == "^[A-Za-z0-9._-]{1,128}$"
+    for mode in ("new", "existing"):
+        assert fields[f"artifacts_{mode}_bucket_name"]["visible_when"] == {
+            "field": "artifacts_bucket_mode", "equals": mode,
+        }
+        assert re.search(
+            rf'variable\s+"artifacts_{mode}_bucket_name"\s*\{{.*?default\s*=\s*"oci_artifacts"',
+            variables, re.DOTALL,
+        )
+    assert 'name           = local.selected_artifacts_bucket_name' in storage
+    assert 'name      = local.selected_artifacts_bucket_name' in storage
     assert "enable_ai_data_governance" not in fields
     assert "optional_addons" not in {field["group"] for field in fields.values()}
     assert "enable_medallion_architecture" not in fields

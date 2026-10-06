@@ -34,6 +34,7 @@ locals {
     for config in values(local.medallion_bucket_configuration) :
     lower(config.mode == "new" ? config.new_name : config.existing_name)
   ]
+  selected_artifacts_bucket_name = trimspace(var.artifacts_bucket_mode == "new" ? var.artifacts_new_bucket_name : var.artifacts_existing_bucket_name)
 }
 
 resource "terraform_data" "validate_medallion_buckets" {
@@ -52,8 +53,8 @@ resource "terraform_data" "validate_medallion_buckets" {
     }
 
     precondition {
-      condition     = !contains(local.selected_medallion_bucket_names, "oci_artifacts")
-      error_message = "The fixed oci_artifacts bucket is reserved for governance artifacts."
+      condition     = !contains(local.selected_medallion_bucket_names, "oci_artifacts") && !contains(local.selected_medallion_bucket_names, lower(local.selected_artifacts_bucket_name))
+      error_message = "Governance artifacts must use a separate bucket; oci_artifacts remains reserved for legacy Governance data."
     }
   }
 }
@@ -149,7 +150,7 @@ resource "oci_objectstorage_bucket" "artifacts" {
   count          = var.artifacts_bucket_mode == "new" ? 1 : 0
   compartment_id = local.target_compartment
   namespace      = var.objectstorage_namespace
-  name           = "oci_artifacts"
+  name           = local.selected_artifacts_bucket_name
   access_type    = "NoPublicAccess"
   storage_tier   = "Standard"
   versioning     = "Disabled"
@@ -166,7 +167,7 @@ resource "oci_objectstorage_bucket" "artifacts" {
 data "oci_objectstorage_bucket" "artifacts" {
   count     = var.artifacts_bucket_mode == "existing" ? 1 : 0
   namespace = var.objectstorage_namespace
-  name      = "oci_artifacts"
+  name      = local.selected_artifacts_bucket_name
 }
 
 # ponytail: prefixes stay virtual until AIDP's first write; add markers only when OCI exposes write readiness.
