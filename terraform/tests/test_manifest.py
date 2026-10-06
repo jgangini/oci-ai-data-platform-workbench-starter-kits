@@ -123,6 +123,8 @@ def test_deploy_studio_manifest_contract() -> None:
         "admin_username",
         "admin_password",
         "registration_code",
+        "autonomous_database_admin_password",
+        "autonomous_database_wallet_password",
     ]
     assert manifest["presentation"]["title"] == "Oracle AI Data Platform Workbench Starter Kits"
     assert manifest["presentation"]["summary"].startswith("Deploys reusable Oracle AI Data Platform Workbench starter kits")
@@ -221,7 +223,7 @@ def test_hook_result_matches_runner_and_manifest_contract() -> None:
         "aidp_runtime_ready": True,
         "aidp_external_volume_count": 0,
     }
-    assert {item["name"] for item in result["artifacts"]} == set(manifest["artifacts"])
+    assert {item["name"] for item in result["artifacts"]} == set(manifest["artifacts"]) - {"adb_wallet.zip"}
     assert set(result["outputs"]).issubset(manifest["outputs"])
     artifact = json.loads(base64.b64decode(result["artifacts"][0]["content_b64"]))
     assert artifact["schema_version"] == 2

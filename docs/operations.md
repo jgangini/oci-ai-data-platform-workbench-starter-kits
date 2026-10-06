@@ -10,6 +10,10 @@ Use **Settings → Application** to distinguish the installed application releas
 
 The [Deploy Studio manifest](../terraform/deploy-studio.json) uses schema version 1. The [release gate](../terraform/release_gate.py) validates that contract. Terraform plan/apply and post-apply are separate phases; review the plan in the deployment process rather than assuming this repository inserts an approval hook between them.
 
+The completion email uses the manifest's project title and description, with one compact service-access block for the portal, Database Actions and AIDP Workbench. Only the declared application/database credentials are included; OCI API keys and operator credentials are excluded. AIDP uses the configured identity domain. Laboratory deployments additionally include their registration code.
+
+The email attaches only `wallet.zip`, `terraform-source.zip` and one sanitized `deployment.log` covering validation, PLAN, APPLY and final configuration. The runner generates the wallet from the selected database, preserves plaintext access values only in its encrypted temporary credential envelope, and purges that envelope after completion. Keep the received email and wallet private. Internal reports remain in deployment history rather than appearing as extra email attachments. This contract requires a Deploy Studio runner that supports the manifest's `email` section.
+
 ## Manage users and kits
 
 | Action in Users | Effect |
