@@ -86,20 +86,20 @@ class Settings:
     vm_update_enabled: bool = False
     cookie_secure: bool = True
     local_development_mode: bool = False
-    territorial_mode: str | None = None
-    territorial_enabled: bool = False
+    gods_eye_view_mode: str | None = None
+    gods_eye_view_enabled: bool = False
     gods_eye_oci_text_model: str = "xai.grok-4.6"
     gods_eye_oci_voice_model: str = "google.gemini-2.5-flash-lite"
     gods_eye_oci_voice: str = "ara"
     local_identity_artifact_dir: str = ""
 
     def __post_init__(self):
-        if self.territorial_mode not in {None, "local", "oci"}:
-            raise ValueError("TERRITORIAL_MODE must be local or oci")
+        if self.gods_eye_view_mode not in {None, "local", "oci"}:
+            raise ValueError("GODS_EYE_VIEW_MODE must be local or oci")
 
     @property
-    def territorial_local_mode(self) -> bool:
-        return self.local_development_mode if self.territorial_mode is None else self.territorial_mode == "local"
+    def gods_eye_view_local_mode(self) -> bool:
+        return self.local_development_mode if self.gods_eye_view_mode is None else self.gods_eye_view_mode == "local"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -150,8 +150,9 @@ class Settings:
             in {"1", "true", "yes"},
             cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
             local_development_mode=os.getenv("LOCAL_DEVELOPMENT_MODE", "false").lower() in {"1", "true", "yes"},
-            territorial_mode=os.getenv("TERRITORIAL_MODE", os.getenv("PRISMA_MODE")),
-            territorial_enabled=os.getenv("TERRITORIAL_VIEWER_ENABLED", os.getenv("PRISMA_VIEWER_ENABLED", "false")).lower() in {"1", "true", "yes"},
+            # Deployment aliases are read-only compatibility; new installations use GODS_EYE_VIEW_*.
+            gods_eye_view_mode=os.getenv("GODS_EYE_VIEW_MODE", os.getenv("TERRITORIAL_MODE", os.getenv("PRISMA_MODE"))),
+            gods_eye_view_enabled=os.getenv("GODS_EYE_VIEW_ENABLED", os.getenv("TERRITORIAL_VIEWER_ENABLED", os.getenv("PRISMA_VIEWER_ENABLED", "false"))).lower() in {"1", "true", "yes"},
             gods_eye_oci_text_model=os.getenv("GODS_EYE_OCI_TEXT_MODEL", "xai.grok-4.6").strip(),
             gods_eye_oci_voice_model=os.getenv("GODS_EYE_OCI_VOICE_MODEL", "google.gemini-2.5-flash-lite").strip(),
             gods_eye_oci_voice=os.getenv("GODS_EYE_OCI_VOICE", "ara").strip().lower(),

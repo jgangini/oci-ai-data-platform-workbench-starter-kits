@@ -17,6 +17,6 @@ __pycache__/
 node_modules/
 dist/
 *.tsbuildinfo
-apps/territorial-viewer/.upstream/
+apps/gods-eye-view/.upstream/
 coverage/
 .DS_Store

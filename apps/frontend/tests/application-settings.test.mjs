@@ -34,7 +34,7 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
     useEffect(callback, deps) { const id = cursor++, old = slots[id]; if (!old || deps.some((value, index) => value !== old.deps[index])) effects.push(() => { old?.cleanup?.(); slots[id] = { deps, cleanup: callback() }; }); },
   };
   const module = {};
-  new Function('exports', 'require', compiled + '\nexports.GovernanceModuleManager = GovernanceModuleManager; exports.AdminLoginCard = AdminLoginCard;')(module, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === 'react-dom' ? { createPortal: node => node } : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './GodsEyeModuleManager' ? { GodsEyeModuleManager() {} } : name === './registrationPoll' ? { ...poll, pollRegistration: options => managerProps ? poll.pollRegistration({ ...options, sleep: async () => {} }) : options.request(options.signal) } : {});
+  new Function('exports', 'require', compiled + '\nexports.GovernanceModuleManager = GovernanceModuleManager; exports.AdminLoginCard = AdminLoginCard;')(module, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === 'react-dom' ? { createPortal: node => node } : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './GodsEyeViewModuleManager' ? { GodsEyeViewModuleManager() {} } : name === './registrationPoll' ? { ...poll, pollRegistration: options => managerProps ? poll.pollRegistration({ ...options, sleep: async () => {} }) : options.request(options.signal) } : {});
   const component = managerProps ? () => module.GovernanceModuleManager({ ...managerProps, onClose: () => { closed++; }, onChanged: () => { changed++; } }) : location.pathname === '/admin/login' ? module.AdminLoginCard : module.App().type;
   function render() { for (let n = 0; dirty && n < 20; n++) {
     cursor = 0; dirty = false; effects = []; tree = component();
@@ -189,7 +189,7 @@ test('application updates require confirmation, preserve the warning and cancel 
   assert.equal(h.find('button', props => props.className === 'settings-save application-update').props.disabled, true);
 });
 
-const governance = { module_id: 'ai_data_governance_vsc_extension', display_name: 'AI Data Governance', installed: false, status: 'not_installed', enabled: false, bundled_version: '3.0.0' };
+const governance = { module_id: 'ai_data_governance', display_name: 'AI Data Governance', installed: false, status: 'not_installed', enabled: false, bundled_version: '3.0.0' };
 const administrators = [
   { id: 'participant', email: 'student@example.test', name: 'Student', is_aidp_admin: false, active: true, labs: [] },
   { id: 'operator', email: 'operator@example.test', name: 'Operator', is_aidp_admin: true, active: true, managed: false, labs: [] },
@@ -230,7 +230,7 @@ test('Users keeps participant actions but global installation stays in Settings'
 });
 
 test('Settings offers separate install and configuration actions for the global viewer module', async t => {
-  const h = await harness(t, { ...release, packages: [{ package_id: 'territorial_control', display_name: 'God’s Eye View · Custom layers', scope: 'global', bundled_version: '1.0.0' }] });
+  const h = await harness(t, { ...release, packages: [{ package_id: 'gods_eye_view', display_name: 'God’s Eye View · Custom layers', scope: 'global', bundled_version: '1.0.0' }] });
   const card = h.find('ApplicationReleaseSettings');
   const children = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? children(child) : [])];
   const nodes = children(card.type(card.props));
@@ -240,10 +240,10 @@ test('Settings offers separate install and configuration actions for the global 
   assert.equal(install.props['aria-haspopup'], 'dialog');
   assert.equal(nodes.find(node => node?.props?.['aria-label'] === 'Configure God’s Eye View · Custom layers').props.href, '/admin/gods-eye-view');
   h.act(() => install.props.onClick());
-  assert.equal(h.nodes().filter(node => node?.type?.name === 'GodsEyeModuleManager').length, 1);
+  assert.equal(h.nodes().filter(node => node?.type?.name === 'GodsEyeViewModuleManager').length, 1);
   assert.equal(h.mutations().length, 0);
-  h.act(() => h.find('GodsEyeModuleManager').props.onClose());
-  assert.ok(!h.nodes().some(node => node?.type?.name === 'GodsEyeModuleManager'));
+  h.act(() => h.find('GodsEyeViewModuleManager').props.onClose());
+  assert.ok(!h.nodes().some(node => node?.type?.name === 'GodsEyeViewModuleManager'));
 });
 
 for (const outcome of ['populated', 'empty', 'error']) test(`Users spinner ends on ${outcome} and does not show an empty table while waiting`, async t => {

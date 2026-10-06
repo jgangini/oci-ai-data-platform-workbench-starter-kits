@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from test_gods_eye_native_proxy import AUTH, proxy
-from test_territorial_bridge import bridge
+from test_gods_eye_view_bridge import bridge
 from test_viewer_identity import HTML
 
 
@@ -13,7 +13,7 @@ def test_native_html_gets_saved_identity_before_any_script_and_never_cache_stale
     seen = []
     identity = {"name": "Territorio <seguro>", "description": "Comunidad & datos"}
     async def settings(_request, method, endpoint):
-        assert (method, endpoint) == ("GET", "/api/territorial/identity")
+        assert (method, endpoint) == ("GET", "/api/gods-eye-view/identity")
         return identity
     monkeypatch.setattr(bridge, "admin_request", settings)
     def respond(request):
@@ -79,8 +79,8 @@ def test_viewer_identity_route_keeps_auth_and_delegates_to_backend(monkeypatch):
         return {"name": "Saved", "description": "Read only"}
     monkeypatch.setattr(bridge, "admin_request", settings)
     with TestClient(bridge.app) as client:
-        assert client.get("/api/territorial/identity").status_code == 401
+        assert client.get("/api/gods-eye-view/identity").status_code == 401
         assert calls == []
-        response = client.get("/api/territorial/identity", headers=AUTH)
+        response = client.get("/api/gods-eye-view/identity", headers=AUTH)
         assert response.json() == {"name": "Saved", "description": "Read only"}
-        assert calls == [("GET", "/api/territorial/identity")]
+        assert calls == [("GET", "/api/gods-eye-view/identity")]

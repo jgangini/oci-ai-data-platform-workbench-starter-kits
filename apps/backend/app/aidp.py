@@ -25,12 +25,13 @@ from .governance import (
     GOVERNANCE_DISPLAY_NAME,
     GOVERNANCE_JOB_NAME,
     GOVERNANCE_MODULE_ID,
+    LEGACY_GOVERNANCE_MODULE_ID,
     GOVERNANCE_TABLES,
     agent_source,
     governance_sync_notebook,
 )
 from .lab_packs import LabAsset, LabPack, available_lab_ids, load_lab_pack
-from .territorial.runtime_secrets import identity_hash, shared_credential
+from .gods_eye_view.runtime_secrets import identity_hash, shared_credential
 from .notebooks import (
     LAYER_PREFIXES,
     WORKSPACE_ROOT,
@@ -317,6 +318,14 @@ class LocalAidpClient:
                 self._operations.pop(operation_key, None)
 
 class AidpClient:
+    @property
+    def _module_root(self) -> str:
+        return getattr(self, "_governance_root", MODULE_ROOT)
+
+    @property
+    def _module_manifest_path(self) -> str:
+        return self._module_root + "/manifest.json"
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.base = (
@@ -787,12 +796,13 @@ class AidpClient:
         )
 
     def _agents(self, workspace_key: str, name: str) -> list[dict[str, Any]]:
+        names = {name, LEGACY_GOVERNANCE_MODULE_ID} if name == GOVERNANCE_AGENT_NAME else {name}
         return [
             item
             for item in self._list(
                 f"/workspaces/{workspace_key}/agents", phase="content"
             )
-            if self._resource_name(item) == name
+            if self._resource_name(item) in names
         ]
 
     def _ensure_agent(
@@ -805,6 +815,7 @@ class AidpClient:
         descriptor: bytes,
         *,
         repair_drift: bool,
+        expected_key: str = "",
     ) -> tuple[str, bool]:
         session_config = {"variables": {}}
         entry_path = f"{root}/governance_agent.py"
@@ -830,6 +841,8 @@ class AidpClient:
             raise AidpProvisionError(f"AIDP has duplicate agents named {name}.")
         created = False
         if not agents:
+            if expected_key:
+                raise AidpProvisionError("The recorded governance Agent identity is missing; reconcile before redeploying.")
             self._request(
                 "POST",
                 f"/workspaces/{workspace_key}/agents",
@@ -853,10 +866,13 @@ class AidpClient:
             created = True
             changed = True
         agent_key = str(agents[0].get("key") or agents[0].get("id") or "")
+        if expected_key and agent_key != expected_key:
+            raise AidpProvisionError("The recorded governance Agent identity does not match; reconcile before redeploying.")
         if not agent_key:
             raise AidpProvisionPending(
                 "AIDP has not published the global governance Agent identifier yet.", "content"
             )
+        changed = changed or self._resource_name(agents[0]) != name
         if changed and not created:
             self._request(
                 "PUT",
@@ -2371,8 +2387,11 @@ class AidpClient:
                 "Lab workflow deletion is still in progress.", "cleanup"
             )
 
-    def _cleanup_agent(self, workspace_key: str, agent_name: str) -> None:
-        for agent in self._agents(workspace_key, agent_name):
+    def _cleanup_agent(self, workspace_key: str, agent_name: str, *, expected_key: str = "") -> None:
+        agents = self._agents(workspace_key, agent_name)
+        if len(agents) > 1 or (expected_key and agents and str(agents[0].get("key") or agents[0].get("id") or "") != expected_key):
+            raise AidpProvisionError("The recorded Agent identity is ambiguous; cleanup stopped.")
+        for agent in agents:
             agent_key = str(agent.get("key") or agent.get("id") or "")
             if agent_key:
                 self._request(
@@ -2720,7 +2739,8 @@ class AidpClient:
             return False
         return bool(
             manifest.get("schema_version") == 1
-            and manifest.get("module_id") == GOVERNANCE_MODULE_ID
+            and manifest.get("module_id") in {GOVERNANCE_MODULE_ID, LEGACY_GOVERNANCE_MODULE_ID}
+            and manifest.get("control_module_id", manifest.get("module_id")) in {GOVERNANCE_MODULE_ID, LEGACY_GOVERNANCE_MODULE_ID}
             and manifest.get("status") in {"installing", "active", "redeploying", "deleting", "error"}
             and isinstance(operation, dict)
             and operation_id == canonical_operation_id
@@ -2728,21 +2748,29 @@ class AidpClient:
         )
 
     def _module_manifest(self, workspace_key: str) -> dict[str, Any] | None:
-        manifest = self._workspace_json(
-            workspace_key,
-            MODULE_MANIFEST_PATH,
-            "The global governance module manifest is invalid; reconcile it before retrying.",
-        )
+        manifests = []
+        for module_id in (GOVERNANCE_MODULE_ID, LEGACY_GOVERNANCE_MODULE_ID):
+            root = f"{MODULE_CONTROL_ROOT}/{module_id}"
+            value = self._workspace_json(workspace_key, root + "/manifest.json",
+                "The global governance module manifest is invalid; reconcile it before retrying.")
+            if value is not None:
+                manifests.append((root, value))
+        if len(manifests) > 1:
+            raise AidpProvisionError("AIDP has duplicate governance module manifests; reconcile before retrying.")
+        self._governance_root, manifest = manifests[0] if manifests else (MODULE_ROOT, None)
         if manifest is not None and not self._module_manifest_valid(manifest):
             raise AidpProvisionError("The global governance module manifest is invalid; cleanup stopped.")
-        return manifest
+        self._governance_control_id = manifest.get("control_module_id", manifest["module_id"]) if manifest is not None else GOVERNANCE_MODULE_ID
+        return {**manifest, "module_id": GOVERNANCE_MODULE_ID, "control_module_id": self._governance_control_id} if manifest is not None else None
 
     def _write_module_manifest(self, workspace_key: str, manifest: dict[str, Any]) -> None:
         manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+        # Keep the installed control identity readable by previous deployment versions.
+        stored = {**manifest, "module_id": manifest.get("control_module_id", manifest["module_id"])}
         self._upload_file(
             workspace_key,
-            MODULE_MANIFEST_PATH,
-            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+            self._module_manifest_path,
+            json.dumps(stored, sort_keys=True, separators=(",", ":")).encode("utf-8"),
             repair_drift=True,
         )
 
@@ -2807,7 +2835,7 @@ class AidpClient:
             raise AidpProvisionError("The dedicated governance OCI credential is incomplete.")
         return {
             "displayName": GOVERNANCE_CREDENTIAL_NAME,
-            "credentialDescription": "Shared OCI credential for governance and Territorial runtimes",
+            "credentialDescription": "Shared OCI credential for governance and Gods Eye View runtimes",
             "type": "SECRET_TOKEN",
             "credentialDetails": {
                 "credentialType": "SECRET_TOKEN",
@@ -2856,7 +2884,7 @@ class AidpClient:
         paused: bool,
         bootstrap_snapshot: bool = False,
     ) -> tuple[dict[str, Any], bool]:
-        notebook_path = f"{MODULE_ROOT}/data_governance_sync.ipynb"
+        notebook_path = f"{self._module_root}/data_governance_sync.ipynb"
         notebook = governance_sync_notebook(
             namespace=self.settings.objectstorage_namespace,
             platform_id=self.settings.aidp_platform_id,
@@ -2865,12 +2893,13 @@ class AidpClient:
             bootstrap_snapshot=bootstrap_snapshot,
             workspace_key=workspace_key,
             job_key=job_key,
+            control_module_id=getattr(self, "_governance_control_id", GOVERNANCE_MODULE_ID),
             **self._governance_oci_config(),
         )
         changed = self._upload_notebook(workspace_key, notebook_path, notebook, repair_drift=True)
         return {
             "name": GOVERNANCE_JOB_NAME,
-            "path": MODULE_ROOT,
+            "path": self._module_root,
             "description": "Continuous 30-second Master Catalog metadata reconciliation",
             "maxConcurrentRuns": 1,
             "continuous": {"pauseStatus": "PAUSED" if paused else "UNPAUSED"},
@@ -3394,10 +3423,11 @@ class AidpClient:
             workspace_key,
             str(compute["key"]),
             GOVERNANCE_AGENT_NAME,
-            f"{MODULE_ROOT}/agent",
+            f"{self._module_root}/agent",
             source,
             descriptor,
             repair_drift=True,
+            expected_key=str((manifest.get("resources") or {}).get("agent_key") or ""),
         )
         resources = manifest.setdefault("resources", {})
         deployment, deployment_changed = self._ensure_global_agent_deployment(
@@ -3481,7 +3511,7 @@ class AidpClient:
             "revokeClusterPermissionDetails",
             (),
         ) or changed
-        module_object_key = self._workspace_object_key(workspace_key, MODULE_ROOT)
+        module_object_key = self._workspace_object_key(workspace_key, self._module_root)
         module_path = f"/workspaces/{workspace_key}/objects/{quote(module_object_key, safe='')}"
         changed = self._reconcile_role_permissions_exact(
             module_path,
@@ -3493,12 +3523,12 @@ class AidpClient:
             allowed_inherited_editors=admin_grantees,
         ) or changed
         for path, is_folder in (
-            (MODULE_MANIFEST_PATH, False),
-            (f"{MODULE_ROOT}/agent", True),
-            (f"{MODULE_ROOT}/agent/governance_agent.py", False),
-            (f"{MODULE_ROOT}/agent/requirements.txt", False),
-            (f"{MODULE_ROOT}/agent/agent-manifest.json", False),
-            (f"{MODULE_ROOT}/data_governance_sync.ipynb", False),
+            (self._module_manifest_path, False),
+            (f"{self._module_root}/agent", True),
+            (f"{self._module_root}/agent/governance_agent.py", False),
+            (f"{self._module_root}/agent/requirements.txt", False),
+            (f"{self._module_root}/agent/agent-manifest.json", False),
+            (f"{self._module_root}/data_governance_sync.ipynb", False),
         ):
             object_key = self._workspace_object_key(workspace_key, path)
             changed = self._reconcile_role_permissions_exact(
@@ -3519,6 +3549,7 @@ class AidpClient:
         return {
             "schema_version": 1,
             "module_id": GOVERNANCE_MODULE_ID,
+            "control_module_id": getattr(self, "_governance_control_id", GOVERNANCE_MODULE_ID),
             "pack_version": load_lab_pack(
                 GOVERNANCE_MODULE_ID, require_available=False
             ).pack_version,
@@ -3543,8 +3574,8 @@ class AidpClient:
                 WORKSPACE_ROOT,
                 CONTROL_ROOT,
                 MODULE_CONTROL_ROOT,
-                MODULE_ROOT,
-                f"{MODULE_ROOT}/agent",
+                self._module_root,
+                f"{self._module_root}/agent",
             ),
         )
         manifest = self._new_module_manifest(operation_id, operation_type)
@@ -4042,15 +4073,15 @@ class AidpClient:
         agent_key = str(resources.get("agent_key") or "")
         if agent_key:
             self._delete_governance_deployments(workspace_key, agent_key)
-        self._cleanup_agent(workspace_key, GOVERNANCE_AGENT_NAME)
+        self._cleanup_agent(workspace_key, GOVERNANCE_AGENT_NAME, expected_key=str((manifest.get("resources") or {}).get("agent_key") or ""))
         self._delete_governance_compute(workspace_key)
         self._cleanup_lab_job(workspace_key, GOVERNANCE_JOB_NAME)
-        # ponytail: OCI credentials are shared with Territorial Control; module removal retains them.
+        # ponytail: OCI credentials are shared with Gods Eye View; module removal retains them.
         for path in (
-            f"{MODULE_ROOT}/agent/governance_agent.py",
-            f"{MODULE_ROOT}/agent/requirements.txt",
-            f"{MODULE_ROOT}/agent/agent-manifest.json",
-            f"{MODULE_ROOT}/data_governance_sync.ipynb",
+            f"{self._module_root}/agent/governance_agent.py",
+            f"{self._module_root}/agent/requirements.txt",
+            f"{self._module_root}/agent/agent-manifest.json",
+            f"{self._module_root}/data_governance_sync.ipynb",
         ):
             self._delete_workspace_path(
                 workspace_key,
@@ -4088,7 +4119,7 @@ class AidpClient:
             handler(workspace_key, manifest)
         self._delete_workspace_path(
             workspace_key,
-            MODULE_ROOT,
+            self._module_root,
             "The governance module manifest and workspace deletion is still in progress.",
         )
         return self._completed_governance_deletion(operation_id)

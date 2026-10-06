@@ -8,7 +8,7 @@ import tarfile
 import pytest
 
 
-MODULE_PATH = Path(__file__).parents[2] / "territorial-viewer" / "prepare_upstream.py"
+MODULE_PATH = Path(__file__).parents[2] / "gods-eye-view" / "prepare_upstream.py"
 SPEC = importlib.util.spec_from_file_location("gods_eye_prepare_upstream", MODULE_PATH)
 upstream = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(upstream)
@@ -73,7 +73,7 @@ def test_patch_requires_exact_file_hash_and_unique_anchor(tmp_path, content, sha
     with pytest.raises(ValueError, match=expected):
         upstream.prepare(archive, tmp_path / "output", manifest)
     assert (tmp_path / "output" / "source.js").read_bytes() == content
-    assert not (tmp_path / "output" / "TERRITORIAL_UPSTREAM.json").exists()
+    assert not (tmp_path / "output" / "GODS_EYE_VIEW_UPSTREAM.json").exists()
 
 
 @pytest.mark.parametrize("content", [b"missing", b"BOUNDARY\nBOUNDARY"])
@@ -102,7 +102,7 @@ def test_exclusions_patch_and_clean_output_contract(tmp_path):
     assert not (output / "docs/media").exists() and not (output / "src/restricted.js").exists()
     assert (output / "docs/media-other/NOTICE").read_bytes() == b"retained license"
     assert (output / "LICENSE").read_bytes() == b"MIT"
-    assert json.loads((output / "TERRITORIAL_UPSTREAM.json").read_text()) == {
+    assert json.loads((output / "GODS_EYE_VIEW_UPSTREAM.json").read_text()) == {
         "commit": "test-commit", "archive_sha256": manifest["archive_sha256"],
         "patched": ["src/main.js"], "excluded": manifest["excluded"]}
     before = {path.relative_to(output): path.read_bytes() for path in output.rglob("*") if path.is_file()}

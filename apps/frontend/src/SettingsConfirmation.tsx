@@ -9,7 +9,7 @@ export function SettingsConfirmation({ title, description = 'The following setti
     node?.showModal();
     return () => { node?.close(); if (origin instanceof HTMLElement && origin.isConnected) origin.focus(); };
   }, []);
-  return <dialog ref={dialog} className="confirm-modal territorial-reset-dialog" aria-labelledby={titleId} aria-describedby={descriptionId} onCancel={event => { event.preventDefault(); onCancel(); }} onClose={onCancel}>
+  return <dialog ref={dialog} className="confirm-modal gods-eye-view-reset-dialog" aria-labelledby={titleId} aria-describedby={descriptionId} onCancel={event => { event.preventDefault(); onCancel(); }} onClose={onCancel}>
     <div className="confirm-content"><h2 id={titleId}>{title}</h2><p id={descriptionId}>{description}</p>{changes.length > 0 && <ul>{changes.map(change => <li key={change}>{change}</li>)}</ul>}</div>
     <footer><button type="button" onClick={onCancel} autoFocus>Cancel</button><button type="button" className="confirm-primary" onClick={onConfirm}>{confirmLabel}</button></footer>
   </dialog>;

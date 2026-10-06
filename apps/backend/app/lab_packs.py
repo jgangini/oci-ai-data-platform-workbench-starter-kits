@@ -266,7 +266,7 @@ def _agent_evaluation_case_valid(case: Any) -> bool:
 def _governance_extension_contract_valid(agent: Any) -> bool:
     if not isinstance(agent, dict):
         return False
-    if agent.get("name") != "ai_data_governance_vsc_extension":
+    if agent.get("name") != "ai_data_governance":
         return False
     if (
         agent.get("editable") is not True
@@ -289,6 +289,9 @@ def _governance_extension_contract_valid(agent: Any) -> bool:
 
 
 def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
+    # Accept recorded package selections from installations before the public-name correction.
+    if lab_id == "ai_data_governance_vsc_extension":
+        lab_id = "ai_data_governance"
     if LAB_ID_PATTERN.fullmatch(lab_id) is None:
         raise LabPackError("Invalid lab_id")
     root = LABS_ROOT / lab_id

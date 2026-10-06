@@ -17,7 +17,7 @@ ACTIVE_LABS = ("banking", "telecommunications", "telco_lineage", "retail", "heal
 def test_catalog_separates_five_participant_labs_from_global_governance_module() -> None:
     packs = lab_catalog()
     public = public_lab_catalog()
-    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "ai_data_governance_vsc_extension")
+    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "ai_data_governance")
     assert tuple(item["lab_id"] for item in public) == ACTIVE_LABS
     assert all(pack.available for pack in packs[:5])
     assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == dict.fromkeys(
@@ -26,14 +26,14 @@ def test_catalog_separates_five_participant_labs_from_global_governance_module()
     assert all(item["description"].strip() for item in public)
     assert "transactions" in public[0]["description"]
     assert packs[-1].status == "available"
-    assert packs[-1].pack_version == "3.0.0"
+    assert packs[-1].pack_version == "3.0.1"
     assert packs[-1].kind == "governance_extension"
     assert packs[-1].scope == "global"
     assert packs[-1].installation_modes == ("laboratory", "production")
     assert packs[-1].display_name == "AI Data Governance"
     assert not packs[-1].datasets and not packs[-1].notebooks
     assert module_catalog() == (packs[-1],)
-    module = load_lab_pack("ai_data_governance_vsc_extension")
+    module = load_lab_pack("ai_data_governance")
     assert module.agent["editable_by"] == "AI_DATA_PLATFORM_ADMIN"
     assert module.agent["tools"] == ["catalog_inventory", "catalog_lineage"]
 

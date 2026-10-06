@@ -304,6 +304,10 @@
     "email_access_fields": ["deployment_mode", "admin_username", "admin_password", "registration_code"]
   },
   "outputs": [
+    "gods_eye_view_enabled",
+    "gods_eye_view_url",
+    "gods_eye_view_instance_id",
+    "gods_eye_view_principal_group",
     "territorial_viewer_enabled",
     "territorial_viewer_url",
     "territorial_viewer_instance_id",
@@ -405,8 +409,7 @@
   "post_apply": {
     "entrypoint": "terraform/hooks/post_apply.py",
     "include_paths": [
-      "apps/backend/app/territorial",
-      "apps/backend/app/prisma",
+      "apps/backend/app/gods_eye_view",
       "apps/backend/app/__init__.py",
       "apps/backend/app/aidp.py",
       "apps/backend/app/config.py",

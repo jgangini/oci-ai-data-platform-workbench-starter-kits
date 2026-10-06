@@ -237,7 +237,7 @@ test("global module operations reuse the server UUID and survive reloads", () =>
     setItem: (key, value) => values.set(key, value),
     removeItem: (key) => values.delete(key),
   };
-  const moduleId = "ai_data_governance_vsc_extension";
+  const moduleId = "ai_data_governance";
   const serverOperationId = "b0dc0b1d-351b-4416-acff-cbeb9e2d82c9";
   const operation = getOrCreateModuleOperation(
     undefined,
@@ -276,7 +276,7 @@ test("blocked browser storage never prevents an in-memory module operation", () 
     setItem: () => { throw new Error("blocked"); },
     removeItem: () => { throw new Error("blocked"); },
   };
-  const moduleId = "ai_data_governance_vsc_extension";
+  const moduleId = "ai_data_governance";
   const operationId = "d3f4d6bc-1e10-4bce-a982-26dd90ad8d80";
 
   assert.equal(loadModuleOperation(blockedStorage, moduleId, "delete"), undefined);

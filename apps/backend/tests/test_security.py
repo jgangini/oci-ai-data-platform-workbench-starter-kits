@@ -29,7 +29,7 @@ def test_session_rejects_tampering_and_expiry() -> None:
 
 
 def test_logins_in_same_second_are_isolated_and_legacy_cookies_still_verify() -> None:
-    from app.territorial.agent_gateway import scoped_session
+    from app.gods_eye_view.agent_gateway import scoped_session
     key = b"k" * 32
     first, second = [issue_session(key, "admin", now=100, ttl=10) for _ in range(2)]
     assert first != second

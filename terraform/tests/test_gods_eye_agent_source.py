@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "hooks"))
-import territorial_bootstrap as bootstrap
+import gods_eye_view_bootstrap as bootstrap
 from gods_eye_agent_source import agent_source
 
 
@@ -31,7 +31,7 @@ def test_agent_is_portable_one_file_with_fixed_gold_queries(tmp_path, monkeypatc
         cwd=tmp_path, capture_output=True, text=True, timeout=30)
     assert process.returncode == 0, process.stderr
     tree = ast.parse(source)
-    assert not any(isinstance(node, ast.ImportFrom) and (node.level or (node.module or "").startswith("territorial"))
+    assert not any(isinstance(node, ast.ImportFrom) and (node.level or (node.module or "").startswith("gods_eye_view"))
                    for node in ast.walk(tree))
     assert "sys.path" not in source and "manifest.json" not in source and "PrismaReaderRuntime" not in source
     assert "oracledb" not in source
@@ -52,7 +52,7 @@ def test_agent_is_portable_one_file_with_fixed_gold_queries(tmp_path, monkeypatc
 
     monkeypatch.setitem(sys.modules, "aidputils.agents.toolkit.configs", SimpleNamespace(AIDPToolConf=ToolConfig))
     monkeypatch.setitem(sys.modules, "aidputils.agents.toolkit.tool_helper", SimpleNamespace(create_langgraph_tool=tool))
-    assert namespace["gold_query"](configuration(), "SELECT payload FROM territorial_sensors WHERE publication_version=:version",
+    assert namespace["gold_query"](configuration(), "SELECT payload FROM gods_eye_view_sensors WHERE publication_version=:version",
         {"version": "published' OR 1=1"}) == [{"id": "sensor-1", "value": 2.3}]
     request = submitted[0]["conf"]
     assert request["catalogType"] == "STANDARD" and request["clusterKey"] == "query-compute"
@@ -60,5 +60,5 @@ def test_agent_is_portable_one_file_with_fixed_gold_queries(tmp_path, monkeypatc
     assert "`oci_medallion`.`oci_gold`.`territorial_sensors`" in request["query"]
     assert "OR 1=1" not in request["query"]
     with pytest.raises(ValueError, match="fixed SELECT"):
-        namespace["gold_query"](configuration(), "DELETE FROM territorial_sensors", {})
+        namespace["gold_query"](configuration(), "DELETE FROM gods_eye_view_sensors", {})
     assert len(submitted) == 1

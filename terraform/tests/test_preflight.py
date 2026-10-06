@@ -369,7 +369,7 @@ def test_preflight_rejects_zero_or_missing_capacity() -> None:
 
 
 @pytest.mark.parametrize("enabled", [True, "true", False, "false"])
-@pytest.mark.parametrize("field", ["enable_territorial_viewer", "enable_prisma_viewer"])
+@pytest.mark.parametrize("field", ["enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer"])
 def test_preflight_counts_viewer_with_deploy_studio_serialized_boolean(enabled, field) -> None:
     result, _ = _select({preflight.E5_SHAPE: ("AVAILABLE", "1"), preflight.E4_SHAPE: ("AVAILABLE", "2")},
                         input_overrides={field: enabled})

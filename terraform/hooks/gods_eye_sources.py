@@ -52,7 +52,7 @@ def source_fragments(bundle, module, names):
     if len(names) != len(set(names)):
         raise ValueError("Repeated standalone export")
     with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
-        path = "territorial/" + module + ".py"
+        path = "gods_eye_view/" + module + ".py"
         if archive.namelist().count(path) != 1:
             raise ValueError("Standalone source must have one exact archive member")
         source = archive.read(path).decode("utf-8")

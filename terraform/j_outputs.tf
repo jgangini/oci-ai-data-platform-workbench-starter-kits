@@ -121,7 +121,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Base Terraform creates no external volumes; the Territorial post-apply reports its validated Landing volume when enabled."
+  description = "Base Terraform creates no external volumes; the God’s Eye View post-apply reports its validated Landing volume when enabled."
   value       = 0
 }
 

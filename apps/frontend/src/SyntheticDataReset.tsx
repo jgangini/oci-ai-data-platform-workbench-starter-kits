@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { territorialEndpoint, territorialError, type TerritorialApi } from './territorialAdminState';
+import { godsEyeViewEndpoint, godsEyeViewError, type GodsEyeViewApi } from './godsEyeViewAdminState';
 
 export type SyntheticReset = { operation_id?: string; sensor_type?: string; status?: 'pending' | 'completed' | 'cancelled' | 'error'; stage?: string; error?: string; counts?: Record<string, number | null>; replacements?: Record<string, string>; revision?: number; completed_at?: string; cancelled_at?: string };
 
@@ -28,11 +28,11 @@ export function SyntheticDataResetStatus({ state, error, runtime, sensorLabel }:
   } : {};
   const title = state.status === 'completed' ? 'Unable to verify the reset.'
     : state.status === 'error' ? `${subject} reset is incomplete.` : !state.status && error ? `${subject} reset could not be started.` : `Resetting ${subject} data…`;
-  return <div className="registration-result territorial-reset-progress" role={failed ? 'alert' : 'status'} aria-live="polite">
+  return <div className="registration-result gods-eye-view-reset-progress" role={failed ? 'alert' : 'status'} aria-live="polite">
     {state.status === 'pending' && !failed && <span className="progress-orbit" aria-hidden="true" />}
     <p className="registration-progress-phase">{title}</p>
     {state.status === 'pending' && <span className="sr-only">{subject} reset progress</span>}
-    {state.status === 'pending' && !failed && <div className="registration-progress-track territorial-reset-track" role="progressbar" aria-label={`${subject} cleanup in progress`}><span /></div>}
+    {state.status === 'pending' && !failed && <div className="registration-progress-track gods-eye-view-reset-track" role="progressbar" aria-label={`${subject} cleanup in progress`}><span /></div>}
     {state.status === 'pending' && <p className="registration-progress-detail">{stages[state.stage || ''] || (aidp ? 'Waiting for the AIDP cleanup to finish…' : local ? `Deleting local ${subject} data…` : 'Waiting for cleanup to finish…')}</p>}
     {state.stage === 'history' && <p className="registration-progress-detail">Historical publications rebuilt: {Object.keys(state.replacements || {}).length || state.counts?.history_rewritten || 0}.</p>}
     {local && <p className="registration-progress-detail">Local records and generated files only. No AIDP job or Delta tables are involved.</p>}
@@ -44,7 +44,7 @@ export function SyntheticDataResetStatus({ state, error, runtime, sensorLabel }:
 }
 
 export function SyntheticDataReset({ api, status, runtime, onChange, onComplete, sensor, disabled = false }: {
-  api: TerritorialApi; status?: SyntheticReset; runtime: string; onChange: (state: SyntheticReset, error: string) => void; onComplete: () => void;
+  api: GodsEyeViewApi; status?: SyntheticReset; runtime: string; onChange: (state: SyntheticReset, error: string) => void; onComplete: () => void;
   sensor?: { type: string; label: string; labels?: Record<string, string> }; disabled?: boolean;
 }) {
   const [operation, setOperation] = useState<SyntheticReset>({});
@@ -63,7 +63,7 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
   const active = ['pending', 'error'].includes(operation.status || '');
   const scope = active ? operation.sensor_type : sensor?.type;
   const subject = sensor ? (scope && scope !== sensor.type ? sensor.labels?.[scope] || scope : sensor.label) : 'Synthetic';
-  const endpointFor = (type = scope) => sensor ? `${territorialEndpoint}/sensors${type === 'all' ? '' : `/${encodeURIComponent(type || sensor.type)}`}/reset` : `${territorialEndpoint}/synthetic/reset`;
+  const endpointFor = (type = scope) => sensor ? `${godsEyeViewEndpoint}/sensors${type === 'all' ? '' : `/${encodeURIComponent(type || sensor.type)}`}/reset` : `${godsEyeViewEndpoint}/synthetic/reset`;
   const endpoint = endpointFor();
   const allowedScope = (next: SyntheticReset) => sensor?.type === 'all'
     ? next.sensor_type === 'all' || !!next.sensor_type && Object.hasOwn(sensor.labels || {}, next.sensor_type)
@@ -119,7 +119,7 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
       if (!controller.signal.aborted) { if (discovering) accept(next); else verified(next); }
     } catch (reason) {
       if (!controller.signal.aborted) {
-        const message = `Unable to verify the reset: ${territorialError(reason)} Status will be checked again.`;
+        const message = `Unable to verify the reset: ${godsEyeViewError(reason)} Status will be checked again.`;
         setError(message); callbacks.current.onChange(current.current, message);
       }
     } finally { if (request.current === controller) request.current = null; }
@@ -132,13 +132,13 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
 
   async function recoverReset(reason: unknown, controller: AbortController) {
     const code = reason && typeof reason === 'object' && 'status' in reason ? reason.status : undefined;
-    if (code === 501 || code === 422) { accept({}, territorialError(reason)); return; }
+    if (code === 501 || code === 422) { accept({}, godsEyeViewError(reason)); return; }
     // The server may have accepted a POST whose response was lost. Recover before allowing another operation.
     try {
       const next = await api<SyntheticReset>(endpoint, { signal: controller.signal });
       if (controller.signal.aborted) return;
       if (code === 409 && next.operation_id && ['pending', 'error'].includes(next.status || '')) accept(next);
-      else verified(next, territorialError(reason));
+      else verified(next, godsEyeViewError(reason));
     } catch {
       if (!controller.signal.aborted) {
         const message = 'The reset response was interrupted. Checking its status before another reset can start.';
@@ -176,11 +176,11 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
   const pending = operation.status === 'pending' && !error;
   const label = retry ? `Retry ${subject} reset` : pending ? `Deleting ${subject} data` : `Delete ${subject} data`;
   return <>
-    <button type="button" className="table-action table-delete territorial-toolbar-button" aria-label={label} title={label} disabled={disabled || busy || pending} onClick={reviewReset}>{trash}</button>
-    {visible && createPortal(<dialog ref={dialog} className={`${open ? 'confirm-modal confirm-delete' : 'territorial-reset-popup'} territorial-reset-dialog`} aria-label={open ? undefined : `${subject} reset`} aria-labelledby={open ? 'territorial-reset-title' : undefined} aria-describedby={open ? 'territorial-reset-description' : undefined} tabIndex={-1}
+    <button type="button" className="table-action table-delete gods-eye-view-toolbar-button" aria-label={label} title={label} disabled={disabled || busy || pending} onClick={reviewReset}>{trash}</button>
+    {visible && createPortal(<dialog ref={dialog} className={`${open ? 'confirm-modal confirm-delete' : 'gods-eye-view-reset-popup'} gods-eye-view-reset-dialog`} aria-label={open ? undefined : `${subject} reset`} aria-labelledby={open ? 'gods-eye-view-reset-title' : undefined} aria-describedby={open ? 'gods-eye-view-reset-description' : undefined} tabIndex={-1}
       onCancel={event => { event.preventDefault(); if (open) closeConfirmation(); else if (!pending) closeProgress(); }}>
-      {open ? <><div className="confirm-content"><div className="confirm-icon">{trash}</div><h2 id="territorial-reset-title">{retry ? `Retry ${subject} reset?` : sensor ? `Delete ${subject} data?` : 'Delete all Synthetic data?'}</h2>
-        <p id="territorial-reset-description">{sensor ? scope === 'all'
+      {open ? <><div className="confirm-content"><div className="confirm-icon">{trash}</div><h2 id="gods-eye-view-reset-title">{retry ? `Retry ${subject} reset?` : sensor ? `Delete ${subject} data?` : 'Delete all Synthetic data?'}</h2>
+        <p id="gods-eye-view-reset-description">{sensor ? scope === 'all'
           ? 'This pauses Synthetic capture for all five sensor types and permanently deletes their Synthetic readings, generated files and reading history. Real readings, social network data, saved sensor locations and sensor configuration are kept.'
           : `This pauses ${subject} capture and permanently deletes its Synthetic readings, generated files and reading history. Other sensor types, real readings, social network data, saved sensor locations and sensor configuration are kept.` : <>{runtime === 'local_fixture'
           ? 'This stops Synthetic capture and permanently deletes its local publications, events and generated files across all networks. No AIDP job or Delta tables are involved.'
@@ -190,7 +190,7 @@ export function SyntheticDataReset({ api, status, runtime, onChange, onComplete,
         <p>After the reset, choose Run now to start a new demonstration.</p></div>
       <footer><button ref={cancel} type="button" onClick={closeConfirmation} autoFocus>Cancel</button><button className="confirm-primary" type="button" disabled={disabled || busy} onClick={() => void reset()}>{retry ? 'Retry reset' : `Delete ${subject} data`}</button></footer></>
       : <><SyntheticDataResetStatus state={operation} error={error} runtime={runtime} sensorLabel={sensor ? subject : undefined} />
-        {!pending && <div className="territorial-reset-popup-actions">{retry && <button type="button" disabled={disabled || busy} onClick={reviewReset}>Retry {subject} reset</button>}
+        {!pending && <div className="gods-eye-view-reset-popup-actions">{retry && <button type="button" disabled={disabled || busy} onClick={reviewReset}>Retry {subject} reset</button>}
           <button type="button" onClick={closeProgress}>Close</button></div>}</>}
     </dialog>, document.body)}
   </>;

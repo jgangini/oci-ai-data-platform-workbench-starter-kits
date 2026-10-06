@@ -2,7 +2,7 @@
 
 Five reproducible data engineering labs and two shared modules for Oracle AI Data Platform (AIDP) Workbench. Deploy a common environment, onboard participants, and follow data from Landing through Gold with quality checks and catalog lineage.
 
-The project includes a React administration portal, a FastAPI service, Terraform infrastructure, versioned datasets and notebooks, and native AIDP workflows and agents. God's Eye View uses Gold for analysis and Object Storage for durable controls; its local SQLite post index is rebuildable. Cloud migration and native acceptance remain pending; see [migration and recovery](docs/operations.md#migrate-gods-eye-view-controls).
+The project includes a React administration portal, a FastAPI service, Terraform infrastructure, versioned datasets and notebooks, and native AIDP workflows and agents.
 
 ## Start here
 
@@ -54,11 +54,11 @@ See [architecture](docs/architecture.md) for deployment boundaries, storage resp
 | --- | --- |
 | [`apps/backend`](apps/backend) | API, provisioning, module lifecycle and canonical [kit packages](apps/backend/app/labs) |
 | [`apps/frontend`](apps/frontend) | Registration and administration UI |
-| [`apps/territorial-viewer`](apps/territorial-viewer) | God's Eye View integration and its upstream asset contract |
+| [`apps/gods-eye-view`](apps/gods-eye-view) | God's Eye View integration and its upstream asset contract |
 | [`terraform`](terraform) | Deploy Studio manifest, infrastructure and post-apply hooks |
 | [`docker`](docker) / [`scripts`](scripts) | Images, local profiles, release and validation tools |
 | [`docs`](docs/README.md) | User guides, architecture, operations and compatibility reference |
 
 ## License
 
-[MIT](LICENSE). Upstream components and datasets retain their own licenses; see the [viewer integration](apps/territorial-viewer/README.md). This is an independent project, not an official Oracle product. Oracle and other third-party marks belong to their respective owners.
+[MIT](LICENSE). Upstream components and datasets retain their own licenses; see the [viewer integration](apps/gods-eye-view/README.md). This is an independent project, not an official Oracle product. Oracle and other third-party marks belong to their respective owners.

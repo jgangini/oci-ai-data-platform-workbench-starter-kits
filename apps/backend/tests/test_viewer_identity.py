@@ -59,16 +59,16 @@ def test_identity_schema_rejects_invalid_inputs(payload):
 
 def test_identity_api_auth_and_persistence(tmp_path):
     client = make_client(tmp_path)
-    path = "/api/admin/territorial/identity"
+    path = "/api/admin/gods-eye-view/identity"
     assert client.get(path).status_code == 401
     assert client.put(path, json=DEFAULT_IDENTITY).status_code == 401
-    assert client.get("/api/territorial/identity").status_code == 401
+    assert client.get("/api/gods-eye-view/identity").status_code == 401
     assert client.get("/api/prisma/identity").status_code == 401
     login(client)
     assert client.get(path).json() == DEFAULT_IDENTITY
     identity = {"name": "A" * 80, "description": "B" * 200}
     assert client.put(path, json=identity).json() == identity
-    response = client.get("/api/territorial/identity")
+    response = client.get("/api/gods-eye-view/identity")
     assert response.json() == identity and response.headers["cache-control"] == "no-store"
     assert client.get("/api/prisma/identity").json() == identity
     assert client.put(path, json={**identity, "name": "A" * 81}).status_code == 422

@@ -4,7 +4,7 @@
 
 ## Prerequisites and profiles
 
-Use Git and Docker with Compose for local execution. For direct checks, CI uses Python 3.12 and Node 22 for the portal, Terraform 1.5.7 and 1.15.7, and the OCI provider pinned in [`a_versions.tf`](../terraform/a_versions.tf). The native viewer uses Node 24.14.0 in its [Dockerfile](../apps/territorial-viewer/Dockerfile); its [integration guide](../apps/territorial-viewer/README.md) defines the pinned upstream build.
+Use Git and Docker with Compose for local execution. For direct checks, CI uses Python 3.12 and Node 22 for the portal, Terraform 1.5.7 and 1.15.7, and the OCI provider pinned in [`a_versions.tf`](../terraform/a_versions.tf). The native viewer uses Node 24.14.0 in its [Dockerfile](../apps/gods-eye-view/Dockerfile); its [integration guide](../apps/gods-eye-view/README.md) defines the pinned upstream build.
 
 | Profile | Command/configuration | What it verifies |
 | --- | --- | --- |
@@ -39,6 +39,8 @@ python scripts/bootstrap_local_oci_env.py --config <oci-config> --key <oci-key.p
 docker compose --env-file .env -f docker/docker-compose.oci-local.yml up --build --detach
 ```
 
+For an installation whose God's Eye View Object runtime is already initialized or migrated, add `--gods-eye-control-bucket <gold-bucket-name>` to the bootstrap command. Use the deployment output `medallion_bucket_names.gold`; the helper verifies the bucket and writes `GODS_EYE_CONTROL_BUCKET` explicitly. It does not infer this value from the Landing bucket. Complete the [migration gates](operations.md#migrate-gods-eye-view-controls) before connecting new consumers to an existing module.
+
 The default URL is `http://127.0.0.1:18082`. The helper prepares protected local configuration; Compose mounts the selected OCI key read-only. This profile targets live services and is not an isolated copy of the deployment. Stop it with the same Compose file and environment:
 
 ```powershell
@@ -70,7 +72,7 @@ terraform -chdir=terraform init -backend=false
 terraform -chdir=terraform validate
 terraform -chdir=terraform test
 docker build -f docker/Dockerfile -t aidp-lab:test .
-docker build -f apps/territorial-viewer/Dockerfile -t gods-eye-view:test .
+docker build -f apps/gods-eye-view/Dockerfile -t gods-eye-view:test .
 ./scripts/arch-postflight.ps1
 ```
 
@@ -84,12 +86,12 @@ God's Eye View's new cloud path uses Object Storage for controls and an immutabl
 
 ```powershell
 $env:PYTHONPATH = "apps/backend"
-python -m pytest apps/backend/tests/test_territorial_control_store.py apps/backend/tests/test_territorial_control_migration.py apps/backend/tests/test_territorial_object_post_index.py --basetemp=.tmp/pytest-controls-new-run -o addopts= -q
+python -m pytest apps/backend/tests/test_gods_eye_view_control_store.py apps/backend/tests/test_gods_eye_view_control_migration.py apps/backend/tests/test_gods_eye_view_object_post_index.py --basetemp=.tmp/pytest-controls-new-run -o addopts= -q
 ```
 
 Use fake storage and fresh local indexes for these tests. Exercise stale ETags, concurrent writers, interrupted staging, history mismatches and terminal cancellation. Existing Oracle facade tests protect migration compatibility; passing them does not authorize a live fallback.
 
-The [migration module](../apps/backend/app/territorial/control_migration.py) separates read-only export, create-only staging and activation. Its tests do not connect to OCI or stop writers. The [operational procedure](operations.md#migrate-gods-eye-view-controls) requires a verified writer freeze and real Gold/Object history proof. Cloud cutover and native agent acceptance remain pending.
+The [migration module](../apps/backend/app/gods_eye_view/control_migration.py) separates read-only export, create-only staging and activation. Its tests do not connect to OCI or stop writers. The [operational procedure](operations.md#migrate-gods-eye-view-controls) requires a verified writer freeze, actual Gold/Object history comparisons and acceptance of the installed consumers.
 
 ## Change packages and AI workflows safely
 

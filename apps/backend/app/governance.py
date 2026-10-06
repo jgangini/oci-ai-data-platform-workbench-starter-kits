@@ -7,13 +7,15 @@ import re
 import uuid
 from typing import Any
 
-from .territorial.runtime_secrets import SHARED_OCI_CREDENTIAL_NAME
+from .gods_eye_view.runtime_secrets import SHARED_OCI_CREDENTIAL_NAME
 
 
-GOVERNANCE_MODULE_ID = "ai_data_governance_vsc_extension"
+GOVERNANCE_MODULE_ID = "ai_data_governance"
+# Adopt the exact previous module/agent identity without creating a second installation.
+LEGACY_GOVERNANCE_MODULE_ID = "ai_data_governance_vsc_extension"
 GOVERNANCE_DISPLAY_NAME = "AI Data Governance"
 GOVERNANCE_CREDENTIAL_NAME = SHARED_OCI_CREDENTIAL_NAME
-GOVERNANCE_AGENT_NAME = "ai_data_governance_vsc_extension"
+GOVERNANCE_AGENT_NAME = "ai_data_governance"
 GOVERNANCE_AGENT_COMPUTE_NAME = "aidp_data_governance_agent_compute"
 GOVERNANCE_JOB_NAME = "wf_ai_data_governance_metadata_sync"
 GOVERNANCE_BUCKET_NAME = "oci_artifacts"
@@ -193,7 +195,7 @@ API_BASE = (
     f"aiDataPlatforms/{CONFIG['platform_id']}"
 )
 IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,255}$")
-logger = logging.getLogger("ai_data_governance_vsc_extension")
+logger = logging.getLogger("ai_data_governance")
 checkpointer = globals().get("checkpointer")
 
 
@@ -1050,13 +1052,16 @@ def governance_sync_notebook(
     job_key: str = "",
     credential_name: str = GOVERNANCE_CREDENTIAL_NAME,
     identity_sha256: str = "",
+    control_module_id: str = GOVERNANCE_MODULE_ID,
 ) -> dict[str, Any]:
     """Return the protected Spark notebook used by the single continuous workflow."""
     if not all((namespace, platform_id, region)):
         raise ValueError("The governance synchronization runtime contract is incomplete")
+    if control_module_id not in {GOVERNANCE_MODULE_ID, LEGACY_GOVERNANCE_MODULE_ID}:
+        raise ValueError("Unknown governance control identity")
     config = json.dumps(
         {
-            "module_id": GOVERNANCE_MODULE_ID,
+            "module_id": control_module_id,
             "credential_name": credential_name,
             "identity_sha256": identity_sha256,
             "namespace": namespace,

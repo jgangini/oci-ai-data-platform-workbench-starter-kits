@@ -175,7 +175,7 @@ class FakeAidp:
         if self.mode == "module-status-pending":
             raise AidpProvisionPending("workspace is not visible yet", "workspace")
         return [self.module or {
-            "module_id": "ai_data_governance_vsc_extension",
+            "module_id": "ai_data_governance",
             "display_name": "AI Data Governance",
             "status": "not_installed",
             "installed": False,
@@ -198,7 +198,7 @@ class FakeAidp:
             raise AidpProvisionPending("workspace is not visible yet", "workspace")
         if self.mode == "module-concurrent-pending":
             self.module = {
-                "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance",
+                "module_id": "ai_data_governance", "display_name": "AI Data Governance",
                 "status": "installing", "installed": True,
                 "operation_id": "a635d4ba-6d8c-48df-9340-4c0c1266ca66",
                 "operation_type": "install", "phase": "control", "enabled": False,
@@ -206,13 +206,13 @@ class FakeAidp:
             raise AidpProvisionPending("the singleton install is already running", "control")
         if self.mode == "module-pending":
             self.module = {
-                "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance",
+                "module_id": "ai_data_governance", "display_name": "AI Data Governance",
                 "status": "installing", "installed": True, "operation_id": operation_id,
                 "operation_type": "install", "phase": "sync", "enabled": False,
             }
             raise AidpProvisionPending("first snapshot running", "sync")
         self.module = {
-            "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance",
+            "module_id": "ai_data_governance", "display_name": "AI Data Governance",
             "status": "active", "installed": True, "operation_id": operation_id,
             "operation_type": "install", "phase": "active", "enabled": True,
         }
@@ -243,7 +243,7 @@ class FakeAidp:
             self.verified_governance_operations.append("delete")
         self.module = None
         return {
-            "module_id": "ai_data_governance_vsc_extension", "display_name": "AI Data Governance",
+            "module_id": "ai_data_governance", "display_name": "AI Data Governance",
             "status": "not_installed", "installed": False, "operation_id": operation_id,
             "operation_type": "delete", "phase": "complete", "enabled": False,
         }
@@ -435,7 +435,7 @@ def test_application_release_and_update_are_admin_only_and_idempotent(tmp_path: 
     assert release.json()["latest_release"] == "v2.3.0"
     assert release.json()["update_available"] is True
     package_ids = {item["package_id"] for item in release.json()["packages"]}
-    assert {"ai_data_governance_vsc_extension", "territorial_control"} <= package_ids
+    assert {"ai_data_governance", "gods_eye_view"} <= package_ids
 
     operation_id = "d9282ff6-8717-4db7-9f59-241469a2c526"
     pending = client.post(
@@ -562,12 +562,12 @@ def test_admin_lists_labs_and_can_add_redeploy_and_remove_one(tmp_path: Path) ->
 
 @pytest.mark.parametrize("deployment_mode", ["laboratory", "production"])
 def test_governance_module_api_requires_admin_session_in_both_modes(tmp_path: Path, deployment_mode: str) -> None:
-    path = "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension"
+    path = "/api/admin/users/user-id/modules/ai_data_governance"
     laboratory = make_client(tmp_path, deployment_mode=deployment_mode)
     assert laboratory.get("/api/admin/modules").status_code == 401
     assert laboratory.post(path).status_code == 401
     login(laboratory)
-    assert laboratory.get("/api/admin/modules").json()["modules"][0]["module_id"] == "ai_data_governance_vsc_extension"
+    assert laboratory.get("/api/admin/modules").json()["modules"][0]["module_id"] == "ai_data_governance"
     assert laboratory.post(path).status_code == 200
     assert laboratory.app.state.test_aidp.verified_governance_operations == ["install"]
 
@@ -578,7 +578,7 @@ def test_governance_module_lifecycle_uses_global_operation_contract(tmp_path: Pa
     modules = client.get("/api/admin/modules")
     assert modules.status_code == 200
     assert modules.json()["modules"][0] == {
-        "module_id": "ai_data_governance_vsc_extension",
+        "module_id": "ai_data_governance",
         "display_name": "AI Data Governance",
         "status": "not_installed",
         "installed": False,
@@ -588,7 +588,7 @@ def test_governance_module_lifecycle_uses_global_operation_contract(tmp_path: Pa
         "enabled": False,
     }
     operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
-    path = "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension"
+    path = "/api/admin/users/user-id/modules/ai_data_governance"
     installed = client.post(path, json={"operation_id": operation_id})
     assert installed.status_code == 200
     assert installed.json()["operation_type"] == "install"
@@ -605,7 +605,7 @@ def test_governance_module_lifecycle_uses_global_operation_contract(tmp_path: Pa
 
 @pytest.mark.parametrize("deployment_mode", ["laboratory", "production"])
 def test_governance_module_rejects_non_platform_admin_and_lists_unmanaged_admin(tmp_path: Path, deployment_mode: str) -> None:
-    path = "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension"
+    path = "/api/admin/users/user-id/modules/ai_data_governance"
     denied = make_client(tmp_path / "denied", mode="not-admin", deployment_mode=deployment_mode)
     login(denied)
     users = denied.get("/api/admin/users").json()["users"]
@@ -630,7 +630,7 @@ def test_governance_module_accepts_admin_inherited_from_group(tmp_path: Path) ->
     assert users[0]["is_aidp_admin"] is True
 
     response = client.post(
-        "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension",
+        "/api/admin/users/user-id/modules/ai_data_governance",
         json={"operation_id": "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"},
     )
 
@@ -643,7 +643,7 @@ def test_governance_module_pending_response_resumes_manifest_operation(tmp_path:
     login(client)
     operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
     response = client.post(
-        "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension",
+        "/api/admin/users/user-id/modules/ai_data_governance",
         json={"operation_id": operation_id},
     )
     assert response.status_code == 202
@@ -658,7 +658,7 @@ def test_governance_module_pending_before_manifest_is_retryable(tmp_path: Path, 
     login(client)
     operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
     response = client.post(
-        "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension",
+        "/api/admin/users/user-id/modules/ai_data_governance",
         json={"operation_id": operation_id},
     )
     assert response.status_code == 202
@@ -673,7 +673,7 @@ def test_concurrent_governance_install_reuses_the_global_operation_id(tmp_path: 
     client = make_client(tmp_path, mode="module-concurrent-pending", deployment_mode="production")
     login(client)
     response = client.post(
-        "/api/admin/users/user-id/modules/ai_data_governance_vsc_extension",
+        "/api/admin/users/user-id/modules/ai_data_governance",
         json={"operation_id": "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"},
     )
     assert response.status_code == 202

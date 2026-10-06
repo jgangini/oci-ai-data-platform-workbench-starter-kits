@@ -16,7 +16,7 @@ import httpx
 
 from .config import Settings
 from .lab_packs import lab_catalog
-from .territorial.module import PACKAGE as TERRITORIAL_PACKAGE
+from .gods_eye_view.module import PACKAGE as GODS_EYE_VIEW_PACKAGE
 
 
 REPOSITORY = "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
@@ -218,7 +218,7 @@ class ApplicationReleaseManager:
                     "status": pack.status,
                 }
                 for pack in lab_catalog()
-            ] + [dict(TERRITORIAL_PACKAGE)],
+            ] + [dict(GODS_EYE_VIEW_PACKAGE)],
         }
 
     @staticmethod

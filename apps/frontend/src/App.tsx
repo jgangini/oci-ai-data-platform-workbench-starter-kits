@@ -9,10 +9,10 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { TerritorialAdmin } from "./TerritorialAdmin";
+import { GodsEyeViewAdmin } from "./GodsEyeViewAdmin";
 import { LoadingIndicator } from "./LoadingIndicator";
-import { GodsEyeModuleManager } from "./GodsEyeModuleManager";
-import { LocalTerritorialAccess } from "./LocalTerritorialAccess";
+import { GodsEyeViewModuleManager } from "./GodsEyeViewModuleManager";
+import { LocalGodsEyeViewAccess } from "./LocalGodsEyeViewAccess";
 
 import { labAssignmentChanges } from "./labAssignments";
 
@@ -44,7 +44,7 @@ type LabUser = {
   labs: AssignedLab[];
   active: boolean;
   managed?: boolean;
-  territorial_access?: boolean;
+  gods_eye_view_access?: boolean;
   is_aidp_admin: boolean;
   participant_code?: number | null;
 };
@@ -66,7 +66,7 @@ type CatalogLab = {
   status: "available" | "planned";
   available: boolean;
 };
-type UserDraft = { name: string; email: string; lab_ids: string[]; territorial_control?: boolean };
+type UserDraft = { name: string; email: string; lab_ids: string[]; gods_eye_view?: boolean };
 type AdminSettingsResponse = {
   aidp_service_endpoint: string;
   aidp_url: string;
@@ -78,7 +78,7 @@ type AdminSettingsResponse = {
   time_zones: string[];
 };
 type AdminModule = {
-  module_id: "ai_data_governance_vsc_extension" | (string & {});
+  module_id: "ai_data_governance" | (string & {});
   display_name: string;
   status: "not_installed" | "installing" | "active" | "redeploying" | "deleting" | "error" | (string & {});
   installed: boolean;
@@ -140,7 +140,7 @@ const fallbackCatalog: CatalogLab[] = [
 ];
 
 function participantLabCatalog(catalog: CatalogLab[]) {
-  return catalog.filter(({ lab_id }) => !["agent", "ai_data_governance_vsc_extension"].includes(lab_id));
+  return catalog.filter(({ lab_id }) => !["agent", "ai_data_governance"].includes(lab_id));
 }
 
 function moduleOperationKey(moduleId: string, kind: ModuleOperationKind) {
@@ -570,7 +570,7 @@ function CreateUserModal({
               </tbody>
             </table>
           </div>
-          {localParticipantAccess && <label><input type="checkbox" checked={!!draft.territorial_control} onChange={event => onDraftChange({ ...draft, territorial_control: event.target.checked })} disabled={creating} />Territorial Control · God’s Eye View and local AIDP project access</label>}
+          {localParticipantAccess && <label><input type="checkbox" checked={!!draft.gods_eye_view} onChange={event => onDraftChange({ ...draft, gods_eye_view: event.target.checked })} disabled={creating} />God’s Eye View and local AIDP project access</label>}
           {localParticipantAccess && <p className="settings-help">Local mode: credentials are saved to a welcome file; no email is sent.</p>}
           {error && <p className="lab-manager-error" role="alert">{error}</p>}
           <footer>
@@ -763,7 +763,7 @@ function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
   const closeRef = useRef<HTMLButtonElement>(null);
   useDialogFocus(true, moduleOperating ? () => undefined : onClose, panelRef, closeRef);
 
-  const governanceModule = modules.find(({ module_id }) => module_id === "ai_data_governance_vsc_extension") ?? null;
+  const governanceModule = modules.find(({ module_id }) => module_id === "ai_data_governance") ?? null;
   const moduleManagerUser = users.find(user => user.id === moduleManagerUserId && user.is_aidp_admin) ?? null;
   const recoverableKind = governanceModule && moduleOperationKind(governanceModule.status, governanceModule.operation_type);
   const transitioning = Boolean(governanceModule && ["installing", "redeploying", "deleting"].includes(governanceModule.status));
@@ -785,7 +785,7 @@ function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
     setModuleLoadError("");
     try {
       const loaded = (await api<{ modules: AdminModule[] }>("/api/admin/modules", { signal })).modules;
-      if (!loaded.some(module => module.module_id === "ai_data_governance_vsc_extension")) throw new Error("AI Data Governance is unavailable.");
+      if (!loaded.some(module => module.module_id === "ai_data_governance")) throw new Error("AI Data Governance is unavailable.");
       setModules(loaded);
       for (const module of loaded) {
         const recoverableKind = moduleOperationKind(module.status, module.operation_type);
@@ -2579,7 +2579,7 @@ function ApplicationReleaseSettings({
           <h2>Application version</h2>
           <p>Update the VM in place from the latest immutable release without reinstalling it.</p>
         </div>
-        <span className={`territorial-mode release-state ${release?.update_available || operationRunning ? "update" : "current real"}`}>
+        <span className={`gods-eye-view-mode release-state ${release?.update_available || operationRunning ? "update" : "current real"}`}>
           {statusLabel}
         </span>
       </header>
@@ -2642,12 +2642,12 @@ function ApplicationReleaseSettings({
                     <td>{item.bundled_version}</td>
                     <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
                     <td className="release-package-actions">
-                      {item.package_id === "ai_data_governance_vsc_extension" && (
+                      {item.package_id === "ai_data_governance" && (
                         <button type="button" className="module-configure module-deploy" onClick={onConfigureGovernance} aria-label="Deploy or redeploy AI Data Governance" title="Deploy or redeploy AI Data Governance" aria-haspopup="dialog">
                           <InstallIcon />
                         </button>
                       )}
-                      {item.package_id === "territorial_control" && (
+                      {item.package_id === "gods_eye_view" && (
                         <>
                         <button type="button" className="module-configure module-deploy" onClick={onConfigureGodsEye} aria-label={`Install ${item.display_name}`} title={`Install ${item.display_name}`} aria-haspopup="dialog">
                           <InstallIcon />
@@ -3041,7 +3041,7 @@ function AdminSettings() {
                   <RefreshIcon />{releaseBusy ? "Updating…" : "Update from GitHub"}
                 </button>}
             </div>
-            {configuringModule ? <TerritorialAdmin api={api} timeZone={savedTimeZone} searchIcon={<SearchIcon />} refreshIcon={<RefreshIcon />} viewerUrlControl={
+            {configuringModule ? <GodsEyeViewAdmin api={api} timeZone={savedTimeZone} searchIcon={<SearchIcon />} refreshIcon={<RefreshIcon />} viewerUrlControl={
               <label className="settings-field">
                 God’s Eye View URL
                 <span className="settings-url-control settings-url-control-actions">
@@ -3072,7 +3072,7 @@ function AdminSettings() {
       </section>
       <Toast message={toast} onDismiss={() => setToast("")} />
       {confirmGovernance && <GovernanceModuleManager onClose={() => setConfirmGovernance(false)} />}
-      {confirmGodsEye && <GodsEyeModuleManager api={api} onClose={() => setConfirmGodsEye(false)} />}
+      {confirmGodsEye && <GodsEyeViewModuleManager api={api} onClose={() => setConfirmGodsEye(false)} />}
       <ConfirmModal
         open={confirmRegistrationSave}
         kind="question"
@@ -3114,8 +3114,8 @@ function AdminSettings() {
 }
 
 export function App() {
-  if (window.location.pathname === "/local/gods-eye-view/login") return <Shell><LocalTerritorialAccess api={api} /></Shell>;
-  if (window.location.pathname === "/local/gods-eye-view/workspace") return <Shell><LocalTerritorialAccess api={api} workspace /></Shell>;
+  if (window.location.pathname === "/local/gods-eye-view/login") return <Shell><LocalGodsEyeViewAccess api={api} /></Shell>;
+  if (window.location.pathname === "/local/gods-eye-view/workspace") return <Shell><LocalGodsEyeViewAccess api={api} workspace /></Shell>;
   if (window.location.pathname === "/admin/gods-eye-view") return <AdminSettings />;
   if (window.location.pathname === "/admin/settings") return <AdminSettings />;
   if (window.location.pathname === "/admin/login")

@@ -66,8 +66,8 @@ run "resolved_compartment_contract" {
   command = plan
 
   assert {
-    condition     = length(oci_core_instance.territorial) == 0 && length(oci_core_nat_gateway.territorial) == 0 && oci_core_subnet.public.cidr_block == var._oci_vcn.cidr_block
-    error_message = "Existing labs must keep their one-VM network when Territorial is disabled."
+    condition     = length(oci_core_instance.gods_eye_view) == 0 && length(oci_core_nat_gateway.gods_eye_view) == 0 && oci_core_subnet.public.cidr_block == var._oci_vcn.cidr_block
+    error_message = "Existing labs must keep their one-VM network when God’s Eye View is disabled."
   }
 
   variables {
@@ -340,23 +340,23 @@ run "production_rejects_registration_code" {
   expect_failures = [oci_core_instance.lab]
 }
 
-run "territorial_private_viewer" {
+run "gods_eye_view_private_viewer" {
   command = plan
 
   override_resource {
-    target          = oci_core_instance.territorial[0]
+    target          = oci_core_instance.gods_eye_view[0]
     override_during = plan
     values          = { private_ip = "10.10.0.130" }
   }
 
   override_resource {
-    target          = oci_core_network_security_group.territorial[0]
+    target          = oci_core_network_security_group.gods_eye_view[0]
     override_during = plan
     values          = { id = "ocid1.networksecuritygroup.test.viewer" }
   }
 
   override_resource {
-    target          = oci_core_network_security_group.territorial_proxy[0]
+    target          = oci_core_network_security_group.gods_eye_view_proxy[0]
     override_during = plan
     values          = { id = "ocid1.networksecuritygroup.test.admin" }
   }
@@ -376,27 +376,27 @@ run "territorial_private_viewer" {
   }
 
   assert {
-    condition     = length(oci_core_instance.territorial) == 1 && !oci_core_instance.territorial[0].create_vnic_details[0].assign_public_ip && oci_core_subnet.territorial[0].prohibit_public_ip_on_vnic
-    error_message = "Territorial must create one private viewer with no public address."
+    condition     = length(oci_core_instance.gods_eye_view) == 1 && !oci_core_instance.gods_eye_view[0].create_vnic_details[0].assign_public_ip && oci_core_subnet.gods_eye_view[0].prohibit_public_ip_on_vnic
+    error_message = "God’s Eye View must create one private viewer with no public address."
   }
 
   assert {
-    condition     = oci_core_subnet.public.cidr_block == "10.10.0.0/25" && oci_core_subnet.territorial[0].cidr_block == "10.10.0.128/25" && oci_core_instance.lab.create_vnic_details[0].private_ip == "10.10.0.10"
+    condition     = oci_core_subnet.public.cidr_block == "10.10.0.0/25" && oci_core_subnet.gods_eye_view[0].cidr_block == "10.10.0.128/25" && oci_core_instance.lab.create_vnic_details[0].private_ip == "10.10.0.10"
     error_message = "Both subnets must be disjoint and the admin bridge must use its reserved private address."
   }
 
   assert {
-    condition     = oci_core_network_security_group_security_rule.territorial[0].source == oci_core_network_security_group.territorial_proxy[0].id && oci_core_network_security_group_security_rule.territorial[0].tcp_options[0].destination_port_range[0].min == 8081 && oci_core_network_security_group_security_rule.territorial_admin[0].source == oci_core_network_security_group.territorial[0].id
+    condition     = oci_core_network_security_group_security_rule.gods_eye_view[0].source == oci_core_network_security_group.gods_eye_view_proxy[0].id && oci_core_network_security_group_security_rule.gods_eye_view[0].tcp_options[0].destination_port_range[0].min == 8081 && oci_core_network_security_group_security_rule.gods_eye_view_admin[0].source == oci_core_network_security_group.gods_eye_view[0].id
     error_message = "Only VM1 may reach the viewer; only VM2 may reach the private admin bridge."
   }
 
   assert {
-    condition     = length(oci_identity_policy.territorial[0].statements) == 1 && strcontains(oci_identity_policy.territorial[0].statements[0], "request.permission = 'OBJECT_READ'") && strcontains(oci_identity_policy.territorial[0].statements[0], "04_gold/prisma/*") && strcontains(oci_identity_policy.territorial[0].statements[0], ".control/prisma/agent.json")
-    error_message = "Viewer principal must only read published Territorial objects."
+    condition     = length(oci_identity_policy.gods_eye_view[0].statements) == 1 && strcontains(oci_identity_policy.gods_eye_view[0].statements[0], "request.permission = 'OBJECT_READ'") && strcontains(oci_identity_policy.gods_eye_view[0].statements[0], "04_gold/prisma/*") && strcontains(oci_identity_policy.gods_eye_view[0].statements[0], ".control/prisma/agent.json")
+    error_message = "Viewer principal must only read published God’s Eye View objects."
   }
 
   assert {
-    condition     = strcontains(base64decode(oci_core_instance.territorial[0].metadata.user_data), "TERRITORIAL_ADMIN_URL=http://10.10.0.10:8000") && output.prisma_viewer_enabled
+    condition     = strcontains(base64decode(oci_core_instance.gods_eye_view[0].metadata.user_data), "GODS_EYE_VIEW_ADMIN_URL=http://10.10.0.10:8000") && output.prisma_viewer_enabled
     error_message = "Both frozen containers must share the private authenticated bridge contract."
   }
 
@@ -419,10 +419,11 @@ run "canonical_viewer_input_overrides_legacy" {
     registration_code_hash    = "pbkdf2_sha256$600000$salt$digest"
     source_commit_sha         = "0123456789abcdef0123456789abcdef01234567"
     enable_prisma_viewer      = true
-    enable_territorial_viewer = false
+    enable_territorial_viewer = true
+    enable_gods_eye_view      = false
   }
   assert {
-    condition     = !output.territorial_viewer_enabled && !output.prisma_viewer_enabled && length(oci_core_instance.territorial) == 0
+    condition     = !output.gods_eye_view_enabled && !output.prisma_viewer_enabled && length(oci_core_instance.gods_eye_view) == 0
     error_message = "The canonical toggle must override the legacy alias without producing a second viewer."
   }
 }

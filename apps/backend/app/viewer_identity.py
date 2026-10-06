@@ -42,14 +42,17 @@ def render_identity(html: str, identity: dict) -> str:
 
 def mount_identity(app, require_admin, require_viewer):
     @app.get("/api/prisma/identity", include_in_schema=False)
-    @app.get("/api/territorial/identity")
+    @app.get("/api/territorial/identity", include_in_schema=False)
+    @app.get("/api/gods-eye-view/identity")
     def viewer_identity(request: Request, _viewer=Depends(require_viewer)):
         return JSONResponse(request.app.state.settings_store.get_viewer_identity(), headers={"Cache-Control": "no-store"})
 
-    @app.get("/api/admin/territorial/identity")
+    @app.get("/api/admin/territorial/identity", include_in_schema=False)
+    @app.get("/api/admin/gods-eye-view/identity")
     def admin_identity(request: Request, _admin=Depends(require_admin)):
         return JSONResponse(request.app.state.settings_store.get_viewer_identity(), headers={"Cache-Control": "no-store"})
 
-    @app.put("/api/admin/territorial/identity")
+    @app.put("/api/admin/territorial/identity", include_in_schema=False)
+    @app.put("/api/admin/gods-eye-view/identity")
     def save_identity(payload: ViewerIdentity, request: Request, _admin=Depends(require_admin)):
         return JSONResponse(request.app.state.settings_store.update_viewer_identity(payload.model_dump()), headers={"Cache-Control": "no-store"})

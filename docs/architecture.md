@@ -2,11 +2,10 @@
 
 [Documentation](README.md) · [Getting started](getting-started.md) · [Operations](operations.md)
 
-The storage boundary owns revision checks, journal replay and migration validation.
-This intentionally adds validation complexity in one place so callers cannot skip
-conflict detection or historical-data checks. SQLite remains a rebuildable index;
-Object Storage is authoritative. The architecture baseline is retained, including
-the measured complexity increase, rather than reset after this migration.
+The portal provisions participant labs and administers two shared modules. AIDP
+executes the data pipelines and agents; Master Catalog governs their tables and
+access. Participant labs, Governance metadata synchronization and God's Eye View
+capture/query processing have separate lifecycles.
 
 ## Deployment boundaries
 
@@ -32,7 +31,7 @@ flowchart TB
     Viewer --> Public
 ```
 
-The public application authenticates users and proxies the private viewer. The viewer VM is not a public administration endpoint. Its source and network rules are defined in [nginx](../docker/nginx.conf), [viewer infrastructure](../terraform/g_territorial_viewer.tf) and the [viewer integration](../apps/territorial-viewer/README.md).
+The public application authenticates users and proxies the private viewer. The viewer VM is not a public administration endpoint. Its source and network rules are defined in [nginx](../docker/nginx.conf), [viewer infrastructure](../terraform/g_gods_eye_view.tf) and the [viewer integration](../apps/gods-eye-view/README.md).
 
 Terraform creates infrastructure; [post-apply](../terraform/hooks/post_apply.py) reconciles AIDP and identity resources. The [application API](../apps/backend/app/aidp.py) subsequently manages participant and global-module lifecycle. Resource existence, successful provisioning, successful processing and successful agent inference are separate acceptance steps.
 
@@ -51,18 +50,22 @@ Terraform creates infrastructure; [post-apply](../terraform/hooks/post_apply.py)
 
 [Bucket configuration](../terraform/f_oci_objectstorage_bucket.tf) also retains an `aidp-data-*` service/compatibility bucket resource. The `bucket_name` output used by the application resolves to the selected Landing bucket. Do not infer actual managed table locations from bucket names, legacy `01_landing/…04_gold/` helpers, or directory names. Inspect the installed catalog and table metadata.
 
-The new God's Eye View implementation uses Object Storage for operational state and Gold for analytics; neither path needs a database writer or reader credential. Migration code is present, but **cloud cutover and native agent acceptance remain pending**. This does not remove Autonomous from unrelated platform contracts. See the [migration procedure](operations.md#migrate-gods-eye-view-controls).
+God's Eye View uses Object Storage for operational state and Gold for analytics; neither path needs a database writer or reader credential. Existing installations must complete the [explicit migration procedure](operations.md#migrate-gods-eye-view-controls) before switching their consumers. Source availability or a successful candidate-agent query does not migrate an installation or retire its credentials. Autonomous remains part of separate platform contracts.
 
 ### God's Eye View control and read paths
 
 ```mermaid
 flowchart LR
     Admin[Confirmed administration changes] --> CAS[Object documents: revision plus ETag CAS]
-    Streams[Social and sensor workflows] --> CAS
-    Streams --> Journal[Immutable post events plus CAS head]
+    Social[Social workflow and publisher] --> CAS
+    Sensor[Sensor workflow] --> CAS
+    Sensor --> Silver[Sensor Bronze and Silver tables]
+    Silver --> Social
+    Capture[Portal social capture] --> Journal
+    Social --> Journal[Immutable post events plus CAS head]
     Journal --> Index[VM SQLite projection: rebuildable]
     Index --> Table[Paginated publication table]
-    Streams --> Gold[Delta Gold publications]
+    Social --> Gold[Delta Gold publications]
     Gold --> Snapshot[Versioned object snapshot and current pointer]
     Snapshot --> Viewer[Authenticated map]
     Gold --> Agent[Agent: fixed Spark queries]
@@ -70,7 +73,7 @@ flowchart LR
 
 Document writes reject stale revisions instead of retrying an administrator's change. Post writers append immutable events and conditionally advance the head; they do not rewrite a complete JSON index or depend on SQLite in Spark. The VM incrementally verifies and projects this journal for filtered, ordered pages. Losing that local index does not lose the journal.
 
-Publication activation follows durable Gold and Object writes. Cleanup retains operation scope, replacement receipts and cancellation history. Object writes are individually durable: `commit` and `rollback` do not create a transaction across objects. Stop the writer before recording terminal cancellation. Source: [control store](../apps/backend/app/territorial/control_store.py), [post index](../apps/backend/app/territorial/post_index.py), [publisher](../apps/backend/app/territorial/pipeline.py).
+Publication activation follows durable Gold and Object writes. Cleanup retains operation scope, replacement receipts and cancellation history. Object writes are individually durable: `commit` and `rollback` do not create a transaction across objects. Stop the writer before recording terminal cancellation. Source: [control store](../apps/backend/app/gods_eye_view/control_store.py), [post index](../apps/backend/app/gods_eye_view/post_index.py), [publisher](../apps/backend/app/gods_eye_view/pipeline.py).
 
 ## Participant data flow
 
@@ -121,7 +124,7 @@ Both modules use the shared OCI API credential `AidpRuntime`; supported OCI-only
 | Kit data, tasks or expected results | [`apps/backend/app/labs`](../apps/backend/app/labs) and [`lab_packs.py`](../apps/backend/app/lab_packs.py) |
 | Naming and participant lifecycle | [`notebooks.py`](../apps/backend/app/notebooks.py), [`aidp.py`](../apps/backend/app/aidp.py) |
 | Governance agent and synchronization | [`governance.py`](../apps/backend/app/governance.py) |
-| God's Eye View pipelines and agent | [`territorial`](../apps/backend/app/territorial), [deployment hook](../terraform/hooks/territorial_bootstrap.py) |
+| God's Eye View pipelines and agent | [`gods_eye_view`](../apps/backend/app/gods_eye_view), [deployment hook](../terraform/hooks/gods_eye_view_bootstrap.py) |
 | Portal | [`apps/frontend/src`](../apps/frontend/src) |
 | Infrastructure and source publication | [`terraform`](../terraform) and [`terraform/hooks`](../terraform/hooks) |
 | Release images and updater | [Release workflow](../.github/workflows/release.yml), [`vm_release_updater.py`](../scripts/vm_release_updater.py) |

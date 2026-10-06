@@ -226,7 +226,7 @@ test("administrators manage one shared governance module from Settings outside p
   assert.doesNotMatch(manager, /type="checkbox"|<ConfirmModal|dedicated AI Compute, credential, notebook/);
   assert.doesNotMatch(source, /production && user\.is_aidp_admin|lab_id: "agent"/);
   assert.match(source, /function participantLabCatalog/);
-  assert.match(source, /\["agent", "ai_data_governance_vsc_extension"\]\.includes\(lab_id\)/);
+  assert.match(source, /\["agent", "ai_data_governance"\]\.includes\(lab_id\)/);
   assert.ok(!labCatalog.labs.includes("agent"));
 });
 

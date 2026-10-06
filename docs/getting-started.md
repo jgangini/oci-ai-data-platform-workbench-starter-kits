@@ -4,12 +4,12 @@
 
 ## Current implementation limits
 
-This branch contains migration work. Select a release by its acceptance evidence, not only by the presence of a tag or passing unit tests.
+Check the selected release's package contracts and deployment acceptance before running a lab. A tag or passing unit tests alone does not establish native readiness.
 
 | Area | Checked-in behavior and limitation |
 | --- | --- |
 | Participant layout | The provisioner supplies `/Workspace/<lab_id>/<participant_key>_<email>` and catalog `oci_medallion`. The bundled 2.0.0 notebooks still validate `/Workspace/medallon/` and `<participant_key>_aidp`. New jobs using the current provisioner can fail those guards before ingestion. This contract must be reconciled and accepted before treating new participant runs as ready. |
-| God's Eye View | Standalone workflows, Gold query code and explicit Object-control migration tooling are present. Native Gold-agent acceptance, cloud migration/cutover and unused database-credential retirement are still pending. Existing installations can retain the legacy runtime. See the [module guide](modules/gods-eye-view.md). |
+| God's Eye View upgrades | Standalone workflows and the Object-control runtime require an explicit migration for existing installations. Verify Gold-agent behavior, activate migrated controls, switch consumers and retire unused credentials as separate steps. Existing installations retain their legacy dependencies until those steps finish. See the [migration procedure](operations.md#migrate-gods-eye-view-controls). |
 | Historical evidence | The Telco lineage validation report describes package 1.1.2. Its results do not certify the current 2.0.0 package or a new installation. |
 
 The layout discrepancy is visible in [naming](../apps/backend/app/notebooks.py), [job provisioning](../apps/backend/app/aidp.py), and the [Banking notebook](../apps/backend/app/labs/banking/notebooks/01_landing_banking.ipynb). Do not bypass notebook guards or substitute another participant's catalog to make a run appear successful.

@@ -58,7 +58,7 @@ When a cleanup fails or is interrupted, retry its existing operation ID and pres
 
 ## Migrate God's Eye View controls
 
-The new source uses Object Storage controls and a post journal, with a disposable SQLite projection on the VM. **Cloud cutover and native agent acceptance remain pending.** The [migration module](../apps/backend/app/territorial/control_migration.py) provides explicit export, staging and activation functions; it does not pause consumers, switch application configuration or remove resources automatically.
+Use this procedure when upgrading an existing module from Oracle controls to Object Storage and its immutable post journal. Fresh installations initialize the Object runtime during deployment. The [migration module](../apps/backend/app/gods_eye_view/control_migration.py) provides explicit export, staging and activation functions; it does not pause consumers, switch application configuration or remove resources automatically. Record each gate for the target installation; candidate-agent acceptance alone does not establish migration completion.
 
 1. **Freeze and record.** Block portal writes, stop both native stream writers and verify their tasks are terminal. Record source/resource identities and preserve the current application settings, publication pointer and cancelled-reset receipt. `writers_frozen=True` asserts these checks; the function does not perform them.
 2. **Export a consistent source.** Call `export_snapshot` on a fresh dedicated Oracle connection with autocommit disabled and a required `publication_sink(version, payload)` callback. It opens a read-only transaction and exports every control document and post row. Publication bodies pass to the sink one at a time; the returned snapshot retains only their canonical hashes, avoiding an in-memory copy of the full analytical history. Write each publication to a private, exclusively created JSONL file. Flush, synchronize and close that file before saving the snapshot receipt or staging anything; a failed sink/export leaves an incomplete artifact, never an accepted export. Revisions, sequences, timestamps and cancellation history are preserved. Keep both export files unchanged for retries and recovery of missing historical copies.
@@ -66,7 +66,7 @@ The new source uses Object Storage controls and a post journal, with a disposabl
 4. **Stage controls and index.** `stage_snapshot` creates destination objects only when absent and otherwise requires exact equality. A partial copy can resume from the same snapshot; conflicting content aborts instead of merging. `seed_posts` retains source sequence gaps and reserved upper bounds. Staging does not enable the runtime.
 5. **Verify all analytical history.** Compare each exported version and canonical payload hash with both its Object snapshot and the actual Delta Gold row. Copy any missing historical version through a reviewed operation and recheck it. Also verify the current publication pointer and its snapshot. A Gold payload may include a redundant `id`; validate it against the row ID and `version` before removing only that field for comparison.
 6. **Activate explicitly.** Supply the verified Gold version-to-hash map to `activate_snapshot`. It rechecks destination documents, the exact seeded journal, every historical Object copy and the current pointer before its final runtime ETag CAS. Only then does it set `control_migration_complete` and increment the runtime revision.
-7. **Accept the new consumers.** Switch the application and installed workflows to the verified Object runtime. Validate native stream output, stable paging, publication/evidence agreement and a grounded Gold-agent conversation before resuming the recorded capture configuration. Preserve job and compute IDs; changing names does not authorize duplicate resources.
+7. **Accept the new consumers.** Configure the application with `GODS_EYE_CONTROL_BUCKET` set to the verified Gold bucket, and switch the installed workflows to that Object runtime. Validate native stream output, stable paging, publication/evidence agreement and a grounded Gold-agent conversation before resuming the recorded capture configuration. Preserve job and compute IDs; changing names does not authorize duplicate resources.
 8. **Retire unused dependencies.** Inspect all job, agent and library references, then remove only the old module database credentials and artifacts that have no remaining consumers. Shared platform databases, catalog connections and native agent-memory services are outside this module's cleanup scope.
 
 The callable sequence is:
@@ -74,7 +74,7 @@ The callable sequence is:
 ```python
 import json
 import os
-from app.territorial.control_migration import export_snapshot, stage_snapshot, activate_snapshot
+from app.gods_eye_view.control_migration import export_snapshot, stage_snapshot, activate_snapshot
 
 with open(private_history_path, "x", encoding="utf-8") as history:
     def save_publication(version, payload):

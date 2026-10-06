@@ -11,7 +11,7 @@ Start with [Getting started](../getting-started.md), [Architecture](../architect
 - It is separate from participant starter kits: registration does not install a private copy or grant module administration.
 - The agent reads metadata from active Master Catalog catalogs visible to the configured OCI identity.
 - Both tools exclude `oci_medallion.oci_artifacts`, including control-schema nodes and links in lineage responses.
-- The stable module and agent identifier remains `ai_data_governance_vsc_extension` for compatibility; the displayed name is **AI Data Governance**.
+- The package, catalog entry and agent identifier are `ai_data_governance`; the displayed name is **AI Data Governance**. Upgrades adopt the existing global installation rather than create another agent for its old identifier.
 
 The two tools are `catalog_inventory` and `catalog_lineage`.
 Inventory can filter catalog, schema, table, or column metadata; lineage requires a uniquely resolved table and supports `ENTITY` or `COLUMN` detail.
@@ -97,7 +97,7 @@ Governance creates `AidpRuntime` only when all recognized names are absent and n
 The selected name and operator identity digest are rendered into the runtime configuration.
 Both generated runtimes check region and the tenancy/user/fingerprint digest before reading the private key.
 The shared resolver accepts OCI-only credentials; combined database writer credentials are not an API authentication fallback.
-OCI API authentication, legacy database migration and AIDP-managed memory are distinct concerns. The new God's Eye View control path uses Object Storage; its [cloud cutover](../operations.md#migrate-gods-eye-view-controls) remains pending.
+OCI API authentication, legacy database migration and AIDP-managed memory are distinct concerns. God's Eye View uses the same OCI-only identity for its Object Storage control path; existing installations must complete the [explicit migration](../operations.md#migrate-gods-eye-view-controls) before retiring their database dependencies.
 
 | Principal or resource | Implemented permission boundary |
 | --- | --- |
@@ -146,6 +146,13 @@ Verify `GET /api/admin/modules`, the current agent deployment, current-revision 
 Exercise inventory, one uniquely scoped lineage request, excluded control-schema access, and an unsupported SQL request.
 For memory, test an explicit same-session follow-up separately from the first answer.
 
+| Example question | Acceptance evidence |
+| --- | --- |
+| Which active catalogs and schemas are available? | `catalog_inventory` returns observed metadata and excludes the module's control schema. |
+| Where does `customer_id` exist, and what is its data type? | Catalog, schema, table and column identify each match; absent descriptions remain absent. |
+| Trace the column lineage of `customer_id` in this table. | Use a fully qualified table that exists; `catalog_lineage` reports observed `COLUMN` links or their absence. |
+| Execute `DROP TABLE customer_360`. | The agent refuses; neither tool executes arbitrary SQL. |
+
 | Observation | Check first |
 | --- | --- |
 | `401` or `403` | Application admin session and selected user's platform-admin membership. |
@@ -157,9 +164,9 @@ For memory, test an explicit same-session follow-up separately from the first an
 
 ## Source and executable contracts
 
-- [Module manifest and evaluation cases](../../apps/backend/app/labs/ai_data_governance_vsc_extension/lab.json).
+- [Module manifest and evaluation cases](../../apps/backend/app/labs/ai_data_governance/lab.json).
 - [Agent, sync notebook and identity rules](../../apps/backend/app/governance.py).
 - [Lifecycle, permissions and resource reconciliation](../../apps/backend/app/aidp.py) and [authenticated API routes](../../apps/backend/app/main.py).
-- [Shared credential selection](../../apps/backend/app/territorial/runtime_secrets.py) and [deployment reuse](../../terraform/hooks/territorial_bootstrap.py).
+- [Shared credential selection](../../apps/backend/app/gods_eye_view/runtime_secrets.py) and [deployment reuse](../../terraform/hooks/gods_eye_view_bootstrap.py).
 - [Settings and module dialog](../../apps/frontend/src/App.tsx).
 - [Generated-runtime tests](../../apps/backend/tests/test_governance.py) and [lifecycle/RBAC tests](../../apps/backend/tests/test_governance_lifecycle.py).

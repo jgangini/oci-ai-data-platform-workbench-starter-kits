@@ -16,7 +16,7 @@ ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "terraform/hooks"))
 sys.path.insert(0, str(ROOT / "apps/backend"))
 from gods_eye_sources import workflow_source, source_fragments
-from app.territorial import core, sensors, synthetic_reset
+from app.gods_eye_view import core, sensors, synthetic_reset
 
 CONFIG = {"writer_credential_name": "AidpControlStore", "pipeline_revision": "a" * 64,
           "oci_credential_name": "AidpRuntime", "oci_identity_sha256": "b" * 64,
@@ -27,8 +27,8 @@ CONFIG = {"writer_credential_name": "AidpControlStore", "pipeline_revision": "a"
 def bundle():
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as archive:
-        for path in (ROOT / "apps/backend/app/territorial").glob("*.py"):
-            archive.writestr("territorial/" + path.name, path.read_bytes())
+        for path in (ROOT / "apps/backend/app/gods_eye_view").glob("*.py"):
+            archive.writestr("gods_eye_view/" + path.name, path.read_bytes())
     return data.getvalue()
 
 
@@ -45,7 +45,7 @@ def test_standalone_has_no_project_loader_duplicate_defs_or_unbound_globals(bund
     tree = ast.parse(source)
     assert "import oracledb" not in source and "import sqlite3" not in source
     assert "database_connection" not in source and "wallet_password" not in source
-    assert not any(isinstance(node, ast.ImportFrom) and (node.level or (node.module or "").startswith(("territorial", "app."))) for node in ast.walk(tree))
+    assert not any(isinstance(node, ast.ImportFrom) and (node.level or (node.module or "").startswith(("gods_eye_view", "app."))) for node in ast.walk(tree))
     assert not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"exec", "eval", "compile", "globals"} for node in ast.walk(tree))
     names = [node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.ClassDef))]
     assert len(names) == len(set(names))
@@ -78,7 +78,7 @@ def test_native_startup_uses_injected_utilities_without_reading_secrets(bundle, 
 def test_fragment_preserves_multiline_literals_comments_and_decorators(bundle):
     source = source_fragments(bundle, "x", "XFailure THIRD_PARTY")
     assert "@dataclass\nclass XFailure" in source.replace("\r\n", "\n")
-    original = ast.parse((ROOT / "apps/backend/app/territorial/x.py").read_text(encoding="utf-8"))
+    original = ast.parse((ROOT / "apps/backend/app/gods_eye_view/x.py").read_text(encoding="utf-8"))
     expected = next(node.value.value for node in original.body if isinstance(node, ast.Assign) and node.targets[0].id == "THIRD_PARTY")
     actual = next(node.value.value for node in ast.parse(source).body if isinstance(node, ast.Assign) and node.targets[0].id == "THIRD_PARTY")
     assert actual == expected
@@ -100,7 +100,7 @@ def test_only_nonsecret_deployment_fields_are_embedded(bundle):
 
 def test_emitted_social_program_appends_posts_to_shared_object_journal(bundle, monkeypatch):
     monkeypatch.syspath_prepend(str(ROOT / "apps/backend/tests"))
-    from test_territorial_control_store import Objects
+    from test_gods_eye_view_control_store import Objects
     runtime = emitted(bundle, "pipeline", monkeypatch)
     store = runtime.ObjectControlStore(Objects(), "namespace", "gold")
     runtime.write_document(store, "runtime", {"analytics_store": "gold", "control_new_install": True}, 0)

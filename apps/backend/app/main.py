@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from .aidp import (
     AidpClient,
@@ -25,8 +25,8 @@ from .config import Settings, SettingsStore
 from .viewer_identity import mount_identity
 from .identity import IdentityClient, IdentityConflict, IdentityPending, IdentityRejected, LocalIdentityClient
 from .lab_packs import available_lab_ids, public_lab_catalog
-from .territorial.api import mount_territorial, run_local_territorial
-from .territorial.access import mount_access
+from .gods_eye_view.api import mount_gods_eye_view, run_local_gods_eye_view
+from .gods_eye_view.access import mount_access
 from .releases import (
     ApplicationReleaseManager,
     ReleaseUpdateConflict,
@@ -57,7 +57,7 @@ class UserRequest(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=5, max_length=254)
     lab_ids: list[str] = Field(min_length=1)
-    territorial_control: bool = False
+    gods_eye_view: bool = Field(default=False, validation_alias=AliasChoices("gods_eye_view", "territorial_control"))
 
     @field_validator("name")
     @classmethod
@@ -185,16 +185,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        run_producer = (settings.local_development_mode or settings.territorial_enabled) and not (settings.local_development_mode and not settings.territorial_local_mode)
-        territorial_task = asyncio.create_task(run_local_territorial(app)) if run_producer else None
+        run_producer = (settings.local_development_mode or settings.gods_eye_view_enabled) and not (settings.local_development_mode and not settings.gods_eye_view_local_mode)
+        gods_eye_view_task = asyncio.create_task(run_local_gods_eye_view(app)) if run_producer else None
         try:
             yield
         finally:
-            if territorial_task:
-                territorial_task.cancel()
+            if gods_eye_view_task:
+                gods_eye_view_task.cancel()
                 with suppress(asyncio.CancelledError):
-                    await territorial_task
-        for client in (app.state.identity_client, app.state.aidp_client, app.state.territorial_aidp_client):
+                    await gods_eye_view_task
+        for client in (app.state.identity_client, app.state.aidp_client, app.state.gods_eye_view_aidp_client):
             if client is not None:
                 await client.close()
 
@@ -212,7 +212,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.login_limiter = RateLimiter(5, 60)
     app.state.identity_client = None
     app.state.aidp_client = None
-    app.state.territorial_aidp_client = None
+    app.state.gods_eye_view_aidp_client = None
     app.state.release_manager = ApplicationReleaseManager(settings)
     app.state.health_lock = asyncio.Lock()
     app.state.health_expires_at = 0.0
@@ -241,14 +241,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.aidp_factory = default_aidp_factory
 
-    def territorial_aidp_factory():
-        if not settings.local_development_mode or settings.territorial_local_mode:
+    def gods_eye_view_aidp_factory():
+        if not settings.local_development_mode or settings.gods_eye_view_local_mode:
             return app.state.aidp_factory()
-        if app.state.territorial_aidp_client is None:
-            app.state.territorial_aidp_client = AidpClient(settings)
-        return app.state.territorial_aidp_client
+        if app.state.gods_eye_view_aidp_client is None:
+            app.state.gods_eye_view_aidp_client = AidpClient(settings)
+        return app.state.gods_eye_view_aidp_client
 
-    app.state.territorial_aidp_factory = territorial_aidp_factory
+    app.state.gods_eye_view_aidp_factory = gods_eye_view_aidp_factory
 
     async def refresh_local_material(identity, user_id, user):
         if isinstance(identity, LocalIdentityClient):
@@ -307,11 +307,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     require_viewer = mount_access(app, require_admin, cookie_name)
     mount_identity(app, require_admin, require_viewer)
-    mount_territorial(app, require_admin, require_viewer)
+    mount_gods_eye_view(app, require_admin, require_viewer)
 
-    async def provision_user(name: str, email: str, lab_ids: list[str], territorial_control: bool = False) -> JSONResponse:
-        if territorial_control and not settings.local_development_mode:
-            raise HTTPException(503, "Participant sign-in for Territorial Control is not configured on this deployment")
+    async def provision_user(name: str, email: str, lab_ids: list[str], gods_eye_view: bool = False) -> JSONResponse:
+        if gods_eye_view and not settings.local_development_mode:
+            raise HTTPException(503, "Participant sign-in for Gods Eye View is not configured on this deployment")
         try:
             identity = app.state.identity_factory()
             result = await identity.prepare_registration(name, email)
@@ -385,8 +385,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.settings_store.get_workbench_url(),
         )
         if isinstance(identity, LocalIdentityClient):
-            if territorial_control:
-                await identity.grant_territorial(result.user_id, True)
+            if gods_eye_view:
+                await identity.grant_gods_eye_view(result.user_id, True)
             await identity.record_material(result.user_id, content)
             content["local_access"] = {"simulated": True, "login_url": "/local/gods-eye-view/login", "delivery": "Local welcome file; no email sent"}
         return JSONResponse(status_code=201 if result.status == "created" else 200, content=content)
@@ -472,7 +472,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Registration reconciliation is temporarily rate limited",
                 headers={"Retry-After": str(retry_after)},
             )
-        return await provision_user(payload.name, payload.email, payload.lab_ids, payload.territorial_control)
+        return await provision_user(payload.name, payload.email, payload.lab_ids, payload.gods_eye_view)
 
     @app.post("/api/admin/login", status_code=204)
     async def admin_login(payload: LoginRequest, request: Request) -> Response:
@@ -503,6 +503,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/admin/session")
     async def admin_session(response: Response, username: str = Depends(require_admin)) -> dict[str, str]:
         response.headers["X-Territorial-User"] = username
+        response.headers["X-Gods-Eye-View-User"] = username
         response.headers["X-PRISMA-User"] = username  # Existing reverse proxies use this header.
         return {"username": username, "operator_username": settings.operator_username}
 
@@ -643,7 +644,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else {}
         )
         return JSONResponse(status_code=202, content={
-            "module_id": module.get("module_id") or "ai_data_governance_vsc_extension",
+            "module_id": module.get("module_id") or "ai_data_governance",
             "display_name": module.get("display_name") or "AI Data Governance",
             "status": str(module.get("status") or pending_status),
             "installed": bool(module.get("installed", True)),
@@ -665,7 +666,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except AidpProvisionError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
-    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension")
+    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension", include_in_schema=False)
+    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance")
     async def admin_install_governance_module(
         user_id: str,
         payload: ModuleOperationRequest | None = None,
@@ -686,7 +688,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result["message"] = "AI Data Governance is active."
         return JSONResponse(content=result)
 
-    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension/redeploy")
+    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension/redeploy", include_in_schema=False)
+    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance/redeploy")
     async def admin_redeploy_governance_module(
         user_id: str,
         payload: ModuleOperationRequest | None = None,
@@ -707,7 +710,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result["message"] = "AI Data Governance was redeployed."
         return JSONResponse(content=result)
 
-    @app.delete("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension")
+    @app.delete("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension", include_in_schema=False)
+    @app.delete("/api/admin/users/{user_id}/modules/ai_data_governance")
     async def admin_delete_governance_module(
         user_id: str,
         operation_id: UUID,
@@ -732,7 +736,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_identity()
         if not settings.aidp_ready():
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
-        return await provision_user(payload.name, payload.email, payload.lab_ids, payload.territorial_control)
+        return await provision_user(payload.name, payload.email, payload.lab_ids, payload.gods_eye_view)
 
     @app.post("/api/admin/users/{user_id}/labs")
     async def admin_add_lab(
