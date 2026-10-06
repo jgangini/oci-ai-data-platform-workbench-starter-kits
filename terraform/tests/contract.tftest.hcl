@@ -344,6 +344,12 @@ run "gods_eye_view_private_viewer" {
   command = plan
 
   override_resource {
+    target          = oci_core_vcn.lab
+    override_during = plan
+    values          = { id = "ocid1.vcn.test.shared" }
+  }
+
+  override_resource {
     target          = oci_core_instance.gods_eye_view[0]
     override_during = plan
     values          = { private_ip = "10.10.0.130" }
@@ -378,6 +384,16 @@ run "gods_eye_view_private_viewer" {
   assert {
     condition     = length(oci_core_instance.gods_eye_view) == 1 && !oci_core_instance.gods_eye_view[0].create_vnic_details[0].assign_public_ip && oci_core_subnet.gods_eye_view[0].prohibit_public_ip_on_vnic
     error_message = "God’s Eye View must create one private viewer with no public address."
+  }
+
+  assert {
+    condition     = oci_core_subnet.public.vcn_id == oci_core_vcn.lab.id && oci_core_subnet.gods_eye_view[0].vcn_id == oci_core_vcn.lab.id && oci_core_instance.lab.create_vnic_details[0].assign_public_ip
+    error_message = "VM1 and private VM2 must share the existing VCN; only the portal has a public IP."
+  }
+
+  assert {
+    condition     = strcontains(base64decode(oci_core_instance.gods_eye_view[0].metadata.user_data), "--component gods-eye-view") && !strcontains(base64decode(oci_core_instance.gods_eye_view[0].metadata.user_data), "--component aidp-lab")
+    error_message = "VM2 must run its separate pinned-upstream viewer image, never the portal image."
   }
 
   assert {

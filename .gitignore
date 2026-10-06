@@ -20,3 +20,6 @@ dist/
 apps/gods-eye-view/.upstream/
 coverage/
 .DS_Store
+.codex/AGENTS.md
+openwiki/
+graphify-out/

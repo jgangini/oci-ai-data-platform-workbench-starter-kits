@@ -95,9 +95,11 @@ The [migration module](../apps/backend/app/gods_eye_view/control_migration.py) s
 
 ## Change packages and AI workflows safely
 
+- The five participant packages keep their source data and notebook dependency contracts under `apps/backend/app/labs/<lab_id>/`. The two global modules keep readable packaged runtimes there too; the [module guides](README.md#shared-global-modules) distinguish their deployment configuration and native acceptance checks.
 - Change kit assets through their generator/source contract, then update the declared version, hashes and expected results together. Do not silently modify bytes under an already released package version.
 - Keep participant parameters, notebook guards and provisioner naming aligned. Verify both the emitted workflow and a native run.
-- God's Eye View publishes one readable `.py` per stream and one agent entry point. Source assembly happens during deployment; source decoding/import discovery must not be hidden in the running stream.
+- God's Eye View publishes one readable `.py` per stream and one agent entry point from [its packaged notebooks](../apps/backend/app/labs/gods_eye_view/notebooks). Regenerate those artifacts with `python scripts/render_gods_eye_view_runtime.py`; use `--check` to fail on source or hash drift without writing. Deployment preserves the code body and substitutes only explicit nonsecret `RUNTIME_CONFIG`. Do not claim total-file byte equality across environments or hide decoding/import discovery in a running stream.
+- Governance's [sync notebook and agent](../apps/backend/app/labs/ai_data_governance/notebooks) are edited directly as the authoritative source. Update their manifest hashes with a package change; deployment verifies those assets and substitutes only `CONFIG`. Its [runtime tests](../apps/backend/tests/test_governance.py) check source-body equivalence and configured execution; there is no second renderer or duplicate embedded template to edit.
 - Test agent authorization, query boundaries, evidence/version checks and synthetic labels independently of model prose. A plausible answer alone is not acceptance.
 - Do not put DB credentials, wallets or private keys into runtime documents, journal events or generated workflow source. The shared `AidpRuntime` credential supplies OCI access; control state belongs in Object Storage.
 - Keep legacy aliases required for rolling upgrades until all consumers have migrated. Refer to [Compatibility](reference/compatibility.md) rather than duplicating alias lists in every guide.

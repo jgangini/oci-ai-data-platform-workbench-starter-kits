@@ -8,11 +8,13 @@ from uuid import uuid4
 import httpx
 from fastapi import HTTPException
 
+from ..lab_packs import load_lab_pack
 from .agent_gateway import checked_endpoint
 from .scheduling import RUN_FAILED, RUN_SUCCESS, SOCIAL_TASK_KEYS, TASK_RUN_QUERY, active_run, job_path, run_state, submit_run, task_outcome
 
-PACKAGE = {"package_id": "gods_eye_view", "display_name": "God’s Eye View · Custom layers",
-           "bundled_version": "1.0.0", "kind": "module", "scope": "global", "status": "available"}
+_pack = load_lab_pack("gods_eye_view", require_available=False)
+PACKAGE = {"package_id": _pack.lab_id, "display_name": _pack.display_name,
+           "bundled_version": _pack.pack_version, "kind": _pack.kind, "scope": _pack.scope, "status": _pack.status}
 
 
 class GodsEyeViewModule:

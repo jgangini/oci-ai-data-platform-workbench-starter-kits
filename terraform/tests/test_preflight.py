@@ -19,7 +19,7 @@ release_gate = importlib.util.module_from_spec(RELEASE_GATE_SPEC)
 sys.modules[RELEASE_GATE_SPEC.name] = release_gate
 RELEASE_GATE_SPEC.loader.exec_module(release_gate)
 
-MODULE_PATH = TERRAFORM_ROOT / "k_preflight.py"
+MODULE_PATH = TERRAFORM_ROOT / "m_preflight.py"
 SPEC = importlib.util.spec_from_file_location("aidp_deploy_preflight", MODULE_PATH)
 assert SPEC and SPEC.loader
 preflight = importlib.util.module_from_spec(SPEC)

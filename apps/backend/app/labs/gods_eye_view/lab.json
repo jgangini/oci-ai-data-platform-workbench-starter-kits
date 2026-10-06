@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "lab_id": "gods_eye_view",
+  "display_name": "God’s Eye View · Custom layers",
+  "pack_version": "1.0.1",
+  "pack_sha256": "d46c1aad79d949eecfb5a02e793823a5d037d902005283365394617abe9db886",
+  "status": "available",
+  "kind": "global_module",
+  "scope": "global",
+  "installation_modes": [
+    "laboratory",
+    "production"
+  ],
+  "datasets": [],
+  "notebooks": [],
+  "tables": {},
+  "expected_results": {},
+  "runtime_files": [
+    {
+      "file": "notebooks/10_bronze/sensor_stream.py",
+      "sha256": "d9076e8195c1826c82e0101ba5a4034c860980b1dc32e599db44fff629f72654",
+      "workspace_path": "10_bronze/sensor_stream.py"
+    },
+    {
+      "file": "notebooks/10_bronze/social_network.py",
+      "sha256": "0862379c5f4ad595616de547b177b94bf4389952640eca434ac50cfa5dc9ffb5",
+      "workspace_path": "10_bronze/social_network.py"
+    },
+    {
+      "file": "notebooks/40_report/ai_gods_eye_view.py",
+      "sha256": "a185941bbd636926167316f7a6bfdcc2713cd0870c54624b343234962248786b",
+      "workspace_path": "40_report/ai_gods_eye_view.py"
+    }
+  ],
+  "source_manifests": [
+    {
+      "file": "source/social_networks/v1/manifest.json",
+      "sha256": "a303e8c121f62d54e383d566d1732f07ef88cff6b257335d29211b699afe7845"
+    },
+    {
+      "file": "source/social_networks/v2/manifest.json",
+      "sha256": "17d4d60ae296b12ba139f0063db243249742ef83d79101feea86eea44779bd4c"
+    },
+    {
+      "file": "source/sensors/colombia/v1/manifest.json",
+      "sha256": "18528b15bb3b110b2d2dcce14a71ac622d5a1f9ac944e415ad823343e0a72c62"
+    }
+  ]
+}

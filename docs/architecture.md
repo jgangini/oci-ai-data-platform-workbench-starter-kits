@@ -31,7 +31,9 @@ flowchart TB
     Viewer --> Public
 ```
 
-The public application authenticates users and proxies the private viewer. The viewer VM is not a public administration endpoint. Its source and network rules are defined in [nginx](../docker/nginx.conf), [viewer infrastructure](../terraform/g_gods_eye_view.tf) and the [viewer integration](../apps/gods-eye-view/README.md).
+The public application VM authenticates users and proxies the separate private viewer VM in the same VCN. The viewer VM is not a public administration endpoint. Its source and network rules are defined in [nginx](../docker/nginx.conf), [viewer infrastructure](../terraform/h_gods_eye_view.tf) and the [viewer integration](../apps/gods-eye-view/README.md).
+
+The release build verifies the viewer's pinned upstream archive and nine source patches, builds the native application and packages the integration in an immutable image. VM bootstrap installs that verified release image; it does not reconstruct the application from an upstream branch. The original modular viewer remains the application shell, with the custom layers and assistants extending its catalog.
 
 Terraform creates infrastructure; [post-apply](../terraform/hooks/post_apply.py) reconciles AIDP and identity resources. The [application API](../apps/backend/app/aidp.py) subsequently manages participant and global-module lifecycle. Resource existence, successful provisioning, successful processing and successful agent inference are separate acceptance steps.
 
@@ -39,7 +41,7 @@ Terraform creates infrastructure; [post-apply](../terraform/hooks/post_apply.py)
 
 | Store | Responsibility | Source of truth |
 | --- | --- | --- |
-| Versioned kit assets | Canonical CSVs, notebook bytes, task dependencies and expected results | Checked-in `lab.json` and package assets |
+| Versioned kit/module assets | Canonical datasets, notebooks, readable runtime templates, task dependencies and expected results | Checked-in `lab.json` and package assets |
 | AIDP workspace | Participant content, jobs and module source files | Installed package and protected operation manifests |
 | Master Catalog / Delta | Governed tables, data processing and lineage | Declared schema/table identity and successful native writes |
 | Four medallion buckets | Configurable Landing, Bronze, Silver and Gold storage roles | Terraform's resolved `medallion_bucket_names` |

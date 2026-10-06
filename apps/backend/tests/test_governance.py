@@ -12,6 +12,7 @@ from app.governance import (
     governance_sync_notebook,
     resolve_column_identities,
 )
+from app.lab_packs import module_runtime_source
 
 
 def rendered_agent(**kwargs) -> str:
@@ -36,6 +37,38 @@ def rendered_sync(*, desired_enabled=None, bootstrap_snapshot=False, **kwargs) -
         **kwargs,
     )
     return "".join(notebook["cells"][0]["source"])
+
+
+def rendered_config(source):
+    node = next(node for node in ast.parse(source).body if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "CONFIG" for target in node.targets))
+    return ast.literal_eval(node.value)
+
+
+@pytest.mark.parametrize("render,filename", [
+    (rendered_agent, "notebooks/agent/governance_agent.py"),
+    (rendered_sync, "notebooks/data_governance_sync.ipynb"),
+])
+def test_deployed_governance_body_matches_its_canonical_file(render, filename):
+    canonical = module_runtime_source("ai_data_governance", filename).decode("utf-8")
+    if filename.endswith(".ipynb"):
+        canonical = "".join(json.loads(canonical)["cells"][0]["source"])
+    rendered = render()
+    lines = rendered.splitlines(keepends=True)
+    config_line = next(index for index, line in enumerate(lines) if line.startswith("CONFIG = "))
+    lines[config_line] = "CONFIG = {}\n"
+    assert "".join(lines) == canonical
+
+
+@pytest.mark.parametrize("enabled", [None, False, True])
+def test_sync_configuration_executes_python_literals_without_json_names(enabled):
+    source = rendered_sync(desired_enabled=enabled, bootstrap_snapshot=True)
+    node = next(node for node in ast.parse(source).body if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "CONFIG" for target in node.targets))
+    namespace = {}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), "config.py", "exec"), namespace)
+    assert namespace["CONFIG"]["desired_enabled"] is enabled
+    assert namespace["CONFIG"]["bootstrap_snapshot"] is True
 
 
 def _function(source: str, name: str, namespace: dict) -> object:
@@ -95,8 +128,8 @@ def test_generated_signer_checks_selected_identity_before_reading_private_key(re
         [public[key] for key in ("tenancy", "user", "fingerprint")], separators=(",", ":")
     ).encode()).hexdigest()
     source = render(credential_name=credential, identity_sha256=digest)
-    assert f'"credential_name": "{credential}"' in source
-    assert f'"identity_sha256": "{digest}"' in source
+    assert rendered_config(source)["credential_name"] == credential
+    assert rendered_config(source)["identity_sha256"] == digest
     values = {**public, "private_key": "fixture-not-a-private-key"}
     if drift:
         values[drift] = "different-fixture-identity"
@@ -301,8 +334,8 @@ def test_disabled_sync_records_disabled_without_snapshot_or_policy_mutation() ->
 def test_vm_disable_does_not_self_pause_but_external_config_disable_does() -> None:
     vm_source = rendered_sync(desired_enabled=False)
     external_source = rendered_sync(desired_enabled=None)
-    assert '"desired_enabled": false' in vm_source
-    assert '"desired_enabled": null' in external_source
+    assert rendered_config(vm_source)["desired_enabled"] is False
+    assert rendered_config(external_source)["desired_enabled"] is None
     disabled_start = vm_source.index("if SHOULD_DISABLE:")
     disabled_block = vm_source[disabled_start:vm_source.index("\ntry:", disabled_start)]
     assert 'if CONFIG["desired_enabled"] is None:\n        _pause_workflow()' in disabled_block

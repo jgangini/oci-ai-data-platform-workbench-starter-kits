@@ -9,7 +9,7 @@ The project includes a React administration portal, a FastAPI service, Terraform
 - **Deploy or run a lab:** [Getting started](docs/getting-started.md).
 - **Understand the system:** [Architecture and data flows](docs/architecture.md).
 - **Administer an installation:** [Operations and recovery](docs/operations.md).
-- **Develop or contribute:** [Local setup and validation](docs/development.md).
+- **Develop or contribute:** [Local setup and validation](docs/development.md) and the [repository instructions](AGENTS.md).
 - **Browse all guides:** [Documentation index](docs/README.md).
 
 Use a validated [immutable release](https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits/releases) for deployment. A development branch is not a release; review the [current implementation limits](docs/getting-started.md#current-implementation-limits) before testing it.

@@ -1,3 +1,4 @@
+import ast
 import asyncio
 from types import SimpleNamespace
 
@@ -82,7 +83,7 @@ def test_module_status_compares_installed_and_bundled_versions() -> None:
     module = asyncio.run(client.list_modules())[0]
 
     assert module["installed_version"] == "2.0.0"
-    assert module["bundled_version"] == "3.0.1"
+    assert module["bundled_version"] == "3.0.2"
     assert module["update_available"] is True
 
 
@@ -711,7 +712,7 @@ def test_governance_rename_preserves_installed_manifest_control_rows_and_agent_i
     client._upload_notebook = lambda workspace, path, notebook, **kwargs: notebooks.append((path, notebook)) or False
     payload, _ = client._governance_job_payload("workspace", "compute", desired_enabled=None, paused=True)
     config_line = next(line for line in notebooks[0][1]["cells"][0]["source"] if line.startswith("CONFIG = "))
-    assert json.loads(config_line.removeprefix("CONFIG = "))["module_id"] == persisted_id
+    assert ast.literal_eval(config_line.removeprefix("CONFIG = "))["module_id"] == persisted_id
     assert payload["path"] == root
     assert client._new_module_manifest(OPERATION_ID, "redeploy")["control_module_id"] == persisted_id
     client._list = lambda *_args, **_kwargs: [{"displayName": persisted_id, "key": "retained-agent"}]

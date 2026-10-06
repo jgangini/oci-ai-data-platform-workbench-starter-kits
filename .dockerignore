@@ -24,3 +24,7 @@ graphify-out
 *.key
 *.crt
 *.p12
+# Ground truth and corpus-generation metadata are offline tooling inputs, never runtime data.
+apps/backend/app/labs/gods_eye_view/source/**/evaluation/
+apps/backend/app/labs/gods_eye_view/source/**/generation.json
+apps/backend/app/labs/gods_eye_view/source/**/README.md

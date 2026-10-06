@@ -55,6 +55,8 @@ The backend also needs the intended regional model ID in `AGENT_MODEL_ID`; the m
 Its generated requirements file relies on AIDP-provided `aidputils`, OCI runtime libraries, and LangGraph; the agent also uses the native GenAI toolkit, LangChain messages/tools, and `requests`.
 The synchronization notebook requires the native Spark, Delta, and notebook utility environment.
 
+The readable [synchronization notebook](../../apps/backend/app/labs/ai_data_governance/notebooks/data_governance_sync.ipynb) and [agent source](../../apps/backend/app/labs/ai_data_governance/notebooks/agent/governance_agent.py) are the authoritative packaged code. Deployment verifies their hashes and fills only the declared `CONFIG = {}` block with nonsecret installation settings. The code body stays the same, while configured file bytes differ. Notebook outputs are empty in Git; actual execution outputs remain in AIDP. The [source contract](../../apps/backend/app/labs/ai_data_governance/source/README.md) uses live Master Catalog metadata, with no invented input dataset.
+
 1. Sign in to the registration application as an application administrator.
 2. Open **Settings → Application → AI Data Governance → Deploy / Redeploy**.
 3. Select an existing user verified as an `AI_DATA_PLATFORM_ADMIN`.
@@ -165,7 +167,7 @@ For memory, test an explicit same-session follow-up separately from the first an
 ## Source and executable contracts
 
 - [Module manifest and evaluation cases](../../apps/backend/app/labs/ai_data_governance/lab.json).
-- [Agent, sync notebook and identity rules](../../apps/backend/app/governance.py).
+- [Runtime configuration and identity rules](../../apps/backend/app/governance.py), [packaged sync notebook](../../apps/backend/app/labs/ai_data_governance/notebooks/data_governance_sync.ipynb) and [agent](../../apps/backend/app/labs/ai_data_governance/notebooks/agent/governance_agent.py).
 - [Lifecycle, permissions and resource reconciliation](../../apps/backend/app/aidp.py) and [authenticated API routes](../../apps/backend/app/main.py).
 - [Shared credential selection](../../apps/backend/app/gods_eye_view/runtime_secrets.py) and [deployment reuse](../../terraform/hooks/gods_eye_view_bootstrap.py).
 - [Settings and module dialog](../../apps/frontend/src/App.tsx).

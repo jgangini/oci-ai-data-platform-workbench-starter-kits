@@ -6,8 +6,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "apps" / "backend"))
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
 from app.gods_eye_view.sensors import generate_batch, text_files
 
 
@@ -18,7 +18,7 @@ def main():
     stamp = datetime.fromisoformat(args.at.replace("Z", "+00:00"))
     if stamp.utcoffset() is None or stamp.utcoffset().total_seconds():
         parser.error("--at must be a UTC timestamp")
-    destination = ROOT / "datasets" / "synthetic" / "sensors" / "colombia" / "v1"
+    destination = ROOT / "colombia" / "v1"
     rows = generate_batch(stamp.timestamp())
     files = text_files(rows)
     manifest = {"mode": "Synthetic", "is_simulated": True, "records": len(rows),

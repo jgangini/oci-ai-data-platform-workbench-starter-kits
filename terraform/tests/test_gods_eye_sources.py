@@ -15,7 +15,7 @@ import pytest
 ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "terraform/hooks"))
 sys.path.insert(0, str(ROOT / "apps/backend"))
-from gods_eye_sources import workflow_source, source_fragments
+from gods_eye_sources import NOTEBOOK_ROOT, WORKFLOW_FILES, configured_source, render_workflow_source, workflow_source, source_fragments
 from app.gods_eye_view import core, sensors, synthetic_reset
 
 CONFIG = {"writer_credential_name": "AidpControlStore", "pipeline_revision": "a" * 64,
@@ -189,3 +189,24 @@ def test_enrichment_journals_valid_post_before_advancing_and_retains_failed_rema
     assert writes[0][1]["prepared"] == [{"id": "a"}]
     assert docs["checkpoint_enrichment"]["pending_ids"] == ["b"]
     assert result["last_error"] == "ValueError" and result["pending_count"] == 1
+
+
+@pytest.mark.parametrize("module", ["sensor_pipeline", "pipeline"])
+def test_versioned_program_matches_renderer_and_only_config_changes_at_deployment(bundle, module):
+    path = NOTEBOOK_ROOT / WORKFLOW_FILES[module]
+    canonical = path.read_text(encoding="utf-8")
+    assert path.read_bytes() == render_workflow_source(module, bundle).encode("utf-8")
+    assert canonical.count("\nRUNTIME_CONFIG = {}\n") == 1
+    deployed = workflow_source(module, CONFIG, bundle)
+    expected, actual = ast.parse(canonical), ast.parse(deployed)
+    for tree in (expected, actual):
+        node = next(node for node in tree.body if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "RUNTIME_CONFIG" for target in node.targets))
+        node.value = ast.Dict(keys=[], values=[])
+    assert ast.dump(actual) == ast.dump(expected)
+
+
+def test_canonical_runtime_refuses_missing_or_duplicate_config_assignment():
+    for source in ("pass\n", "\nRUNTIME_CONFIG = {}\n\nRUNTIME_CONFIG = {}\n"):
+        with pytest.raises(ValueError, match="one empty configuration"):
+            configured_source(source, {})

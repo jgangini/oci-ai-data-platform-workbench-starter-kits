@@ -197,7 +197,7 @@ def test_claims_fail_closed_on_ungrounded_or_invalid_model_output(claims):
 
 
 def test_native_post_0062_selects_complete_literal_span_without_reproducing_the_failed_quote():
-    fixture = Path(__file__).resolve().parents[3] / "datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1/posts/post-0062/post.json"
+    fixture = Path(__file__).resolve().parents[3] / "apps/backend/app/labs/gods_eye_view/source/social_networks/v1/posts/post-0062/post.json"
     text = json.loads(fixture.read_text(encoding="utf-8"))["message"]
     event = normalize_event({"platform": "instagram", "source_id": "cycle-11:bogota-v1:post-0062", "mode": "simulation",
         "text": text, "created_at": "2026-10-05T14:00:00Z"})

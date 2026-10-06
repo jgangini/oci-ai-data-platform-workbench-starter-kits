@@ -353,7 +353,7 @@
   ],
   "artifacts": ["aidp_lab_summary.json"],
   "preflight": {
-    "entrypoint": "terraform/k_preflight.py",
+    "entrypoint": "terraform/m_preflight.py",
     "timeout_seconds": 300,
     "requires_oci_credentials": true,
     "secret_inputs": ["autonomous_database_admin_password", "autonomous_database_wallet_password"],
@@ -410,6 +410,12 @@
     "entrypoint": "terraform/hooks/post_apply.py",
     "include_paths": [
       "apps/backend/app/gods_eye_view",
+      "apps/backend/app/labs/gods_eye_view/lab.json",
+      "apps/backend/app/labs/gods_eye_view/notebooks",
+      "apps/backend/app/labs/gods_eye_view/source/social_networks/v1/manifest.json",
+      "apps/backend/app/labs/gods_eye_view/source/social_networks/v2/manifest.json",
+      "apps/backend/app/labs/gods_eye_view/source/sensors/colombia/v1/manifest.json",
+      "apps/backend/app/labs/ai_data_governance",
       "apps/backend/app/__init__.py",
       "apps/backend/app/aidp.py",
       "apps/backend/app/config.py",

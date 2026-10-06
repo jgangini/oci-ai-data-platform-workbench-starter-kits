@@ -16,6 +16,9 @@ git clone --filter=blob:none '${source_repo_url}' /opt/prisma/source
 git -C /opt/prisma/source checkout --detach '${source_commit_sha}'
 test "$(git -C /opt/prisma/source rev-parse HEAD)" = '${source_commit_sha}'
 RELEASE=$(git -C /opt/prisma/source describe --tags --exact-match '${source_commit_sha}')
+# CI verifies upstream.json and integration patch hashes before building this immutable image.
+# VM2 installs that artifact; no upstream build or mutable branch runs during bootstrap.
+printf "%s\n" "God's Eye View VM2: release $RELEASE (${source_commit_sha}), built from pinned upstream and verified local patches."
 IMAGE=$(python3 /opt/prisma/source/scripts/load_release_image.py --release "$RELEASE" --commit '${source_commit_sha}' --component gods-eye-view)
 cat >/usr/local/sbin/prisma-release-update <<'EOF'
 #!/bin/sh

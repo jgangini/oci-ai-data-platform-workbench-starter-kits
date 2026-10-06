@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 
-DEFAULT_TRUTH = Path(__file__).resolve().parents[1] / "datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1/evaluation/ground-truth.json"
+DEFAULT_TRUTH = Path(__file__).resolve().parents[1] / "apps/backend/app/labs/gods_eye_view/source/social_networks/v1/evaluation/ground-truth.json"
 
 
 def confusion(expected, predicted):

@@ -10,7 +10,7 @@ from .core import SYNTHETIC_MODES, PLATFORMS, utc_text
 
 VERSION = "bogota-v1"
 VERSIONS = {"bogota-v1": "v1", "bogota-v2": "v2"}
-DIRECTORY = "datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1"
+DIRECTORY = "labs/gods_eye_view/source/social_networks/v1"
 MEDIA_TYPES = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}
 
 
@@ -18,7 +18,7 @@ def dataset_root(version=VERSION):
     if not isinstance(version, str) or version not in VERSIONS:
         raise ValueError("Unsupported synthetic dataset version")
     configured = os.getenv("GODS_EYE_DATASET_ROOT")
-    root = Path(configured).resolve() if configured else Path(__file__).resolve().parents[4] / DIRECTORY
+    root = Path(configured).resolve() if configured else Path(__file__).resolve().parents[1] / DIRECTORY
     return root if version == VERSION else root.parent / VERSIONS[version]
 
 

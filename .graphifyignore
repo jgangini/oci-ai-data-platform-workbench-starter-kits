@@ -1,2 +1,14 @@
 graphify-out/
-apps/territorial-viewer/.upstream/
+**/.upstream/
+openwiki/
+.codex/
+.source/
+.tmp/
+.venv/
+.git/
+.aidp/
+.sentrux/
+**/node_modules/
+**/dist/
+**/__pycache__/
+**/.terraform/

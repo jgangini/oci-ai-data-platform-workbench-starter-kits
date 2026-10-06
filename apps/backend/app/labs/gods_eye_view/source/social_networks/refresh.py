@@ -9,7 +9,7 @@ import re
 import struct
 
 
-ROOT = Path(__file__).resolve().parents[1] / "datasets/synthetic/social-media/natural-hazards/colombia/bogota/v1"
+ROOT = Path(__file__).resolve().parent / "v1"
 SCENES = {
     "flood-kennedy-active": "localized flooding on a residential street in Kennedy",
     "flood-kennedy-receding": "receding floodwater and an emerging curb in Kennedy",

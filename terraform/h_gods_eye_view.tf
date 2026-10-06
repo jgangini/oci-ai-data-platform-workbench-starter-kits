@@ -351,7 +351,8 @@ output "gods_eye_view_enabled" {
 }
 
 output "gods_eye_view_url" {
-  value = local.gods_eye_view_enabled ? "https://${data.oci_core_vnic.lab.public_ip_address}/gods-eye-view/" : null
+  description = "VM2 viewer through the authenticated VM1 proxy; both VMs share this stack VCN."
+  value       = local.gods_eye_view_enabled ? "https://${data.oci_core_vnic.lab.public_ip_address}/gods-eye-view/" : null
 }
 
 output "gods_eye_view_private_url" {
@@ -361,7 +362,8 @@ output "gods_eye_view_private_url" {
 }
 
 output "gods_eye_view_instance_id" {
-  value = local.gods_eye_view_enabled ? oci_core_instance.gods_eye_view[0].id : null
+  description = "Dedicated private VM2 running the immutable release image built from pinned upstream and verified local patches."
+  value       = local.gods_eye_view_enabled ? oci_core_instance.gods_eye_view[0].id : null
 }
 
 output "gods_eye_view_principal_group" {

@@ -199,7 +199,7 @@ def test_fictional_identities_and_contextual_media_cover_every_platform():
 
 
 def test_refresh_preserves_scenario_and_is_reproducible(tmp_path):
-    from scripts.refresh_gods_eye_view_corpus import refresh, optimize_media
+    from app.labs.gods_eye_view.source.social_networks.refresh import refresh, optimize_media
     root = runtime_copy(tmp_path)
     before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
     refresh(root)
@@ -210,7 +210,7 @@ def test_refresh_preserves_scenario_and_is_reproducible(tmp_path):
 
 
 def test_encoded_media_preserves_generation_provenance_resolution_and_release_size():
-    from scripts.refresh_gods_eye_view_corpus import generated_assets, media_dimensions
+    from app.labs.gods_eye_view.source.social_networks.refresh import generated_assets, media_dimensions
     root = corpus.dataset_root()
     assets = generated_assets(root)
     assert len(assets) == 72 and len({asset["source_png"]["sha256"] for asset in assets.values()}) == 72
@@ -229,7 +229,7 @@ def test_encoded_media_preserves_generation_provenance_resolution_and_release_si
 
 
 def test_refresh_refuses_tampered_input_before_rewriting_any_files(tmp_path):
-    from scripts.refresh_gods_eye_view_corpus import refresh
+    from app.labs.gods_eye_view.source.social_networks.refresh import refresh
     root = runtime_copy(tmp_path)
     target = root / "posts/post-0120/post.json"
     target.write_bytes(target.read_bytes() + b" ")
@@ -240,7 +240,7 @@ def test_refresh_refuses_tampered_input_before_rewriting_any_files(tmp_path):
 
 
 def test_duplicate_photo_assignment_is_rejected_before_refresh_or_capture(tmp_path):
-    from scripts.refresh_gods_eye_view_corpus import refresh
+    from app.labs.gods_eye_view.source.social_networks.refresh import refresh
     root = runtime_copy(tmp_path)
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     first, second = manifest["posts"][:2]
@@ -296,14 +296,18 @@ def test_presentation_refreshes_only_verified_simulated_fixtures_without_mutatin
     assert "caller mutation" not in corpus.presentation(event)["attachments"][0]["alt_text"]
 
 
-def test_runtime_docker_copies_only_posts_media_and_manifest():
-    dockerfile = Path(__file__).resolve().parents[3] / "docker/Dockerfile"
-    copies = [line for line in dockerfile.read_text().splitlines() if line.startswith("COPY datasets/")]
-    assert len(copies) == 6
-    assert sum("/v1/" in line for line in copies) == sum("/v2/" in line for line in copies) == 3
-    assert any("/posts " in line for line in copies) and any("/manifest.json " in line for line in copies)
-    assert any("/media " in line for line in copies)
-    assert all("evaluation" not in line for line in copies)
+def test_runtime_docker_excludes_offline_evaluation_from_the_canonical_corpus():
+    root = Path(__file__).resolve().parents[3]
+    dockerfile = (root / "docker/Dockerfile").read_text()
+    ignored = set((root / ".dockerignore").read_text().splitlines())
+    assert "COPY apps/backend/app ./app" in dockerfile
+    assert "COPY datasets/" not in dockerfile
+    assert "ENV GODS_EYE_DATASET_ROOT=/opt/aidp-lab/app/labs/gods_eye_view/source/social_networks/v1" in dockerfile
+    assert "apps/backend/app/labs/gods_eye_view/source/**/evaluation/" in ignored
+    for version in ("v1", "v2"):
+        path = root / "apps/backend/app/labs/gods_eye_view/source/social_networks" / version
+        assert (path / "evaluation/ground-truth.json").is_file()
+        assert (path / "manifest.json").is_file() and (path / "posts").is_dir() and (path / "media").is_dir()
 
 
 def test_v2_has_twelve_attributed_images_and_keeps_evaluation_out_of_capture():
@@ -402,3 +406,19 @@ def test_explicitly_paused_source_never_falls_back_to_legacy_replay():
     source = {**default_source("x"), "capture_paused": True}
     inputs = list(capture.inputs([source], {}, {"run_id": "legacy", "status": "running"}))
     assert {item[0]["platform"] for item in inputs} == {"sensor", "sire", "linea123"}
+
+
+def test_packaged_sensor_corpus_is_the_exact_reproducible_generator_output():
+    from datetime import datetime
+    from app.gods_eye_view.sensors import generate_batch, text_files
+
+    root = Path(corpus.__file__).parents[1] / "labs/gods_eye_view/source/sensors/colombia/v1"
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    generated = text_files(generate_batch(datetime.fromisoformat(manifest["observed_batch_at"]).timestamp()))
+    assert set(generated) == {entry["path"] for entry in manifest["files"]}
+    assert manifest["records"] == sum(entry["records"] for entry in manifest["files"]) == 4000
+    for entry in manifest["files"]:
+        content = (root / entry["path"]).read_bytes()
+        assert content == generated[entry["path"]]
+        assert hashlib.sha256(content).hexdigest() == entry["sha256"]
+        assert len(content.splitlines()) == entry["records"]

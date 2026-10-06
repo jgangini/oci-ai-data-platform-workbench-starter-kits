@@ -5,6 +5,12 @@ import json
 import pprint
 import tokenize
 import zipfile
+from pathlib import Path
+
+
+NOTEBOOK_ROOT = Path(__file__).resolve().parents[2] / "apps/backend/app/labs/gods_eye_view/notebooks"
+CONFIG_ASSIGNMENT = "\nRUNTIME_CONFIG = {}\n"
+WORKFLOW_FILES = {"pipeline": "10_bronze/social_network.py", "sensor_pipeline": "10_bronze/sensor_stream.py"}
 
 
 SENSOR_EXPORTS = {
@@ -129,18 +135,35 @@ def _standalone_fragment(bundle, module, names, exports):
     return source
 
 
+def configured_source(source, config):
+    """Deployment changes the one explicit configuration assignment, never program logic."""
+    if source.count(CONFIG_ASSIGNMENT) != 1:
+        raise ValueError("Canonical runtime must contain one empty configuration assignment")
+    json.dumps(config, allow_nan=False)
+    configured = source.replace(CONFIG_ASSIGNMENT, "\nRUNTIME_CONFIG = " + pprint.pformat(config, sort_dicts=True, width=100) + "\n")
+    compile(configured, "native_program.py", "exec")
+    return configured
+
+
 def workflow_source(module, config, bundle):
-    if module not in {"pipeline", "sensor_pipeline"}:
+    if module not in WORKFLOW_FILES:
         raise ValueError("Unknown standalone workflow")
     required = ("namespace", "bucket", "pipeline_revision", "oci_credential_name", "oci_identity_sha256")
     if not isinstance(config, dict) or any(not isinstance(config.get(key), str) or not config[key] for key in required):
         raise ValueError("Standalone workflow requires explicit deployment configuration")
-    config = {key: value for key, value in config.items() if key in RUNTIME_FIELDS}
-    json.dumps(config, allow_nan=False)
+    from app.lab_packs import module_runtime_source
+    source = module_runtime_source("gods_eye_view", "notebooks/" + WORKFLOW_FILES[module]).decode("utf-8")
+    return configured_source(source, {key: value for key, value in config.items() if key in RUNTIME_FIELDS})
+
+
+def render_workflow_source(module, bundle):
+    """Build the versioned artifact; deployment reads it instead of assembling source."""
+    if module not in WORKFLOW_FILES:
+        raise ValueError("Unknown standalone workflow")
     exports = SENSOR_EXPORTS if module == "sensor_pipeline" else SOCIAL_EXPORTS
     workflow = "sensor_stream" if module == "sensor_pipeline" else "social_network"
     parts = ['"""God\'s Eye View: readable native ' + workflow + ' processing. No project imports."""\nfrom __future__ import annotations\n',
-             "# Deployment configuration contains credential names, never credential values.\nRUNTIME_CONFIG = " + pprint.pformat(config, sort_dicts=True, width=100) + "\n"]
+             "# Deployment fills only this configuration block; secret values remain in AIDP.\nRUNTIME_CONFIG = {}\n"]
     for name, selected in exports.items():
         parts.append("\n# ---- " + name.replace("_", " ") + " ----\n" + _standalone_fragment(bundle, name, selected, exports))
     parts.append('''
@@ -165,6 +188,6 @@ def main():
 if __name__ == "__main__":
     main()
 '''.replace("WORKFLOW", workflow).replace("RUN_" + workflow, RENAMES[module]["run"]))
-    source = "\n".join(parts)
+    source = "\n".join(parts).replace("\r\n", "\n")
     compile(source, workflow + ".py", "exec")
     return source

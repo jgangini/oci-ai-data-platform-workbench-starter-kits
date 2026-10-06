@@ -31,6 +31,7 @@ Every guide contains source data, task dependencies, Gold outputs and reproducib
 - [Operations](operations.md): installation, updates, recovery and scoped deletion.
 - [Development](development.md): local profiles, source ownership and checks.
 - [Compatibility](reference/compatibility.md): retained names and rolling-upgrade contracts.
+- [Repository instructions](../AGENTS.md): deployment, content, UI and validation rules for contributors.
 - [Implementation limits](getting-started.md#current-implementation-limits): differences between source intent, packaged assets and accepted native behavior.
 
 These guides describe the checked-in implementation. The linked `lab.json` files define package versions, asset hashes and expected results; deployment manifests and native job outputs establish what is installed and has actually run. A local test, diagram or historical validation report is not evidence that a different cloud release passed acceptance.

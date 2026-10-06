@@ -135,9 +135,22 @@
       }
     ]
   },
-  "pack_sha256": "4f6bbc25d12d6b2b293a57f16c42738add59139998e5705be33200ed7fff1623",
-  "pack_version": "3.0.1",
+  "pack_sha256": "a2d406450df46fe953eb9f0d2f1777b62f0af70e14e392c244f7a7fd30a655c0",
+  "pack_version": "3.0.2",
   "schema_version": 1,
   "status": "available",
-  "tables": {}
+  "tables": {},
+  "runtime_files": [
+    {
+      "file": "notebooks/agent/governance_agent.py",
+      "workspace_path": "agent/governance_agent.py",
+      "sha256": "3fd0b57a21575b2f4fd814ef922a8262b75fa18a626c77531eb26abc1c047fcf"
+    },
+    {
+      "file": "notebooks/data_governance_sync.ipynb",
+      "workspace_path": "data_governance_sync.ipynb",
+      "sha256": "dbb86540758ef063faba7667c3fb0284a9a665f7c0ea91c406cd428b5b34944a"
+    }
+  ],
+  "source_manifests": []
 }

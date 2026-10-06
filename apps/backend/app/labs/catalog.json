@@ -6,7 +6,8 @@
     "telco_lineage",
     "retail",
     "healthcare",
-    "ai_data_governance"
+    "ai_data_governance",
+    "gods_eye_view"
   ],
   "descriptions": {
     "banking": "Explore customer accounts, branches and transactions through a governed medallion pipeline.",
@@ -14,6 +15,7 @@
     "telco_lineage": "Test end-to-end data lineage for prepaid, postpaid and home services, from Landing through Gold with entity and column relationships.",
     "retail": "Transform customers, products, orders and order items into sales and customer analytics.",
     "healthcare": "Prepare patients, providers, appointments and encounters for operational healthcare analysis.",
-    "ai_data_governance": "Deploy one shared AI Data Governance Agent and native Master Catalog metadata synchronization for all AIDP developers."
+    "ai_data_governance": "Deploy one shared AI Data Governance Agent and native Master Catalog metadata synchronization for all AIDP developers.",
+    "gods_eye_view": "Deploy an independent map viewer with shared social and sensor workflows and evidence-grounded Gold queries."
   }
 }

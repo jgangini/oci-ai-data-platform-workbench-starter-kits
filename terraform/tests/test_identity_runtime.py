@@ -13,7 +13,7 @@ def _resource(source: str, resource_type: str, label: str) -> str:
 
 
 def test_operator_identity_is_reused_without_gateway_control_plane_resources() -> None:
-    identity = (ROOT / "terraform/h_oci_identity.tf").read_text(encoding="utf-8")
+    identity = (ROOT / "terraform/i_oci_identity.tf").read_text(encoding="utf-8")
     compute = (ROOT / "terraform/g_oci_core_instance.tf").read_text(encoding="utf-8")
     terraform = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "terraform").glob("*.tf"))
 
@@ -43,7 +43,7 @@ def test_operator_identity_is_reused_without_gateway_control_plane_resources() -
 
 
 def test_identity_groups_ignore_service_managed_schema_extensions() -> None:
-    identity = (ROOT / "terraform/h_oci_identity.tf").read_text(encoding="utf-8")
+    identity = (ROOT / "terraform/i_oci_identity.tf").read_text(encoding="utf-8")
 
     for group in ("developers", "pending"):
         block = _resource(identity, "oci_identity_domains_group", group)
@@ -121,7 +121,7 @@ def test_vm_bootstrap_identity_is_authorized_before_instance_launch() -> None:
 
 
 def test_required_aidp_policy_has_no_optional_or_search_resources() -> None:
-    aidp = (ROOT / "terraform/i_oci_ai_data_platform.tf").read_text(encoding="utf-8")
+    aidp = (ROOT / "terraform/j_oci_ai_data_platform.tf").read_text(encoding="utf-8")
 
     policy = _resource(aidp, "oci_identity_policy", "aidp_service")
     assert policy.count('"Allow any-user') == 10

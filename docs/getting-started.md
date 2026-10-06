@@ -32,7 +32,7 @@ Before deployment, have an OCI operator profile and RSA API key, a target compar
 | Laboratory | Participants can self-register with the instructor's code; administrators can also create users. |
 | Production | Public registration is disabled; administrators provision participants from Users. |
 
-The deployment package and discovery contract are defined in [`terraform/deploy-studio.json`](../terraform/deploy-studio.json); resolved endpoints and bucket names are defined in [`j_outputs.tf`](../terraform/j_outputs.tf).
+The deployment package and discovery contract are defined in [`terraform/deploy-studio.json`](../terraform/deploy-studio.json); resolved endpoints and bucket names are defined in [`l_outputs.tf`](../terraform/l_outputs.tf).
 
 ## Register and activate a participant
 

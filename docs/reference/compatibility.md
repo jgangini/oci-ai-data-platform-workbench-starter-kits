@@ -55,7 +55,7 @@ and then `enable_prisma_viewer`.
 The Deploy Studio manifest deliberately keeps serialized field name
 `enable_prisma_viewer`: adding a new default-false field would otherwise override
 saved enabled deployments. Canonical and legacy viewer outputs remain available.
-See [Terraform compatibility](../../terraform/g_gods_eye_view.tf),
+See [Terraform compatibility](../../terraform/h_gods_eye_view.tf),
 [variables](../../terraform/b_variables.tf) and [manifest](../../terraform/deploy-studio.json).
 
 The development Compose service is `gods-eye-view`; private overlays must

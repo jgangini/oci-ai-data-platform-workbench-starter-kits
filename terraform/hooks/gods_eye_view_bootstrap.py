@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 from uuid import uuid4
 
-from gods_eye_sources import workflow_source
+from gods_eye_sources import NOTEBOOK_ROOT, workflow_source
 from gods_eye_agent_source import agent_source
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -219,38 +219,9 @@ def publish_runtime_sources(api, workspace, config, bundle, *, ensure_folder):
     }
     for name, source in sources.items():
         compile(source, name, "exec")
-    sources["README.md"] = """# God's Eye View
-
-`10_bronze/social_network.py` and `10_bronze/sensor_stream.py` are independent
-Python workflows containing their complete processing logic and nonsecret
-configuration. Open either file to inspect its Bronze, Silver and publication
-stages. AIDP credentials hold secret values; they are never embedded here.
-
-`20_silver/` and `30_gold/` document the stages performed by those workflows.
-`40_report/ai_gods_eye_view.py` is the standalone Gold-backed agent.
-The installer verifies uploads against `manifest.json`; execution does not load
-that manifest or other project files. Stop any workflow using these paths before
-replacing its source. Make changes in the source repository and redeploy.
-"""
-    sources["20_silver/README.md"] = """# Silver processing
-
-The Silver stages run inside the two files in `../10_bronze/`.
-`social_network.py` normalizes and classifies captured publications, correlates
-evidence and maintains `oci_silver.social_posts`, `oci_silver.events` and
-`oci_silver.event_posts`. `sensor_stream.py` validates readings and maintains
-`oci_silver.sensors_current`, retaining the latest reading for each sensor.
-Existing physical tables and checkpoints are reused to preserve history.
-"""
-    sources["30_gold/README.md"] = """# Gold publication
-
-The publication stage in `../10_bronze/social_network.py` combines processed
-social evidence and current sensors into a versioned snapshot. It exposes
-`oci_gold.events`, `oci_gold.event_posts` and the JSON views
-`oci_gold.territorial_incidents`, `oci_gold.territorial_evidence`,
-`oci_gold.territorial_sensors` and `oci_gold.territorial_event_posts`.
-The agent in `../40_report/ai_gods_eye_view.py` queries these Gold views using the
-separate query compute. Existing publication versions and storage paths remain.
-"""
+    sources['README.md'] = (NOTEBOOK_ROOT / 'README.md').read_text(encoding="utf-8")
+    sources['20_silver/README.md'] = (NOTEBOOK_ROOT / '20_silver/README.md').read_text(encoding="utf-8")
+    sources['30_gold/README.md'] = (NOTEBOOK_ROOT / '30_gold/README.md').read_text(encoding="utf-8")
     manifest = json.dumps({"bundle_sha256": hashlib.sha256(bundle).hexdigest(),
         "files": {name: hashlib.sha256(source.encode("utf-8")).hexdigest() for name, source in sorted(sources.items())}},
         sort_keys=True, indent=2) + "\n"

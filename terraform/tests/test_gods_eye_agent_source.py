@@ -10,7 +10,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "hooks"))
 import gods_eye_view_bootstrap as bootstrap
-from gods_eye_agent_source import agent_source
+from gods_eye_agent_source import agent_source, render_agent_source
+from gods_eye_sources import NOTEBOOK_ROOT
 
 
 def configuration():
@@ -62,3 +63,17 @@ def test_agent_is_portable_one_file_with_fixed_gold_queries(tmp_path, monkeypatc
     with pytest.raises(ValueError, match="fixed SELECT"):
         namespace["gold_query"](configuration(), "DELETE FROM gods_eye_view_sensors", {})
     assert len(submitted) == 1
+
+
+def test_versioned_agent_matches_renderer_and_filters_configuration_secrets():
+    bundle = bootstrap.runtime_archive()
+    path = NOTEBOOK_ROOT / "40_report/ai_gods_eye_view.py"
+    assert path.read_bytes() == render_agent_source(bundle).encode("utf-8")
+    canonical = ast.parse(path.read_text(encoding="utf-8"))
+    config = {**configuration(), "private_key": object(), "db_password": object()}
+    deployed = ast.parse(agent_source(config, bundle))
+    for tree in (canonical, deployed):
+        node = [node for node in tree.body if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "RUNTIME_CONFIG" for target in node.targets)][-1]
+        node.value = ast.Dict(keys=[], values=[])
+    assert ast.dump(canonical) == ast.dump(deployed)

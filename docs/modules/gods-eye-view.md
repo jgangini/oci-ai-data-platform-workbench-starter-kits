@@ -89,7 +89,9 @@ The stable Workspace root is `/Workspace/medallion/gods_eye_view/`:
 | `40_report/requirements.txt` | Agent dependencies. |
 | `README.md`, `manifest.json` | Usage guidance and deployment integrity record. |
 
-The files contain readable logic and nonsecret configuration, without runtime project extraction or sibling-module discovery. The manifest verifies uploads; streams do not load it to execute. Stop affected consumers before replacing a stable source path.
+The checked-in counterparts are in [labs/gods_eye_view/notebooks](../../apps/backend/app/labs/gods_eye_view/notebooks); the [source folder](../../apps/backend/app/labs/gods_eye_view/source) contains the versioned social corpus and sensor inputs. The [module manifest](../../apps/backend/app/labs/gods_eye_view/lab.json) records runtime and input-manifest hashes.
+
+The files contain readable logic without runtime project extraction or sibling-module discovery. Deployment reads the packaged programs and fills only `RUNTIME_CONFIG` with explicit nonsecret environment metadata. The executable body remains the same; the entire deployed file is not byte-identical because configuration differs. `python scripts/render_gods_eye_view_runtime.py --check` checks generated-source and manifest drift without rewriting files. The deployed manifest verifies configured uploads; streams do not load it to execute. Stop affected consumers before replacing a stable source path.
 
 Jobs are `wf_ai_gods_eye_view_social_network` and `wf_ai_gods_eye_view_sensor_stream`, with task keys `social_network` and `sensor_stream`. Installers adopt recognized existing IDs rather than duplicate jobs. A native `PYTHON_TASK` receives the Workspace path in its JSON argument array. AIDP injects `aidputils`; Spark uses `SparkSession.builder.getOrCreate()`.
 

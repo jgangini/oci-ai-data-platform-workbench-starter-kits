@@ -20,7 +20,15 @@ def test_manifest_packages_importable_gods_eye_view_hook_runtime(tmp_path) -> No
             shutil.copyfile(source, target)
     result = subprocess.run([sys.executable, "-I", "-c",
         "import sys; sys.path.insert(0, 'terraform/hooks'); import gods_eye_view_bootstrap; "
-        "from app.aidp import AidpClient; assert gods_eye_view_bootstrap.runtime_archive()"],
+        "from app.aidp import AidpClient; from app.lab_packs import load_lab_pack; "
+        "from gods_eye_sources import workflow_source; from gods_eye_agent_source import agent_source; "
+        "bundle = gods_eye_view_bootstrap.runtime_archive(); assert bundle; "
+        "config = {key: 'test' for key in ('namespace','bucket','pipeline_revision','oci_credential_name',"
+        "'oci_identity_sha256','region','model_id','compartment_id','catalog','gold_query_compute_id')}; "
+        "assert workflow_source('pipeline', config, bundle); assert workflow_source('sensor_pipeline', config, bundle); "
+        "assert agent_source(config, bundle); "
+        "assert load_lab_pack('gods_eye_view').runtime_files; "
+        "assert load_lab_pack('ai_data_governance').runtime_files"],
         cwd=tmp_path, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
 
@@ -327,8 +335,8 @@ def test_runtime_security_contracts() -> None:
     variables = (root / "terraform/b_variables.tf").read_text(encoding="utf-8")
     providers = (root / "terraform/d_main.tf").read_text(encoding="utf-8")
     compute = (root / "terraform/g_oci_core_instance.tf").read_text(encoding="utf-8")
-    identity = (root / "terraform/h_oci_identity.tf").read_text(encoding="utf-8")
-    aidp = (root / "terraform/i_oci_ai_data_platform.tf").read_text(encoding="utf-8")
+    identity = (root / "terraform/i_oci_identity.tf").read_text(encoding="utf-8")
+    aidp = (root / "terraform/j_oci_ai_data_platform.tf").read_text(encoding="utf-8")
     storage = (root / "terraform/f_oci_objectstorage_bucket.tf").read_text(encoding="utf-8")
     backend_main = (root / "apps/backend/app/main.py").read_text(encoding="utf-8")
     assert "$proxy_add_x_forwarded_for" not in nginx
@@ -430,7 +438,7 @@ def test_runtime_security_contracts() -> None:
     assert "AIDP_CONSOLE_URL" not in cloud_init
 
 
-def test_terraform_files_follow_select_ai_order() -> None:
+def test_terraform_files_have_unique_contiguous_prefixes() -> None:
     root = Path(__file__).parents[2] / "terraform"
     assert 'required_version = ">= 1.5.7"' in (root / "a_versions.tf").read_text(encoding="utf-8")
     expected = {
@@ -441,12 +449,17 @@ def test_terraform_files_follow_select_ai_order() -> None:
         "e_oci_core_vcn.tf",
         "f_oci_objectstorage_bucket.tf",
         "g_oci_core_instance.tf",
-        "h_oci_identity.tf",
-        "i_oci_ai_data_platform.tf",
-        "j_outputs.tf",
+        "h_gods_eye_view.tf",
+        "i_oci_identity.tf",
+        "j_oci_ai_data_platform.tf",
+        "k_oci_autonomous_database.tf",
+        "l_outputs.tf",
     }
-    assert expected.issubset({path.name for path in root.glob("*.tf")})
-    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefgghiij")
+    assert expected == {path.name for path in root.glob("*.tf")}
+    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefghijkl")
+    manifest = json.loads((root / "deploy-studio.json").read_text(encoding="utf-8"))
+    assert manifest["preflight"]["entrypoint"] == "terraform/m_preflight.py"
+    assert (root / "m_preflight.py").is_file()
     assert not {"main.tf", "network.tf", "compute.tf", "storage.tf", "identity.tf", "aidp.tf", "outputs.tf", "providers.tf"} & {
         path.name for path in root.glob("*.tf")
     }

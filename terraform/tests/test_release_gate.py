@@ -226,7 +226,7 @@ def test_source_accepts_minimal_safe_deployment(tmp_path: Path) -> None:
 
 def test_source_accepts_developer_pending_groups_and_ignores_docs(tmp_path: Path) -> None:
     root = _source(tmp_path)
-    (root / "h_oci_identity.tf").write_text(
+    (root / "i_oci_identity.tf").write_text(
         '\n'.join(
             (
                 'resource "oci_identity_domains_group" "developers" {}',

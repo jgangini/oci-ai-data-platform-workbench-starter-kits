@@ -18,7 +18,7 @@ import gods_eye_view_release_update as viewer_updater
 
 
 def test_terraform_preserves_both_prior_state_addresses_without_resource_recreation():
-    source = (ROOT / "terraform/g_gods_eye_view.tf").read_text(encoding="utf-8")
+    source = (ROOT / "terraform/h_gods_eye_view.tf").read_text(encoding="utf-8")
     resources = set(re.findall(r'resource "([^"]+)" "(gods_eye_view[^"]*)"', source))
     moves = dict(re.findall(r'from = ([\w.]+)\s+to\s+= ([\w.]+)', source))
     assert len(moves) == len(resources) * 2
@@ -50,6 +50,24 @@ def test_portal_control_bucket_is_explicit_gold_not_bootstrap_landing():
     assert re.search(r'gods_eye_control_bucket\s*=\s*local.medallion_bucket_names\["gold"\]', instance)
     assert 'GODS_EYE_CONTROL_BUCKET=${gods_eye_control_bucket}' in template
     assert re.search(r'bucket_name\s*=\s*local.bootstrap_bucket_name', instance)
+
+
+
+def test_vm2_bootstrap_installs_the_patched_upstream_release_without_rebuilding_it():
+    template = (ROOT / "terraform/templatefile/gods_eye_view_user_data.sh").read_text()
+    dockerfile = (ROOT / "apps/gods-eye-view/Dockerfile").read_text()
+    upstream = json.loads((ROOT / "apps/gods-eye-view/upstream.json").read_text())
+    assert upstream["repository"] == "https://github.com/bilawalsidhu/gods-eye-view"
+    assert re.fullmatch(r"[a-f0-9]{40}", upstream["commit"])
+    assert re.fullmatch(r"[a-f0-9]{64}", upstream["archive_sha256"])
+    assert upstream["patches"] and all(re.fullmatch(r"[a-f0-9]{64}", patch["sha256"]) for patch in upstream["patches"])
+    assert "RUN python prepare_upstream.py --output /prepared" in dockerfile
+    assert "COPY --from=upstream-source /prepared ./" in dockerfile
+    assert "--component aidp-lab" in (ROOT / "terraform/templatefile/user_data.sh").read_text()
+    assert "--component gods-eye-view" in template and "verified local patches" in template
+    assert "docker build" not in template and "prepare_upstream.py" not in template
+    assert 'git -C /opt/prisma/source checkout --detach' in template
+    assert 'prisma-release-update' in template  # Installed update command remains compatible.
 
 
 def release(component="prisma-viewer"):
@@ -142,20 +160,20 @@ def test_updater_preserves_private_bridge_only_on_active_container(monkeypatch, 
 
 def test_optional_viewer_requires_capacity_for_both_vms():
     sys.path.insert(0, str(ROOT / "terraform"))
-    import k_preflight
+    import m_preflight
     report = SimpleNamespace(shape_availabilities=[SimpleNamespace(
         instance_shape="VM.Standard.E5.Flex", availability_status="AVAILABLE", available_count=1,
     )])
     candidates = ["VM.Standard.E5.Flex"]
-    assert k_preflight._available_shape(report, candidates) == candidates[0]
-    assert k_preflight._available_shape(report, candidates, 2) is None
+    assert m_preflight._available_shape(report, candidates) == candidates[0]
+    assert m_preflight._available_shape(report, candidates, 2) is None
     report.shape_availabilities[0].available_count = 2
-    assert k_preflight._available_shape(report, candidates, 2) == candidates[0]
+    assert m_preflight._available_shape(report, candidates, 2) == candidates[0]
     # Live Chicago reports AVAILABLE with an omitted count; unknown is not zero.
     report.shape_availabilities[0].available_count = None
-    assert k_preflight._available_shape(report, candidates, 2) == candidates[0]
+    assert m_preflight._available_shape(report, candidates, 2) == candidates[0]
     report.shape_availabilities[0].availability_status = "HARDWARE_NOT_SUPPORTED"
-    assert k_preflight._available_shape(report, candidates, 2) is None
+    assert m_preflight._available_shape(report, candidates, 2) is None
 
 
 def test_active_updater_preserves_acme_webroot_and_shared_certificates(monkeypatch, tmp_path):

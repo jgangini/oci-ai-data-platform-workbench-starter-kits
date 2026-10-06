@@ -22,16 +22,19 @@ directory from the archive. That generated tree is never vendored or committed,
 and the preparer refuses to overwrite a nonempty directory. Docker independently
 reproduces the tree; it does not depend on a developer's checkout.
 
-The six hash-checked source patches are:
+The nine hash-checked source patches are:
 
 | Upstream file | Integration change |
 | --- | --- |
+| `src/data/localGeojsonCore.js` | Exposes native terrain/stem helpers reused by sensor layers. |
 | `src/main.js` | Delegates to `native/main.js`. |
 | `src/standalone/application.js` | Adds `extendCatalog(catalog, {scene, signal})` before registrations are sealed. |
 | `src/app/constructCatalog.js` | Removes the restricted Bhote Koshi event/locator registrations. |
 | `src/scenes/recipes.js` | Removes Nepal event recipes and their restricted data imports. |
 | `src/scenes/packs/defaults.js` | Removes the Nepal scene presentation adapter. |
 | `src/tools/index.js` | Removes the Bhote Koshi data query from the native tool registry. |
+| `src/ui/rightPanelRail.js` | Supports the expanded Agent Flow panel and shared voice-control boundary. |
+| `src/ui/leftPanelRail.js` | Keeps a minimum gap and respects the shared voice/HUD floor. |
 
 The upstream [MIT source license](https://github.com/bilawalsidhu/gods-eye-view/blob/aa16b7c3b0166a89d8c7a6089e0aff53a22faaee/LICENSE)
 and original notices remain in the generated tree and image. MIT covers source,
@@ -67,7 +70,7 @@ Node version. From the repository root:
 python apps/gods-eye-view/prepare_upstream.py --output apps/gods-eye-view/.upstream
 npm --prefix apps/gods-eye-view/.upstream ci --ignore-scripts
 node apps/gods-eye-view/native/runtime.mjs --build
-node --test --test-isolation=none apps/gods-eye-view/tests/*.test.mjs
+node --test apps/gods-eye-view/tests/*.test.mjs
 docker build -f apps/gods-eye-view/Dockerfile -t gods-eye-view:dev .
 ```
 
@@ -77,7 +80,7 @@ root viewer's old `npm run build` builds the retained standalone page; use the
 native command or Docker for the deployed native application.
 
 For an upstream update, review the desired immutable commit and its licenses,
-calculate the archive and six original file hashes, and review each patch against
+calculate the archive and all original patched-file hashes, and review each patch against
 that source before updating `upstream.json`. Materialize into a new empty
 directory; never edit generated files to make a failing patch pass. Run the
 preparer tests, viewer tests, native build, Docker health checks and authenticated
@@ -86,6 +89,12 @@ Only then publish the kit's immutable release and update the two VMs through the
 existing release process. An upstream hash or anchor mismatch must fail closed.
 
 ## Runtime boundary and providers
+
+Terraform deploys VM2 separately from the public application VM, in the same VCN.
+The release build verifies the upstream archive and patches, builds/tests the
+native application, and publishes an immutable image with its manifest and digest.
+VM2 bootstrap verifies and installs that image; it does not download a moving
+upstream branch or rebuild the viewer. Updates retain the same release checks.
 
 VM2 supervises the original Node provider/preview runtime on
 `127.0.0.1:4173` and the Python authentication bridge on port 8081.
@@ -180,7 +189,11 @@ inside it while the composer remains visible.
 
 `GODS_EYE_VIEW_MODE=oci` selects the real runtime independently of local development
 identity. Configure it on both the backend and viewer, with the existing operator
-profile and Autonomous runtime installed on the backend. An explicit
+profile and the configured module runtime on the backend. New module controls use
+Object Storage, and analytical queries use AIDP Gold; Autonomous is not a
+prerequisite for these paths. Existing deployments require the separate
+[migration gates](../../docs/operations.md#migrate-gods-eye-view-controls).
+An explicit
 `GODS_EYE_VIEW_ADMIN_URL` makes the viewer obtain the authenticated backend's publication;
 OCI mode rejects a fixture publication. Without that URL, the deployed viewer
 continues reading Gold with its instance principal. Backend-proxy `/ready` checks
@@ -190,9 +203,9 @@ Local identity with OCI mode does not start a second capture producer: the
 deployed VM owns capture. Missing credentials or AIDP failures never select a
 fixture answer. Omitting the override retains the existing development defaults.
 
-The God’s Eye View layer uses one native `CustomDataSource` and the native
-layer manager's ten-second refresh lifecycle. Disabling it stops its refresh;
-other layers remain intact. A fresh URL seeds a native Bogotá camera share state
+The God’s Eye View layer uses one native `CustomDataSource`. Capture-status polling
+follows the server schedule and refreshes completed publication revisions.
+Disabling the layer stops its refresh; other layers remain intact. A fresh URL seeds a native Bogotá camera share state
 before startup; an existing hash is preserved. No delayed or recurring local
 camera override competes with native navigation or user-shared views.
 Inclusive social periods use the linked publication's creation time;
@@ -207,11 +220,11 @@ evidence IDs were included in the current human review can be displayed.
 ## Acceptance limits
 
 Local fixture answers are explicitly identified and do not invoke an AIDP model.
-Positive native CSV-processing evidence from the v2.3.8 processing baseline does
-not establish live conversational acceptance. The separately tested deployed
-AIDP agent returned HTTP 429 even with an explicit 2,048-token output bound;
-its provider/configuration comparison matched expected values, but the cause
-remains unconfirmed. A successful direct OCI inference does not resolve or prove
-the AIDP agent path. Keep those acceptance items separate and repeat them after
-the applicable provider/runtime change. Unit tests and container health do not
-certify live voice, model inference or third-party feed availability.
+Validate the installed revision's native workflows, Gold/Object publication,
+agent conversation and evidence agreement independently. A successful direct OCI
+inference does not establish the AIDP agent path, and a candidate conversation
+does not switch the active pointer. Unit tests and container health do not
+certify live voice, model inference or third-party feed availability. Keep run
+identifiers and temporary diagnostics private; use the
+[module acceptance guide](../../docs/modules/gods-eye-view.md#security-and-acceptance)
+for the stable deployment checks.
