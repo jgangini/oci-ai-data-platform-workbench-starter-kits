@@ -29,7 +29,7 @@ def main():
         path.write_bytes(content)
         manifest["files"].append({"path": relative, "records": len(content.splitlines()),
                                   "sha256": hashlib.sha256(content).hexdigest()})
-    (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"Wrote {len(rows)} simulated readings in {len(files)} TXT files to {destination}")
 
 

@@ -31,8 +31,18 @@ def render(check=False):
             path.write_bytes(content)
         metadata["runtime_files"].append({"file": "notebooks/" + relative,
             "sha256": hashlib.sha256(content).hexdigest(), "workspace_path": relative})
-    metadata["source_manifests"] = [{"file": relative, "sha256": hashlib.sha256((lab / relative).read_bytes()).hexdigest()}
-        for relative in ("source/social_networks/v1/manifest.json", "source/social_networks/v2/manifest.json", "source/sensors/colombia/v1/manifest.json")]
+    metadata["source_manifests"] = []
+    for relative in ("source/social_networks/v1/manifest.json", "source/social_networks/v2/manifest.json", "source/sensors/colombia/v1/manifest.json"):
+        path = lab / relative
+        current = path.read_bytes()
+        # Git stores these UTF-8 manifests with LF on every platform; hash those exact bytes.
+        content = current.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        if current != content:
+            if check:
+                drift.append(path.relative_to(ROOT).as_posix())
+            else:
+                path.write_bytes(content)
+        metadata["source_manifests"].append({"file": relative, "sha256": hashlib.sha256(content).hexdigest()})
     unsigned = {key: value for key, value in metadata.items() if key != "pack_sha256"}
     metadata["pack_sha256"] = hashlib.sha256(json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     content = (json.dumps(metadata, ensure_ascii=False, indent=2) + "\n").encode("utf-8")

@@ -3,7 +3,7 @@
   "lab_id": "gods_eye_view",
   "display_name": "God’s Eye View · Custom layers",
   "pack_version": "1.0.1",
-  "pack_sha256": "d46c1aad79d949eecfb5a02e793823a5d037d902005283365394617abe9db886",
+  "pack_sha256": "9352674ef62075e91cecef489e1103eeb478f6996996c5a1624d763953ebdf4f",
   "status": "available",
   "kind": "global_module",
   "scope": "global",
@@ -43,7 +43,7 @@
     },
     {
       "file": "source/sensors/colombia/v1/manifest.json",
-      "sha256": "18528b15bb3b110b2d2dcce14a71ac622d5a1f9ac944e415ad823343e0a72c62"
+      "sha256": "5da4021ec989dae86cb9faf0c030060668b2582398f004bfd40bf22e24e92a0a"
     }
   ]
 }

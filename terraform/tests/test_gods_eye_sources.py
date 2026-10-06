@@ -210,3 +210,32 @@ def test_canonical_runtime_refuses_missing_or_duplicate_config_assignment():
     for source in ("pass\n", "\nRUNTIME_CONFIG = {}\n\nRUNTIME_CONFIG = {}\n"):
         with pytest.raises(ValueError, match="one empty configuration"):
             configured_source(source, {})
+
+
+def test_renderer_canonicalizes_manifest_newlines_and_check_never_mutates(tmp_path, monkeypatch, bundle):
+    import hashlib
+    from scripts import render_gods_eye_view_runtime as renderer
+
+    lab = tmp_path / "lab"
+    relatives = ("source/social_networks/v1/manifest.json", "source/social_networks/v2/manifest.json", "source/sensors/colombia/v1/manifest.json")
+    canonical = b'{\n  "records": 0\n}\n'
+    for relative in relatives:
+        path = lab / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(canonical)
+    (lab / "lab.json").write_bytes(b'{"lab_id":"gods_eye_view"}\n')
+    monkeypatch.setattr(renderer, "ROOT", tmp_path)
+    monkeypatch.setattr(renderer, "NOTEBOOK_ROOT", lab / "notebooks")
+    monkeypatch.setattr(renderer, "runtime_archive", lambda: bundle)
+    renderer.render()
+    sensor_manifest = lab / relatives[-1]
+    sensor_manifest.write_bytes(canonical.replace(b"\n", b"\r\n"))
+    before = {path: path.read_bytes() for path in lab.rglob("*") if path.is_file()}
+    with pytest.raises(SystemExit, match="source/sensors/colombia/v1/manifest.json"):
+        renderer.render(check=True)
+    assert before == {path: path.read_bytes() for path in before}
+    renderer.render()
+    assert sensor_manifest.read_bytes() == canonical
+    metadata = json.loads((lab / "lab.json").read_text(encoding="utf-8"))
+    assert {item["sha256"] for item in metadata["source_manifests"]} == {hashlib.sha256(canonical).hexdigest()}
+    renderer.render(check=True)
