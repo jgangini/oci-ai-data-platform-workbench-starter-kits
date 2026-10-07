@@ -128,7 +128,7 @@ and are not independent deployment entrypoints.
 | `release_gate.validate_source` | preflight and CLI | `test_release_gate.py` | Pending | Keep. |
 | `release_gate._has_nonempty_key` | plan validation | `test_release_gate.py` | Pending | Keep: rejects customer-managed Object Storage keys. |
 | `release_gate._planned_values` | plan validation | `test_release_gate.py` | Pending | Keep. |
-| `release_gate._forbidden_plan_type` | plan validation | `test_release_gate.py` | Pending | Keep. |
+| `release_gate._forbidden_plan_resource` | plan validation | `test_release_gate.py` | Pending | Keep. |
 | `release_gate.validate_plan` | CLI/Deploy Studio gate | `test_release_gate.py` | Pending | Keep: create-only candidate. |
 | `release_gate.main` | CLI/Deploy Studio | `test_release_gate.py` | Pending | Keep: entrypoint. |
 | `m_preflight._safe_error_message` | `main` | `test_preflight.py` | Pending | Keep: prevents secret leakage. |
