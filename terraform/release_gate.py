@@ -19,7 +19,7 @@ _STABLE_RELEASE_REF = re.compile(
 )
 _COMPARTMENT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _OCI_REGION = re.compile(r"^[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*$")
-_ALLOWED_IDENTITY_DOMAIN_GROUPS = frozenset({"developers", "pending"})
+_ALLOWED_IDENTITY_DOMAIN_GROUPS = frozenset({"developers", "pending", "gods_eye_view_readers"})
 _RESOURCE_DECLARATION = re.compile(
     r'resource\s+"([^"]+)"\s+"([^"]+)"',
     re.IGNORECASE,
@@ -147,7 +147,7 @@ def _control_name_finding(value: str) -> str | None:
 
 def _forbidden_control_resource(text: str) -> str | None:
     for resource_type, name in _RESOURCE_DECLARATION.findall(text):
-        if resource_type.casefold() == "oci_identity_domains_app":
+        if resource_type.casefold() == "oci_identity_domains_app" and name != "viewer":
             return "Identity Domains OAuth client"
         finding = _control_name_finding(resource_type) or _control_name_finding(name)
         if finding:
@@ -217,7 +217,7 @@ def _planned_values(resource: dict[str, Any]) -> dict[str, Any]:
 
 def _forbidden_plan_type(resource_type: str, address: str) -> str | None:
     resource_name = address.rsplit(".", 1)[-1].split("[", 1)[0].lower()
-    if resource_type == "oci_identity_domains_app":
+    if resource_type == "oci_identity_domains_app" and resource_name != "viewer":
         return "Identity Domains OAuth client"
     finding = _control_name_finding(resource_type) or _control_name_finding(resource_name)
     if finding:
@@ -248,6 +248,10 @@ def validate_plan(plan: dict[str, Any]) -> None:
         forbidden_type = _forbidden_plan_type(resource_type, address)
         if forbidden_type:
             raise ValueError(f"release plan contains {forbidden_type} in {address}")
+        if resource_type == "oci_identity_domains_app":
+            values = _planned_values(resource)
+            if values.get("client_type") != "public" or values.get("allowed_grants") != ["authorization_code"]:
+                raise ValueError(f"release plan requires a public authorization-code viewer client in {address}")
         if resource_type == "oci_objectstorage_bucket" and _has_nonempty_key(_planned_values(resource), "kms_key_id"):
             raise ValueError(f"release plan assigns a customer-managed key to {address}")
 
