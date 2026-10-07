@@ -20,11 +20,11 @@ USER = {"id": "native-user", "email": "member@example.test", "active": True}
 
 
 @pytest.fixture
-def flow(tmp_path):
+def flow(tmp_path, request):
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private.public_key()))
     public.update(kid="signing-key", use="sig", alg="RS256")
-    state = {"member": True, "claims": {}, "keys": [public], "app": {
+    state = {"member": True, "reader_group": "readers", "claims": {}, "keys": [public], "app": {
         "id": "application-id", "name": CLIENT_ID, "active": True, "isOAuthClient": True,
         "clientType": "public", "allowedGrants": ["authorization_code"], "redirectUris": [REDIRECT]},
         "discovery": {"issuer": DOMAIN, "authorization_endpoint": DOMAIN + "/oauth2/v1/authorize",
@@ -32,6 +32,9 @@ def flow(tmp_path):
         "requests": []}
 
     class Identity:
+        async def _gods_eye_view_group(self):
+            return state["reader_group"]
+
         async def _request(self, method, path, **kwargs):
             assert method == "GET" and path == "/admin/v1/Apps"
             assert kwargs["params"]["filter"] == f'name eq "{CLIENT_ID}"'
@@ -58,8 +61,10 @@ def flow(tmp_path):
         token = jwt.encode(claims, private, algorithm="RS256", headers={"kid": "signing-key"})
         return httpx.Response(200, json={"id_token": state.get("token", token)})
 
+    legacy = getattr(request, "param", False)
     settings = Settings(admin_username="admin", cookie_secure=True, identity_domain_url=DOMAIN,
-                        gods_eye_view_group_id="readers", viewer_oidc_app_name=CLIENT_ID,
+                        lab_marker="aidp-lab-test", gods_eye_view_group_id="" if legacy else "readers",
+                        viewer_oidc_app_name="" if legacy else CLIENT_ID,
                         aidp_settings_file=str(tmp_path / "settings.json"), session_secret_file=str(tmp_path / "session.key"))
     app = create_app(settings)
     app.state.identity_factory = Identity
@@ -102,6 +107,25 @@ def test_member_login_reader_permission_revocation_and_replay(flow):
     before = len(state["requests"])
     assert finish(flow, query).headers["location"] == "/viewer/login?error=sign_in_failed"
     assert len(state["requests"]) == before
+
+
+@pytest.mark.parametrize("flow", [True], indirect=True)
+def test_legacy_host_supports_signin_with_fresh_native_validation(flow, monkeypatch):
+    client, app, state = flow
+    assert app.state.settings.viewer_oidc_app_name == app.state.settings.gods_eye_view_group_id == ""
+    with monkeypatch.context() as patch:
+        patch.setattr(app.state, "identity_factory", lambda: pytest.fail("Public configuration must not invoke OCI"))
+        assert client.get("/api/public/config").json()["viewer_signin_enabled"] is True
+    query = start(flow)
+    assert query["client_id"] == [CLIENT_ID]
+    assert finish(flow, query).headers["location"] == "/gods-eye-view/"
+    state["reader_group"] = None
+    assert client.get("/api/public/config").json()["viewer_signin_enabled"] is True
+    assert client.get("/api/auth/oci/login").status_code == 503
+    state["reader_group"] = "readers"
+    state["app"]["name"] = "foreign-client"
+    assert client.get("/api/public/config").json()["viewer_signin_enabled"] is True
+    assert client.get("/api/auth/oci/login").status_code == 503
 
 
 @pytest.mark.parametrize("claims", [{"iss": "https://wrong.example.test"}, {"aud": "wrong-client"},

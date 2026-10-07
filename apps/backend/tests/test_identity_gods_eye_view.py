@@ -9,7 +9,8 @@ from app.config import Settings
 from app.identity import IdentityClient, IdentityPending, IdentityRejected
 
 
-def native_identity(*, active=True, pending=False, configured=True, confirm=True, group_marker="lab:gods_eye_view"):
+def native_identity(*, active=True, pending=False, configured=True, confirm=True, group_marker="lab:gods_eye_view",
+                    lab_marker="lab", discovered_groups=()):
     account = {"id": "participant", "ocid": "ocid1.user.oc1..participant",
                "userName": "participant@example.com", "displayName": "Participant", "active": active}
     members = {"pending"} if pending else set()
@@ -21,8 +22,19 @@ def native_identity(*, active=True, pending=False, configured=True, confirm=True
             return httpx.Response(200, json=account)
         if request.method == "GET" and path.startswith("/admin/v1/Users/"):
             return httpx.Response(404)
-        if request.method == "GET" and path == "/admin/v1/Groups/readers":
-            return httpx.Response(200, json={"id": "readers", "externalId": group_marker})
+        resources = {
+            "/admin/v1/Groups/readers": ({"id": "readers", "externalId": group_marker}, None),
+            "/admin/v1/Groups": ({"Resources": discovered_groups, "totalResults": len(discovered_groups)},
+                                 f'externalId eq "{lab_marker}:gods_eye_view"'),
+            "/admin/v1/Apps": ({"totalResults": 1, "Resources": [{
+                "id": "viewer-app-id", "name": "viewer-app", "active": True, "isOAuthClient": True,
+                "clientType": "public", "allowedGrants": ["authorization_code"],
+                "redirectUris": ["https://portal.example.test/api/auth/oci/callback"]}]}, 'name eq "viewer-app"'),
+        }
+        if request.method == "GET" and path in resources:
+            body, expected_filter = resources[path]
+            assert request.url.params.get("filter") == expected_filter
+            return httpx.Response(200, json=body)
         if request.method == "GET" and path == "/admin/v1/Users":
             expression = request.url.params["filter"]
             rows = [account] if any(f'groups.value eq "{group}"' in expression for group in members) else []
@@ -41,7 +53,7 @@ def native_identity(*, active=True, pending=False, configured=True, confirm=True
             return httpx.Response(204)
         raise AssertionError(f"Unexpected request: {request.method} {path}")
 
-    settings = Settings(identity_domain_url="https://identity.example.test", lab_marker="lab",
+    settings = Settings(identity_domain_url="https://identity.example.test", lab_marker=lab_marker,
                         developer_group_id="developers", pending_group_id="pending",
                         gods_eye_view_group_id="readers" if configured else "")
     client = IdentityClient(settings, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
@@ -67,6 +79,48 @@ def test_native_reader_grant_is_persisted_and_revoked_without_other_roles():
         await client.close()
 
     asyncio.run(run())
+
+
+def test_legacy_host_discovers_owned_group_and_keeps_native_membership_checks():
+    async def run():
+        marker = "aidp-lab-a1b2"
+        groups = [{"id": "readers", "externalId": marker + ":gods_eye_view"}]
+        client, members, patches = native_identity(configured=False, lab_marker=marker,
+                                                  group_marker=groups[0]["externalId"], discovered_groups=groups)
+        assert client.settings.managed_viewer_app_name == "aidp_viewer_a1b2"
+        assert await client.gods_eye_view_user("participant") is None
+        await client.grant_gods_eye_view("participant", True)
+        assert members == {"readers"} and len(patches) == 1
+        assert (await client.gods_eye_view_user("participant"))["gods_eye_view_access"] is True
+        groups.clear()
+        assert await client.gods_eye_view_user("participant") is None
+        await client.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("groups", [
+    [{"id": "readers", "externalId": "foreign:gods_eye_view"}],
+    [{"id": "readers", "externalId": "aidp-lab-a1b2:gods_eye_view"}] * 2,
+    [{"id": "developers", "externalId": "aidp-lab-a1b2:gods_eye_view"}],
+    [{"id": "pending", "externalId": "aidp-lab-a1b2:gods_eye_view"}],
+    [{"id": "readers/foreign", "externalId": "aidp-lab-a1b2:gods_eye_view"}],
+    [{"externalId": "aidp-lab-a1b2:gods_eye_view"}],
+])
+def test_legacy_group_discovery_rejects_ambiguous_foreign_and_platform_groups(groups):
+    async def run():
+        client, _, patches = native_identity(configured=False, lab_marker="aidp-lab-a1b2", discovered_groups=groups)
+        with pytest.raises(IdentityPending):
+            await client.grant_gods_eye_view("participant", True)
+        assert patches == []
+        await client.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("marker", ["aidp-lab", "aidp-lab-abc", "aidp-lab-a1b2\n", "aidp-lab-A1B2", "foreign-a1b2", "aidp-lab-1234567890123"])
+def test_legacy_discovery_requires_exact_managed_marker(marker):
+    assert Settings(lab_marker=marker).managed_viewer_app_name == ""
 
 
 @pytest.mark.parametrize("active,pending", [(False, False), (True, True)])

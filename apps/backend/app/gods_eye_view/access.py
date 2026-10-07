@@ -7,6 +7,7 @@ from oci._vendor import requests
 
 from ..security import issue_session, verify_session
 from ..identity import IdentityConflict, IdentityPending, IdentityRejected
+from ..viewer_auth import _application as viewer_application
 
 
 class ParticipantLogin(BaseModel):
@@ -70,13 +71,14 @@ def mount_access(app, require_admin, cookie_name):
                 module = await app.state.gods_eye_view_status()
                 if not (module.get("installed") is True and module.get("enabled") is True and module.get("status") == "ready"):
                     raise HTTPException(409, "Deploy God's Eye View before granting access")
-                if not settings.viewer_oidc_app_name:
-                    raise HTTPException(503, "OCI viewer sign-in is not configured")
+                await viewer_application(identity, settings)
             await identity.grant_gods_eye_view(user_id, payload.enabled)
         except (IdentityConflict, IdentityRejected) as exc:
             raise HTTPException(409, str(exc)) from None
         except IdentityPending as exc:
             raise HTTPException(503, str(exc)) from None
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise HTTPException(503, "OCI viewer sign-in could not be verified") from None
         except (httpx.HTTPError, requests.exceptions.RequestException):
             raise HTTPException(503, "Viewer access could not be verified") from None
         return {"enabled": payload.enabled, "mode": "SIMULATED" if settings.local_development_mode else "OCI"}

@@ -327,8 +327,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     raise HTTPException(409, "Deploy God's Eye View before granting access")
                 try:
                     await viewer_application(identity, settings)
-                    if not await identity._gods_eye_view_group():
-                        raise IdentityPending("God's Eye View reader group is not configured yet")
                 except (ValueError, KeyError, TypeError, AttributeError, IdentityPending,
                         httpx.HTTPError, requests.exceptions.RequestException):
                     raise HTTPException(503, "OCI viewer sign-in could not be verified") from None
@@ -470,7 +468,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "registration_code_pattern": "AAAA-0000",
             "labs": public_lab_catalog(),
             "local_participant_access": settings.local_development_mode,
-            "viewer_signin_enabled": bool(settings.viewer_oidc_app_name and settings.gods_eye_view_group_id),
+            "viewer_signin_enabled": not settings.local_development_mode and bool(
+                (settings.viewer_oidc_app_name and settings.gods_eye_view_group_id) or settings.managed_viewer_app_name),
         }
 
     @app.post("/api/register")
