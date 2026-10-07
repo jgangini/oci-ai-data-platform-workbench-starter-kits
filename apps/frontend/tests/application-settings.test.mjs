@@ -11,7 +11,7 @@ const assignments = {};
 new Function('exports', ts.transpileModule(readFileSync(new URL('../src/labAssignments.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(assignments);
 const settings = { aidp_service_endpoint: 'https://example.test/api', aidp_url: 'https://example.test/workbench', aidp_platform_id: 'platform', deployment_mode: 'laboratory', registration_code_configured: true, time_zone: 'America/Bogota', time_zones: ['America/Bogota', 'UTC'] };
 const release = { current_release: 'v2.3.9', current_commit_sha: 'abc123', latest_release: 'v2.4.0', update_available: true, updater_available: true, operation: null, packages: [] };
-async function harness(t, currentRelease = release, route = '/admin/settings', initial = {}, managerProps = null, sessionState = new Map()) {
+async function harness(t, currentRelease = release, route = '/admin/settings', initial = {}, managerProps = null, sessionState = new Map(), loginProps = null) {
   let cursor = 0, dirty = true, effects = [], tree, closed = 0, changed = 0;
   const slots = [], requests = [], navigations = [], previous = { window: globalThis.window, document: globalThis.document, HTMLElement: globalThis.HTMLElement };
   const listeners = new Map(), storage = new Map(), timers = new Map(), intervals = new Map(), appRoot = { inert: false };
@@ -39,7 +39,8 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
   };
   const module = {};
   new Function('exports', 'require', compiled + '\nexports.GovernanceModuleManager = GovernanceModuleManager; exports.AdminLoginCard = AdminLoginCard;')(module, name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? jsxRuntime : name === 'react-dom' ? { createPortal: node => node } : name === './LoadingIndicator' ? { LoadingIndicator() {} } : name === './SearchableCombobox' ? { SearchableCombobox() {} } : name === './GodsEyeViewModuleManager' ? { GodsEyeViewModuleManager() {}, godsEyeServices: Array(6) } : name === './labAssignments' ? assignments : name === './registrationPoll' ? { ...poll, pollRegistration: options => managerProps ? poll.pollRegistration({ ...options, sleep: async () => {} }) : options.request(options.signal) } : {});
-  const component = managerProps ? () => module.GovernanceModuleManager({ ...managerProps, onClose: () => { closed++; }, onChanged: () => { changed++; } }) : location.pathname === '/admin/login' ? module.AdminLoginCard : module.App().type;
+  const routeElement = module.App();
+  const component = managerProps ? () => module.GovernanceModuleManager({ ...managerProps, onClose: () => { closed++; }, onChanged: () => { changed++; } }) : loginProps ? () => module.AdminLoginCard(loginProps) : () => routeElement.type(routeElement.props);
   function render() { for (let n = 0; dirty && n < 20; n++) {
     cursor = 0; dirty = false; effects = []; tree = component();
     const elements = nodes(tree).filter(node => node?.props).map(node => Object.assign(node.props.ref?.current instanceof Element ? node.props.ref.current : new Element(), { node, props: node.props }));
@@ -62,9 +63,11 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
     update: () => act(() => { const button = find('button', props => props.className === 'settings-save application-update'); assert.ok(!button.props.disabled); button.props.onClick(); }) };
 }
 
+const adminLoginHarness = (t, route, props = {}) => harness(t, release, route, {}, null, new Map(), props);
+
 for (const next of ['/gods-eye-view/', 'https://outside.test/', '//outside.test/', '/gods-eye-view/../api/', '', '/admin/settings']) {
   test(`login accepts only the fixed viewer return target: ${next || '(none)'}`, async t => {
-    const h = await harness(t, release, '/admin/login?next=' + encodeURIComponent(next));
+    const h = await adminLoginHarness(t, '/admin/login?next=' + encodeURIComponent(next));
     const view = '#v=2&lat=4.6&lon=-74.1&style=normal';
     window.location.hash = view;
     h.act(() => h.find('input', props => props.name === 'aidp-admin-username').props.onChange({ target: { value: 'admin' } }));
@@ -81,7 +84,7 @@ for (const next of ['/gods-eye-view/', 'https://outside.test/', '//outside.test/
 }
 
 test('failed viewer login stays on the form and preserves the map fragment for retry', async t => {
-  const h = await harness(t, release, '/admin/login?next=/gods-eye-view/');
+  const h = await adminLoginHarness(t, '/admin/login?next=/gods-eye-view/');
   window.location.hash = '#v=2&lat=4.6';
   const pending = h.find('form').props.onSubmit({ preventDefault() {} });
   h.mutations()[0].resolve({ detail: 'Invalid administrator credentials' }, 401);
@@ -93,8 +96,8 @@ test('failed viewer login stays on the form and preserves the map fragment for r
 
 for (const error of ['', 'access_denied', 'sign_in_failed', '<script>untrusted</script>']) test(`viewer sign-in uses OCI redirect and a predefined error only: ${error || 'none'}`, async t => {
   const h = await harness(t, release, '/viewer/login?error=' + encodeURIComponent(error), { '/api/config': { viewer_signin_enabled: true } });
-  assert.equal(h.find('a', props => props.children === 'Sign in with OCI').props.href, '/api/auth/oci/login');
-  assert.equal(h.find('a', props => props.children === 'Administrator sign-in').props.href, '/admin/login?next=/gods-eye-view/');
+  assert.equal(h.find('a', props => props.className === 'result-link viewer-signin').props.href, '/api/auth/oci/login');
+  assert.equal(h.find('button', props => props.children === 'Administrator sign-in').props.type, 'button');
   assert.ok(!h.nodes().some(node => node?.type === 'input' || node?.type === 'form'));
   assert.deepEqual(h.requests.map(request => request.path), ['/api/config']);
   const alert = h.nodes().find(node => node?.props?.role === 'alert');
@@ -105,7 +108,7 @@ for (const error of ['', 'access_denied', 'sign_in_failed', '<script>untrusted</
 
 for (const enabled of [false, undefined, 'true']) test(`viewer sign-in stays disabled without an explicit enabled capability: ${enabled}`, async t => {
   const h = await harness(t, release, '/viewer/login', { '/api/config': { viewer_signin_enabled: enabled } });
-  assert.equal(h.find('button', props => props.children === 'Sign in with OCI').props.disabled, true);
+  assert.equal(h.find('button', props => props.className === 'viewer-signin').props.disabled, true);
   assert.ok(!h.nodes().some(node => node?.props?.href === '/api/auth/oci/login'));
   assert.match(text(h.nodes()[0]), /OCI sign-in is unavailable/);
   assert.equal(h.mutations().length, 0);
@@ -113,10 +116,100 @@ for (const enabled of [false, undefined, 'true']) test(`viewer sign-in stays dis
 
 test('viewer sign-in stays disabled while capability loading fails', async t => {
   const h = await harness(t, release, '/viewer/login', { '/api/config': null });
-  assert.equal(h.find('button', props => props.children === 'Sign in with OCI').props.disabled, true);
+  assert.equal(h.find('button', props => props.className === 'viewer-signin').props.disabled, true);
   h.requests[0].reject(new Error('Config unavailable')); await h.settle();
   assert.ok(!h.nodes().some(node => node?.props?.href === '/api/auth/oci/login'));
   assert.match(text(h.nodes()[0]), /OCI sign-in is unavailable/);
+});
+
+test('viewer sign-in presents one centered branded card and the shared Oracle mark', async t => {
+  const identity = { name: 'City Observatory', description: 'Every neighborhood matters' };
+  const h = await harness(t, release, '/viewer/login', { '/api/config': { viewer_signin_enabled: true, viewer_identity: identity } });
+  assert.equal(h.find('section', props => props.className === 'centered viewer-login').props.children.props.className, 'card narrow');
+  assert.equal(h.nodes().filter(node => node?.props?.className === 'card narrow').length, 1);
+  assert.equal(h.find('h2', props => props.id === 'viewer-login-title').props.children, identity.name);
+  assert.equal(h.find('p', props => props.children === identity.description).props.children, identity.description);
+  assert.equal(h.find('p', props => props.className === 'eyebrow').props.children, 'Starter kit');
+  assert.ok(!h.nodes().some(node => node?.props?.className === 'hero-grid'));
+  const mark = h.find('OracleMark');
+  const svg = mark.type(mark.props);
+  assert.equal(svg.type, 'svg'); assert.equal(svg.props['aria-hidden'], 'true');
+  assert.equal(svg.props.children.props.d, 'M16.412 4.412h-8.82a7.588 7.588 0 0 0-.008 15.176h8.828a7.588 7.588 0 0 0 0-15.176zm-.193 12.502H7.786a4.915 4.915 0 0 1 0-9.828h8.433a4.914 4.914 0 1 1 0 9.828z');
+  assert.equal(text(h.find('a', props => props.className === 'result-link viewer-signin')), 'Sign in with OCI');
+});
+
+test('viewer branding has defaults while configuration is pending and after failure', async t => {
+  const h = await harness(t, release, '/viewer/login', { '/api/config': null });
+  assert.equal(h.find('h2').props.children, "God's Eye View");
+  assert.ok(text(h.nodes()[0]).includes('NO PLACE LEFT BEHIND'));
+  h.requests[0].reject(new Error('Config unavailable')); await h.settle();
+  assert.equal(h.find('h2').props.children, "God's Eye View");
+  assert.ok(text(h.nodes()[0]).includes('NO PLACE LEFT BEHIND'));
+});
+
+test('viewer administrator toggle shares branding and returns without navigation or authentication', async t => {
+  const identity = { name: 'City Observatory', description: 'Every neighborhood matters' };
+  const h = await harness(t, release, '/viewer/login', { '/api/config': { viewer_signin_enabled: true, viewer_identity: identity } });
+  window.location.hash = '#v=2&lat=4.6';
+  const shell = h.nodes()[0].type;
+  h.act(() => h.find('button', props => props.children === 'Administrator sign-in').props.onClick());
+  const administrator = h.find('AdminLoginCard');
+  assert.deepEqual(administrator.props.viewerIdentity, identity);
+  assert.equal(h.nodes()[0].type, shell);
+  assert.equal(h.find('section', props => props.className === 'centered viewer-login').props.children, administrator);
+  assert.deepEqual(h.navigations, []); assert.equal(h.mutations().length, 0);
+  h.act(administrator.props.onViewerSignIn);
+  assert.equal(h.find('h2').props.children, identity.name);
+  assert.equal(window.location.hash, '#v=2&lat=4.6');
+  assert.deepEqual(h.requests.map(request => request.path), ['/api/config']);
+  assert.deepEqual(h.navigations, []);
+});
+
+test('the exact administrator viewer return route opens the branded administrator card', async t => {
+  const identity = { name: 'City Observatory', description: 'Every neighborhood matters' };
+  const h = await harness(t, release, '/admin/login?next=%2Fgods-eye-view%2F', { '/api/config': { viewer_signin_enabled: true, viewer_identity: identity } });
+  const administrator = h.find('AdminLoginCard');
+  assert.deepEqual(administrator.props.viewerIdentity, identity);
+  assert.equal(h.find('section', props => props.className === 'centered viewer-login').props.children, administrator);
+  h.act(administrator.props.onViewerSignIn);
+  assert.equal(h.find('a', props => props.className === 'result-link viewer-signin').props.href, '/api/auth/oci/login');
+  assert.deepEqual(h.navigations, []); assert.equal(h.mutations().length, 0);
+});
+
+test('branded administrator form preserves the map on errors and always returns to the fixed viewer target', async t => {
+  const identity = { name: 'City Observatory', description: 'Every neighborhood matters' };
+  let switched = 0;
+  const h = await adminLoginHarness(t, '/viewer/login?next=https%3A%2F%2Foutside.test', { viewerIdentity: identity, onViewerSignIn: () => { switched++; } });
+  assert.equal(h.find('form').props.className, 'card narrow');
+  assert.equal(h.find('h2').props.children, identity.name);
+  assert.ok(text(h.nodes()[0]).includes(identity.description));
+  const back = h.find('button', props => props.children === 'Back to OCI sign-in');
+  assert.equal(back.props.type, 'button'); h.act(back.props.onClick);
+  assert.equal(switched, 1); assert.equal(h.mutations().length, 0); assert.deepEqual(h.navigations, []);
+  const view = '#v=2&lat=4.6&lon=-74.1&style=normal';
+  window.location.hash = view;
+  h.act(() => h.find('input', props => props.name === 'aidp-admin-username').props.onChange({ target: { value: 'admin' } }));
+  h.act(() => h.find('input', props => props.name === 'aidp-admin-password').props.onChange({ target: { value: 'wrong-test-password' } }));
+  const failed = h.find('form').props.onSubmit({ preventDefault() {} });
+  const first = h.mutations()[0];
+  assert.equal(first.path, '/api/admin/login'); assert.equal(first.options.credentials, 'include');
+  first.resolve({ detail: 'Invalid administrator credentials' }, 401); await failed; await h.settle();
+  assert.equal(h.find('p', props => props.role === 'alert').props.children, 'Invalid administrator credentials');
+  assert.equal(h.find('input', props => props.name === 'aidp-admin-password').props.value, '');
+  assert.equal(h.find('input', props => props.name === 'aidp-admin-username').props.value, 'admin');
+  assert.equal(window.location.hash, view); assert.deepEqual(h.navigations, []);
+  h.act(() => h.find('input', props => props.name === 'aidp-admin-password').props.onChange({ target: { value: 'retry-test-password' } }));
+  const retry = h.find('form').props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(JSON.parse(h.mutations()[1].options.body), { username: 'admin', password: 'retry-test-password' });
+  h.mutations()[1].resolve({}, 204); await retry; await h.settle();
+  assert.deepEqual(h.navigations, ['/gods-eye-view/' + view]);
+  assert.equal(h.find('input', props => props.name === 'aidp-admin-password').props.value, '');
+});
+
+test('general administrator login keeps its original presentation and registration shell', async t => {
+  const h = await harness(t, release, '/admin/login?next=https://outside.test');
+  assert.deepEqual(h.find('AdminLoginCard').props, {});
+  assert.ok(!h.nodes().some(node => node?.props?.className === 'centered viewer-login'));
 });
 
 for (const failed of [false, true]) test(`Workbench configuration loader ends on ${failed ? 'failure' : 'empty success'}`, async t => {

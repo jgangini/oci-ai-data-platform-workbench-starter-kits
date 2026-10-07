@@ -74,3 +74,23 @@ def test_identity_api_auth_and_persistence(tmp_path):
     assert client.put(path, json={**identity, "name": "A" * 81}).status_code == 422
     assert client.get(path).json() == identity
     assert client.put(path, json={"name": "", "description": ""}).json() == DEFAULT_IDENTITY
+
+
+def test_public_login_branding_uses_current_normalized_identity_without_oci(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+    monkeypatch.setattr(client.app.state, "identity_factory", lambda: pytest.fail("Public branding must not invoke OCI"))
+    for path in ("/api/public/config", "/api/config"):
+        response = client.get(path)
+        assert response.status_code == 200 and response.json()["viewer_identity"] == DEFAULT_IDENTITY
+        assert response.headers["cache-control"] == "no-store"
+    login(client)
+    saved = client.put("/api/admin/gods-eye-view/identity", json={"name": "  City Watch  ", "description": "  Live updates  "})
+    assert saved.status_code == 200
+    client.cookies.clear()
+    response = client.get("/api/public/config")
+    assert response.json()["viewer_identity"] == {"name": "City Watch", "description": "Live updates"}
+    assert response.headers["cache-control"] == "no-store"
+    assert client.app.state.settings_store.get_registration_code_hash() not in response.text
+    assert client.get("/api/admin/settings").status_code == 401
+    assert client.get("/api/gods-eye-view/identity").status_code == 401
+    assert client.put("/api/admin/gods-eye-view/identity", json=DEFAULT_IDENTITY).status_code == 401

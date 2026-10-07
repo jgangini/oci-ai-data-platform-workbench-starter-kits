@@ -468,6 +468,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "registration_code_pattern": "AAAA-0000",
             "labs": public_lab_catalog(),
             "local_participant_access": settings.local_development_mode,
+            "viewer_identity": app.state.settings_store.get_viewer_identity(),
             "viewer_signin_enabled": not settings.local_development_mode and bool(
                 (settings.viewer_oidc_app_name and settings.gods_eye_view_group_id) or settings.managed_viewer_app_name),
         }

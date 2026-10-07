@@ -101,6 +101,7 @@ type AdminModuleOperationResponse = {
 type PublicConfig = {
   local_participant_access?: boolean;
   viewer_signin_enabled?: boolean;
+  viewer_identity?: { name: string; description: string };
   deployment_mode: "laboratory" | "production";
   labs: CatalogLab[];
 };
@@ -1064,13 +1065,8 @@ function useAdminSession() {
 
 function OracleMark() {
   return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        fill="currentColor"
-        fillRule="evenodd"
-        d="M.1 8c0 2.761 2.237 5 4.997 5h5.806A4.999 4.999 0 0015.9 8c0-2.761-2.237-5-4.997-5H5.097A4.999 4.999 0 00.1 8zm13.911 0a3.235 3.235 0 01-3.234 3.237h-5.55A3.235 3.235 0 011.991 8a3.235 3.235 0 013.234-3.236h5.551A3.235 3.235 0 0114.011 8z"
-        clipRule="evenodd"
-      />
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M16.412 4.412h-8.82a7.588 7.588 0 0 0-.008 15.176h8.828a7.588 7.588 0 0 0 0-15.176zm-.193 12.502H7.786a4.915 4.915 0 0 1 0-9.828h8.433a4.914 4.914 0 1 1 0 9.828z" />
     </svg>
   );
 }
@@ -1816,35 +1812,32 @@ function RegisterPage({
 
 function ViewerLogin() {
   const config = usePublicConfig();
+  const [administrator, setAdministrator] = useState(window.location.pathname === "/admin/login");
+  const identity = config?.viewer_identity ?? { name: "God's Eye View", description: "NO PLACE LEFT BEHIND" };
   const signInEnabled = config?.viewer_signin_enabled === true;
   const signInError = new URLSearchParams(window.location.search).get("error");
   const message = signInError === "access_denied"
-    ? "Your account does not have God’s Eye View access. Contact your administrator."
+    ? "Your account does not have access to this starter kit. Contact your administrator."
     : signInError === "sign_in_failed" ? "Unable to complete OCI sign-in. Try again." : "";
   return <Shell>
-    <section className="hero-grid">
-      <div className="hero-copy">
-        <p className="eyebrow">Shared module</p>
-        <h1>God’s Eye View</h1>
-        <p>Explore published layers and ask the shared assistant.</p>
-      </div>
-      <section className="card" aria-labelledby="viewer-login-title">
+    <section className="centered viewer-login">
+      {administrator ? <AdminLoginCard viewerIdentity={identity} onViewerSignIn={() => setAdministrator(false)} /> : <section className="card narrow" aria-labelledby="viewer-login-title">
         <div>
-          <p className="eyebrow">Participant access</p>
-          <h2 id="viewer-login-title">Sign in</h2>
-          <p>Use your OCI identity domain account.</p>
+          <p className="eyebrow">Starter kit</p>
+          <h2 id="viewer-login-title">{identity.name}</h2>
+          <p>{identity.description}</p>
         </div>
         {message && <p className="notice error" role="alert">{message}</p>}
         {signInEnabled
-          ? <a className="result-link" href="/api/auth/oci/login">Sign in with OCI</a>
-          : <><button type="button" disabled>Sign in with OCI</button><p>OCI sign-in is unavailable in this environment. Contact your administrator.</p></>}
-        <a href="/admin/login?next=/gods-eye-view/">Administrator sign-in</a>
-      </section>
+          ? <a className="result-link viewer-signin" href="/api/auth/oci/login"><OracleMark />Sign in with OCI</a>
+          : <><button className="viewer-signin" type="button" disabled><OracleMark />Sign in with OCI</button><p>OCI sign-in is unavailable in this environment. Contact your administrator.</p></>}
+        <button className="viewer-login-switch" type="button" autoFocus onClick={() => setAdministrator(true)}>Administrator sign-in</button>
+      </section>}
     </section>
   </Shell>;
 }
 
-function AdminLoginCard() {
+function AdminLoginCard({ viewerIdentity, onViewerSignIn }: { viewerIdentity?: PublicConfig["viewer_identity"]; onViewerSignIn?: () => void } = {}) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -1859,7 +1852,7 @@ function AdminLoginCard() {
       });
       setPassword("");
       window.location.assign(
-        new URLSearchParams(window.location.search).get("next") === "/gods-eye-view/"
+        viewerIdentity || new URLSearchParams(window.location.search).get("next") === "/gods-eye-view/"
           ? "/gods-eye-view/" + window.location.hash
           : "/admin/users",
       );
@@ -1869,11 +1862,11 @@ function AdminLoginCard() {
     }
   }
   return (
-    <form className="card" autoComplete="off" onSubmit={submit}>
+    <form className={viewerIdentity ? "card narrow" : "card"} autoComplete="off" onSubmit={submit}>
       <div>
         <p className="eyebrow">Administrator access</p>
-        <h2>Sign in</h2>
-        <p>Manage starter kit users and application settings.</p>
+        <h2>{viewerIdentity?.name ?? "Sign in"}</h2>
+        <p>{viewerIdentity?.description ?? "Manage starter kit users and application settings."}</p>
       </div>
       <label>
         Username
@@ -1928,6 +1921,7 @@ function AdminLoginCard() {
         </p>
       )}
       <button>Sign in</button>
+      {onViewerSignIn && <button className="viewer-login-switch" type="button" onClick={onViewerSignIn}>Back to OCI sign-in</button>}
     </form>
   );
 }
@@ -3326,6 +3320,7 @@ function AdminSettings() {
 
 export function App() {
   if (window.location.pathname === "/viewer/login") return <ViewerLogin />;
+  if (window.location.pathname === "/admin/login" && new URLSearchParams(window.location.search).get("next") === "/gods-eye-view/") return <ViewerLogin />;
   if (window.location.pathname === "/local/gods-eye-view/login") return <Shell><LocalGodsEyeViewAccess api={api} /></Shell>;
   if (window.location.pathname === "/local/gods-eye-view/workspace") return <Shell><LocalGodsEyeViewAccess api={api} workspace /></Shell>;
   if (window.location.pathname === "/admin/gods-eye-view") return <AdminSettings />;
