@@ -28,10 +28,11 @@ def _domain_endpoint(url, domain):
 
 
 async def _application(identity, settings):
-    if not (settings.viewer_oidc_app_name and settings.gods_eye_view_group_id):
+    app_name = settings.viewer_oidc_app_name or settings.managed_viewer_app_name
+    if not app_name or not await identity._gods_eye_view_group():
         raise HTTPException(503, "Deploy the portal's OCI viewer sign-in configuration first")
     response = await identity._request("GET", "/admin/v1/Apps", params={
-        "filter": f"name eq {_scim_literal(settings.viewer_oidc_app_name)}", "count": 2,
+        "filter": f"name eq {_scim_literal(app_name)}", "count": 2,
         "attributes": "id,name,active,isOAuthClient,clientType,allowedGrants,redirectUris"})
     response.raise_for_status()
     body = response.json()
@@ -39,7 +40,7 @@ async def _application(identity, settings):
     if body.get("totalResults") != 1 or len(apps) != 1:
         raise ValueError("Viewer sign-in application is unavailable or ambiguous")
     application = apps[0]
-    if (application.get("name") != settings.viewer_oidc_app_name or not application.get("id")
+    if (application.get("name") != app_name or not application.get("id")
             or application.get("active") is not True or application.get("isOAuthClient") is not True
             or application.get("clientType") != "public"
             or application.get("allowedGrants") != ["authorization_code"]):

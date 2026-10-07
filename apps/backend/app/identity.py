@@ -313,8 +313,27 @@ class IdentityClient:
     async def _users_in_group(self, group_id: str) -> list[dict[str, Any]]:
         return await self._users_matching(f"groups.value eq {_scim_literal(group_id)}")
 
+    async def _discover_gods_eye_view_group(self) -> str | None:
+        if not self.settings.managed_viewer_app_name:
+            return None
+        response = await self._request("GET", "/admin/v1/Groups", params={
+            "filter": f"externalId eq {_scim_literal(self.settings.lab_marker + ':gods_eye_view')}",
+            "count": 2, "attributes": "id,externalId"})
+        response.raise_for_status()
+        body = response.json()
+        groups = body.get("Resources", [])
+        if body.get("totalResults") == 0 and groups == []:
+            return None
+        if body.get("totalResults") != 1 or len(groups) != 1:
+            raise IdentityPending("God's Eye View reader group is unavailable or ambiguous")
+        group_id = groups[0].get("id", "")
+        if (not isinstance(group_id, str) or not group_id or "/" in group_id
+                or groups[0].get("externalId") != f"{self.settings.lab_marker}:gods_eye_view"):
+            raise IdentityPending("God's Eye View reader group does not belong to this deployment")
+        return group_id
+
     async def _gods_eye_view_group(self) -> str | None:
-        group_id = getattr(self.settings, "gods_eye_view_group_id", "").strip()
+        group_id = self.settings.gods_eye_view_group_id.strip() or await self._discover_gods_eye_view_group()
         if not group_id:
             return None
         if group_id in {self.settings.developer_group_id, self.settings.pending_group_id}:

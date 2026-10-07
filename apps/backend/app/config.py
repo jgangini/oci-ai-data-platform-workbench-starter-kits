@@ -106,6 +106,11 @@ class Settings:
     def gods_eye_view_local_mode(self) -> bool:
         return self.local_development_mode if self.gods_eye_view_mode is None else self.gods_eye_view_mode == "local"
 
+    @property
+    def managed_viewer_app_name(self) -> str:
+        marker = re.fullmatch(r"aidp-lab-([a-z0-9]{4,12})", self.lab_marker)
+        return f"aidp_viewer_{marker[1]}" if marker else ""
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
