@@ -11,7 +11,8 @@ import {
 import { createPortal } from "react-dom";
 import { GodsEyeViewAdmin } from "./GodsEyeViewAdmin";
 import { LoadingIndicator } from "./LoadingIndicator";
-import { GodsEyeViewModuleManager } from "./GodsEyeViewModuleManager";
+import { SearchableCombobox } from "./SearchableCombobox";
+import { GodsEyeViewModuleManager, type ModuleStatus } from "./GodsEyeViewModuleManager";
 import { LocalGodsEyeViewAccess } from "./LocalGodsEyeViewAccess";
 
 import { labAssignmentChanges } from "./labAssignments";
@@ -87,6 +88,7 @@ type AdminModule = {
   update_available?: boolean;
   operation_id?: string | null;
   operation_type?: ModuleOperationKind | null;
+  phase?: string;
   message?: string | null;
   enabled: boolean;
 };
@@ -98,6 +100,7 @@ type AdminModuleOperationResponse = {
 };
 type PublicConfig = {
   local_participant_access?: boolean;
+  viewer_signin_enabled?: boolean;
   deployment_mode: "laboratory" | "production";
   labs: CatalogLab[];
 };
@@ -270,7 +273,7 @@ function ConfirmModal({
   onConfirm,
 }: {
   open: boolean;
-  kind: "question" | "delete" | "reset";
+  kind: "question" | "save" | "delete" | "reset";
   title: string;
   description: string;
   children?: ReactNode;
@@ -455,9 +458,13 @@ function CreateUserModal({
   onClose,
   onSubmit,
   localParticipantAccess,
+  viewerModule,
+  viewerReady,
 }: {
   open: boolean;
   localParticipantAccess?: boolean;
+  viewerModule: ModuleStatus | null;
+  viewerReady: boolean;
   catalog: CatalogLab[];
   draft: UserDraft;
   creating: boolean;
@@ -490,11 +497,11 @@ function CreateUserModal({
             <p className="eyebrow">Participant access</p>
             <h2 id={titleId}>Add user</h2>
             <p id={descriptionId}>
-              Enter the participant details and select one or more initial starter kits.
+              Enter the participant details and select starter kits or shared module access.
             </p>
           </div>
           <span className="lab-selection-count">
-            {draft.lab_ids.length} selected
+            {draft.lab_ids.length + Number(Boolean(draft.gods_eye_view))} selected
           </span>
         </header>
         <form className="create-user-form" onSubmit={onSubmit}>
@@ -567,17 +574,25 @@ function CreateUserModal({
                     </tr>
                   );
                 })}
+                <tr>
+                  <td><input className="lab-assignment-check" type="checkbox" checked={Boolean(draft.gods_eye_view)} disabled={creating || !viewerReady}
+                    aria-label="Select God’s Eye View · Custom layers access"
+                    onChange={event => onDraftChange({ ...draft, gods_eye_view: event.target.checked })} /></td>
+                  <td><strong>God’s Eye View · Custom layers</strong></td>
+                  <td>{viewerModule?.bundled_version || "—"}</td>
+                  <td className="lab-table-description">Access the shared viewer and assistant with your OCI identity.</td>
+                  <td><span className={`lab-state ${viewerReady ? "unassigned" : "planned"}`}>{viewerReady ? "Available" : "Unavailable"}</span></td>
+                </tr>
               </tbody>
             </table>
           </div>
-          {localParticipantAccess && <label><input type="checkbox" checked={!!draft.gods_eye_view} onChange={event => onDraftChange({ ...draft, gods_eye_view: event.target.checked })} disabled={creating} />God’s Eye View and local AIDP project access</label>}
           {localParticipantAccess && <p className="settings-help">Local mode: credentials are saved to a welcome file; no email is sent.</p>}
           {error && <p className="lab-manager-error" role="alert">{error}</p>}
           <footer>
             <button className="secondary" type="button" disabled={creating} onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" disabled={creating || !draft.lab_ids.length}>
+            <button type="submit" disabled={creating || !draft.lab_ids.length && !draft.gods_eye_view || Boolean(draft.gods_eye_view) && !viewerReady}>
               {creating ? "Creating..." : "Create user"}
             </button>
           </footer>
@@ -593,9 +608,13 @@ function LabManagerModal({
   user,
   catalog,
   selectedLabIds,
+  selectedViewerAccess,
+  viewerModule,
+  viewerReady,
   confirmingRemoval,
   error,
   onSelectionChange,
+  onViewerSelectionChange,
   onRedeploy,
   onClose,
   onSave,
@@ -604,9 +623,13 @@ function LabManagerModal({
   user: LabUser | null;
   catalog: CatalogLab[];
   selectedLabIds: string[];
+  selectedViewerAccess: boolean;
+  viewerModule: ModuleStatus | null;
+  viewerReady: boolean;
   confirmingRemoval: boolean;
   error: string;
   onSelectionChange: (labIds: string[]) => void;
+  onViewerSelectionChange: (enabled: boolean) => void;
   onRedeploy: (lab: AssignedLab) => void;
   onClose: () => void;
   onSave: () => void;
@@ -623,7 +646,8 @@ function LabManagerModal({
     user.labs.map((lab) => lab.lab_id),
     selectedLabIds,
   );
-  const hasChanges = Boolean(changes.add.length || changes.remove.length);
+  const hasChanges = Boolean(changes.add.length || changes.remove.length || selectedViewerAccess !== Boolean(user.gods_eye_view_access));
+  const viewerAvailable = viewerReady && user.active && user.status === "active";
   return createPortal(
     <div className="lab-manager-overlay">
       <section
@@ -642,7 +666,7 @@ function LabManagerModal({
             <p id={descriptionId}>{user.email}</p>
           </div>
           <span className="lab-selection-count">
-            {selectedLabIds.length} selected
+            {selectedLabIds.length + Number(selectedViewerAccess)} selected
           </span>
         </header>
         <div className="lab-manager-table-wrap">
@@ -671,7 +695,7 @@ function LabManagerModal({
                         className="lab-assignment-check"
                         type="checkbox"
                         checked={selected}
-                        disabled={!lab.available}
+                        disabled={user.managed === false || !lab.available}
                         aria-label={`${selected ? "Remove" : "Add"} ${lab.display_name} ${selected ? "from" : "to"} ${user.email}`}
                         onChange={(event) => onSelectionChange(
                           event.target.checked
@@ -699,7 +723,7 @@ function LabManagerModal({
                       </span>
                     </td>
                     <td className="actions-column">
-                      <button
+                      {user.managed !== false && <button
                         className="table-action table-reset"
                         type="button"
                         disabled={!installed}
@@ -710,17 +734,29 @@ function LabManagerModal({
                         title={installed ? hasBundledUpdate ? "Update starter kit" : "Redeploy starter kit" : "Assign the lab before redeploying"}
                       >
                         <RefreshIcon />
-                      </button>
+                      </button>}
                     </td>
                   </tr>
                 );
               })}
+              <tr>
+                <td><input className="lab-assignment-check" type="checkbox" checked={selectedViewerAccess}
+                  disabled={!user.gods_eye_view_access && !viewerAvailable}
+                  aria-label={`God’s Eye View · Custom layers access for ${user.email}`}
+                  onChange={event => onViewerSelectionChange(event.target.checked)} /></td>
+                <td><strong>God’s Eye View · Custom layers</strong></td>
+                <td>{viewerModule?.bundled_version || "—"}</td>
+                <td className="lab-table-description">Access the shared viewer and assistant with your OCI identity.</td>
+                <td><span className={`lab-state ${user.gods_eye_view_access ? "installed" : viewerAvailable ? "unassigned" : "planned"}`}>{user.gods_eye_view_access ? "Granted" : viewerAvailable ? "Available" : "Unavailable"}</span></td>
+                <td className="actions-column" />
+              </tr>
             </tbody>
           </table>
         </div>
         {confirmingRemoval && (
           <p className="lab-manager-warning" role="alert">
-            Confirm removal of {changes.remove.length} {changes.remove.length === 1 ? "starter kit" : "starter kits"}. Only their jobs, tables, objects and workspace content will be deleted.
+            {changes.remove.length > 0 && <>Confirm removal of {changes.remove.length} {changes.remove.length === 1 ? "starter kit" : "starter kits"}. Only their jobs, tables, objects and workspace content will be deleted. </>}
+            {user.gods_eye_view_access && !selectedViewerAccess && <>Revoke God’s Eye View access, including existing sessions. The shared module and its data are retained.</>}
           </p>
         )}
         {error && <p className="lab-manager-error" role="alert">{error}</p>}
@@ -728,7 +764,7 @@ function LabManagerModal({
           <button ref={closeRef} className="secondary" type="button" onClick={onClose}>
             {confirmingRemoval ? "Back" : "Cancel"}
           </button>
-          <button type="button" disabled={!hasChanges || !selectedLabIds.length} onClick={onSave}>
+          <button type="button" disabled={!hasChanges || user.labs.length > 0 && !selectedLabIds.length} onClick={onSave}>
                   {confirmingRemoval ? "Confirm changes" : "Save"}
           </button>
         </footer>
@@ -738,8 +774,16 @@ function LabManagerModal({
   );
 }
 
-function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
+const governanceServices = ['AIDP Workbench', 'Object Storage', 'Spark Compute', 'Master Catalog', 'AI Compute'];
+const governancePhases: Record<string, string> = {
+  verify: 'Object Storage', control: 'Object Storage · Spark Compute', sync: 'Spark Compute · Master Catalog',
+  agent: 'AI Compute', permissions: 'AIDP Workbench', activation: 'Spark Compute', steady: 'AIDP Workbench', cleanup: 'Removing module resources…',
+};
+
+function GovernanceModuleManager({ initialUserId = "", visible = true, onStatusChange, onClose, onChanged }: {
   initialUserId?: string;
+  visible?: boolean;
+  onStatusChange?: (state: { module: AdminModule | null; busy: boolean; unverified: boolean }) => void;
   onClose: () => void;
   onChanged?: () => void;
 }) {
@@ -759,22 +803,29 @@ function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
   const moduleOperationsRef = useRef(new Map<string, ModuleOperation>());
   const titleId = useId();
   const descriptionId = useId();
+  const phaseId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  useDialogFocus(true, moduleOperating ? () => undefined : onClose, panelRef, closeRef);
+  useDialogFocus(visible, onClose, panelRef, closeRef);
 
   const governanceModule = modules.find(({ module_id }) => module_id === "ai_data_governance") ?? null;
-  const moduleManagerUser = users.find(user => user.id === moduleManagerUserId && user.is_aidp_admin) ?? null;
+  const moduleManagerUser = users.find(user => user.id === moduleManagerUserId && user.is_aidp_admin === true) ?? null;
+  const phaseLabel = governancePhases[moduleProgress?.phase || ''] || 'Preparing module services…';
   const recoverableKind = governanceModule && moduleOperationKind(governanceModule.status, governanceModule.operation_type);
   const transitioning = Boolean(governanceModule && ["installing", "redeploying", "deleting"].includes(governanceModule.status));
   const resumable = Boolean(recoverableKind && governanceModule?.operation_id);
   const disabled = moduleOperating || !usersLoaded || !moduleManagerUser || !governanceModule || Boolean(moduleLoadError || usersError);
+  useEffect(() => {
+    onStatusChange?.({ module: governanceModule, busy: moduleOperating, unverified: Boolean(moduleLoadError) });
+  }, [governanceModule, moduleOperating, moduleLoadError, onStatusChange]);
 
   async function loadAdministrators(signal: AbortSignal) {
     setUsersError("");
     setUsersLoaded(false);
     try {
-      setUsers((await api<{ users: LabUser[] }>("/api/admin/users", { signal })).users);
+      const result = await api<{ users: LabUser[] }>("/api/admin/users", { signal });
+      signal.throwIfAborted();
+      setUsers(result.users);
     } catch (reason) {
       if (!signal.aborted) setUsersError(reason instanceof Error ? reason.message : "Unable to load administrators.");
     } finally {
@@ -785,6 +836,7 @@ function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
     setModuleLoadError("");
     try {
       const loaded = (await api<{ modules: AdminModule[] }>("/api/admin/modules", { signal })).modules;
+      signal?.throwIfAborted();
       if (!loaded.some(module => module.module_id === "ai_data_governance")) throw new Error("AI Data Governance is unavailable.");
       setModules(loaded);
       for (const module of loaded) {
@@ -832,7 +884,7 @@ function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
     return () => { cancelled = true; window.clearTimeout(timeout); };
   }, [transitioning, moduleOperating, governanceModule?.operation_id]);
   async function runModuleAction(kind: ModuleOperationKind) {
-    if (!usersLoaded || !moduleManagerUser || !moduleManagerUser.is_aidp_admin || !governanceModule || moduleAbortRef.current || moduleLoadError || usersError) return;
+    if (disabled || moduleAbortRef.current || !governanceModule || !moduleManagerUser) return;
     const recoverableKind = moduleOperationKind(governanceModule.status, governanceModule.operation_type);
     const operationKey = moduleOperationKey(governanceModule.module_id, kind);
     let operation;
@@ -859,7 +911,7 @@ function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
     setMessage("");
     setModuleProgress({
       status: "pending",
-      phase: kind === "delete" ? "cleanup" : "content",
+      phase: kind === "delete" ? "cleanup" : "verify",
       message: `${kind === "install" ? "Installing" : kind === "redeploy" ? "Redeploying" : "Deleting"} ${governanceModule.display_name}.`,
     });
     let operationId = operation.operationId;
@@ -878,6 +930,7 @@ function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
                 body: JSON.stringify({ operation_id: operationId }),
                 signal,
               }));
+          signal.throwIfAborted();
           if (response.operation_id && response.operation_id !== operationId) {
             operationId = response.operation_id;
             const serverOperation = {
@@ -900,26 +953,31 @@ function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
         },
         onPending: setModuleProgress,
       });
+      controller.signal.throwIfAborted();
       moduleOperationsRef.current.delete(operationKey);
       writeStoredModuleOperation(governanceModule.module_id, kind);
       setConfirmDelete(false);
       setMessage(result.message || `${governanceModule.display_name} ${kind === "delete" ? "deleted" : "ready"}.`);
       await loadModules();
+      controller.signal.throwIfAborted();
       onChanged?.();
     } catch (reason) {
       if (controller.signal.aborted) return;
       await loadModules();
+      if (controller.signal.aborted) return;
       setModuleOperationError(reason instanceof Error ? reason.message : "Unable to update the governance module.");
     } finally {
-      if (moduleAbortRef.current === controller) moduleAbortRef.current = null;
-      setModuleProgress(null);
-      setModuleOperating(false);
+      if (moduleAbortRef.current === controller) {
+        moduleAbortRef.current = null;
+        if (!controller.signal.aborted) { setModuleProgress(null); setModuleOperating(false); }
+      }
     }
   }
 
+  if (!visible) return null;
   return createPortal(
     <div className="lab-manager-overlay">
-      <section className="lab-manager-modal governance-module-modal" ref={panelRef} role="dialog"
+      <section className="lab-manager-modal governance-module-modal module-manager-dialog" ref={panelRef} role="dialog"
         aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} aria-busy={moduleOperating} tabIndex={-1}>
         <header>
           <div>
@@ -932,22 +990,17 @@ function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
           </span>}
         </header>
         <div className="governance-module-body">
-          {!usersLoaded || (!governanceModule && !moduleLoadError) ? <LoadingIndicator label="Loading module settings…" /> : <>
-            <label>AI Data Platform administrator
-              <select value={moduleManagerUserId} disabled={moduleOperating || confirmDelete} onChange={event => {
-                setModuleManagerUserId(event.target.value); setModuleOperationError(""); setMessage("");
-              }}>
-                <option value="">Select an administrator</option>
-                {users.filter(user => user.is_aidp_admin).map(user => <option key={user.id} value={user.id}>{user.email}</option>)}
-              </select>
-            </label>
+          {!moduleOperating && (!usersLoaded || (!governanceModule && !moduleLoadError) ? <LoadingIndicator label="Loading module settings…" /> : <>
+            <SearchableCombobox label="AI Data Platform administrator" placeholder="Select an administrator"
+              value={moduleManagerUserId} disabled={moduleOperating || confirmDelete}
+              options={users.filter(user => user.is_aidp_admin === true).map(user => ({ value: user.id, label: user.email }))}
+              onChange={value => { setModuleManagerUserId(value); setModuleOperationError(""); setMessage(""); }} />
             {!usersError && !users.some(user => user.is_aidp_admin) && <p role="alert" className="lab-manager-error">No AI Data Platform administrator is available.</p>}
             <p className="governance-module-note">Deploy or redeploy the shared Agent, dedicated AI Compute and governance workflow across the Master Catalog. Existing shared OCI credentials are retained; participants are not granted administrator access.</p>
-            {governanceModule && <p className="governance-module-note kit-version-copy">
-              <strong>{governanceModule.installed_version ? `Installed ${governanceModule.installed_version}` : "Not installed"}</strong>
-              <small>Bundled {governanceModule.bundled_version || "unknown"}</small>
-            </p>}
-          </>}
+            <ul className="module-service-tags" aria-label="Services">
+              {governanceServices.map(service => <li className="badge inactive" key={service}>{service}</li>)}
+            </ul>
+          </>)}
           {(usersError || moduleLoadError) && <>
             <p className="lab-manager-error" role="alert">{usersError || moduleLoadError}</p>
             <button className="secondary" type="button" onClick={() => {
@@ -955,16 +1008,26 @@ function GovernanceModuleManager({ initialUserId = "", onClose, onChanged }: {
               void loadModules();
             }}>Retry settings</button>
           </>}
-          {confirmDelete && <p className="lab-manager-warning" role="alert"><strong>Delete global governance module?</strong> This permanently deletes its Agent deployment, dedicated AI Compute, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema, shared Spark compute and shared OCI credentials are retained.</p>}
+          {confirmDelete && !moduleOperating && <p className="lab-manager-warning" role="alert"><strong>Delete global governance module?</strong> This permanently deletes its Agent deployment, dedicated AI Compute, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema, shared Spark compute and shared OCI credentials are retained.</p>}
           {(moduleOperationError || governanceModule?.status === "error") && <p className="lab-manager-error" role="alert">{moduleOperationError || governanceModule?.message || "The module operation failed. Resume to retry."}</p>}
-          {moduleOperating && <div role="status" className="governance-module-progress"><LoadingIndicator label="Updating module…" inline /><span>{moduleProgress?.message || "Updating the shared module."}</span></div>}
+          {moduleOperating && <div className="registration-result module-install-progress" role="status" aria-live="polite" aria-busy="true">
+            <span className="progress-orbit" aria-hidden="true" />
+            <p className="eyebrow">Deployment progress</p>
+            <p className="registration-progress-phase" id={phaseId}>{phaseLabel}</p>
+            <div className="registration-progress-track gods-eye-view-reset-track" role="progressbar" aria-labelledby={phaseId} aria-valuetext="Module operation in progress">
+              <span />
+            </div>
+            <p className="registration-progress-detail">{moduleProgress?.message || 'Updating the shared module.'}</p>
+            <p className="registration-progress-detail">Close hides this window while the operation continues in Settings. After a page reload or navigation, reopen it and select an administrator to resume the saved operation.</p>
+          </div>}
           {message && <p role="status" className="governance-module-note">{message}</p>}
         </div>
         <footer>
-          <button ref={closeRef} className="secondary" type="button" disabled={moduleOperating} onClick={() => confirmDelete ? setConfirmDelete(false) : onClose()}>
-            {confirmDelete ? "Back" : message ? "Close" : "Cancel"}
+          <button ref={closeRef} className="secondary" type="button" onClick={() => confirmDelete && !moduleOperating ? setConfirmDelete(false) : onClose()}>
+            {confirmDelete && !moduleOperating ? "Back" : moduleOperating || message ? "Close" : "Cancel"}
           </button>
-          {confirmDelete ? <button type="button" disabled={disabled} onClick={() => void runModuleAction("delete")}>Delete module</button>
+          {moduleOperating ? <button type="button" disabled>Deploying…</button>
+            : confirmDelete ? <button type="button" disabled={disabled} onClick={() => void runModuleAction("delete")}>Delete module</button>
             : resumable ? <button type="button" disabled={disabled} onClick={() => recoverableKind && void runModuleAction(recoverableKind)}>
               Resume {recoverableKind === "install" ? "installation" : recoverableKind === "redeploy" ? "redeployment" : "deletion"}
             </button> : <>
@@ -1751,6 +1814,36 @@ function RegisterPage({
   );
 }
 
+function ViewerLogin() {
+  const config = usePublicConfig();
+  const signInEnabled = config?.viewer_signin_enabled === true;
+  const signInError = new URLSearchParams(window.location.search).get("error");
+  const message = signInError === "access_denied"
+    ? "Your account does not have God’s Eye View access. Contact your administrator."
+    : signInError === "sign_in_failed" ? "Unable to complete OCI sign-in. Try again." : "";
+  return <Shell>
+    <section className="hero-grid">
+      <div className="hero-copy">
+        <p className="eyebrow">Shared module</p>
+        <h1>God’s Eye View</h1>
+        <p>Explore published layers and ask the shared assistant.</p>
+      </div>
+      <section className="card" aria-labelledby="viewer-login-title">
+        <div>
+          <p className="eyebrow">Participant access</p>
+          <h2 id="viewer-login-title">Sign in</h2>
+          <p>Use your OCI identity domain account.</p>
+        </div>
+        {message && <p className="notice error" role="alert">{message}</p>}
+        {signInEnabled
+          ? <a className="result-link" href="/api/auth/oci/login">Sign in with OCI</a>
+          : <><button type="button" disabled>Sign in with OCI</button><p>OCI sign-in is unavailable in this environment. Contact your administrator.</p></>}
+        <a href="/admin/login?next=/gods-eye-view/">Administrator sign-in</a>
+      </section>
+    </section>
+  </Shell>;
+}
+
 function AdminLoginCard() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -1854,11 +1947,12 @@ function AdminUsers() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createProgress, setCreateProgress] = useState<RegistrationResponse | null>(null);
-  const [draft, setDraft] = useState<UserDraft>({ name: "", email: "", lab_ids: ["banking"] as string[] });
+  const [draft, setDraft] = useState<UserDraft>({ name: "", email: "", lab_ids: [] });
   const createAbortRef = useRef<AbortController | null>(null);
   const operationAbortRef = useRef<AbortController | null>(null);
   const [labManagerUserId, setLabManagerUserId] = useState<string | null>(null);
   const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
+  const [selectedViewerAccess, setSelectedViewerAccess] = useState(false);
   const [confirmingLabRemoval, setConfirmingLabRemoval] = useState(false);
   const [labManagerError, setLabManagerError] = useState("");
   const [pendingLabAction, setPendingLabAction] = useState<{
@@ -1872,6 +1966,37 @@ function AdminUsers() {
   const [pendingDelete, setPendingDelete] = useState<LabUser | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const [viewerModule, setViewerModule] = useState<ModuleStatus | null>(null);
+  const [viewerModuleError, setViewerModuleError] = useState("");
+  const viewerModuleRequest = useRef<AbortController | null>(null);
+  const viewerReady = Boolean(viewerModule?.module_id === "gods_eye_view" && viewerModule.installed === true && viewerModule.enabled === true && viewerModule.status === "ready");
+  async function loadViewerModule() {
+    viewerModuleRequest.current?.abort();
+    const controller = new AbortController();
+    viewerModuleRequest.current = controller;
+    setViewerModule(null);
+    setViewerModuleError("");
+    try {
+      const loaded = await api<ModuleStatus>("/api/admin/gods-eye-view/module", { signal: controller.signal });
+      if (!controller.signal.aborted) setViewerModule(loaded);
+    } catch (reason) {
+      if (!controller.signal.aborted) setViewerModuleError(reason instanceof Error ? reason.message : "Unable to check God’s Eye View installation.");
+    }
+  }
+  async function requestViewerAccess(user: LabUser, enabled: boolean, signal: AbortSignal) {
+    setOperationProgress({ status: "pending", phase: "permissions", message: `${enabled ? "Granting" : "Revoking"} God’s Eye View access.` });
+    try {
+      const result = await api<{ enabled: boolean }>(`/api/admin/gods-eye-view/users/${encodeURIComponent(user.id)}`, {
+        method: "PUT", body: JSON.stringify({ enabled }), signal,
+      });
+      if (result?.enabled !== enabled) throw new Error("God’s Eye View access was not confirmed. Refresh and retry.");
+    } catch (reason) {
+      signal.throwIfAborted();
+      const loaded = await loadUsers();
+      if (loaded?.find(item => item.id === user.id)?.gods_eye_view_access !== enabled) throw reason;
+    }
+    signal.throwIfAborted();
+  }
   async function loadUsers() {
     const request = ++usersRequestRef.current;
     setUsersLoading(true);
@@ -1895,10 +2020,12 @@ function AdminUsers() {
   }
   useEffect(() => {
     void loadUsers();
+    void loadViewerModule();
     return () => {
       usersRequestRef.current++;
       createAbortRef.current?.abort();
       operationAbortRef.current?.abort();
+      viewerModuleRequest.current?.abort();
     };
   }, []);
   const visible = users.filter((user) =>
@@ -1914,6 +2041,11 @@ function AdminUsers() {
   }
   async function createUser(event: FormEvent) {
     event.preventDefault();
+    if (createAbortRef.current) return;
+    if (!draft.lab_ids.length && !draft.gods_eye_view || draft.gods_eye_view && !viewerReady) {
+      setError("Select a starter kit or an available shared module.");
+      return;
+    }
     setCreating(true);
     setCreateOpen(false);
     setCreateProgress({
@@ -1923,7 +2055,6 @@ function AdminUsers() {
     });
     setError("");
     setMessage("");
-    createAbortRef.current?.abort();
     const controller = new AbortController();
     createAbortRef.current = controller;
     try {
@@ -1937,7 +2068,7 @@ function AdminUsers() {
           }),
         onPending: setCreateProgress,
       });
-      setDraft({ name: "", email: "", lab_ids: ["banking"] });
+      setDraft({ name: "", email: "", lab_ids: [] });
       setCreateOpen(false);
       setMessage(result.message || "User created and added to the lab.");
       await loadUsers();
@@ -1957,7 +2088,7 @@ function AdminUsers() {
     if (creating) return;
     setCreateOpen(false);
     setError("");
-    setDraft({ name: "", email: "", lab_ids: ["banking"] });
+    setDraft({ name: "", email: "", lab_ids: [] });
   }
   async function deleteUser() {
     if (!pendingDelete) return;
@@ -2042,36 +2173,42 @@ function AdminUsers() {
   function openLabManager(user: LabUser) {
     setLabManagerUserId(user.id);
     setSelectedLabIds(user.labs.map((lab) => lab.lab_id));
+    setSelectedViewerAccess(Boolean(user.gods_eye_view_access));
     setConfirmingLabRemoval(false);
     setLabManagerError("");
   }
 
   async function saveLabAssignments() {
-    if (!labManagerUser) return;
+    if (!labManagerUser || operationAbortRef.current) return;
     const changes = labAssignmentChanges(
       labManagerUser.labs.map((lab) => lab.lab_id),
-      selectedLabIds,
+      labManagerUser.managed === false ? labManagerUser.labs.map(lab => lab.lab_id) : selectedLabIds,
     );
-    if (!selectedLabIds.length) {
+    const viewerChanged = selectedViewerAccess !== Boolean(labManagerUser.gods_eye_view_access);
+    if (labManagerUser.labs.length > 0 && !selectedLabIds.length) {
       setLabManagerError("A participant must keep at least one starter kit.");
       return;
     }
-    if (changes.remove.length && !confirmingLabRemoval) {
+    if (viewerChanged && selectedViewerAccess && (!viewerReady || !labManagerUser.active || labManagerUser.status !== "active")) {
+      setLabManagerError("Verify the module installation and activate the user before granting access.");
+      return;
+    }
+    if ((changes.remove.length || viewerChanged && !selectedViewerAccess) && !confirmingLabRemoval) {
       setConfirmingLabRemoval(true);
       setLabManagerError("");
       return;
     }
-    if (!changes.add.length && !changes.remove.length) {
+    if (!changes.add.length && !changes.remove.length && !viewerChanged) {
       setLabManagerUserId(null);
       return;
     }
     const controller = new AbortController();
-    operationAbortRef.current?.abort();
     operationAbortRef.current = controller;
     setOperating(true);
     setLabManagerError("");
     setMessage("");
     try {
+      if (viewerChanged && !selectedViewerAccess) await requestViewerAccess(labManagerUser, false, controller.signal);
       for (const labId of changes.add) {
         setOperationProgress({
           status: "pending",
@@ -2090,15 +2227,14 @@ function AdminUsers() {
         });
         await requestLabAction({ kind: "remove", user: labManagerUser, lab }, controller.signal);
       }
+      if (viewerChanged && selectedViewerAccess) await requestViewerAccess(labManagerUser, true, controller.signal);
       await loadUsers();
       setLabManagerUserId(null);
       setConfirmingLabRemoval(false);
-      setMessage(`Starter kits updated for ${labManagerUser.email}.`);
+      setMessage(`Access updated for ${labManagerUser.email}.`);
     } catch (reason) {
       if (controller.signal.aborted) return;
-      const loaded = await loadUsers();
-      const refreshed = loaded?.find((user) => user.id === labManagerUser.id);
-      if (refreshed) setSelectedLabIds(refreshed.labs.map((lab) => lab.lab_id));
+      await loadUsers();
       setConfirmingLabRemoval(false);
       setLabManagerError(reason instanceof Error ? reason.message : "Unable to update the starter kits.");
     } finally {
@@ -2191,7 +2327,7 @@ function AdminUsers() {
                 <button
                   className="toolbar-icon"
                   type="button"
-                  onClick={() => void loadUsers()}
+                  onClick={() => { void loadViewerModule(); void loadUsers(); }}
                   aria-label="Refresh users"
                   title="Refresh users"
                 >
@@ -2199,6 +2335,7 @@ function AdminUsers() {
                 </button>
               </div>
             </div>
+            {viewerModuleError && <p className="notice error" role="alert">{viewerModuleError} Refresh to verify shared module access.</p>}
             <div className="table-wrap">
               <table aria-busy={usersLoading}>
                 <thead>
@@ -2239,19 +2376,20 @@ function AdminUsers() {
                         <div className="lab-summary">
                           {user.managed === false ? (
                             <span>
-                              <strong>AIDP administrator</strong>
-                              <small>Platform administration only</small>
+                              <strong>{user.is_aidp_admin ? "AIDP administrator" : "Existing OCI user"}</strong>
+                              <small>Identity domain account</small>
                             </span>
                           ) : (
                             <span>
                               <strong>{user.labs.length} {user.labs.length === 1 ? "starter kit" : "starter kits"}</strong>
-                              <small>
+                              {user.labs.length > 0 && <small>
                                 {user.labs.every((lab) => lab.phase === "active")
                                   ? "All active"
                                   : `${user.labs.filter((lab) => lab.phase === "active").length} active`}
-                              </small>
+                              </small>}
                             </span>
                           )}
+                          {user.gods_eye_view_access && <span><strong>God’s Eye View · Custom layers</strong><small>Shared module access</small></span>}
                         </div>
                       </td>
                       <td>
@@ -2263,8 +2401,6 @@ function AdminUsers() {
                       </td>
                       <td className="row-actions">
                         <span className="row-action-group">
-                          {user.managed !== false && (
-                            <>
                               <button
                                 className="table-action table-edit"
                                 type="button"
@@ -2276,6 +2412,7 @@ function AdminUsers() {
                               >
                                 <EditIcon />
                               </button>
+                          {user.managed !== false && (
                               <button
                                 className="table-action table-delete"
                                 type="button"
@@ -2288,7 +2425,6 @@ function AdminUsers() {
                               >
                                 <TrashIcon />
                               </button>
-                            </>
                           )}
                         </span>
                       </td>
@@ -2310,6 +2446,8 @@ function AdminUsers() {
       </Shell>
       <CreateUserModal
         localParticipantAccess={publicConfig?.local_participant_access}
+        viewerModule={viewerModule}
+        viewerReady={viewerReady}
         open={createOpen}
         catalog={catalog}
         draft={draft}
@@ -2333,10 +2471,18 @@ function AdminUsers() {
         user={labManagerUser}
         catalog={catalog}
         selectedLabIds={selectedLabIds}
+        selectedViewerAccess={selectedViewerAccess}
+        viewerModule={viewerModule}
+        viewerReady={viewerReady}
         confirmingRemoval={confirmingLabRemoval}
         error={labManagerError}
         onSelectionChange={(labIds) => {
           setSelectedLabIds(labIds);
+          setConfirmingLabRemoval(false);
+          setLabManagerError("");
+        }}
+        onViewerSelectionChange={(enabled) => {
+          setSelectedViewerAccess(enabled);
           setConfirmingLabRemoval(false);
           setLabManagerError("");
         }}
@@ -2508,13 +2654,7 @@ function RegistrationAccessSettings({
   onSave: () => void;
   busy: boolean;
 }) {
-  if (deploymentMode === "production") {
-    return (
-      <p className="settings-mode-note">
-        Production mode uses administrator access only. Participant registration is disabled.
-      </p>
-    );
-  }
+  if (deploymentMode === "production") return null;
 
   return (
     <SettingsRegistrationCodeField
@@ -2552,12 +2692,22 @@ function ApplicationReleaseSettings({
   error,
   onConfigureGovernance,
   onConfigureGodsEye,
+  godsEyeReady,
+  godsEyeInstalling,
+  godsEyeAction,
+  governanceInstalling,
+  governanceAction,
 }: {
   release: AdminApplicationRelease | null;
   busy: boolean;
   error: string;
   onConfigureGovernance: () => void;
   onConfigureGodsEye: () => void;
+  godsEyeReady: boolean;
+  godsEyeInstalling: boolean;
+  godsEyeAction: string;
+  governanceInstalling: boolean;
+  governanceAction: string;
 }) {
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
@@ -2643,18 +2793,18 @@ function ApplicationReleaseSettings({
                     <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
                     <td className="release-package-actions">
                       {item.package_id === "ai_data_governance" && (
-                        <button type="button" className="module-configure module-deploy" onClick={onConfigureGovernance} aria-label="Deploy or redeploy AI Data Governance" title="Deploy or redeploy AI Data Governance" aria-haspopup="dialog">
-                          <InstallIcon />
+                        <button type="button" className="module-configure module-deploy" onClick={onConfigureGovernance} aria-label={governanceAction} title={governanceAction} aria-haspopup="dialog">
+                          {governanceInstalling ? <LoadingIndicator inline label="Governance operation in progress" /> : <InstallIcon />}
                         </button>
                       )}
                       {item.package_id === "gods_eye_view" && (
                         <>
-                        <button type="button" className="module-configure module-deploy" onClick={onConfigureGodsEye} aria-label={`Install ${item.display_name}`} title={`Install ${item.display_name}`} aria-haspopup="dialog">
-                          <InstallIcon />
+                        <button type="button" className="module-configure module-deploy" onClick={onConfigureGodsEye} aria-label={`${godsEyeAction} ${item.display_name}`} title={`${godsEyeAction} ${item.display_name}`} aria-haspopup="dialog">
+                          {godsEyeInstalling ? <LoadingIndicator inline label="Deployment in progress" /> : <InstallIcon />}
                         </button>
-                        <a className="module-configure" href="/admin/gods-eye-view" aria-label={`Configure ${item.display_name}`} title={`Configure ${item.display_name}`}>
+                        {godsEyeReady && <a className="module-configure" href="/admin/gods-eye-view" aria-label={`Configure ${item.display_name}`} title={`Configure ${item.display_name}`}>
                           <AdminLoginIcon />
-                        </a>
+                        </a>}
                         </>
                       )}
                     </td>
@@ -2692,16 +2842,28 @@ function AdminSettings() {
   const [timeZone, setTimeZone] = useState('America/Bogota');
   const [savedTimeZone, setSavedTimeZone] = useState('America/Bogota');
   const [timeZones, setTimeZones] = useState<{ value: string; label: string }[]>([]);
+  const [confirmTimeZoneSave, setConfirmTimeZoneSave] = useState(false);
+  const timeZoneToSave = useRef<{ value: string; label: string } | null>(null);
+  const selectedTimeZone = timeZones.find(zone => zone.value === timeZone);
   const [applicationRelease, setApplicationRelease] = useState<AdminApplicationRelease | null>(null);
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [confirmReleaseUpdate, setConfirmReleaseUpdate] = useState(false);
   const [confirmGovernance, setConfirmGovernance] = useState(false);
+  const [governanceState, setGovernanceState] = useState<{ module: AdminModule | null; busy: boolean; unverified: boolean }>({ module: null, busy: false, unverified: false });
   const [confirmGodsEye, setConfirmGodsEye] = useState(false);
+  const [godsEyeModule, setGodsEyeModule] = useState<ModuleStatus | null>(null);
+  const [moduleUnverified, setModuleUnverified] = useState(false);
+  const godsEyeReady = !moduleUnverified && godsEyeModule?.installed === true && godsEyeModule.enabled === true && godsEyeModule.status === "ready";
+  const governanceInstalling = !governanceState.unverified && (governanceState.busy || Boolean(governanceState.module && ['installing', 'redeploying', 'deleting'].includes(governanceState.module.status)));
+  const governanceAction = governanceInstalling ? 'View deployment progress for AI Data Governance' : governanceState.unverified ? 'Check installation status for AI Data Governance' : 'Deploy or redeploy AI Data Governance';
+  const godsEyeInstalling = !moduleUnverified && godsEyeModule?.status === "activating" && godsEyeModule.resumable !== true;
+  const godsEyeAction = moduleUnverified || !godsEyeModule ? "Check installation status for" : godsEyeModule.status === "activating" ? "View deployment progress for" : "Install";
   const [releaseError, setReleaseError] = useState("");
   const [releaseProgress, setReleaseProgress] = useState<RegistrationResponse | null>(null);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const releaseAbortRef = useRef<AbortController | null>(null);
+  const moduleAbortRef = useRef<AbortController | null>(null);
   const workbenchTabRef = useRef<HTMLButtonElement>(null);
   const applicationTabRef = useRef<HTMLButtonElement>(null);
   const serviceEndpointRef = useRef<HTMLInputElement>(null);
@@ -2719,7 +2881,7 @@ function AdminSettings() {
     setSavedTimeZone(result.time_zone);
     setTimeZones([...new Set([result.time_zone, ...result.time_zones])].flatMap(value => {
       try {
-        const offset = new Intl.DateTimeFormat('en', { timeZone: value, timeZoneName: 'longOffset' }).formatToParts(new Date()).find(part => part.type === 'timeZoneName')?.value.replace('GMT', 'UTC');
+        const offset = new Intl.DateTimeFormat('en', { timeZone: value, timeZoneName: 'longOffset' }).formatToParts(new Date()).find(part => part.type === 'timeZoneName')?.value.replace('GMT', 'UTC').replace(/^UTC$/, 'UTC+00:00');
         return [{ value, label: `${value.replaceAll('_', ' ')} (${offset})` }];
       } catch { return []; }
     }));
@@ -2740,6 +2902,25 @@ function AdminSettings() {
       return null;
     }
   }
+  async function loadGodsEyeModule() {
+    if (moduleAbortRef.current) return;
+    const controller = new AbortController(); moduleAbortRef.current = controller;
+    try {
+      const result = await api<ModuleStatus>("/api/admin/gods-eye-view/module", { signal: controller.signal });
+      controller.signal.throwIfAborted();
+      setGodsEyeModule(result?.module_id === "gods_eye_view" ? result : null);
+      setModuleUnverified(false);
+    } catch {
+      if (!controller.signal.aborted) setModuleUnverified(true);
+    } finally {
+      if (moduleAbortRef.current === controller) moduleAbortRef.current = null;
+    }
+  }
+  useEffect(() => {
+    if (confirmGodsEye || godsEyeModule?.status !== "activating") return;
+    const timer = window.setInterval(() => void loadGodsEyeModule(), 5000);
+    return () => window.clearInterval(timer);
+  }, [confirmGodsEye, godsEyeModule?.status]);
   useEffect(() => {
     void api<AdminSettingsResponse>("/api/admin/settings")
       .then(result => applyAdminSettings(result))
@@ -2754,7 +2935,8 @@ function AdminSettings() {
           );
       }).finally(() => setSettingsLoading(false));
     void loadApplicationRelease();
-    return () => releaseAbortRef.current?.abort();
+    void loadGodsEyeModule();
+    return () => { releaseAbortRef.current?.abort(); moduleAbortRef.current?.abort(); };
   }, []);
   function handleSettingsTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -2800,11 +2982,17 @@ function AdminSettings() {
     registrationCodeToSave.current = registrationCode;
     setConfirmRegistrationSave(true);
   }
-  async function saveSettings(section: "registration" | "timezone", registrationCode = "") {
+  function requestTimeZoneSave() {
+    if (settingsSaveRef.current || settingsLoading || !selectedTimeZone || timeZone === savedTimeZone) return;
+    setError("");
+    timeZoneToSave.current = selectedTimeZone;
+    setConfirmTimeZoneSave(true);
+  }
+  async function saveSettings(section: "registration" | "timezone", value: string) {
     if (settingsSaveRef.current) return;
     setError("");
     const rotatesRegistrationCode = section === "registration";
-    if (rotatesRegistrationCode && !/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)) {
+    if (rotatesRegistrationCode && !/^[A-Z]{4}-[0-9]{4}$/.test(value)) {
       setError("Enter four letters followed by four numbers.");
       return;
     }
@@ -2814,12 +3002,11 @@ function AdminSettings() {
       const result = await api<AdminSettingsResponse>("/api/admin/settings", {
         method: "PUT",
         body: JSON.stringify({
-          ...(rotatesRegistrationCode ? { registration_code: registrationCode } : {}),
-          ...(section === "timezone" ? { time_zone: timeZone } : {}),
+          ...(rotatesRegistrationCode ? { registration_code: value } : { time_zone: value }),
         }),
       });
       applyAdminSettings(result, section);
-      if (rotatesRegistrationCode) setRegistrationCode(current => current === registrationCode ? "" : current);
+      if (rotatesRegistrationCode) setRegistrationCode(current => current === value ? "" : current);
       setToast(section === "registration" ? "Registration code saved." : "Time zone saved.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save settings");
@@ -3054,12 +3241,19 @@ function AdminSettings() {
               release={applicationRelease}
               busy={releaseBusy}
               error={releaseError}
-              onConfigureGovernance={() => setConfirmGovernance(true)}
-              onConfigureGodsEye={() => setConfirmGodsEye(true)}
+              onConfigureGovernance={() => { window.location.hash = "application"; setConfirmGovernance(true); }}
+              onConfigureGodsEye={() => { window.location.hash = "application"; setConfirmGodsEye(true); }}
+              godsEyeReady={godsEyeReady}
+              godsEyeInstalling={godsEyeInstalling}
+              godsEyeAction={godsEyeAction}
+              governanceInstalling={governanceInstalling}
+              governanceAction={governanceAction}
             />
               <div className="settings-time-zone-controls">
-                <label className="settings-field">Display time zone<select value={timeZone} onChange={event => setTimeZone(event.target.value)}>{timeZones.map(zone => <option key={zone.value} value={zone.value}>{zone.label}</option>)}</select></label>
-                <button type="button" className="settings-save" disabled={settingsSaving || timeZone === savedTimeZone} onClick={() => void saveSettings('timezone')}>Save time zone</button>
+                <SearchableCombobox className="settings-field time-zone-picker" label="Display time zone"
+                  placeholder="Search city or UTC offset" value={timeZone} options={timeZones}
+                  disabled={settingsLoading || settingsSaving} onChange={setTimeZone} />
+                <button type="button" className="settings-save" aria-haspopup="dialog" disabled={settingsLoading || settingsSaving || !selectedTimeZone || timeZone === savedTimeZone} onClick={requestTimeZoneSave}>Save time zone</button>
               </div>
             </>}
           </section>
@@ -3071,8 +3265,8 @@ function AdminSettings() {
         </div>
       </section>
       <Toast message={toast} onDismiss={() => setToast("")} />
-      {confirmGovernance && <GovernanceModuleManager onClose={() => setConfirmGovernance(false)} />}
-      {confirmGodsEye && <GodsEyeViewModuleManager api={api} onClose={() => setConfirmGodsEye(false)} />}
+      <GovernanceModuleManager visible={confirmGovernance} onStatusChange={setGovernanceState} onClose={() => setConfirmGovernance(false)} />
+      {confirmGodsEye && <GodsEyeViewModuleManager api={api} onClose={() => { setConfirmGodsEye(false); void loadGodsEyeModule(); }} onChanged={() => void loadGodsEyeModule()} />}
       <ConfirmModal
         open={confirmRegistrationSave}
         kind="question"
@@ -3090,6 +3284,23 @@ function AdminSettings() {
           registrationCodeToSave.current = null;
           setConfirmRegistrationSave(false);
           if (code) void saveSettings("registration", code);
+        }}
+      />
+      <ConfirmModal
+        open={confirmTimeZoneSave}
+        kind="save"
+        title="Save time zone?"
+        description={`Display dates and times in ${timeZoneToSave.current?.label || "the selected time zone"}?`}
+        confirmLabel="Save"
+        onClose={() => {
+          timeZoneToSave.current = null;
+          setConfirmTimeZoneSave(false);
+        }}
+        onConfirm={() => {
+          const zone = timeZoneToSave.current;
+          timeZoneToSave.current = null;
+          setConfirmTimeZoneSave(false);
+          if (zone) void saveSettings("timezone", zone.value);
         }}
       />
       <ConfirmModal
@@ -3114,6 +3325,7 @@ function AdminSettings() {
 }
 
 export function App() {
+  if (window.location.pathname === "/viewer/login") return <ViewerLogin />;
   if (window.location.pathname === "/local/gods-eye-view/login") return <Shell><LocalGodsEyeViewAccess api={api} /></Shell>;
   if (window.location.pathname === "/local/gods-eye-view/workspace") return <Shell><LocalGodsEyeViewAccess api={api} workspace /></Shell>;
   if (window.location.pathname === "/admin/gods-eye-view") return <AdminSettings />;

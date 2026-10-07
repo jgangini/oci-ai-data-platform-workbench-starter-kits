@@ -647,6 +647,36 @@ def test_governance_module_accepts_admin_inherited_from_group(tmp_path: Path) ->
     assert client.app.state.test_aidp.verified_governance_operations == ["install"]
 
 
+@pytest.mark.parametrize("mode,user_id,expected", [
+    ("active", "user-id", 200), ("group-admin", "user-id", 200), ("unmanaged-admin", "user-id", 200),
+    ("not-admin", "user-id", 403), ("active", "unknown-user", 403),
+])
+def test_viewer_deployment_verifies_selected_native_administrator(tmp_path: Path, mode: str, user_id: str, expected: int) -> None:
+    client = make_client(tmp_path, mode=mode, deployment_mode="production")
+    calls = []
+    class Module:
+        async def status(self, deploy=False, administrator=None):
+            calls.append((deploy, administrator))
+            return {"module_id": "gods_eye_view", "status": "available", "enabled": False,
+                    "installed": False, "bundled_version": "1.0.1"}
+    client.app.state.gods_eye_view_module = Module()
+    path = f"/api/admin/users/{user_id}/modules/gods_eye_view"
+    assert client.post(path).status_code == 401 and not calls
+    login(client)
+    assert client.get("/api/admin/gods-eye-view/module").json()["bundled_version"] == "1.0.1"
+    assert calls == [(False, None)]
+    response = client.post(path)
+    assert response.status_code == expected
+    if expected == 200:
+        deploy, administrator = calls[-1]
+        assert deploy and administrator["id"] == "user-id" and administrator["ocid"] == "ocid1.user.oc1..ada"
+    else:
+        assert calls == [(False, None)] and "AI_DATA_PLATFORM_ADMIN" in response.json()["detail"]
+    if mode == "active" and user_id == "user-id":
+        assert client.post("/api/admin/gods-eye-view/module/deploy").status_code == 200
+        assert calls[-1] == (True, None)
+
+
 def test_governance_module_pending_response_resumes_manifest_operation(tmp_path: Path) -> None:
     client = make_client(tmp_path, mode="module-pending", deployment_mode="production")
     login(client)

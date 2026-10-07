@@ -106,7 +106,7 @@ def test_cloud_does_not_mount_local_identity_endpoints(tmp_path):
     client = TestClient(create_app(local_settings(tmp_path, local_development_mode=False, local_identity_artifact_dir="")))
     assert client.post("/api/local/gods-eye-view/login", json={"username": "any", "password": "any"}).status_code == 404
     assert client.get("/api/local/gods-eye-view/workspace").status_code == 404
-    assert client.put("/api/admin/gods-eye-view/users/any", json={"enabled": True}).status_code == 404
+    assert client.put("/api/admin/gods-eye-view/users/any", json={"enabled": True}).status_code == 401
 
 
 def test_public_registration_explicit_local_grant(tmp_path):

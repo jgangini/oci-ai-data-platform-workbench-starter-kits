@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import * as jsxRuntime from 'react/jsx-runtime';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const source = readFileSync(new URL('../src/godsEyeViewAdminState.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -91,8 +92,11 @@ test('viewer identity loads independently, saves once, resets empty fields and p
   h.act(() => h.find('input', p => p.maxLength === 200).props.onChange({ target: { value: '' } }));
   h.submit(); h.submit(); assert.equal(h.requests.length, 1, 'Opening confirmation cannot save');
   assert.equal(h.find('fieldset').props.disabled, false, 'The native modal blocks background interaction without disabling its focus-return target');
-  assert.match(h.confirmation().description, /browser tab title, loading page and viewer heading for everyone/);
-  assert.deepEqual(h.confirmation().changes, ['Name: Community <map>', 'Description: NO PLACE LEFT BEHIND (original)']);
+  assert.equal(h.confirmation().confirmLabel, 'Save'); assert.equal(h.confirmation().changes, undefined);
+  const description = renderToStaticMarkup(h.confirmation().description);
+  assert.match(description, /<strong class="confirmation-value">Community &lt;map&gt;<\/strong>/);
+  assert.match(description, /<strong class="confirmation-value">NO PLACE LEFT BEHIND \(original\)<\/strong>/);
+  assert.match(description, /for everyone.*Reload the viewer/);
   h.cancel(); assert.equal(h.requests.length, 1); assert.equal(h.find('input', p => p.maxLength === 80).props.value, 'Community <map>');
   h.submit(); const confirmation = h.confirmation(); h.act(() => { confirmation.onConfirm(); confirmation.onConfirm(); }); assert.equal(h.requests.length, 2);
   assert.equal(h.requests[1].options.method, 'PUT');
@@ -121,16 +125,19 @@ test('viewer identity load errors permit retry without enabling a destructive sa
 
 test('shared schedule saves once without starting capture and preserves dirty drafts and revisions across polling conflicts', async t => {
   const initial = { start_at: null, interval_minutes: 5, config_version: 1 };
-  const h = sourceFormHarness(t, 'CaptureScheduleForm', { schedule: initial, kind: 'social' });
+  let h = sourceFormHarness(t, 'CaptureScheduleForm', { schedule: initial, kind: 'social' });
   assert.equal(h.requests.length, 0); assert.equal(h.find('input', p => p.type === 'datetime-local').props.value, '');
   h.submit(); await h.settle(); assert.equal(h.requests.length, 0); assert.match(h.find('p', p => p.role === 'alert').props.children, /valid scheduled/);
   h.change('datetime-local', '2026-10-06T11:30:00'); h.change('number', '7');
   const fresh = { start_at: '2026-10-07T16:00:00Z', interval_minutes: 9, config_version: 2 };
   h.receive({ schedule: fresh }); assert.equal(h.find('input', p => p.type === 'number').props.value, 7);
   h.submit(); h.submit(); assert.equal(h.requests.length, 0, 'Schedule confirmation precedes all writes');
-  assert.match(h.confirmation().description, /all four social networks.*Paused and completed captures remain stopped/);
-  assert.match(h.confirmation().changes[0], /2026-10-06 11:30:00/);
-  assert.equal(h.confirmation().changes[1], 'Capture interval: 7 minutes');
+  assert.equal(h.confirmation().confirmLabel, 'Save'); assert.equal(h.confirmation().changes, undefined);
+  const description = renderToStaticMarkup(h.confirmation().description);
+  assert.match(description, /all four social networks.*Paused and completed captures remain stopped/);
+  assert.match(description, /<strong class="confirmation-value">2026-10-06 11:30:00 · [^<]+<\/strong>/);
+  assert.match(description, /<strong class="confirmation-value">7 minutes<\/strong>/);
+  assert.ok(!h.nodes().some(node => node.type === 'button' && node.props.children === 'Discard schedule changes'));
   h.cancel(); assert.equal(h.requests.length, 0); assert.equal(h.find('input', p => p.type === 'number').props.value, 7);
   h.submit(); h.receive({ schedule: { ...fresh, config_version: 3 } });
   const confirmation = h.confirmation(); h.act(() => { confirmation.onConfirm(); confirmation.onConfirm(); });
@@ -140,15 +147,16 @@ test('shared schedule saves once without starting capture and preserves dirty dr
   h.requests[0].reject(Object.assign(new Error('Schedule conflict'), { status: 409 })); await h.settle();
   assert.equal(h.find('input', p => p.type === 'number').props.value, 7); assert.equal(h.updated.length, 0);
   h.receive({ schedule: fresh });
-  h.act(() => h.find('button', p => p.children === 'Discard schedule changes').props.onClick());
+  assert.match(h.find('p', p => p.role === 'status').props.children, /Reload this page/);
+  h.cleanup(); h = sourceFormHarness(t, 'CaptureScheduleForm', { schedule: fresh, kind: 'social' });
   assert.equal(h.find('input', p => p.type === 'datetime-local').props.value, scheduleLocalTime(fresh.start_at));
-  h.change('number', '10'); h.submit(); h.confirm(); assert.equal(JSON.parse(h.requests[1].options.body).expected_revision, 2);
-  const saved = { ...fresh, interval_minutes: 10, config_version: 3 }; h.requests[1].resolve(saved); await h.settle();
+  h.change('number', '10'); h.submit(); h.confirm(); assert.equal(JSON.parse(h.requests[0].options.body).expected_revision, 2);
+  const saved = { ...fresh, interval_minutes: 10, config_version: 3 }; h.requests[0].resolve(saved); await h.settle();
   assert.deepEqual(h.updated, [saved]); h.receive({ schedule: initial }); assert.equal(h.find('input', p => p.type === 'number').props.value, 10);
   h.receive({ kind: 'sensor', schedule: saved }); h.change('number', '11'); h.submit();
-  assert.match(h.confirmation().description, /all sensor types/); h.confirm();
-  assert.equal(h.requests[2].path, '/api/admin/gods-eye-view/sensor-schedule');
-  h.cleanup(); assert.equal(h.requests[2].options.signal.aborted, true); h.requests[2].resolve({ ...saved, config_version: 4 }); await h.settle();
+  assert.match(renderToStaticMarkup(h.confirmation().description), /all sensor types/); h.confirm();
+  assert.equal(h.requests[1].path, '/api/admin/gods-eye-view/sensor-schedule');
+  h.cleanup(); assert.equal(h.requests[1].options.signal.aborted, true); h.requests[1].resolve({ ...saved, config_version: 4 }); await h.settle();
   assert.equal(h.updated.length, 1, 'Unmounted saves cannot update parent state');
 });
 

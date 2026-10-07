@@ -43,6 +43,10 @@ Agent tools query Master Catalog directly rather than reading the synchronized D
 The four tables provide durable metadata, configuration, mappings, and synchronization status.
 The protected workspace manifest records lifecycle progress separately so an interrupted operation can resume.
 
+The Settings installation popup uses the same compact, full-width progress layout as God's Eye View. Its service labels follow the actual Governance phases; native progress is indeterminate because shared services can be revisited or reconciled together. Spark Compute is included among the service tags. The rotating table action reopens the monitor. Closing the popup keeps reconciliation running while Settings remains mounted; navigating away or reloading preserves the operation in the workspace manifest. Reopen the popup, select an AIDP administrator and use **Resume** to continue that same operation. Closing never requests cancellation.
+
+Localhost uses the same native installation, redeployment and inline deletion confirmation as production when connected to live AIDP. Opening the popup only reads settings; **Deploy** starts the real operation. Progress comes from server responses, not a manual preview or browser-stored percentage.
+
 The generated agent consumes the AIDP-injected `checkpointer` when available.
 If it is absent, or graph initialization with it fails, the implementation creates a stateless graph and logs the initialization failure.
 Consequently, a successful answer alone does not prove persistent memory or an Autonomous-backed conversation store.

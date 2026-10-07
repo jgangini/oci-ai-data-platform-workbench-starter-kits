@@ -1074,7 +1074,7 @@ def test_object_controls_require_proven_fresh_install_or_verified_migration(monk
     elif previous == "job":
         api.resources["/workspaces/ws/jobs"] = [{"name": "prisma_bogota_tick"}]
     elif previous == "agent":
-        api.resources["/agents"] = [{"displayName": "prisma_bogota_agent_legacy"}]
+        api.resources["/workspaces/ws/agents"] = [{"displayName": "prisma_bogota_agent_legacy"}]
     elif previous == "credential":
         api.resources["/credentials"] = [{"displayName": "PrismaWriterRuntime"}]
     def listed(*_, **__):
@@ -1082,6 +1082,11 @@ def test_object_controls_require_proven_fresh_install_or_verified_migration(monk
             raise PermissionError("Cannot prove an empty deployment")
         return SimpleNamespace(data=SimpleNamespace(objects=[object()] if previous == "objects" else [], next_start_with=None))
     storage.list_objects = listed
+    request = api.request
+    def scoped_request(method, path, **options):
+        assert path != "/agents", "Agent discovery must use the workspace-scoped endpoint"
+        return request(method, path, **options)
+    monkeypatch.setattr(api, "request", scoped_request)
     before = list(storage.calls)
     monkeypatch.setitem(sys.modules, "oracledb", None)
     if previous in {None, "migrated"}:
@@ -1120,7 +1125,11 @@ def test_bootstrap_publishes_agent_pointer_only_after_native_acceptance(monkeypa
     monkeypatch.setattr(bootstrap, "database_users", lambda *_args, **_kwargs: pytest.fail("No database provisioning"))
     monkeypatch.setattr(bootstrap, "initialize_controls", initialize_controls)
     monkeypatch.setattr(bootstrap, "ensure_oci_credential", lambda *_: {"displayName": "AidpRuntime"})
-    monkeypatch.setattr(bootstrap, "install_volumes", lambda *_: None)
+    def install_volumes(_api, runtime):
+        assert len(published) == 2, "External volume creation requires existing Landing prefixes"
+        assert published[0][:4] == ("ns", "landing", runtime["landing_prefix"] + ".keep", b"")
+        assert published[1][:4] == ("ns", "landing", runtime["sensor_landing_prefix"] + ".keep", b"")
+    monkeypatch.setattr(bootstrap, "install_volumes", install_volumes)
     monkeypatch.setattr(bootstrap, "install_stream_compute", lambda _api, _workspace, name: name)
     def install_libraries(api, *_, **__):
         assert (api.api_version, api.resource_segment) == ("20260430", "aiDataPlatforms")

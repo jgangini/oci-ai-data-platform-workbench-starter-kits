@@ -19,10 +19,37 @@ CREATE_ADDRESSES = {
     "oci_identity_policy.gods_eye_view_run_command[0]",
 }
 ACTIVE_JOBS = {"ACCEPTED", "IN_PROGRESS", "CANCELING"}
+OBSERVED_ATTRIBUTES = {
+    "oci_ai_data_platform_ai_data_platform": {"ai_feature_status", "time_updated"},
+    "oci_database_autonomous_database": {"actual_used_data_storage_size_in_tbs", "allocated_storage_size_in_tbs",
+        "apex_details", "time_earliest_available_ad_update", "time_earliest_available_db_version_upgrade",
+        "time_latest_available_ad_update", "time_latest_available_db_version_upgrade", "total_backup_storage_size_in_gbs"},
+    "oci_objectstorage_bucket": {"approximate_count", "approximate_size", "etag"},
+}
+NORMALIZED_DEFAULTS = {
+    "oci_database_autonomous_database": {"is_backup_retention_locked": False, "is_reconnect_clone_enabled": False,
+                                         "whitelisted_ips": []},
+    "oci_objectstorage_bucket": {"metadata": {}},
+    "oci_identity_domains_group": {"urnietfparamsscimschemasoracleidcsextensiondynamic_group":
+                                   [{"membership_rule": "", "membership_type": "static"}]},
+}
+
+
+def refresh_only(drift, planned):
+    """Recognize provider observations, never an ignored configuration/security change."""
+    change = drift.get("change", {})
+    before, after = change.get("before"), change.get("after")
+    if (change.get("actions") != ["update"] or not isinstance(before, dict) or not isinstance(after, dict)
+            or planned.get("change", {}).get("actions") != ["no-op"]):
+        return False
+    observed, defaults = OBSERVED_ATTRIBUTES.get(drift.get("type"), set()), NORMALIZED_DEFAULTS.get(drift.get("type"), {})
+    changed = {key for key in before.keys() | after.keys() if before.get(key) != after.get(key)}
+    return bool(changed) and all(key in observed or key in defaults
+        and before.get(key) in (None, []) and after.get(key) == defaults[key] for key in changed)
 
 
 def check_plan(plan, receipt):
-    """Fail closed on drift or any write beyond creating the selected module."""
+    """Fail closed on configuration drift or writes beyond creating the selected module."""
     if (not isinstance(plan, dict) or not str(plan.get("format_version", "")).startswith("1.")
             or plan.get("errored") or plan.get("complete") is False or plan.get("deferred_changes")):
         raise ValueError("The infrastructure plan is incomplete or unsupported")
@@ -30,16 +57,17 @@ def check_plan(plan, receipt):
     if (variables.get("source_commit_sha", {}).get("value") != receipt["source_commit_sha"]
             or MODULE_ID not in variables.get("enabled_vm_modules", {}).get("value", [])):
         raise ValueError("The infrastructure plan does not match this installation")
+    planned = {item.get("address"): item for item in plan.get("resource_changes", [])}
     for change in plan.get("resource_drift", []):
-        if change.get("change", {}).get("actions") != ["no-op"]:
-            raise ValueError("Infrastructure drift must be resolved before installing a module")
+        if change.get("change", {}).get("actions") != ["no-op"] and not refresh_only(change, planned.get(change.get("address"), {})):
+            raise ValueError(f"Infrastructure drift in {change.get('address', 'an unknown resource')} must be resolved before installing a module")
     found = set()
     for change in plan.get("resource_changes", []):
         address, actions = change.get("address"), change.get("change", {}).get("actions")
         if change.get("mode") == "data" and actions in (["read"], ["no-op"]):
             continue
         if actions != ["no-op"] and not (address in CREATE_ADDRESSES and actions == ["create"]):
-            raise ValueError("The module plan would modify unrelated infrastructure")
+            raise ValueError(f"The module plan would modify unrelated infrastructure: {address}")
         if address in CREATE_ADDRESSES:
             found.add(address)
     if found != CREATE_ADDRESSES:
@@ -96,7 +124,7 @@ class ModuleInstallation:
             raise ValueError("The infrastructure source archive has changed")
         return response
 
-    async def status(self, deploy=False):
+    async def status(self, deploy=False, administrator=None):
         async with self.lock:
             state = await asyncio.to_thread(self.read)
             running = self.task is not None and not self.task.done()
@@ -104,14 +132,18 @@ class ModuleInstallation:
                 # ponytail: the portal runs one API process; CAS and OCI job tokens preserve restart recovery.
                 # Add a renewable distributed lease before replicating the administrative API.
                 await asyncio.to_thread(self.receipt)
+                actor = {"administrator_user_id": str(administrator["id"]),
+                         "administrator_ocid": str(administrator["ocid"])} if administrator else {}
                 if state.get("status") == "failed":
-                    state = await asyncio.to_thread(self.write, attempt=state.get("attempt", 0) + 1,
+                    state = await asyncio.to_thread(self.write, **actor, attempt=state.get("attempt", 0) + 1,
                         plan_job_id=None, apply_job_id=None, status="activating", enabled=False)
                 elif state.get("status") != "activating":
-                    state = await asyncio.to_thread(self.write, status="activating", enabled=bool(state.get("enabled")),
+                    state = await asyncio.to_thread(self.write, **actor, status="activating", enabled=bool(state.get("enabled")),
                         operation_id=state.get("operation_id") or str(uuid4()), attempt=state.get("attempt", 0),
                         stage="verification" if state.get("enabled") else "infrastructure",
                         message="Checking this installation and its infrastructure.")
+                elif actor and not state.get("administrator_user_id"):
+                    state = await asyncio.to_thread(self.write, **actor)
                 self.task = asyncio.create_task(asyncio.to_thread(self.run))
                 self.task.add_done_callback(lambda task: None if task.cancelled() else task.exception())
                 running = True

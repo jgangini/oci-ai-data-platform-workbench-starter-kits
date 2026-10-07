@@ -98,6 +98,8 @@ resource "oci_core_instance" "lab" {
       identity_domain_url            = local.default_domain.url
       developer_group_id             = oci_identity_domains_group.developers.id
       pending_group_id               = oci_identity_domains_group.pending.id
+      gods_eye_view_group_id         = oci_identity_domains_group.gods_eye_view_readers.id
+      viewer_oidc_app_name           = "aidp_viewer_${local.suffix}"
       operator_user_ocid             = var.operator_user_ocid
       operator_username              = var.operator_username
       tenancy_ocid                   = var.tenancy_ocid

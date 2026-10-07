@@ -379,8 +379,8 @@ def test_runtime_security_contracts() -> None:
     assert "touch /var/local/userdata.done" in cloud_init
     assert '"$TLS_DIR:/etc/aidp-lab/tls:ro,z"' in cloud_init
     assert '"$STATE_DIR:/var/lib/aidp-lab:Z"' in cloud_init
-    assert 'alias  = "home"' in providers
-    assert "region = var.home_region" in providers
+    assert re.search(r'^\s*alias\s*=\s*"home"\s*$', providers, re.MULTILINE)
+    assert re.search(r'^\s*region\s*=\s*var\.home_region\s*$', providers, re.MULTILINE)
     assert "shape_candidates" not in compute
     assert "oci_core_shapes" not in compute
     assert compute.count("var.preferred_vm_shape") == 2
@@ -396,7 +396,7 @@ def test_runtime_security_contracts() -> None:
     assert 'resource "oci_identity_domains_grant"' not in identity
     assert "API Key Administrator" not in identity
     assert aidp.count("oci.home") == 1
-    assert 'resource "oci_identity_domains_app"' not in identity
+    assert re.findall(r'resource "oci_identity_domains_app" "([^"]+)"', identity) == ["viewer"]
     assert 'resource "oci_kms_' not in identity
     assert 'resource "oci_vault_' not in identity
     assert 'resource "time_sleep"' not in identity

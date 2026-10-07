@@ -745,7 +745,7 @@ def initialize_controls(api, agent_api, storage, runtime, workspace):
     agent_names = {AGENT_NAME, *RESOURCE_ALIASES.get(AGENT_NAME, ())}
     if (any(item.get("name") in job_names for item in items(api, f"/workspaces/{workspace}/jobs"))
             or any(item.get("displayName") in agent_names or str(item.get("displayName", "")).startswith("prisma_bogota")
-                   for item in items(agent_api, "/agents"))
+                   for item in items(agent_api, f"/workspaces/{workspace}/agents"))
             or any(item.get("displayName") in {"AidpControlStore", "TerritorialWriterRuntime", "PrismaWriterRuntime", "PrismaReaderRuntime"}
                    for item in items(agent_api, "/credentials"))):
         raise RuntimeError("God’s Eye View existing controls require a verified Object Storage migration")
@@ -782,6 +782,9 @@ def bootstrap_gods_eye_view(api, context, outputs, config, signer, storage, reco
     oci_credential = ensure_oci_credential(agent_api, {**config, "region": context["region"]})
     runtime["oci_credential_name"] = oci_credential["displayName"]
     report("volumes", "Preparing the managed Landing volume")
+    # AIDP validates the external path at creation; Spark ignores these hidden non-event objects.
+    for prefix in (runtime["landing_prefix"], runtime["sensor_landing_prefix"]):
+        storage.put_object(runtime["namespace"], runtime["landing_bucket"], prefix + ".keep", b"", content_type="application/octet-stream")
     install_volumes(agent_api, runtime)
     report("computes", "Preparing separate social, sensor, query and agent compute")
     social_compute = install_stream_compute(api, workspace, "aidp_gods_eye_view_social_compute")
@@ -798,9 +801,6 @@ def bootstrap_gods_eye_view(api, context, outputs, config, signer, storage, reco
     report("agent", "Preparing the shared God's Eye View agent deployment")
     agent = publish_agent(agent_api, workspace, bundle, context["region"], runtime)
     runtime["agent_id"] = agent["agent_key"]
-    # Materialize empty governed roots; Spark ignores these hidden non-event objects.
-    for prefix in (runtime["landing_prefix"], runtime["sensor_landing_prefix"]):
-        storage.put_object(runtime["namespace"], runtime["landing_bucket"], prefix + ".keep", b"", content_type="application/octet-stream")
     current = read_document(connection, "runtime")
     desired = {key: value for key, value in {**current, **runtime}.items()
                if key not in {"writer_credential_name", "reader_credential_name"}}

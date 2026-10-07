@@ -72,6 +72,30 @@ def principal(request: Request) -> str:
     return value
 
 
+async def viewer_role(request: Request) -> str:
+    subject = principal(request)
+    # The private listener accepts only VM1; nginx replaces this capability after
+    # checking the current signed session. Old local subjects always remain readers.
+    if subject.startswith(("local-gods-eye-view:", "local-territorial:", "local-prisma:")):
+        return "reader"
+    role = request.headers.get("x-gods-eye-view-role")
+    if role is not None:
+        if role not in {"reader", "admin"}:
+            raise HTTPException(401, "Invalid viewer role")
+        return role
+    # Compatibility: older proxies have no role header. Verify the cookie rather
+    # than promoting every non-local identity to administrator.
+    session = await admin_request(request, "GET", "/api/gods-eye-view/session")
+    if session.get("username") != subject:
+        raise HTTPException(401, "The viewer identity does not match its session")
+    if session.get("role") in {"reader", "admin"}:
+        return session["role"]
+    administrator = await admin_request(request, "GET", "/api/admin/session")
+    if administrator.get("username") != subject:
+        raise HTTPException(401, "An administrator session is required")
+    return "admin"
+
+
 def voice_failure_detail(supplied):
     stage, reason = supplied.get("voice_stage"), supplied.get("voice_reason")
     messages = {
@@ -133,7 +157,7 @@ async def admin_request(request: Request, method: str, path: str, payload=None):
     wire_path = path.replace("/gods-eye-view/", "/prisma/", 1) if path.startswith(("/api/gods-eye-view/", "/api/admin/gods-eye-view/")) else path
     try:
         # Only grounded chat needs the native Gold cold-start budget; ordinary administration stays bounded at 100s.
-        timeout = httpx.Timeout(100, connect=10, read=250 if method == "POST" and wire_path == "/api/admin/prisma/chat" else 100)
+        timeout = httpx.Timeout(100, connect=10, read=250 if method == "POST" and wire_path in {"/api/admin/prisma/chat", "/api/prisma/chat"} else 100)
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.request(method, base + wire_path,
                 headers={"Cookie": request.headers.get("cookie", "")}, json=payload)
@@ -414,8 +438,7 @@ async def viewer_identity(request: Request):
 async def snapshot(request: Request, date_from: str = "", date_to: str = ""):
     period_bounds({"date_from": date_from, "date_to": date_to})
     data = window_publication(await snapshot_for(request), {"date_from": date_from, "date_to": date_to})
-    # Compatibility: previously issued local session subjects must never gain admin permissions.
-    can_admin = not principal(request).startswith(("local-gods-eye-view:", "local-territorial:", "local-prisma:"))
+    can_admin = await viewer_role(request) == "admin"
     return {**data, "can_review": can_admin, "can_admin": can_admin}
 
 
@@ -430,8 +453,14 @@ async def chat(payload: ChatRequest, request: Request):
     if MODE == "local":
         reply = fixture_reply(payload, data)
     else:
-        reply = await admin_request(request, "POST", "/api/admin/gods-eye-view/chat", {
-            **payload.model_dump(mode="json"), "session_id": str(public_id)})
+        content = {**payload.model_dump(mode="json"), "session_id": str(public_id)}
+        try:
+            reply = await admin_request(request, "POST", "/api/gods-eye-view/chat", content)
+        except HTTPException as error:
+            # Compatibility: older backends expose grounded chat only to admins.
+            if error.status_code != 404 or await viewer_role(request) != "admin":
+                raise
+            reply = await admin_request(request, "POST", "/api/admin/gods-eye-view/chat", content)
     return {**grounded_reply(reply, data, payload), "session_id": str(public_id), "version": data["version"],
             "published_at": data.get("published_at"), "runtime": "local_fixture" if MODE == "local" else "aidp"}
 
@@ -440,7 +469,8 @@ async def chat(payload: ChatRequest, request: Request):
 @app.post("/api/territorial/incidents/{incident_id}/review", include_in_schema=False)
 @app.post("/api/gods-eye-view/incidents/{incident_id}/review")
 async def review(incident_id: str, payload: ReviewRequest, request: Request):
-    principal(request)
+    if await viewer_role(request) != "admin":
+        raise HTTPException(403, "Administrator access is required")
     if not re.fullmatch(r"[A-Za-z0-9:_-]{1,200}", incident_id):
         raise HTTPException(422, "Invalid identifier")
     return await admin_request(request, "POST", f"/api/gods-eye-view/incidents/{incident_id}/review", payload.model_dump(exclude_none=True))
@@ -450,7 +480,7 @@ async def review(incident_id: str, payload: ReviewRequest, request: Request):
 @app.post("/api/territorial/sensors/{sensor_id}/location", include_in_schema=False)
 @app.post("/api/gods-eye-view/sensors/{sensor_id}/location")
 async def sensor_location(sensor_id: str, payload: SensorLocationUpdate, request: Request):
-    if principal(request).startswith(("local-gods-eye-view:", "local-territorial:", "local-prisma:")):
+    if await viewer_role(request) != "admin":
         raise HTTPException(403, "Administrator access is required")
     native_proxy.check_origin(request)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", sensor_id):

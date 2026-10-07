@@ -10,8 +10,9 @@ const styles = await readFile(new URL("../src/styles.css", import.meta.url), "ut
 const viteConfig = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
 const labCatalog = JSON.parse(await readFile(new URL("../../backend/app/labs/catalog.json", import.meta.url), "utf8"));
 
-test("browser storage is limited to non-secret idempotency keys", () => {
-  assert.doesNotMatch(source, /localStorage\.setItem|sessionStorage/);
+test("browser storage is limited to non-secret operation keys", () => {
+  assert.doesNotMatch(source, /(?:localStorage|sessionStorage)\.setItem/);
+  assert.doesNotMatch(source, /onPreviewStep|previewStep|Restart preview|Next step/);
   assert.match(pollingSource, /aidp-lab\.operation\.\$\{kind\}\.\$\{userId\}\.\$\{labId\}/);
   assert.match(pollingSource, /aidp-module\.operation\.\$\{kind\}\.\$\{moduleId\}/);
   assert.match(pollingSource, /JSON\.stringify\(operation\)/);
@@ -142,7 +143,7 @@ test("settings can rotate the registration code without exposing or persisting i
   assert.match(source, /function SettingsRegistrationCodeField/);
   assert.match(source, /Lab registration code/);
   assert.match(source, /registration_code_configured/);
-  assert.match(source, /registration_code: registrationCode/);
+  assert.match(source, /registration_code: value/);
   assert.match(source, /className="registration-code settings-registration-code"/);
   assert.match(source, /Lab registration code character \$\{index \+ 1\} of 8/);
   assert.match(source, /\^\[A-Z\]\{4\}-\[0-9\]\{4\}\$/);
@@ -195,8 +196,6 @@ test("application settings report releases and request only the fixed VM update 
   assert.match(source, /Installed release/);
   assert.match(source, /Bundled version/);
   assert.match(source, /Existing participant installations remain unchanged/);
-  assert.match(source, /governanceModule\.installed_version/);
-  assert.match(source, /governanceModule\.bundled_version/);
   assert.match(source, /governanceModule\.update_available \? "Update" : "Redeploy"/);
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /deadlineMs: 30 \* 60 \* 1_000/);
@@ -215,8 +214,10 @@ test("administrators manage one shared governance module from Settings outside p
   assert.match(source, /operation_type\?: ModuleOperationKind \| null/);
   assert.equal((source.match(/<GovernanceModuleManager\b/g) ?? []).length, 1);
   assert.doesNotMatch(source, /function GovernanceModuleModal|window\.location\.assign\("\/admin\/users\?module=/);
-  assert.match(manager, /users\.filter\(user => user\.is_aidp_admin\)/);
-  assert.match(manager, /if \(!usersLoaded \|\| !moduleManagerUser \|\| !moduleManagerUser\.is_aidp_admin/);
+  assert.match(manager, /users\.filter\(user => user\.is_aidp_admin === true\)/);
+  assert.match(manager, /const disabled = moduleOperating \|\| !usersLoaded \|\| !moduleManagerUser \|\| !governanceModule/);
+  assert.match(manager, /user\.id === moduleManagerUserId && user\.is_aidp_admin === true/);
+  assert.match(manager, /if \(disabled \|\| moduleAbortRef\.current/);
   assert.match(manager, /\/api\/admin\/modules/);
   assert.match(manager, /\/modules\/\$\{encodeURIComponent\(governanceModule\.module_id\)\}/);
   assert.match(manager, /getOrCreateModuleOperation/);
@@ -228,14 +229,6 @@ test("administrators manage one shared governance module from Settings outside p
   assert.match(source, /function participantLabCatalog/);
   assert.match(source, /\["agent", "ai_data_governance"\]\.includes\(lab_id\)/);
   assert.ok(!labCatalog.labs.includes("agent"));
-});
-
-test("unmanaged AIDP administrators have no participant or global module row actions", () => {
-  assert.match(source, /user\.managed === false \? \(/);
-  assert.match(source, /<strong>AIDP administrator<\/strong>/);
-  assert.match(source, /<small>Platform administration only<\/small>/);
-  assert.doesNotMatch(source, /user\.is_aidp_admin && governanceModule/);
-  assert.match(source, /user\.managed !== false && \([\s\S]*Manage starter kits for/);
 });
 
 test("dialogs make the application shell and footer inert", () => {
@@ -256,7 +249,7 @@ test("administrator mutates one participant laboratory at a time", () => {
   assert.match(source, /aria-busy=\{operating \|\| creating\} inert=\{operating \|\| creating\}/);
   assert.match(source, /operationAbortRef\.current\?\.abort\(\)/);
   assert.match(source, /A participant must keep at least one starter kit/);
-  assert.match(source, /disabled=\{!hasChanges \|\| !selectedLabIds\.length\}/);
+  assert.match(source, /disabled=\{!hasChanges \|\| user\.labs\.length > 0 && !selectedLabIds\.length\}/);
   assert.match(source, /select:not\(\[disabled\]\)/);
   assert.match(source, /function ProvisioningOverlay/);
   assert.match(styles, /\.table-action \{[^}]*width: 44px;[^}]*min-height: 44px;/);

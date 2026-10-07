@@ -23,14 +23,14 @@ class GodsEyeViewModule:
         self.lock = asyncio.Lock()
         self.installer = None
 
-    async def status(self, deploy=False):
+    async def status(self, deploy=False, administrator=None):
         async with self.lock:
             try:
                 if self.settings.portal_managed_modules and not self.settings.gods_eye_view_local_mode:
                     if self.installer is None:
                         from .installation import ModuleInstallation
                         self.installer = ModuleInstallation(self.settings, self.runtime.aidp_factory, lambda: self._status(True))
-                    state = await self.installer.status(deploy)
+                    state = await self.installer.status(deploy, administrator)
                     return self._response(state, stage=state.get("stage"), resumable=state.get("resumable", False))
                 return await asyncio.to_thread(self._status, deploy)
             except HTTPException:
@@ -53,6 +53,7 @@ class GodsEyeViewModule:
 
     def _response(self, state, **values):
         return {"module_id": PACKAGE["package_id"], "display_name": PACKAGE["display_name"],
+                "bundled_version": PACKAGE["bundled_version"],
                 "installed": bool(state.get("enabled")), "enabled": bool(state.get("enabled")),
                 "status": state.get("status", "available"), "operation_id": state.get("operation_id"),
                 "viewer_url": "/gods-eye-view/", "runtime": "local_fixture" if self.settings.gods_eye_view_local_mode else "aidp",

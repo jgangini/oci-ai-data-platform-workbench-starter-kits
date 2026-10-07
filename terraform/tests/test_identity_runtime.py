@@ -21,7 +21,14 @@ def test_operator_identity_is_reused_without_gateway_control_plane_resources() -
     assert 'resource "oci_identity_domains_group" "provisioner"' not in identity
     assert 'resource "oci_identity_domains_grant"' not in identity
     assert 'resource "oci_identity_policy" "provisioner_runtime"' not in identity
-    assert 'resource "oci_identity_domains_app"' not in identity
+    assert re.findall(r'resource "oci_identity_domains_app" "([^"]+)"', terraform) == ["viewer"]
+    viewer = _resource(identity, "oci_identity_domains_app", "viewer")
+    assert 'value = "CustomBrowserMobileTemplateId"' in viewer
+    assert re.search(r'client_type\s*=\s*"public"', viewer)
+    assert re.search(r'allowed_grants\s*=\s*\["authorization_code"\]', viewer)
+    assert 'https://${data.oci_core_vnic.lab.public_ip_address}/api/auth/oci/callback' in viewer
+    for forbidden in ("client_secret", "client_credentials", "admin_roles", "app_roles", "allowed_operations"):
+        assert forbidden not in viewer
     assert 'resource "oci_kms_' not in identity
     assert 'resource "oci_vault_' not in identity
     assert 'resource "oci_identity_policy" "vm_secret"' not in compute
@@ -45,9 +52,26 @@ def test_operator_identity_is_reused_without_gateway_control_plane_resources() -
 def test_identity_groups_ignore_service_managed_schema_extensions() -> None:
     identity = (ROOT / "terraform/i_oci_identity.tf").read_text(encoding="utf-8")
 
-    for group in ("developers", "pending"):
+    for group in ("developers", "pending", "gods_eye_view_readers"):
         block = _resource(identity, "oci_identity_domains_group", group)
         assert "ignore_changes = [schemas]" in block
+
+
+def test_viewer_reader_group_and_signin_configuration_are_deployment_scoped() -> None:
+    identity = (ROOT / "terraform/i_oci_identity.tf").read_text(encoding="utf-8")
+    compute = (ROOT / "terraform/g_oci_core_instance.tf").read_text(encoding="utf-8")
+    cloud_init = (ROOT / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")
+    group = _resource(identity, "oci_identity_domains_group", "gods_eye_view_readers")
+    assert re.search(r'external_id\s*=\s*"\$\{local.name_prefix\}:gods_eye_view"', group)
+    for path in (ROOT / "terraform").glob("*.tf"):
+        source = path.read_text(encoding="utf-8")
+        for label in re.findall(r'resource "oci_identity_policy" "([^"]+)"', source):
+            # Membership grants portal reading, not OCI/AIDP administration.
+            assert "gods_eye_view_readers" not in _resource(source, "oci_identity_policy", label)
+    assert re.search(r'gods_eye_view_group_id\s*=\s*oci_identity_domains_group.gods_eye_view_readers.id', compute)
+    assert re.search(r'viewer_oidc_app_name\s*=\s*"aidp_viewer_\$\{local.suffix\}"', compute)
+    assert "IDENTITY_GODS_EYE_VIEW_GROUP_ID=${gods_eye_view_group_id}" in cloud_init
+    assert "IDENTITY_VIEWER_APP_NAME=${viewer_oidc_app_name}" in cloud_init
 
 
 def test_vm_receives_operator_credentials_through_one_use_encrypted_bootstrap() -> None:

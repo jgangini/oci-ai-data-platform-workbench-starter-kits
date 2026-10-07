@@ -118,7 +118,7 @@ def test_bootstrap_manifest_freezes_component_sha_platform_and_digest():
 
 
 @pytest.mark.parametrize("published", ["gods-eye-view", "territorial-viewer", "prisma-viewer", "partial", "partial-legacy"])
-def test_canonical_viewer_loader_accepts_frozen_legacy_releases_but_never_partial_aliases(monkeypatch, published):
+def test_canonical_viewer_loader_accepts_frozen_legacy_releases_but_never_partial_aliases(monkeypatch, capsys, published):
     component = "prisma-viewer" if published.startswith("partial") else published
     document = release(component)
     if published.startswith("partial"):
@@ -133,7 +133,9 @@ def test_canonical_viewer_loader_accepts_frozen_legacy_releases_but_never_partia
             "image": {"asset_name": bootstrap.COMPONENTS[component][0], "sha256": digest,
                       "platform": "linux/amd64", "image_tag": component + ":" + "b" * 40}}))
     monkeypatch.setattr(bootstrap, "_download", download)
-    monkeypatch.setattr(bootstrap.subprocess, "run", lambda *_args, **_kwargs: None)
+    def docker_load(_args, **kwargs):
+        print("Loaded image: " + component + ":" + "b" * 40, file=kwargs.get("stdout", sys.stdout))
+    monkeypatch.setattr(bootstrap.subprocess, "run", docker_load)
     monkeypatch.setattr(bootstrap.subprocess, "check_output", lambda *_args, **_kwargs: "linux/amd64")
     if published.startswith("partial"):
         with pytest.raises(ValueError, match="missing or ambiguous"):
@@ -142,6 +144,8 @@ def test_canonical_viewer_loader_accepts_frozen_legacy_releases_but_never_partia
     else:
         assert bootstrap.load("v2.3.0", "b" * 40, "gods-eye-view") == component + ":" + "b" * 40
         assert set(downloaded) == set(bootstrap.COMPONENTS[component])
+        output = capsys.readouterr()
+        assert output.out == "" and "Loaded image:" in output.err
 
 
 @pytest.mark.parametrize("variable", ["GODS_EYE_VIEW_ADMIN_BIND", "TERRITORIAL_ADMIN_BIND", "PRISMA_ADMIN_BIND"])
@@ -206,6 +210,8 @@ def test_both_reverse_proxies_authenticate_and_overwrite_viewer_identity():
         for block in blocks:
             assert "auth_request /_gods_eye_view_session;" in block
             assert "proxy_set_header X-Gods-Eye-View-User $gods_eye_view_user;" in block
+            assert "auth_request_set $gods_eye_view_role $upstream_http_x_gods_eye_view_role;" in block
+            assert "proxy_set_header X-Gods-Eye-View-Role $gods_eye_view_role;" in block
             assert "auth_request_set $gods_eye_view_legacy_user $upstream_http_x_territorial_user;" in block
             assert "proxy_set_header X-Territorial-User $gods_eye_view_legacy_user;" in block
             assert "proxy_set_header X-PRISMA-User $gods_eye_view_legacy_user;" in block
@@ -214,8 +220,14 @@ def test_both_reverse_proxies_authenticate_and_overwrite_viewer_identity():
             if not block.startswith("= /gods-eye-view/ {"):
                 assert "error_page 401 = @gods_eye_view_unauthorized;" in block
         assert all("$http_x_" + prefix + "_user" not in proxy for prefix in ("gods_eye_view", "territorial", "prisma"))
+        assert "$http_x_gods_eye_view_role" not in proxy
         login = next(block for block in proxy.split("location ") if block.startswith("@gods_eye_view_login"))
-        assert "return 302 /admin/login?next=/gods-eye-view/;" in login
+        assert "return 302 /viewer/login;" in login
+        callback = next(block for block in proxy.split("location ") if block.startswith("= /api/auth/oci/callback"))
+        assert "access_log off;" in callback
+        assert "error_log /dev/null;" in callback
+        for block in (callback, next(block for block in proxy.split("location ") if block.startswith("/api/ {"))):
+            assert "proxy_set_header X-Forwarded-Host $http_host;" in block
         unauthorized = next(block for block in proxy.split("location ") if block.startswith("@gods_eye_view_unauthorized"))
         assert "default_type application/json;" in unauthorized
         assert 'return 401 \'{"detail":"Viewer session required"}\';' in unauthorized

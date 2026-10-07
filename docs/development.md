@@ -49,6 +49,10 @@ docker compose --env-file .env -f docker/docker-compose.oci-local.yml down
 
 The optional parent Deploy Studio host wrapper is outside this repository. Follow that host's instructions if it manages multiple previews; do not assume a developer-specific drive path or port is part of this project's API.
 
+### Test native module installation locally
+
+Localhost uses the same native installation controls as production when configured against a live AIDP deployment. Open Settings → Application, select an AIDP administrator and review the module's resources before pressing **Deploy**. Opening the popup only reads settings; Deploy starts the real operation and can create billable OCI/AIDP resources. There is no manual design simulation or browser-stored progress percentage. The monitor shows server phases and an indeterminate progress bar, and the table action rotates while the operation is pending. God's Eye View recovers its durable server operation after navigation or reload; Governance retains its workspace operation ID and requires **Resume** to continue reconciliation after leaving Settings. The explicit backend `local_fixture` runtime remains isolated test data and does not provision cloud resources.
+
 ## Validate a change
 
 Read repository instructions before editing. For code/infrastructure changes, run the project's architecture preflight before the change and postflight afterward. Use the smallest relevant checks during development and the release/CI matrix before publishing a release.

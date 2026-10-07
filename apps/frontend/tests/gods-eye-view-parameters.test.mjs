@@ -28,6 +28,7 @@ test('shared settings confirmation uses a native modal, labels its explanation a
   const tree = component.SettingsConfirmation({ title: 'Save changes?', description: 'These changes apply to everyone.', changes: ['New setting'], onCancel: () => cancelled++, onConfirm: () => confirmed++ });
   const cleanup = effects[0](); assert.equal(shown, 1);
   const content = tree.props.children[0].props.children, buttons = tree.props.children[1].props.children;
+  assert.ok(tree.props.className.split(' ').includes('confirm-save'));
   assert.equal(tree.type, 'dialog'); assert.equal(tree.props['aria-labelledby'], content[0].props.id); assert.equal(tree.props['aria-describedby'], content[1].props.id);
   assert.notEqual(content[0].props.id, content[1].props.id); assert.equal(content[1].props.children, 'These changes apply to everyone.');
   assert.equal(buttons[0].props.autoFocus, true); assert.equal(buttons[0].props.children, 'Cancel'); assert.equal(buttons[1].props.type, 'button');

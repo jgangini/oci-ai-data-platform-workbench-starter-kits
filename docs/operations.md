@@ -20,13 +20,14 @@ The email attaches only `wallet.zip`, `terraform-source.zip` and one sanitized `
 
 | Action in Users | Effect |
 | --- | --- |
-| Add user | Provision Identity access and the initial selected kits through one resumable operation. |
+| Add user | Select initial starter kits and/or God's Eye View access; nothing is preselected. Provision Identity access and only the selected kit resources through one resumable operation. |
+| Manage starter kits → God's Eye View | Grant or revoke membership in the installed shared viewer's reader group. The checkbox is disabled for new grants until installation is ready. |
 | Add a kit | Install its versioned assets, workflow, tables and grants for that participant. |
 | Update / Redeploy | Reconcile the selected kit with the bundled version. Other kits remain assigned. |
 | Remove a kit | Remove only that kit's owned workflow, tables, objects, content and grants. |
 | Delete participant | Clean up assigned kits and then remove the Identity account. |
 
-At least one kit must remain assigned; deleting the participant is the action for removing the last assignment. Provisioning and cleanup use manifests and operation IDs. Resume a failed operation from its reported state instead of creating duplicate users, jobs or folders manually.
+A new user can have only God's Eye View access, without kit resources or AIDP developer permissions. Adding their first kit provisions those resources and permissions through the existing kit flow. For users with assigned kits, at least one kit must remain assigned; deleting the participant is the action for removing the last assignment. Provisioning and cleanup use manifests and operation IDs. Resume a failed operation from its reported state instead of creating duplicate users, jobs or folders manually.
 
 ## Update application and viewer images
 
@@ -68,9 +69,11 @@ flowchart LR
     Verify --> Ready[Installation ready; conversation acceptance remains separate]
 ```
 
-The base reserves networking and the private endpoint before installation, keeping the portal VM stable. The installer only adds the viewer VM, its dynamic group and two scoped IAM policies; any other infrastructure write or detected drift stops the operation. The original source archive and commit must match the receipt, and stack variables must remain unchanged between plan and apply. It does not create another stack or an untracked VM.
+The base reserves networking and the private endpoint before installation, keeping the portal VM stable. The installer only adds the viewer VM, its dynamic group and two scoped IAM policies; any other infrastructure write or configuration drift stops the operation. Known provider observations (usage counters, service timestamps and empty/default field normalization) are accepted only when the same resource has a no-op plan. Network, identity, permissions and configuration drift remain blocked. The source archive and commit must match the receipt, and stack variables must remain unchanged between plan and apply. It does not create another stack or an untracked VM.
 
 The selected artifacts bucket holds `.control/modules/installation.json` and `.control/gods_eye_view/install/operation.json`. The first binds the environment and immutable source; the second retains operation/attempt IDs, Resource Manager jobs and phases through restarts. They are separate from the module's data controls in Gold. Preserve both; do not edit them to bypass a mismatch.
+
+Both OCI providers preserve `Oracle-Tags.CreatedBy` and `Oracle-Tags.CreatedOn`. For an existing original archive whose failed module plan proposes only removing those automatic portal tags, run `scripts/migrate_module_default_tags.py` in the configured backend environment to preview the explicit migration, then add `--apply` to migrate. It verifies the failed job, exact stack/source identity and variables, backs up the original archive and receipt in `.control/gods_eye_view/install/provider-tags-migration.json`, and changes only the two provider blocks. It conditionally updates the archive binding after verifying the migrated bytes; it never applies Terraform or clears the failed operation. Rerunning reconciles an interrupted receipt update. Generate and validate a new module plan before apply. Any other portal write, active job or source mismatch blocks migration.
 
 The dialog polls status without starting work. **Close** or Escape leaves installation running. Reopen to follow progress; if the worker stopped, **Resume installation** confirms continuation of the same operation. **Retry installation** confirms another attempt using its managed resources; **Verify installation** checks an installed module without reprovisioning it. A lost response is reconciled by GET before another POST is allowed.
 
