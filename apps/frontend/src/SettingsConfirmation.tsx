@@ -1,7 +1,7 @@
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 
 export function SettingsConfirmation({ title, description = 'The following settings will change:', changes = [], confirmLabel = 'Save changes', onCancel, onConfirm }: {
-  title: string; description?: string; changes?: string[]; confirmLabel?: string; onCancel: () => void; onConfirm: () => void;
+  title: string; description?: ReactNode; changes?: string[]; confirmLabel?: string; onCancel: () => void; onConfirm: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null), titleId = useId(), descriptionId = useId();
   useEffect(() => {
@@ -9,7 +9,7 @@ export function SettingsConfirmation({ title, description = 'The following setti
     node?.showModal();
     return () => { node?.close(); if (origin instanceof HTMLElement && origin.isConnected) origin.focus(); };
   }, []);
-  return <dialog ref={dialog} className="confirm-modal gods-eye-view-reset-dialog" aria-labelledby={titleId} aria-describedby={descriptionId} onCancel={event => { event.preventDefault(); onCancel(); }} onClose={onCancel}>
+  return <dialog ref={dialog} className="confirm-modal confirm-save gods-eye-view-reset-dialog" aria-labelledby={titleId} aria-describedby={descriptionId} onCancel={event => { event.preventDefault(); onCancel(); }} onClose={onCancel}>
     <div className="confirm-content"><h2 id={titleId}>{title}</h2><p id={descriptionId}>{description}</p>{changes.length > 0 && <ul>{changes.map(change => <li key={change}>{change}</li>)}</ul>}</div>
     <footer><button type="button" onClick={onCancel} autoFocus>Cancel</button><button type="button" className="confirm-primary" onClick={onConfirm}>{confirmLabel}</button></footer>
   </dialog>;

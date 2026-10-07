@@ -21,7 +21,7 @@ spec = importlib.util.spec_from_file_location("gods_eye_view_bridge", Path(__fil
 bridge = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = bridge
 spec.loader.exec_module(bridge)
-HEADERS = {"x-prisma-user": "operator", "cookie": "admin-session=fixture-value"}
+HEADERS = {"x-prisma-user": "operator", "x-gods-eye-view-role": "admin", "cookie": "admin-session=fixture-value"}
 PUBLIC_ID = "855a0379-97d5-4c8a-8137-76a5d24912b2"
 
 
@@ -333,7 +333,7 @@ def test_cloud_chat_forwards_cookie_and_context_to_operator_boundary(client, mon
     monkeypatch.setattr(bridge, "admin_request", admin_request)
     body = client.post("/api/gods-eye-view/chat", headers=HEADERS, json={"question": "Resumen", "version": "v1", "session_id": PUBLIC_ID}).json()
     assert body["runtime"] == "aidp"
-    assert calls[0][:3] == (HEADERS["cookie"], "POST", "/api/admin/gods-eye-view/chat")
+    assert calls[0][:3] == (HEADERS["cookie"], "POST", "/api/gods-eye-view/chat")
     assert calls[0][3]["session_id"] == PUBLIC_ID
 
 
@@ -359,7 +359,7 @@ def test_explicit_cloud_backend_keeps_snapshot_and_agent_together(client, monkey
     assert all(call[0] == HEADERS["cookie"] for call in calls)
     if status == 200:
         assert response.json()["runtime"] == "aidp" and response.json()["sensor_evidence_ids"] == [reading["id"]]
-        assert calls[1][2] == "/api/admin/gods-eye-view/chat"
+        assert calls[1][2] == "/api/gods-eye-view/chat"
     else:
         assert len(calls) == 1
 
@@ -447,6 +447,7 @@ def test_gateway_hides_tools_and_scopes_sessions_to_authenticated_cookie():
 
 @pytest.mark.parametrize("method,path,expected_read", [
     ("POST", "/api/admin/gods-eye-view/chat", 250), ("POST", "/api/admin/prisma/chat", 250),
+    ("POST", "/api/gods-eye-view/chat", 250), ("POST", "/api/prisma/chat", 250),
     ("GET", "/api/gods-eye-view/snapshot", 100), ("POST", "/api/gods-eye-view/oci-chat", 100),
 ])
 @pytest.mark.parametrize("fail", [False, True])
@@ -468,6 +469,74 @@ def test_bridge_reserves_cold_start_budget_only_for_gold_chat_without_retry(monk
     else:
         assert asyncio.run(bridge.admin_request(request, method, path, {})) == {"answer": "grounded"}
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("subject", ["viewer:native-user", "local-prisma:viewer"])
+def test_reader_capability_never_becomes_admin_and_blocks_review_and_location(client, subject):
+    headers = {**HEADERS, "x-prisma-user": subject, "x-gods-eye-view-role": "reader"}
+    snapshot = client.get("/api/gods-eye-view/snapshot", headers=headers)
+    assert snapshot.status_code == 200
+    assert snapshot.json()["can_admin"] is snapshot.json()["can_review"] is False
+    assert client.post("/api/gods-eye-view/incidents/incident-1/review", headers=headers,
+        json={"status": "validated"}).status_code == 403
+    assert client.post("/api/gods-eye-view/sensors/station-1/location", headers=headers,
+        json={"lat": 4.6, "lon": -74.1, "expected_lat": 4.5, "expected_lon": -74.0}).status_code == 403
+
+
+def test_legacy_local_subject_stays_reader_even_with_admin_capability(client):
+    headers = {**HEADERS, "x-prisma-user": "local-prisma:viewer"}
+    assert client.get("/api/gods-eye-view/snapshot", headers=headers).json()["can_admin"] is False
+
+
+@pytest.mark.parametrize("session,administrator,status,can_admin", [
+    ({"username": "operator"}, {"username": "operator"}, 200, True),
+    ({"username": "operator", "role": "reader"}, None, 200, False),
+    ({"username": "different", "role": "admin"}, None, 401, None),
+    ({"username": "operator"}, {"username": "different"}, 401, None),
+    (None, None, 401, None),
+])
+def test_legacy_proxy_requires_backend_session_and_exact_current_admin(client, monkeypatch, session, administrator, status, can_admin):
+    calls = []
+    async def backend(request, method, path, payload=None):
+        calls.append(path)
+        if path == "/api/gods-eye-view/session":
+            if session is None:
+                raise HTTPException(401, "Revoked access")
+            return session
+        if path == "/api/admin/session":
+            assert administrator is not None
+            return administrator
+        return SNAPSHOT
+    monkeypatch.setattr(bridge, "admin_request", backend)
+    headers = {key: value for key, value in HEADERS.items() if key != "x-gods-eye-view-role"}
+    response = client.get("/api/gods-eye-view/snapshot", headers=headers)
+    assert response.status_code == status
+    assert "/api/gods-eye-view/session" in calls
+    if status == 200:
+        assert response.json()["can_admin"] is response.json()["can_review"] is can_admin
+
+
+@pytest.mark.parametrize("role", ["reader", "admin"])
+def test_cloud_chat_fallback_to_legacy_admin_route_never_promotes_readers(client, monkeypatch, role):
+    monkeypatch.setattr(bridge, "MODE", "oci")
+    monkeypatch.setattr(bridge, "published_snapshot", lambda: SNAPSHOT)
+    calls = []
+    async def backend(request, method, path, payload=None):
+        calls.append(path)
+        if path == "/api/gods-eye-view/chat":
+            raise HTTPException(404, "Old backend")
+        assert path == "/api/admin/gods-eye-view/chat"
+        return ANSWER
+    monkeypatch.setattr(bridge, "admin_request", backend)
+    response = client.post("/api/gods-eye-view/chat", headers={**HEADERS, "x-gods-eye-view-role": role},
+        json={"question": "Resumen", "version": "v1", "session_id": PUBLIC_ID})
+    assert response.status_code == (200 if role == "admin" else 404)
+    assert calls == ["/api/gods-eye-view/chat"] + (["/api/admin/gods-eye-view/chat"] if role == "admin" else [])
+
+
+def test_unknown_proxy_capability_is_refused(client):
+    response = client.get("/api/gods-eye-view/snapshot", headers={**HEADERS, "x-gods-eye-view-role": "owner"})
+    assert response.status_code == 401
 
 
 @pytest.mark.parametrize("kind", ["social", "sensors"])

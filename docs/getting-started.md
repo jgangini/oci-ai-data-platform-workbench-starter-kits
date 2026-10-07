@@ -44,6 +44,8 @@ To add God's Eye View, open **Settings → Application → Install**, review and
 3. Activate the OCI Identity Domains account from its standard welcome email.
 4. Sign in to the supplied AIDP Workbench URL with that email.
 
+Administrators can instead select only God's Eye View in **Users → Add user** once its shared installation is ready. These readers activate their OCI Identity Domains account and use **Sign in with OCI** at `/gods-eye-view/`; no participant workspace is created. Existing viewer access is managed through **Manage starter kits**. See [individual viewer access](modules/gods-eye-view.md#individual-access-to-the-shared-viewer).
+
 ```mermaid
 sequenceDiagram
     actor User as Participant or administrator

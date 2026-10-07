@@ -159,7 +159,7 @@ async def run_local_gods_eye_view(app):
         await asyncio.sleep(60)
 
 
-def mount_gods_eye_view(app, require_admin, require_viewer=None):
+def mount_gods_eye_view(app, require_admin, require_viewer=None, selected_platform_admin=None):
     from .parameters import mount_parameters
     mount_parameters(app, require_admin)
     router = APIRouter(dependencies=[Depends(require_admin)])
@@ -243,11 +243,13 @@ def mount_gods_eye_view(app, require_admin, require_viewer=None):
             ]}
         return result
 
-    async def module_status(deploy=False):
+    async def module_status(deploy=False, administrator=None):
         from .module import GodsEyeViewModule
         if not getattr(app.state, "gods_eye_view_module", None):
             app.state.gods_eye_view_module = GodsEyeViewModule(app.state.settings, runtime_for(app))
-        return await app.state.gods_eye_view_module.status(deploy)
+        return await app.state.gods_eye_view_module.status(deploy, administrator)
+
+    app.state.gods_eye_view_status = module_status
 
     @router.get("/api/admin/gods-eye-view/module")
     async def module():
@@ -256,6 +258,13 @@ def mount_gods_eye_view(app, require_admin, require_viewer=None):
     @router.post("/api/admin/gods-eye-view/module/deploy")
     async def deploy_module():
         return await module_status(True)
+
+    @router.post("/api/admin/users/{user_id}/modules/gods_eye_view")
+    async def deploy_module_for_administrator(user_id: str):
+        if selected_platform_admin is None:
+            raise HTTPException(503, "Platform administrator verification is unavailable")
+        administrator = await selected_platform_admin(user_id)
+        return await module_status(True, administrator)
 
     async def invoke(method, *args):
         try:
@@ -403,6 +412,7 @@ def mount_gods_eye_view(app, require_admin, require_viewer=None):
             raise HTTPException(422, "Invalid sensor identifier")
         return await invoke("sensor_location", sensor_id, payload.model_dump())
 
+    @viewer.post("/api/gods-eye-view/chat")
     @router.post("/api/admin/gods-eye-view/chat")
     async def chat(payload: ChatRequest, request: Request):
         if app.state.settings.gods_eye_view_local_mode:

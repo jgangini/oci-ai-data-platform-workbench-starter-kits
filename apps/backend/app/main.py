@@ -8,9 +8,11 @@ from contextlib import asynccontextmanager, suppress
 from typing import Any, AsyncIterator, Callable
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from oci._vendor import requests
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .aidp import (
     AidpClient,
@@ -23,6 +25,7 @@ from .aidp import (
 )
 from .config import Settings, SettingsStore
 from .viewer_identity import mount_identity
+from .viewer_auth import _application as viewer_application, mount_viewer_login
 from .identity import IdentityClient, IdentityConflict, IdentityPending, IdentityRejected, LocalIdentityClient
 from .lab_packs import available_lab_ids, public_lab_catalog
 from .gods_eye_view.api import mount_gods_eye_view, run_local_gods_eye_view
@@ -57,7 +60,7 @@ class UserRequest(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=5, max_length=254)
     lab_ids: list[str] = Field(min_length=1)
-    gods_eye_view: bool = Field(default=False, validation_alias=AliasChoices("gods_eye_view", "territorial_control"))
+    gods_eye_view: bool = Field(default=False, strict=True, validation_alias=AliasChoices("gods_eye_view", "territorial_control"))
 
     @field_validator("name")
     @classmethod
@@ -99,7 +102,13 @@ class RegistrationRequest(UserRequest):
 
 
 class AdminUserRequest(UserRequest):
-    pass
+    lab_ids: list[str] = Field(min_length=0)
+
+    @model_validator(mode="after")
+    def require_access(self):
+        if not self.lab_ids and not self.gods_eye_view:
+            raise ValueError("Choose at least one starter kit or God's Eye View")
+        return self
 
 
 class AdminLabRequest(BaseModel):
@@ -301,24 +310,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def require_admin(request: Request) -> str:
         username = verify_session(request.cookies.get(cookie_name, ""), app.state.session_key)
-        if username != settings.admin_username:
+        if username != settings.admin_username or username.startswith("viewer:"):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Administrator session required")
         return username
 
     require_viewer = mount_access(app, require_admin, cookie_name)
     mount_identity(app, require_admin, require_viewer)
-    mount_gods_eye_view(app, require_admin, require_viewer)
+    mount_viewer_login(app, cookie_name, client_ip)
 
     async def provision_user(name: str, email: str, lab_ids: list[str], gods_eye_view: bool = False) -> JSONResponse:
-        if gods_eye_view and not settings.local_development_mode:
-            raise HTTPException(503, "Participant sign-in for Gods Eye View is not configured on this deployment")
         try:
             identity = app.state.identity_factory()
-            result = await identity.prepare_registration(name, email)
+            if gods_eye_view and not settings.local_development_mode:
+                module = await app.state.gods_eye_view_status()
+                if not (module.get("installed") is True and module.get("enabled") is True and module.get("status") == "ready"):
+                    raise HTTPException(409, "Deploy God's Eye View before granting access")
+                try:
+                    await viewer_application(identity, settings)
+                    if not await identity._gods_eye_view_group():
+                        raise IdentityPending("God's Eye View reader group is not configured yet")
+                except (ValueError, KeyError, TypeError, AttributeError, IdentityPending,
+                        httpx.HTTPError, requests.exceptions.RequestException):
+                    raise HTTPException(503, "OCI viewer sign-in could not be verified") from None
+            result = await (identity.prepare_registration(name, email) if lab_ids
+                            else identity.prepare_registration(name, email, developer_access=False))
         except IdentityConflict as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
         except IdentityRejected as exc:
-            logger.warning("Identity Domains rejected a lab registration: %s", exc)
+            logger.warning("Identity Domains rejected a lab registration (%s)", type(exc).__name__)
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "Identity Domains rejected this registration request",
@@ -328,67 +347,76 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=202,
                 content={"status": "pending", "phase": "identity", "message": str(exc)},
             )
-        aidp = app.state.aidp_factory()
+        except (httpx.HTTPError, requests.exceptions.RequestException):
+            raise HTTPException(503, "Identity Domains could not be verified") from None
+        if lab_ids:
+            aidp = app.state.aidp_factory()
 
-        async def restore_existing_access() -> None:
-            if not result.was_developer:
-                return
-            try:
-                await identity.activate_registration(result.user_id)
-            except IdentityPending as exc:
-                raise HTTPException(
-                    status.HTTP_503_SERVICE_UNAVAILABLE,
-                    "Prior developer access is still being restored",
-                ) from exc
+            async def restore_existing_access() -> None:
+                if not result.was_developer:
+                    return
+                try:
+                    await identity.activate_registration(result.user_id)
+                except IdentityPending as exc:
+                    raise HTTPException(
+                        status.HTTP_503_SERVICE_UNAVAILABLE,
+                        "Prior developer access is still being restored",
+                    ) from exc
 
-        if result.status != "created":
+            if result.status != "created":
+                try:
+                    current = await aidp.list_user_labs([result.user_ocid])
+                except (AidpProvisionPending, AidpProvisionError) as exc:
+                    await restore_existing_access()
+                    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+                assigned = {material.lab_id for material in current.get(result.user_ocid, [])}
+                requested = set(lab_ids)
+                if (assigned or result.was_developer) and assigned != requested:
+                    await restore_existing_access()
+                    raise HTTPException(
+                        status.HTTP_409_CONFLICT,
+                        "Existing lab assignments can only be changed by an administrator",
+                    )
+            participant_code = app.state.settings_store.participant_code(result.email)
             try:
-                current = await aidp.list_user_labs([result.user_ocid])
-            except (AidpProvisionPending, AidpProvisionError) as exc:
+                material = await aidp.provision_user(
+                    result.user_ocid, email, lab_ids, participant_code
+                )
+            except AidpProvisionPending as exc:
+                await restore_existing_access()
+                return JSONResponse(
+                    status_code=202,
+                    content={"status": "pending", "phase": exc.phase, "message": str(exc)},
+                )
+            except AidpProvisionConflict as exc:
+                await restore_existing_access()
+                raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+            except AidpProvisionError as exc:
                 await restore_existing_access()
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-            assigned = {material.lab_id for material in current.get(result.user_ocid, [])}
-            requested = set(lab_ids)
-            if (assigned or result.was_developer) and assigned != requested:
-                await restore_existing_access()
-                raise HTTPException(
-                    status.HTTP_409_CONFLICT,
-                    "Existing lab assignments can only be changed by an administrator",
-                )
-        participant_code = app.state.settings_store.participant_code(result.email)
         try:
-            material = await aidp.provision_user(
-                result.user_ocid, email, lab_ids, participant_code
-            )
-        except AidpProvisionPending as exc:
-            await restore_existing_access()
-            return JSONResponse(
-                status_code=202,
-                content={"status": "pending", "phase": exc.phase, "message": str(exc)},
-            )
-        except AidpProvisionConflict as exc:
-            await restore_existing_access()
-            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-        except AidpProvisionError as exc:
-            await restore_existing_access()
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        try:
-            await identity.activate_registration(result.user_id)
+            if lab_ids:
+                await identity.activate_registration(result.user_id)
+            else:
+                await identity.activate_registration(result.user_id, developer_access=False)
+            if gods_eye_view:
+                await identity.grant_gods_eye_view(result.user_id, True)
         except IdentityPending as exc:
             return JSONResponse(
                 status_code=202,
                 content={"status": "pending", "phase": "permissions", "message": str(exc)},
             )
-        content = _material_payload(
-            material,
-            result.email,
-            app.state.settings_store.get_workbench_url(),
-        )
-        if isinstance(identity, LocalIdentityClient):
-            if gods_eye_view:
-                await identity.grant_gods_eye_view(result.user_id, True)
+        except IdentityRejected:
+            raise HTTPException(409, "God's Eye View access could not be granted") from None
+        except (httpx.HTTPError, requests.exceptions.RequestException):
+            raise HTTPException(503, "Identity Domains could not be verified") from None
+        content = (_material_payload(material, result.email, app.state.settings_store.get_workbench_url())
+                   if lab_ids else {"status": "active", "email": result.email, "labs": []})
+        if lab_ids and isinstance(identity, LocalIdentityClient):
             await identity.record_material(result.user_id, content)
             content["local_access"] = {"simulated": True, "login_url": "/local/gods-eye-view/login", "delivery": "Local welcome file; no email sent"}
+        if gods_eye_view:
+            content.update(gods_eye_view_access=True, viewer_url="/local/gods-eye-view/login" if settings.local_development_mode else "/viewer/login")
         return JSONResponse(status_code=201 if result.status == "created" else 200, content=content)
 
     @app.get("/api/health")
@@ -442,11 +470,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "registration_code_pattern": "AAAA-0000",
             "labs": public_lab_catalog(),
             "local_participant_access": settings.local_development_mode,
+            "viewer_signin_enabled": bool(settings.viewer_oidc_app_name and settings.gods_eye_view_group_id),
         }
 
     @app.post("/api/register")
     async def register(payload: RegistrationRequest, request: Request) -> JSONResponse:
         require_registration_ready()
+        if payload.gods_eye_view and not settings.local_development_mode:
+            raise HTTPException(403, "An administrator must grant God's Eye View access")
         source_ip = client_ip(request)
         invalid_retry_after = app.state.invalid_code_limiter.retry_after(source_ip)
         if invalid_retry_after:
@@ -619,6 +650,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "The selected user is not an AI_DATA_PLATFORM_ADMIN")
         return dict(matches[0])
 
+    mount_gods_eye_view(app, require_admin, require_viewer, selected_platform_admin)
+
     async def module_pending_response(
         operation_id: str, operation_type: str, exc: AidpProvisionPending
     ) -> JSONResponse:
@@ -734,7 +767,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/admin/users")
     async def admin_create_user(payload: AdminUserRequest, _admin: str = Depends(require_admin)) -> JSONResponse:
         require_identity()
-        if not settings.aidp_ready():
+        if payload.lab_ids and not settings.aidp_ready():
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
         return await provision_user(payload.name, payload.email, payload.lab_ids, payload.gods_eye_view)
 
@@ -752,9 +785,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             user = await identity.get_lab_user(user_id)
             if user is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Lab user not found")
-            material = await app.state.aidp_factory().add_lab(
-                user["ocid"], user["email"], payload.lab_id
-            )
+            aidp = app.state.aidp_factory()
+            current = await aidp.list_user_labs([user["ocid"]])
+            if current.get(user["ocid"]):
+                material = await aidp.add_lab(user["ocid"], user["email"], payload.lab_id)
+            else:
+                material = await aidp.provision_user(user["ocid"], user["email"], [payload.lab_id],
+                                                   app.state.settings_store.participant_code(user["email"]))
+            await identity.activate_registration(user_id)
         except IdentityConflict as exc:
             raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
         except IdentityPending as exc:

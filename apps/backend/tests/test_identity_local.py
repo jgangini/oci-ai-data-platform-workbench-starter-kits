@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.identity import LocalIdentityClient
+from app.identity import IdentityRejected, LocalIdentityClient
 
 
 def test_local_user_credentials_material_and_permission_survive_restart(tmp_path):
@@ -52,3 +52,22 @@ def test_local_user_credentials_material_and_permission_survive_restart(tmp_path
 def test_local_artifacts_cannot_be_enabled_in_cloud(tmp_path):
     with pytest.raises(ValueError, match="LOCAL_DEVELOPMENT_MODE"):
         LocalIdentityClient(SimpleNamespace(local_development_mode=False, local_identity_artifact_dir=str(tmp_path)))
+
+
+def test_local_pending_and_disabled_accounts_cannot_receive_module_access():
+    async def run():
+        identity = LocalIdentityClient(SimpleNamespace(local_development_mode=True))
+        registered = await identity.prepare_registration("Participant", "participant@example.com")
+        assert (await identity.get_gods_eye_view_account(registered.user_id))["status"] == "pending"
+        with pytest.raises(IdentityRejected, match="Only active users"):
+            await identity.grant_gods_eye_view(registered.user_id, True)
+        await identity.activate_registration(registered.user_id)
+        await identity.grant_gods_eye_view(registered.user_id, True)
+        identity.users[registered.user_id]["active"] = False
+        assert await identity.gods_eye_view_user(registered.user_id) is None
+        with pytest.raises(IdentityRejected, match="Only active users"):
+            await identity.grant_gods_eye_view(registered.user_id, True)
+        await identity.grant_gods_eye_view(registered.user_id, False)
+        assert not (await identity.get_gods_eye_view_account(registered.user_id))["gods_eye_view_access"]
+
+    asyncio.run(run())

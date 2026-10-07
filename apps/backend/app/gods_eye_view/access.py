@@ -1,8 +1,12 @@
-"""Local participant access uses the normal signed session and explicit project grants."""
+"""Shared viewer access uses signed sessions and explicit OCI or local membership."""
 from fastapi import Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
+from urllib.parse import urlsplit
+import httpx
+from oci._vendor import requests
 
 from ..security import issue_session, verify_session
+from ..identity import IdentityConflict, IdentityPending, IdentityRejected
 
 
 class ParticipantLogin(BaseModel):
@@ -12,7 +16,7 @@ class ParticipantLogin(BaseModel):
 
 
 class ProjectGrant(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     enabled: bool
 
 
@@ -21,10 +25,16 @@ def mount_access(app, require_admin, cookie_name):
 
     async def require_viewer(request: Request):
         subject = verify_session(request.cookies.get(cookie_name, ""), app.state.session_key)
-        if subject == settings.admin_username:
+        if subject == settings.admin_username and not subject.startswith("viewer:"):
             return subject
-        if settings.local_development_mode and subject and subject.startswith(("local-gods-eye-view:", "local-territorial:", "local-prisma:")):
-            user = await app.state.identity_factory().gods_eye_view_user(subject.split(":", 1)[1])
+        prefixes = ("viewer:",)
+        if settings.local_development_mode:
+            prefixes += ("local-gods-eye-view:", "local-territorial:", "local-prisma:")
+        if subject and subject.startswith(prefixes):
+            try:
+                user = await app.state.identity_factory().gods_eye_view_user(subject.split(":", 1)[1])
+            except (IdentityPending, httpx.HTTPError, requests.exceptions.RequestException):
+                raise HTTPException(503, "Viewer access could not be verified") from None
             if user:
                 return subject
         raise HTTPException(401, "Gods Eye View access required")
@@ -38,7 +48,38 @@ def mount_access(app, require_admin, cookie_name):
         response.headers["X-Gods-Eye-View-User"] = subject
         response.headers["X-Territorial-User"] = wire_subject
         response.headers["X-PRISMA-User"] = wire_subject
-        return {"username": subject}
+        role = "admin" if subject == settings.admin_username and not subject.startswith("viewer:") else "reader"
+        response.headers["X-Gods-Eye-View-Role"] = role
+        response.headers["Cache-Control"] = "no-store"
+        return {"username": subject, "role": role}
+
+    @app.put("/api/admin/prisma/users/{user_id}", include_in_schema=False)
+    @app.put("/api/admin/territorial/users/{user_id}", include_in_schema=False)
+    @app.put("/api/admin/gods-eye-view/users/{user_id}")
+    async def grant(user_id: str, payload: ProjectGrant, request: Request, _admin=Depends(require_admin)):
+        if request.headers.get("origin"):
+            origin = urlsplit(request.headers["origin"])
+            host = request.headers.get("x-forwarded-host", request.headers.get("host", ""))
+            if origin.scheme != request.url.scheme or origin.netloc != host or origin.path or origin.query or origin.fragment:
+                raise HTTPException(403, "Same-origin request required")
+        identity = app.state.identity_factory()
+        try:
+            if not await identity.get_gods_eye_view_account(user_id):
+                raise HTTPException(404, "Participant not found")
+            if payload.enabled and not settings.local_development_mode:
+                module = await app.state.gods_eye_view_status()
+                if not (module.get("installed") is True and module.get("enabled") is True and module.get("status") == "ready"):
+                    raise HTTPException(409, "Deploy God's Eye View before granting access")
+                if not settings.viewer_oidc_app_name:
+                    raise HTTPException(503, "OCI viewer sign-in is not configured")
+            await identity.grant_gods_eye_view(user_id, payload.enabled)
+        except (IdentityConflict, IdentityRejected) as exc:
+            raise HTTPException(409, str(exc)) from None
+        except IdentityPending as exc:
+            raise HTTPException(503, str(exc)) from None
+        except (httpx.HTTPError, requests.exceptions.RequestException):
+            raise HTTPException(503, "Viewer access could not be verified") from None
+        return {"enabled": payload.enabled, "mode": "SIMULATED" if settings.local_development_mode else "OCI"}
 
     if settings.local_development_mode:
         @app.post("/api/local/prisma/login", status_code=204, include_in_schema=False)
@@ -67,15 +108,5 @@ def mount_access(app, require_admin, cookie_name):
             return {"mode": "SIMULATED", "project": "God's Eye View", "user": user,
                     "project_access": {"workspace_path": "/Workspace/medallion/gods_eye_view", "role": "reader", "simulated": True},
                     "viewer_url": "/gods-eye-view/", "message": "Local access simulation. No OCI identity or email was created."}
-
-        @app.put("/api/admin/prisma/users/{user_id}", include_in_schema=False)
-        @app.put("/api/admin/territorial/users/{user_id}", include_in_schema=False)
-        @app.put("/api/admin/gods-eye-view/users/{user_id}")
-        async def grant(user_id: str, payload: ProjectGrant, _admin=Depends(require_admin)):
-            identity = app.state.identity_factory()
-            if not await identity.get_lab_user(user_id):
-                raise HTTPException(404, "Participant not found")
-            await identity.grant_gods_eye_view(user_id, payload.enabled)
-            return {"enabled": payload.enabled, "mode": "SIMULATED"}
 
     return require_viewer

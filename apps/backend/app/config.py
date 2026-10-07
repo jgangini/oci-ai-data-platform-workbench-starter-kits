@@ -64,6 +64,9 @@ class Settings:
     identity_domain_url: str = ""
     developer_group_id: str = ""
     pending_group_id: str = ""
+    gods_eye_view_group_id: str = ""
+    viewer_oidc_app_name: str = ""
+    viewer_oidc_redirect_uri: str = ""
     aidp_workbench_url: str = ""
     aidp_platform_id: str = ""
     aidp_workspace_name: str = ""
@@ -115,6 +118,9 @@ class Settings:
             identity_domain_url=os.getenv("IDENTITY_DOMAIN_URL", "").rstrip("/"),
             developer_group_id=os.getenv("IDENTITY_DEVELOPER_GROUP_ID", ""),
             pending_group_id=os.getenv("IDENTITY_PENDING_GROUP_ID", ""),
+            gods_eye_view_group_id=os.getenv("IDENTITY_GODS_EYE_VIEW_GROUP_ID", ""),
+            viewer_oidc_app_name=os.getenv("IDENTITY_VIEWER_APP_NAME", ""),
+            viewer_oidc_redirect_uri=os.getenv("VIEWER_OIDC_REDIRECT_URI", ""),
             aidp_workbench_url=os.getenv("AIDP_WORKBENCH_URL", ""),
             aidp_platform_id=os.getenv("AIDP_PLATFORM_ID", ""),
             aidp_workspace_name=os.getenv("AIDP_WORKSPACE_NAME", ""),

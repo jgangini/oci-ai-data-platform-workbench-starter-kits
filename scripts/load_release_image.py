@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -84,7 +85,7 @@ def load(tag: str, commit: str, component: str) -> str:
         image_tag = validate_manifest(json.loads((root / manifest_name).read_text()), tag=tag,
                                       commit=commit, component=component, digest=assets[image_name][1])
         _download(assets[image_name][0], root / image_name, assets[image_name][1], 4 * 1024 ** 3)
-        subprocess.run(["docker", "load", "--input", str(root / image_name)], check=True)
+        subprocess.run(["docker", "load", "--input", str(root / image_name)], check=True, stdout=sys.stderr)
         platform = subprocess.check_output(
             ["docker", "image", "inspect", image_tag, "--format", "{{.Os}}/{{.Architecture}}"], text=True,
         ).strip()

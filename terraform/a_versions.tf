@@ -18,5 +18,6 @@ terraform {
 }
 
 provider "oci" {
-  region = var.region
+  region              = var.region
+  ignore_defined_tags = ["Oracle-Tags.CreatedBy", "Oracle-Tags.CreatedOn"]
 }

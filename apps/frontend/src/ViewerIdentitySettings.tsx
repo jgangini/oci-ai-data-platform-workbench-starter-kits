@@ -45,9 +45,8 @@ export function ViewerIdentitySettings({ api }: { api: GodsEyeViewApi }) {
     {error && <p role="alert" className="gods-eye-view-error">{error}</p>}
     {error && !identity && <button type="button" className="secondary" disabled={busy} onClick={() => setReload(value => value + 1)}>Retry</button>}
     {message && <p role="status" className="gods-eye-view-success">{message}</p>}
-    {confirmation && <SettingsConfirmation title="Save viewer name and description?" confirmLabel="Save Name"
-      description="This updates the browser tab title, loading page and viewer heading for everyone. Reload the viewer to apply the changes. Blank fields restore their original values."
-      changes={[`Name: ${confirmation.name.trim() || "God's Eye View (original)"}`, `Description: ${confirmation.description.trim() || 'NO PLACE LEFT BEHIND (original)'}`]}
+    {confirmation && <SettingsConfirmation title="Save viewer name and description?" confirmLabel="Save"
+      description={<>Set the viewer name to <strong className="confirmation-value">{confirmation.name.trim() || "God's Eye View (original)"}</strong> and description to <strong className="confirmation-value">{confirmation.description.trim() || 'NO PLACE LEFT BEHIND (original)'}</strong> for everyone. Reload the viewer to update its browser tab, loading page and heading.</>}
       onCancel={() => setConfirmation(null)} onConfirm={() => void save()} />}
   </form>;
 }

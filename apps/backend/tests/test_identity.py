@@ -688,7 +688,7 @@ def test_admin_listing_includes_managed_user_without_group() -> None:
             "active@example.com": "active",
             "group-active@example.com": "active",
             "group-pending@example.com": "pending",
-            "orphan@example.com": "pending",
+            "orphan@example.com": "active",
         }
         await client.close()
 

@@ -38,13 +38,11 @@ export function CaptureScheduleForm({ schedule, api, kind, disabled, onUpdate }:
         <label>Capture interval (minutes)<input type="number" min="1" max="1440" step="1" required value={interval} onChange={event => setInterval(event.target.value === '' ? '' : Number(event.target.value))} /></label>
         <button type="submit">{busy ? 'Saving…' : 'Save schedule'}</button></div>
       {saved && <small>{!saved.start_at && 'Schedule not configured. '}Applies to {kind === 'social' ? 'all four social networks' : 'all sensor types'}. Times use your browser time zone; paused and completed captures stay stopped.</small>}
-      {dirty && schedule && <div className="gods-eye-view-source-actions"><button type="button" className="secondary" onClick={() => { receive(schedule); setError(''); setMessage(''); }}>Discard schedule changes</button></div>}
-      {dirty && schedule && schedule.config_version !== saved?.config_version && <p role="status">Schedule changed elsewhere. Discard changes to load it; Save will check for a conflict.</p>}
+      {dirty && schedule && schedule.config_version !== saved?.config_version && <p role="status">Schedule changed elsewhere. Reload this page to load the latest schedule before saving.</p>}
       {message && <p role="status" className="gods-eye-view-success">{message}</p>}{error && <p role="alert" className="gods-eye-view-error">{error}</p>}
     </fieldset>
-    {confirmation && <SettingsConfirmation title={`Save ${kind === 'social' ? 'social networks' : 'sensors'} capture schedule?`} confirmLabel="Save schedule"
-      description={`This replaces the shared start time and capture interval for ${kind === 'social' ? 'all four social networks' : 'all sensor types'}. Paused and completed captures remain stopped.`}
-      changes={[`Scheduled: ${scheduleLocalTime(confirmation.start_at).replace('T', ' ')} · ${zone}`, `Capture interval: ${confirmation.interval_minutes} minutes`]}
+    {confirmation && <SettingsConfirmation title={`Save ${kind === 'social' ? 'social networks' : 'sensors'} capture schedule?`} confirmLabel="Save"
+      description={<>Schedule captures for {kind === 'social' ? 'all four social networks' : 'all sensor types'} starting <strong className="confirmation-value">{scheduleLocalTime(confirmation.start_at).replace('T', ' ')} · {zone}</strong>, every <strong className="confirmation-value">{confirmation.interval_minutes} minutes</strong>. Paused and completed captures remain stopped.</>}
       onCancel={() => setConfirmation(null)} onConfirm={() => void save()} />}
   </form>;
 }

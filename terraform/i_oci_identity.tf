@@ -35,6 +35,39 @@ resource "oci_identity_domains_group" "pending" {
   }
 }
 
+resource "oci_identity_domains_group" "gods_eye_view_readers" {
+  provider      = oci.home
+  idcs_endpoint = local.default_domain.url
+  schemas       = ["urn:ietf:params:scim:schemas:core:2.0:Group"]
+  display_name  = "aidp-viewer-readers-${local.suffix}"
+  external_id   = "${local.name_prefix}:gods_eye_view"
+  force_delete  = true
+  lifecycle {
+    ignore_changes = [schemas]
+  }
+}
+
+# One public PKCE sign-in application for this portal; no provisioning/API privileges.
+resource "oci_identity_domains_app" "viewer" {
+  provider      = oci.home
+  idcs_endpoint = local.default_domain.url
+  schemas       = ["urn:ietf:params:scim:schemas:oracle:idcs:App"]
+  display_name  = "Starter Kits viewer ${local.suffix}"
+  name          = "aidp_viewer_${local.suffix}"
+  based_on_template {
+    value = "CustomBrowserMobileTemplateId"
+  }
+  active          = true
+  is_oauth_client = true
+  client_type     = "public"
+  allowed_grants  = ["authorization_code"]
+  redirect_uris   = ["https://${data.oci_core_vnic.lab.public_ip_address}/api/auth/oci/callback"]
+  force_delete    = true
+  lifecycle {
+    ignore_changes = [schemas]
+  }
+}
+
 resource "oci_identity_policy" "developer_console" {
   provider       = oci.home
   compartment_id = var.tenancy_ocid
