@@ -19,6 +19,18 @@ resource "oci_identity_policy" "aidp_service" {
   ]
 }
 
+# IAM changes are replicated from the home region. Creating AIDP immediately
+# after the policy can fail its internal bucket creation before permissions arrive.
+# ponytail: bounded propagation window; replace with a native readiness probe
+# when OCI exposes one for the AIDP service principal.
+resource "time_sleep" "aidp_iam_propagation" {
+  create_duration = "5m"
+  triggers = {
+    policy_id         = oci_identity_policy.aidp_service.id
+    policy_statements = sha256(jsonencode(oci_identity_policy.aidp_service.statements))
+  }
+}
+
 resource "oci_ai_data_platform_ai_data_platform" "lab" {
   compartment_id         = local.target_compartment
   display_name           = local.name_prefix
@@ -38,7 +50,7 @@ resource "oci_ai_data_platform_ai_data_platform" "lab" {
     create = "120m"
   }
 
-  depends_on = [oci_identity_policy.aidp_service]
+  depends_on = [time_sleep.aidp_iam_propagation]
 }
 
 data "oci_identity_tenancy" "current" {

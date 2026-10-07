@@ -405,6 +405,9 @@ def test_runtime_security_contracts() -> None:
     assert 'alias_key == null ? "" : oci_ai_data_platform_ai_data_platform.lab.alias_key' in aidp
     assert 'timeouts {' in aidp
     assert 'create = "120m"' in aidp
+    assert 'depends_on = [time_sleep.aidp_iam_propagation]' in aidp
+    assert 'sha256(jsonencode(oci_identity_policy.aidp_service.statements))' in aidp
+    assert 'create_duration = "5m"' in aidp
     network = (root / "terraform/e_oci_core_vcn.tf").read_text(encoding="utf-8")
     assert 'resource "oci_core_security_list" "web"' in network
     assert "security_list_ids          = [oci_core_security_list.web.id]" in network

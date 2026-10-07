@@ -22,6 +22,16 @@ MODEL_TYPE_BASE = "BASE"
 DEFAULT_ARTIFACTS_BUCKET = "oci_artifacts"
 
 
+def _require_automatic_tag_defaults(identity: Any, compartment_id: str) -> str:
+    defaults = _list_all(identity.assemble_effective_tag_set, compartment_id=compartment_id, lifecycle_state="ACTIVE")
+    if any(item.is_required for item in defaults):
+        raise RuntimeError(
+            "AIDP creates internal buckets without user-supplied tag values. "
+            "Configure automatic values for inherited required tag defaults before deployment."
+        )
+    return f"{len(defaults)} inherited tag defaults have automatic values; tenancy defaults will be preserved"
+
+
 def _require_new_bucket_available(object_storage: Any, bucket_name: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", bucket_name) is None:
         raise ValueError("The artifacts bucket name must contain 1-128 letters, numbers, dots, underscores, or hyphens")
@@ -261,6 +271,7 @@ def select_inputs(
         target,
         mode,
     )
+    tags_message = _require_automatic_tag_defaults(identity, tenancy_id if mode == "new" else target)
     home_region = _home_region(identity, tenancy_id)
     availability_domains = identity.list_availability_domains(tenancy_id).data
     compute = compute_factory(regional_config)
@@ -304,6 +315,7 @@ def select_inputs(
                         "message": compartment_message,
                     },
                     {"name": "OCI tenancy home region", "status": "passed", "message": home_region},
+                    {"name": "Inherited tag defaults", "status": "passed", "message": tags_message},
                     {"name": "Regional Agent LLM", "status": "passed", "message": model_name},
                     {"name": "Autonomous AI Database 26ai", "status": "passed", "message": database_message},
                     {

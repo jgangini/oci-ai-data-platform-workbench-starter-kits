@@ -28,6 +28,9 @@ SPEC.loader.exec_module(preflight)
 
 
 class Identity:
+    def assemble_effective_tag_set(self, **_kwargs: Any) -> Any:
+        return SimpleNamespace(data=[], headers={})
+
     def get_user(self, _user_ocid: str) -> Any:
         return SimpleNamespace(data=SimpleNamespace(name="joel.ganggini@oracle.com"))
 
@@ -47,6 +50,23 @@ class Identity:
 
     def list_compartments(self, **_kwargs: Any) -> Any:
         return SimpleNamespace(data=[], headers={})
+
+def test_inherited_required_tags_fail_before_creating_resources() -> None:
+    identity = Identity()
+    identity.assemble_effective_tag_set = lambda **kwargs: SimpleNamespace(
+        data=[SimpleNamespace(is_required=True)], headers={}
+    )
+    with pytest.raises(RuntimeError, match="internal buckets without user-supplied tag values"):
+        preflight._require_automatic_tag_defaults(identity, "compartment")
+
+
+def test_automatic_inherited_tags_are_preserved() -> None:
+    identity = Identity()
+    identity.assemble_effective_tag_set = lambda **kwargs: SimpleNamespace(
+        data=[SimpleNamespace(is_required=False), SimpleNamespace(is_required=False)], headers={}
+    )
+    assert preflight._require_automatic_tag_defaults(identity, "compartment").startswith("2 inherited")
+
 
 class Compute:
     def __init__(self, statuses: dict[str, tuple[str, str]]) -> None:
