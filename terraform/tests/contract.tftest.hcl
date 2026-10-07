@@ -1,4 +1,6 @@
 mock_provider "oci" {}
+mock_provider "time" {}
+
 mock_provider "oci" {
   alias = "home"
 }
