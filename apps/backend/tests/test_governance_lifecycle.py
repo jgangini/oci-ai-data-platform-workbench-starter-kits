@@ -43,6 +43,49 @@ def manifest(operation_type: str, *, phase: str = "permissions") -> dict:
     }
 
 
+@pytest.mark.parametrize(
+    ("returned_path", "object_type", "accepted"),
+    [
+        ("/Workspace/", "FOLDER", True),
+        ("/Workspace", "FOLDER", True),
+        ("/Workspace/", "FILE", False),
+        ("/Workspace//", "FOLDER", False),
+        ("/Workspace/other", "FOLDER", False),
+        ("/Workspace/../other", "FOLDER", False),
+    ],
+)
+def test_workspace_object_key_validates_native_folder_path(
+    returned_path: str, object_type: str, accepted: bool
+) -> None:
+    client = module_client()
+    client._workspace_object = lambda *_args, **_kwargs: (
+        None, {"folder": returned_path, "type": object_type}
+    )
+    if accepted:
+        assert client._workspace_object_key("workspace", "/Workspace") == returned_path
+    else:
+        with pytest.raises(AidpProvisionError, match="mismatched workspace object path"):
+            client._workspace_object_key("workspace", "/Workspace")
+
+
+@pytest.mark.parametrize("object_type", ["FILE", "NOTEBOOK"])
+@pytest.mark.parametrize("display_name", ["manifest.json", "other.json", "../manifest.json"])
+def test_workspace_object_key_uses_native_file_name(
+    object_type: str, display_name: str
+) -> None:
+    client = module_client()
+    client._workspace_object = lambda *_args, **_kwargs: (
+        {"arbitrary_content": True},
+        {"folder": "/Workspace/.control/", "display-name": display_name, "type": object_type},
+    )
+    path = "/Workspace/.control/manifest.json"
+    if display_name == "manifest.json":
+        assert client._workspace_object_key("workspace", path) == path
+    else:
+        with pytest.raises(AidpProvisionError, match="mismatched workspace object path"):
+            client._workspace_object_key("workspace", path)
+
+
 def test_module_manifest_requires_a_canonical_uuid_operation_id() -> None:
     state = manifest("install")
     assert AidpClient._module_manifest_valid(state) is True
@@ -137,6 +180,78 @@ def test_latest_run_must_belong_to_current_published_revision() -> None:
         {"key": "old", "jobVersion": "1", "runState": "SUCCESS", "timeStarted": "2026-08-24T00:00:01Z"}
     ]
     assert client._successful_governance_sync("workspace", "job") is False
+
+
+@pytest.mark.parametrize("status", ["SUCCESS", "RUNNING", "FAILED", "INTERNAL_ERROR", "TIMED_OUT", "UPSTREAM_FAILED", "UPSTREAM_CANCELED"])
+def test_governance_sync_reads_native_filtered_paginated_job_runs(status: str) -> None:
+    client = module_client()
+    pages = []
+
+    def request(method, path, **kwargs):
+        assert method == "GET"
+        assert kwargs["phase"] == "sync"
+        if path == "/workspaces/workspace/jobs/job":
+            return {"timeUpdated": "2026-08-24T00:00:10Z"}
+        assert path == "/workspaces/workspace/jobRuns"
+        assert kwargs["include_headers"] is True
+        query = kwargs["params"]
+        assert query["jobKey"] == "job"
+        assert query["limit"] == "100"
+        pages.append(query.get("page"))
+        if "page" not in query:
+            return {"items": [
+                {"key": "old", "jobKey": "job", "state": {"status": "SUCCESS"}, "startTime": 1787529609000},
+                {"key": "foreign", "jobKey": "other-job", "state": {"status": "FAILED"}, "startTime": 1787529620000},
+            ]}, {"opc-next-page": "next"}
+        assert query["page"] == "next"
+        return {"items": [
+            {"key": "current", "jobKey": "job", "state": {"status": status}, "startTime": 1787529611000},
+        ]}, {}
+
+    client._request = request
+    if status not in {"SUCCESS", "RUNNING"}:
+        with pytest.raises(AidpProvisionError, match="synchronization failed closed"):
+            client._successful_governance_sync("workspace", "job")
+    else:
+        assert client._successful_governance_sync("workspace", "job") is (status == "SUCCESS")
+    assert pages == [None, "next"]
+
+
+def test_governance_sync_does_not_accept_another_jobs_success() -> None:
+    client = module_client()
+    client._list = lambda *_args, **_kwargs: [
+        {"key": "foreign", "jobKey": "other-job", "jobVersion": "2", "state": {"status": "SUCCESS"}},
+    ]
+    client._request = lambda *_args, **_kwargs: {"version": "2"}
+    assert client._successful_governance_sync("workspace", "job") is False
+
+
+@pytest.mark.parametrize("existing_runs", [[], [{"key": "existing", "jobKey": "job"}]])
+def test_initial_governance_sync_is_submitted_only_without_run_history(existing_runs) -> None:
+    client = module_client()
+    state = manifest("install", phase="control")
+    client._ensure_governance_bucket = lambda: False
+    client._ensure_governance_credential = lambda: ("credential", False)
+    client._shared_compute = lambda _workspace: {"key": "compute"}
+    client._ensure_governance_job = lambda *_args, **_kwargs: ("job", False)
+    client._write_module_manifest = lambda *_args: None
+    requests = []
+
+    def request(method, path, **kwargs):
+        requests.append((method, path, kwargs))
+        if method == "GET":
+            assert path == "/workspaces/workspace/jobRuns"
+            assert kwargs["params"]["jobKey"] == "job"
+            return {"items": existing_runs}, {}
+        assert method == "POST" and path == "/workspaces/workspace/jobRuns"
+        assert kwargs["payload"] == {"jobKey": "job", "parameters": [], "queue": {"isEnabled": False}}
+        assert kwargs["retry_scope"] == "governance-bootstrap:" + OPERATION_ID
+        return {"key": "started"}
+
+    client._request = request
+    client._reconcile_governance_control("workspace", state, "install")
+    assert [method for method, _, _ in requests] == (["GET"] if existing_runs else ["GET", "POST"])
+    assert state["phase"] == "sync"
 
 
 def test_sync_without_revision_requires_a_run_after_the_publish_marker() -> None:

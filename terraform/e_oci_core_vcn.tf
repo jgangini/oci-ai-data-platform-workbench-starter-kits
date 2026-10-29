@@ -41,6 +41,19 @@ resource "oci_core_security_list" "web" {
     protocol    = "all"
     destination = "0.0.0.0/0"
   }
+
+  dynamic "ingress_security_rules" {
+    for_each = var.ssh_allowed_cidr == "" ? [] : [var.ssh_allowed_cidr]
+    content {
+      protocol    = "6"
+      source      = ingress_security_rules.value
+      description = "VM SSH from the administrator's authorized source"
+      tcp_options {
+        min = 22
+        max = 22
+      }
+    }
+  }
 }
 
 resource "oci_core_internet_gateway" "lab" {

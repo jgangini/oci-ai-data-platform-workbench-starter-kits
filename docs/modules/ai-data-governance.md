@@ -72,6 +72,16 @@ Selecting another user does not create a new installation: the backend reconcile
 Concurrent installs reuse the current installation operation; failed operations resume with their original `operation_id`.
 An HTTP `202` response means reconciliation remains pending, not that the module is ready.
 
+Synchronization monitoring uses the native [Get job runs API](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aiwap/op-aidataplatforms-aidataplatformid-workspaces-workspacekey-jobruns-get.html):
+`GET /workspaces/{workspaceKey}/jobRuns` filtered by `jobKey`, following every pagination token.
+The latest run must match the current published revision or synchronization timestamp; a run identifying another job cannot establish readiness.
+Native execution results are read from `state.status`, with legacy string states retained for compatibility.
+Failed, canceled, timed-out or upstream-failed runs stop installation; a pending or running result keeps reconciliation pending.
+After updating an affected portal, reopen the module dialog and use **Resume** to continue its existing operation and resources.
+During a retry, the dialog shows the current progress instead of retaining the prior operation's error badge and fallback alert. A new failure remains visible.
+Control reconciliation submits the initial native job run when its history is empty, using the operation ID for retry deduplication and disabling queueing. Existing run history and paused redeploys are preserved.
+Permission reconciliation accepts the native folder representation `/Workspace/` for `/Workspace`. This equivalence applies only to a confirmed folder and one terminal slash. For files and notebooks, native `folder` identifies the parent; `display-name` completes the object path. The resulting path must still exactly match the requested object before its permissions are reconciled.
+
 ```mermaid
 flowchart TD
     Request[Authorized install or redeploy] --> Verify[Verify bucket and singleton manifest]

@@ -61,7 +61,10 @@ def test_deploy_studio_manifest_contract() -> None:
     assert "preferred_vm_shape" not in fields
     assert "vm_ocpus" not in fields
     assert "vm_memory_gbs" not in fields
-    assert "ssh_allowed_cidr" not in fields
+    assert fields["ssh_allowed_cidr"]["required"] is False
+    assert fields["ssh_allowed_cidr"]["default"] == ""
+    assert "ssh-private-key.pem" in manifest["artifacts"]
+    assert "ssh-private-key.pem" in manifest["email"]["attachments"]
     assert fields["admin_password"]["transform"] == "pbkdf2_sha256"
     assert fields["registration_code"]["pattern"] == "^[A-Z]{4}-[0-9]{4}$"
     assert fields["registration_code"]["transform"] == "uppercase_pbkdf2_sha256"
@@ -223,7 +226,10 @@ def test_hook_result_matches_runner_and_manifest_contract() -> None:
         "aidp_runtime_ready": True,
         "aidp_external_volume_count": 0,
     }
-    assert {item["name"] for item in result["artifacts"]} == set(manifest["artifacts"]) - {"adb_wallet.zip"}
+    # Resource Manager collects the wallet and sensitive TLS key from state.
+    assert {item["name"] for item in result["artifacts"]} == set(manifest["artifacts"]) - {
+        "adb_wallet.zip", "ssh-private-key.pem"
+    }
     assert set(result["outputs"]).issubset(manifest["outputs"])
     artifact = json.loads(base64.b64decode(result["artifacts"][0]["content_b64"]))
     assert artifact["schema_version"] == 2

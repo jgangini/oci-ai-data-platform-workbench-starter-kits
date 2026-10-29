@@ -1140,12 +1140,23 @@ class AidpClient:
         if object_key:
             return object_key
         object_path = str(
-            normalized.get("folder")
-            or normalized.get("path")
+            normalized.get("path")
             or (body.get("path") if isinstance(body, dict) else "")
             or ""
         )
-        if object_path and object_path != path:
+        object_type = self._workspace_object_type(body, headers)
+        if not object_path:
+            object_path = str(normalized.get("folder") or "")
+            display_name = str(normalized.get("display-name") or "")
+            if object_path and display_name and object_type in {"FILE", "NOTEBOOK"}:
+                object_path = object_path.removesuffix("/") + "/" + display_name
+        # Native folder metadata may include a terminal slash (notably /Workspace/).
+        # Only accept that representation for a confirmed folder; preserve all
+        # other path checks rather than resolving arbitrary dot or parent segments.
+        comparable_path = object_path
+        if object_type == "FOLDER":
+            comparable_path = object_path.removesuffix("/")
+        if object_path and comparable_path != path:
             raise AidpProvisionError(
                 f"AIDP returned a mismatched workspace object path for {path}."
             )
@@ -3011,31 +3022,37 @@ class AidpClient:
 
     @staticmethod
     def _governance_run_state(run: dict[str, Any]) -> str:
+        state = run.get("state")
         return str(
-            run.get("runState")
+            (state.get("status") if isinstance(state, dict) else state)
+            or run.get("runState")
             or run.get("lifecycleState")
-            or run.get("state")
             or ""
         ).upper()
 
     def _successful_governance_sync(
         self, workspace_key: str, job_key: str, *, requested_at: str = ""
     ) -> bool:
-        runs = self._list(f"/workspaces/{workspace_key}/jobs/{job_key}/runs", phase="sync")
+        runs = self._list(
+            f"/workspaces/{workspace_key}/jobRuns",
+            params={"jobKey": job_key},
+            phase="sync",
+        )
         revision, threshold = self._governance_sync_marker(
             workspace_key, job_key, requested_at
         )
         current_runs = [
             run
             for run in runs
-            if self._governance_run_matches(run, revision, threshold)
+            if run.get("jobKey", job_key) == job_key
+            and self._governance_run_matches(run, revision, threshold)
         ]
         if not current_runs:
             return False
         state = self._governance_run_state(
             max(current_runs, key=self._governance_run_order)
         )
-        if state in {"FAILED", "ERROR", "CANCELED", "CANCELLED"}:
+        if state in {"FAILED", "ERROR", "CANCELED", "CANCELLED", "INTERNAL_ERROR", "TIMED_OUT", "UPSTREAM_FAILED", "UPSTREAM_CANCELED"}:
             raise AidpProvisionError("The governance metadata synchronization failed closed.")
         return state in {"SUCCESS", "SUCCEEDED"}
 
@@ -3698,6 +3715,14 @@ class AidpClient:
         resources.update(credential_key=credential_key, workflow_key=job_key)
         if changed:
             resources["sync_requested_at"] = sync_requested_at
+        if (operation_type == "install" or previous_enabled) and not self._list(
+            f"/workspaces/{workspace_key}/jobRuns", params={"jobKey": job_key}, phase="sync"
+        ):
+            self._request(
+                "POST", f"/workspaces/{workspace_key}/jobRuns",
+                payload={"jobKey": job_key, "parameters": [], "queue": {"isEnabled": False}},
+                phase="sync", retry_scope="governance-bootstrap:" + manifest["operation"]["operation_id"],
+            )
         manifest["phase"] = (
             "agent"
             if operation_type == "redeploy" and not previous_enabled

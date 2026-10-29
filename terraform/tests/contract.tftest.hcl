@@ -1,5 +1,14 @@
 mock_provider "oci" {}
 mock_provider "time" {}
+mock_provider "tls" {}
+
+override_resource {
+  target          = tls_private_key.instance_ssh
+  override_during = plan
+  values = {
+    public_key_openssh = "ssh-rsa deployment-public-key-fixture"
+  }
+}
 
 mock_provider "oci" {
   alias = "home"
@@ -64,8 +73,58 @@ override_data {
   values = { public_ip_address = "192.0.2.10" }
 }
 
+run "ssh_authorized_source" {
+  command = plan
+  variables {
+    tenancy_ocid            = "ocid1.tenancy.oc1..test"
+    home_region             = "us-ashburn-1"
+    operator_user_ocid      = "ocid1.user.oc1..operator"
+    compartment_ocid        = "ocid1.compartment.oc1..test"
+    objectstorage_namespace = "testnamespace"
+    deployment_suffix       = "test1234"
+    admin_password_hash     = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
+    ssh_allowed_cidr        = "203.0.113.10/32"
+  }
+  assert {
+    condition = length([
+      for rule in oci_core_security_list.web.ingress_security_rules : rule
+      if try(rule.tcp_options[0].min, 0) == 22 && rule.source == "203.0.113.10/32"
+    ]) == 1
+    error_message = "SSH must use only the configured source CIDR."
+  }
+}
+
+run "ssh_reject_worldwide_source" {
+  command = plan
+  variables {
+    tenancy_ocid            = "ocid1.tenancy.oc1..test"
+    home_region             = "us-ashburn-1"
+    operator_user_ocid      = "ocid1.user.oc1..operator"
+    compartment_ocid        = "ocid1.compartment.oc1..test"
+    objectstorage_namespace = "testnamespace"
+    deployment_suffix       = "test1234"
+    admin_password_hash     = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
+    ssh_allowed_cidr        = "0.0.0.0/0"
+  }
+  expect_failures = [var.ssh_allowed_cidr]
+}
+
 run "resolved_compartment_contract" {
   command = plan
+
+  assert {
+    condition     = oci_core_instance.lab.metadata["ssh_authorized_keys"] == "ssh-rsa deployment-public-key-fixture" && output.ssh_username == "opc"
+    error_message = "The emailed SSH key must correspond to the public key installed for opc."
+  }
+
+  assert {
+    condition     = length([for rule in oci_core_security_list.web.ingress_security_rules : rule if try(rule.tcp_options[0].min, 0) == 22]) == 0
+    error_message = "Public SSH must stay closed until an authorized source CIDR is configured."
+  }
 
   assert {
     condition     = length(oci_core_instance.gods_eye_view) == 0 && length(oci_core_nat_gateway.gods_eye_view) == 0 && oci_core_subnet.public.cidr_block == var._oci_vcn.cidr_block

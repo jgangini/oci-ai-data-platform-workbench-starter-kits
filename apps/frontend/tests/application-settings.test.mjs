@@ -794,6 +794,19 @@ for (const [kind, status, label] of [['install', 'installing', 'installation'], 
   else assert.deepEqual(JSON.parse(request.options.body), { operation_id: operationId });
 });
 
+test('Governance retry replaces a stale failure with progress and still shows a new failure', async t => {
+  const failed = { ...governance, status: 'error', operation_type: 'install', operation_id: 'saved-operation', message: 'Previous failure' };
+  const h = await managerHarness(t, failed, { initialUserId: 'operator' });
+  assert.ok(h.nodes().some(node => node?.props?.role === 'alert' && text(node) === 'Previous failure'));
+  h.act(() => action(h, 'Resume installation').props.onClick());
+  assert.equal(text(h.find('span', props => props.className.startsWith('lab-state'))), 'in progress');
+  assert.ok(!h.nodes().some(node => node?.props?.role === 'alert' && text(node) === 'Previous failure'));
+  h.mutations()[0].reject(new Error('New failure'));
+  await h.settle();
+  h.requests.at(-1).resolve({ modules: [failed] }); await h.settle();
+  assert.ok(h.nodes().some(node => node?.props?.role === 'alert' && text(node) === 'New failure'));
+});
+
 test('Governance preserves a replacement operation ID and shows progress inside the same dialog', async t => {
   const h = await managerHarness(t, governance, { initialUserId: 'operator' });
   h.act(() => action(h, 'Deploy').props.onClick());
