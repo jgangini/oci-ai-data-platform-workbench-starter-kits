@@ -977,3 +977,75 @@ def test_module_status_reads_native_schedule(paused):
     client._request = lambda *_args, **_kwargs: {
         "continuous": None, "schedule": {"pauseStatus": "PAUSED" if paused else "UNPAUSED"}}
     assert asyncio.run(client.list_modules())[0]["enabled"] is (not paused)
+
+
+def test_native_redeploy_preserves_name_and_completes_same_operation_revision():
+    client = module_client()
+    state = manifest("redeploy", phase="agent")
+    state["status"] = "redeploying"
+    original = {"key": "deployment", "displayName": "retained-name", "lifecycleState": "ACTIVE", "deploymentVersion": None}
+    deployed = {**original, "key": "replacement-deployment"}
+    state["resources"]["deployment_key"] = original["key"]
+    writes = []
+    client._list = lambda *_args, **_kwargs: [deployed if writes else original]
+
+    def request(method, path, **kwargs):
+        assert method == "POST" and path.endswith("/deployments/actions/redeploy")
+        # Native AIDP rejects even its own unchanged name as a duplicate.
+        if "displayName" in kwargs["payload"]:
+            raise AidpProvisionPending("Deployment with Name already exists", "deployment")
+        writes.append(kwargs)
+        return deployed
+
+    client._request = request
+    args = ("workspace", "compute", "agent", state, "a" * 64)
+    assert client._ensure_global_agent_deployment(*args) == (deployed, True)
+    assert client._ensure_global_agent_deployment(*args) == (deployed, False)
+    assert client._ensure_global_agent_deployment(*args) == (deployed, False)
+    assert len(writes) == 1
+    assert writes[0]["payload"] == {
+        "description": "Production deployment for the global governance Agent",
+        "agentComputeKey": "compute", "agentKey": "agent"}
+    assert state["resources"]["deployment_revision"] == f"{OPERATION_ID}:{'a' * 64}"
+    assert "deployment_redeploy_requested" not in state["resources"]
+    assert original["displayName"] == deployed["displayName"] == "retained-name"
+
+
+@pytest.mark.parametrize("retired_state", ["INACTIVE", "DELETED"])
+def test_agent_redeploy_ignores_retired_deployment_history(retired_state):
+    client = module_client()
+    current = {"key": "new", "lifecycleState": "ACTIVE"}
+    client._list = lambda *_args, **_kwargs: [
+        {"key": "old", "lifecycleState": retired_state}, current]
+    assert client._agent_deployments("/deployments") == [current]
+
+
+@pytest.mark.parametrize("method", ["_ensure_agent_deployment", "_ensure_global_agent_deployment"])
+def test_agent_redeploy_transition_waits_without_creating_another_deployment(method):
+    client = module_client()
+    client._list = lambda *_args, **_kwargs: [
+        {"key": "old", "lifecycleState": "ACTIVE"},
+        {"key": "new", "lifecycleState": "CREATING"}]
+    client._request = lambda *_args, **_kwargs: pytest.fail("Transition must only be observed")
+    with pytest.raises(AidpProvisionPending, match="transition"):
+        if method == "_ensure_agent_deployment":
+            client._ensure_agent_deployment("workspace", "agent", "compute", GOVERNANCE_AGENT_NAME)
+        else:
+            client._ensure_global_agent_deployment("workspace", "compute", "agent", manifest("redeploy"), "a" * 64)
+
+
+def test_duplicate_active_agent_deployments_still_fail_closed():
+    client = module_client()
+    client._list = lambda *_args, **_kwargs: [
+        {"key": "one", "lifecycleState": "ACTIVE"},
+        {"key": "two", "lifecycleState": "ACTIVE"}]
+    with pytest.raises(AidpProvisionError, match="duplicate"):
+        client._agent_deployments("/deployments")
+
+
+def test_same_deployment_without_visible_revision_does_not_complete_redeploy():
+    client = module_client()
+    state = {"deployment_key": "same", "deployment_redeploy_baseline": "[null,null,null]"}
+    with pytest.raises(AidpProvisionPending, match="revision"):
+        client._record_governance_redeploy(state, "revision", "", [], {"key": "same"})
+    assert "deployment_revision" not in state

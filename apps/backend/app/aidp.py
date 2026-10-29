@@ -889,6 +889,25 @@ class AidpClient:
             )
         return agent_key, changed
 
+    def _agent_deployments(self, path: str) -> list[dict[str, Any]]:
+        deployments = [
+            item for item in self._list(path, phase="deployment")
+            if str(item.get("lifecycleState") or item.get("state") or "").upper()
+            not in {"INACTIVE", "DELETED"}
+        ]
+        if len(deployments) > 1:
+            if any(
+                str(item.get("lifecycleState") or item.get("state") or "").upper()
+                in {"CREATING", "DEPLOYING", "UPDATING"}
+                for item in deployments
+            ):
+                raise AidpProvisionPending(
+                    "The global governance Agent deployment transition is still running.",
+                    "deployment",
+                )
+            raise AidpProvisionError("AIDP has duplicate global governance Agent deployments.")
+        return deployments
+
     def _ensure_agent_deployment(
         self,
         workspace_key: str,
@@ -899,9 +918,7 @@ class AidpClient:
         redeploy_revision: str = "",
     ) -> tuple[dict[str, Any], bool]:
         path = f"/workspaces/{workspace_key}/agents/{agent_key}/deployments"
-        deployments = self._list(path, phase="deployment")
-        if len(deployments) > 1:
-            raise AidpProvisionError("AIDP has duplicate global governance Agent deployments.")
+        deployments = self._agent_deployments(path)
         for deployment in deployments:
             state = str(
                 deployment.get("lifecycleState") or deployment.get("state") or ""
@@ -912,10 +929,6 @@ class AidpClient:
                         "POST",
                         f"{path}/actions/redeploy",
                         payload={
-                            "displayName": (
-                                self._resource_name(deployment)
-                                or f"{agent_name}_deployment"
-                            ),
                             "description": (
                                 "Production deployment for the global governance Agent"
                             ),
@@ -3425,7 +3438,10 @@ class AidpClient:
             return
         current_marker = self._deployment_marker(deployment)
         baseline = str(resources.get("deployment_redeploy_baseline") or "")
-        if not baseline or current_marker == baseline:
+        previous_key = str(resources.get("deployment_key") or "")
+        current_key = str(deployment.get("key") or deployment.get("id") or "")
+        replaced = bool(previous_key and current_key and previous_key != current_key)
+        if not baseline or (current_marker == baseline and not replaced):
             raise AidpProvisionPending(
                 "The global governance Agent redeploy revision is not visible yet.",
                 "agent",
@@ -3445,9 +3461,7 @@ class AidpClient:
         resources = manifest.setdefault("resources", {})
         redeploy_revision = self._governance_redeploy_revision(manifest, source_hash)
         deployment_path = f"/workspaces/{workspace_key}/agents/{agent_key}/deployments"
-        visible_deployments = self._list(deployment_path, phase="deployment")
-        if len(visible_deployments) > 1:
-            raise AidpProvisionError("AIDP has duplicate global governance Agent deployments.")
+        visible_deployments = self._agent_deployments(deployment_path)
         trigger_revision = self._governance_redeploy_trigger(
             resources, redeploy_revision
         )
