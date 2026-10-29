@@ -122,6 +122,8 @@ OCI API authentication, legacy database migration and AIDP-managed memory are di
 | Participant | No module `MANAGE`/`ADMIN` grant or direct dedicated AI Compute grant. |
 | Shared workspace ancestors | Conflicting inherited editor grants cause reconciliation to fail closed. |
 
+Native permission listings include existing platform-administrator `ADMIN` grants without an `isInherited` field. Reconciliation preserves these grants only for `AI_DATA_PLATFORM_ADMIN` and the principals resolved from that role's verified membership; it does not revoke or recreate them as module-owned grants. An unverified principal or a permission set other than exactly `ADMIN` does not receive this exemption. The managed developer role remains exactly `USE` on the agent, with no direct dedicated-compute grant. See Oracle's [system-role model](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aidug/roles.html) and [workspace permission response contract](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aiwap/op-aidataplatforms-aidataplatformid-workspaces-workspacekey-objects-objectkey-permissions-get.html).
+
 This is a global metadata service, not a per-caller catalog authorization proxy.
 Invocation permission does not make the shared OCI identity impersonate the caller.
 The Delta access-policy table records mappings; neither synchronization nor the agent translates those rows into IAM grants or enforces them on arbitrary queries.
