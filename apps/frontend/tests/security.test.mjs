@@ -212,7 +212,8 @@ test("administrators manage one shared governance module from Settings outside p
   const manager = source.slice(source.indexOf('function GovernanceModuleManager'), source.indexOf('function usePublicConfig'));
   assert.match(source, /is_aidp_admin: boolean/);
   assert.match(source, /operation_type\?: ModuleOperationKind \| null/);
-  assert.equal((source.match(/<GovernanceModuleManager\b/g) ?? []).length, 1);
+  assert.equal((source.match(/<GovernanceModuleManager\b/g) ?? []).length, 2);
+  assert.match(source, /<GovernanceModuleManager moduleId="ai_social_network"/);
   assert.doesNotMatch(source, /function GovernanceModuleModal|window\.location\.assign\("\/admin\/users\?module=/);
   assert.match(manager, /users\.filter\(user => user\.is_aidp_admin === true\)/);
   assert.match(manager, /const disabled = moduleOperating \|\| !usersLoaded \|\| !moduleManagerUser \|\| !governanceModule/);

@@ -22,6 +22,7 @@ Every guide contains source data, task dependencies, Gold outputs and reproducib
 
 ## Shared global modules
 
+- [AI Social Network](modules/ai-social-network.md): incremental JSON-to-Gold ingestion, five-minute scheduling, social Agent and AI Lakehouse memory.
 - [AI Data Governance](modules/ai-data-governance.md): catalog synchronization, permissions, agent tools and lifecycle.
 - [God's Eye View](modules/gods-eye-view.md): sources, streaming, map publications, agent queries and synthetic cleanup.
 

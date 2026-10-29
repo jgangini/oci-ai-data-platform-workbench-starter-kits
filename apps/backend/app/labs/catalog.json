@@ -7,7 +7,8 @@
     "retail",
     "healthcare",
     "ai_data_governance",
-    "gods_eye_view"
+    "gods_eye_view",
+    "ai_social_network"
   ],
   "descriptions": {
     "banking": "Explore customer accounts, branches and transactions through a governed medallion pipeline.",
@@ -16,6 +17,7 @@
     "retail": "Transform customers, products, orders and order items into sales and customer analytics.",
     "healthcare": "Prepare patients, providers, appointments and encounters for operational healthcare analysis.",
     "ai_data_governance": "Deploy one shared AI Data Governance Agent and native Master Catalog metadata synchronization for all AIDP developers.",
-    "gods_eye_view": "Deploy an independent map viewer with shared social and sensor workflows and evidence-grounded Gold queries."
+    "gods_eye_view": "Deploy an independent map viewer with shared social and sensor workflows and evidence-grounded Gold queries.",
+    "ai_social_network": "Incrementally process social JSON into Delta Gold with a five-minute native schedule and an independent agent with AI Lakehouse memory."
   }
 }

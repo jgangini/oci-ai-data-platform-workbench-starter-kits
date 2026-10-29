@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "lab_id": "ai_social_network",
+  "display_name": "AI Social Network",
+  "pack_version": "1.0.0",
+  "status": "available",
+  "kind": "global_module",
+  "scope": "global",
+  "installation_modes": [
+    "laboratory",
+    "production"
+  ],
+  "datasets": [],
+  "notebooks": [],
+  "tables": {},
+  "expected_results": {},
+  "agent": {
+    "name": "ai_social_network",
+    "tools": [
+      "summary",
+      "search",
+      "history",
+      "details"
+    ],
+    "memory": "AI_LAKEHOUSE",
+    "read_layer": "gold"
+  },
+  "runtime_files": [
+    {
+      "file": "notebooks/social_ingest.py",
+      "workspace_path": "social_ingest.py",
+      "sha256": "8603401995830788971f21c51273b266afd1174e0bbbc15363d05b4b294beb95"
+    },
+    {
+      "file": "notebooks/agent/social_agent.py",
+      "workspace_path": "agent/social_agent.py",
+      "sha256": "667e76f12361ef7ea381eca6cbf14e6943c88908a7c901b87e866d9b372fe1a4"
+    }
+  ],
+  "pack_sha256": "558c18e92a8a551a1cdcb5d0f4670d1d8a82782487609fe56e2a75485fbb06d6"
+}

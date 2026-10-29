@@ -185,6 +185,11 @@ class FakeAidp:
             "enabled": False,
         }]
 
+    async def governance_agent_endpoint(self) -> str:
+        if not self.module or self.module.get("status") != "active":
+            raise AidpProvisionConflict("Deploy the module before copying its Agent URL.")
+        return "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/agent/chat"
+
     async def install_governance_module(
         self,
         user_ocid: str,
@@ -781,3 +786,70 @@ def test_https_profile_keeps_host_cookie_prefix(tmp_path: Path) -> None:
     )
     assert response.status_code == 204
     assert "__Host-aidp_lab_admin" in response.headers["set-cookie"]
+
+
+def test_agent_endpoint_requires_admin_and_active_native_module(tmp_path):
+    client = make_client(tmp_path)
+    path = "/api/admin/modules/ai_data_governance/agent-endpoint"
+    assert client.get(path).status_code == 401
+    login(client)
+    assert client.get(path).status_code == 409
+    client.app.state.test_aidp.module = {"status": "active"}
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.json() == {"url": "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/agent/chat"}
+    assert response.headers["cache-control"] == "no-store"
+
+
+class FakeSocial:
+    def __init__(self, pending=False):
+        self.calls = []
+        self.pending = pending
+
+    async def status(self):
+        return {"module_id": "ai_social_network", "status": "not_installed", "installed": False}
+
+    async def agent_endpoint(self):
+        raise AidpProvisionConflict("Deploy first")
+
+    async def operate(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        if self.pending:
+            raise AidpProvisionPending("Preparing social Gold", "control")
+        return {"module_id": "ai_social_network", "status": "active", "installed": True}
+
+
+def test_social_module_routes_require_admin_and_verified_platform_administrator(tmp_path):
+    client = make_client(tmp_path)
+    social = FakeSocial()
+    client.app.state.social_factory = lambda: social
+    assert client.get("/api/admin/modules/ai_social_network").status_code == 401
+    assert client.get("/api/admin/modules/ai_social_network/agent-endpoint").status_code == 401
+    login(client)
+    assert client.get("/api/admin/modules/ai_social_network").status_code == 200
+    assert "no-store" in client.get("/api/admin/modules/ai_social_network").headers["cache-control"]
+    assert client.get("/api/admin/modules/ai_social_network/agent-endpoint").status_code == 409
+    operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
+    path = "/api/admin/users/user-id/modules/ai_social_network"
+    result = client.post(path, json={"operation_id": operation_id, "source_bucket":"custom-landing", "source_prefix":"custom-social/"})
+    assert result.status_code == 200
+    assert social.calls == [(("ocid1.user.oc1..ada", operation_id, "install", "custom-landing", "custom-social/"), {"role_membership_verified": True})]
+    assert client.post(path+"/unknown",json={}).status_code == 404
+    assert client.post(path,json={"operation_id":"invalid"}).status_code == 422
+    unauthorized = make_client(tmp_path / "other", mode="not-admin")
+    unauthorized.app.state.social_factory = lambda: social
+    login(unauthorized)
+    assert unauthorized.post(path,json={}).status_code == 403
+    assert len(social.calls) == 1
+
+
+def test_social_pending_before_manifest_preserves_resumable_operation(tmp_path):
+    client = make_client(tmp_path)
+    client.app.state.social_factory = lambda: FakeSocial(pending=True)
+    login(client)
+    operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
+    response = client.post("/api/admin/users/user-id/modules/ai_social_network",json={"operation_id":operation_id})
+    assert response.status_code == 202
+    assert response.json()["status"] == "installing"
+    assert response.json()["operation_id"] == operation_id
+    assert response.json()["phase"] == "control"

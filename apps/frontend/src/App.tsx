@@ -91,6 +91,8 @@ type AdminModule = {
   phase?: string;
   message?: string | null;
   enabled: boolean;
+  source_bucket?: string;
+  source_prefix?: string;
 };
 type AdminModuleOperationResponse = {
   status: AdminModule["status"];
@@ -781,13 +783,18 @@ const governancePhases: Record<string, string> = {
   agent: 'AI Compute', permissions: 'AIDP Workbench', activation: 'Spark Compute', steady: 'AIDP Workbench', cleanup: 'Removing module resources…',
 };
 
-function GovernanceModuleManager({ initialUserId = "", visible = true, onStatusChange, onClose, onChanged }: {
+function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId = "ai_data_governance", onStatusChange, onClose, onChanged }: {
+  moduleId?: "ai_data_governance" | "ai_social_network";
   initialUserId?: string;
   visible?: boolean;
   onStatusChange?: (state: { module: AdminModule | null; busy: boolean; unverified: boolean }) => void;
   onClose: () => void;
   onChanged?: () => void;
 }) {
+  const social = moduleId === "ai_social_network";
+  const moduleName = social ? "AI Social Network" : "AI Data Governance";
+  const [sourceBucket, setSourceBucket] = useState("");
+  const [sourcePrefix, setSourcePrefix] = useState("aidp-social/");
   const [users, setUsers] = useState<LabUser[]>([]);
   const [usersLoaded, setUsersLoaded] = useState(false);
   const [usersError, setUsersError] = useState("");
@@ -809,9 +816,9 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, onStatusC
   const closeRef = useRef<HTMLButtonElement>(null);
   useDialogFocus(visible, onClose, panelRef, closeRef);
 
-  const governanceModule = modules.find(({ module_id }) => module_id === "ai_data_governance") ?? null;
+  const governanceModule = modules.find(({ module_id }) => module_id === moduleId) ?? null;
   const moduleManagerUser = users.find(user => user.id === moduleManagerUserId && user.is_aidp_admin === true) ?? null;
-  const phaseLabel = governancePhases[moduleProgress?.phase || ''] || 'Preparing module services…';
+  const phaseLabel = social ? ({ verify: 'Verifying selected storage', control: 'Preparing incremental pipeline', sync: 'Processing the first Gold batch', metadata: 'Updating table details', agent: 'Deploying the Agent', permissions: 'Applying Agent access', activation: 'Activating the five-minute schedule' } as Record<string,string>)[moduleProgress?.phase || ''] || 'Preparing module services…' : governancePhases[moduleProgress?.phase || ''] || 'Preparing module services…';
   const recoverableKind = governanceModule && moduleOperationKind(governanceModule.status, governanceModule.operation_type);
   const transitioning = Boolean(governanceModule && ["installing", "redeploying", "deleting"].includes(governanceModule.status));
   const resumable = Boolean(recoverableKind && governanceModule?.operation_id);
@@ -836,9 +843,11 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, onStatusC
   async function loadModules(signal = loadAbortRef.current?.signal) {
     setModuleLoadError("");
     try {
-      const loaded = (await api<{ modules: AdminModule[] }>("/api/admin/modules", { signal })).modules;
+      const loaded = social ? [await api<AdminModule>("/api/admin/modules/ai_social_network", { signal })] : (await api<{ modules: AdminModule[] }>("/api/admin/modules", { signal })).modules;
+      const installed = loaded.find(module => module.module_id === moduleId && module.installed);
+      if (social && installed) { setSourceBucket(installed.source_bucket || ""); setSourcePrefix(installed.source_prefix || "aidp-social/"); }
       signal?.throwIfAborted();
-      if (!loaded.some(module => module.module_id === "ai_data_governance")) throw new Error("AI Data Governance is unavailable.");
+      if (!loaded.some(module => module.module_id === moduleId)) throw new Error(`${moduleName} is unavailable.`);
       setModules(loaded);
       for (const module of loaded) {
         const recoverableKind = moduleOperationKind(module.status, module.operation_type);
@@ -928,7 +937,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, onStatusC
               })
             : api<AdminModuleOperationResponse>(kind === "redeploy" ? `${moduleBase}/redeploy` : moduleBase, {
                 method: "POST",
-                body: JSON.stringify({ operation_id: operationId }),
+                body: JSON.stringify({ operation_id: operationId, ...(social ? { source_bucket: sourceBucket, source_prefix: sourcePrefix } : {}) }),
                 signal,
               }));
           signal.throwIfAborted();
@@ -983,7 +992,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, onStatusC
         <header>
           <div>
             <p className="eyebrow">Shared global module</p>
-            <h2 id={titleId}>AI Data Governance</h2>
+            <h2 id={titleId}>{moduleName}</h2>
             <p id={descriptionId}>One shared module for all AIDP developers, managed by AI Data Platform administrators.</p>
           </div>
           {governanceModule && <span className={`lab-state ${governanceModule.enabled ? "installed" : "unassigned"}`}>
@@ -997,7 +1006,12 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, onStatusC
               options={users.filter(user => user.is_aidp_admin === true).map(user => ({ value: user.id, label: user.email }))}
               onChange={value => { setModuleManagerUserId(value); setModuleOperationError(""); setMessage(""); }} />
             {!usersError && !users.some(user => user.is_aidp_admin) && <p role="alert" className="lab-manager-error">No AI Data Platform administrator is available.</p>}
-            <p className="governance-module-note">Deploy or redeploy the shared Agent, dedicated AI Compute and governance workflow across the Master Catalog. Existing shared OCI credentials are retained; participants are not granted administrator access.</p>
+            <p className="governance-module-note">{social ? "Deploy a dedicated Agent with AI Lakehouse memory and a five-minute incremental JSON pipeline to Gold. The source objects and existing shared OCI credentials are retained. AIDP compute incurs usage costs." : "Deploy or redeploy the shared Agent, dedicated AI Compute and governance workflow across the Master Catalog. Existing shared OCI credentials are retained; participants are not granted administrator access."}</p>
+            {social && <div className="social-source-fields">
+              <label>Source bucket<input value={sourceBucket} onChange={event => setSourceBucket(event.target.value)} disabled={governanceModule?.installed} maxLength={256} placeholder="Use the configured Landing bucket" /></label>
+              <label>JSON prefix<input value={sourcePrefix} onChange={event => setSourcePrefix(event.target.value)} disabled={governanceModule?.installed} maxLength={512} required /></label>
+              <p className="governance-module-note">Only new or changed records are loaded. The Agent queries processed Gold tables. Empty sources are valid; no sample posts are created.</p>
+            </div>}
             <ul className="module-service-tags" aria-label="Services">
               {governanceServices.map(service => <li className="badge inactive" key={service}>{service}</li>)}
             </ul>
@@ -1032,7 +1046,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, onStatusC
             : resumable ? <button type="button" disabled={disabled} onClick={() => recoverableKind && void runModuleAction(recoverableKind)}>
               Resume {recoverableKind === "install" ? "installation" : recoverableKind === "redeploy" ? "redeployment" : "deletion"}
             </button> : <>
-              {governanceModule?.installed && <button className="secondary destructive" type="button" disabled={disabled || transitioning} onClick={() => { setConfirmDelete(true); closeRef.current?.focus(); }}>Delete</button>}
+              {!social && governanceModule?.installed && <button className="secondary destructive" type="button" disabled={disabled || transitioning} onClick={() => { setConfirmDelete(true); closeRef.current?.focus(); }}>Delete</button>}
               <button type="button" disabled={disabled || transitioning} onClick={() => void runModuleAction(governanceModule?.installed ? "redeploy" : "install")}>
                 {governanceModule?.installed ? governanceModule.update_available ? "Update" : "Redeploy" : "Deploy"}
               </button>
@@ -2691,6 +2705,13 @@ function ApplicationReleaseSettings({
   godsEyeAction,
   governanceInstalling,
   governanceAction,
+  governanceReady,
+  socialReady,
+  socialInstalling,
+  onConfigureSocial,
+  onCopyAgent,
+  agentLinkBusy,
+  agentLink,
 }: {
   release: AdminApplicationRelease | null;
   busy: boolean;
@@ -2702,6 +2723,13 @@ function ApplicationReleaseSettings({
   godsEyeAction: string;
   governanceInstalling: boolean;
   governanceAction: string;
+  governanceReady: boolean;
+  socialReady: boolean;
+  socialInstalling: boolean;
+  onConfigureSocial: () => void;
+  onCopyAgent: (moduleId: string) => void;
+  agentLinkBusy: boolean;
+  agentLink: string;
 }) {
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
@@ -2769,6 +2797,7 @@ function ApplicationReleaseSettings({
           {!release.updater_available && (
             <p className="settings-help">In-place updates are enabled only on the deployed application VM.</p>
           )}
+          {agentLink && <label className="settings-field">Agent URL<input aria-label="Agent URL" value={agentLink} readOnly spellCheck={false} /></label>}
           <div className="release-packages-wrap">
             <table className="release-packages">
               <thead>
@@ -2787,10 +2816,28 @@ function ApplicationReleaseSettings({
                     <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
                     <td className="release-package-actions">
                       {item.package_id === "ai_data_governance" && (
+                        <>
+                        <button type="button" className="module-configure module-agent-link" disabled={!governanceReady || agentLinkBusy}
+                          onClick={() => onCopyAgent(item.package_id)} aria-label="Copy AI Data Governance agent URL"
+                          title={governanceReady ? "Copy AI Data Governance agent URL" : "Agent URL is available after deployment"}>
+                          <img src="/icons/agent-link/lucide-bot-message-square.svg" alt="" />
+                        </button>
                         <button type="button" className="module-configure module-deploy" onClick={onConfigureGovernance} aria-label={governanceAction} title={governanceAction} aria-haspopup="dialog">
                           {governanceInstalling ? <LoadingIndicator inline label="Governance operation in progress" /> : <InstallIcon />}
                         </button>
+                        </>
                       )}
+                      {item.package_id === "ai_social_network" && <>
+                        <button type="button" className="module-configure module-agent-link" disabled={!socialReady || agentLinkBusy}
+                          onClick={() => onCopyAgent(item.package_id)} aria-label="Copy AI Social Network agent URL"
+                          title={socialReady ? "Copy AI Social Network agent URL" : "Agent URL is available after deployment"}>
+                          <img src="/icons/agent-link/lucide-bot-message-square.svg" alt="" />
+                        </button>
+                        <button type="button" className="module-configure module-deploy" onClick={onConfigureSocial}
+                          aria-label="Deploy or redeploy AI Social Network" title="Deploy or redeploy AI Social Network" aria-haspopup="dialog">
+                          {socialInstalling ? <LoadingIndicator inline label="Social deployment in progress" /> : <InstallIcon />}
+                        </button>
+                      </>}
                       {item.package_id === "gods_eye_view" && (
                         <>
                         <button type="button" className="module-configure module-deploy" onClick={onConfigureGodsEye} aria-label={`${godsEyeAction} ${item.display_name}`} title={`${godsEyeAction} ${item.display_name}`} aria-haspopup="dialog">
@@ -2843,7 +2890,14 @@ function AdminSettings() {
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [confirmReleaseUpdate, setConfirmReleaseUpdate] = useState(false);
   const [confirmGovernance, setConfirmGovernance] = useState(false);
+  const [confirmSocial, setConfirmSocial] = useState(false);
+  const [socialState, setSocialState] = useState<{ module: AdminModule | null; busy: boolean; unverified: boolean }>({ module: null, busy: false, unverified: false });
+  const socialReady = !socialState.unverified && !socialState.busy && socialState.module?.status === "active";
+  const socialInstalling = socialState.busy || Boolean(socialState.module && ['installing', 'redeploying'].includes(socialState.module.status));
   const [governanceState, setGovernanceState] = useState<{ module: AdminModule | null; busy: boolean; unverified: boolean }>({ module: null, busy: false, unverified: false });
+  const [agentLink, setAgentLink] = useState("");
+  const [agentLinkBusy, setAgentLinkBusy] = useState(false);
+  const governanceReady = !governanceState.unverified && !governanceState.busy && governanceState.module?.status === "active";
   const [confirmGodsEye, setConfirmGodsEye] = useState(false);
   const [godsEyeModule, setGodsEyeModule] = useState<ModuleStatus | null>(null);
   const [moduleUnverified, setModuleUnverified] = useState(false);
@@ -2948,6 +3002,26 @@ function AdminSettings() {
   async function logout() {
     await api("/api/admin/logout", { method: "POST" });
     window.location.assign("/");
+  }
+  async function copyModuleAgent(moduleId: string) {
+    if (agentLinkBusy) return;
+    setAgentLinkBusy(true);
+    setReleaseError("");
+    setAgentLink("");
+    try {
+      const result = await api<{ url: string }>(`/api/admin/modules/${encodeURIComponent(moduleId)}/agent-endpoint`);
+      setAgentLink(result.url);
+      try {
+        await navigator.clipboard.writeText(result.url);
+        setToast("Agent URL copied.");
+      } catch {
+        setReleaseError("Clipboard is unavailable. Select and copy the Agent URL below.");
+      }
+    } catch (reason) {
+      setReleaseError(reason instanceof Error ? reason.message : "Unable to verify the Agent URL.");
+    } finally {
+      setAgentLinkBusy(false);
+    }
   }
   async function copyAidpValue(
     value: string,
@@ -3242,6 +3316,13 @@ function AdminSettings() {
               godsEyeAction={godsEyeAction}
               governanceInstalling={governanceInstalling}
               governanceAction={governanceAction}
+              governanceReady={governanceReady}
+              socialReady={socialReady}
+              socialInstalling={socialInstalling}
+              onConfigureSocial={() => { window.location.hash = "application"; setConfirmSocial(true); }}
+              onCopyAgent={moduleId => void copyModuleAgent(moduleId)}
+              agentLinkBusy={agentLinkBusy}
+              agentLink={agentLink}
             />
               <div className="settings-time-zone-controls">
                 <SearchableCombobox className="settings-field time-zone-picker" label="Display time zone"
@@ -3260,6 +3341,7 @@ function AdminSettings() {
       </section>
       <Toast message={toast} onDismiss={() => setToast("")} />
       <GovernanceModuleManager visible={confirmGovernance} onStatusChange={setGovernanceState} onClose={() => setConfirmGovernance(false)} />
+      <GovernanceModuleManager moduleId="ai_social_network" visible={confirmSocial} onStatusChange={setSocialState} onClose={() => setConfirmSocial(false)} />
       {confirmGodsEye && <GodsEyeViewModuleManager api={api} onClose={() => { setConfirmGodsEye(false); void loadGodsEyeModule(); }} onChanged={() => void loadGodsEyeModule()} />}
       <ConfirmModal
         open={confirmRegistrationSave}

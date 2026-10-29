@@ -172,3 +172,8 @@ Keep investigation logs private and remove tokens, credentials and personal data
 Keep application persistent state, module operation manifests, installed release references and data/checkpoint backups under the deployment's access controls. Before a migration, record which consumers write to each store and when writes are paused. After writes resume, rollback must reconcile new state; restoring an old snapshot alone can discard later captures or cancellations.
 
 The current repository does not provide a general cross-store disaster-recovery guarantee. Validate restoration in an isolated environment before relying on a backup procedure for production.
+
+
+## AI Social Network lifecycle
+
+Install or redeploy the independent Social module from Settings → Application, selecting a platform administrator and the JSON source. The [module guide](modules/ai-social-network.md) defines the Gold/control model, native five-minute schedule, immutable source identity, retry receipts and acceptance. Closing the dialog preserves the operation. The installer pauses/drains its writer before changing source and enables scheduling only after its first batch and Agent permissions pass. The source, historical Gold data and shared credential are retained; no destructive Social deletion action is exposed. The active Agent icon copies the verified native URL for an authenticated external server proxy.

@@ -101,7 +101,7 @@ The [migration module](../apps/backend/app/gods_eye_view/control_migration.py) s
 
 ## Change packages and AI workflows safely
 
-- The five participant packages keep their source data and notebook dependency contracts under `apps/backend/app/labs/<lab_id>/`. The two global modules keep readable packaged runtimes there too; the [module guides](README.md#shared-global-modules) distinguish their deployment configuration and native acceptance checks.
+- The five participant packages keep their source data and notebook dependency contracts under `apps/backend/app/labs/<lab_id>/`. The three global modules keep readable packaged runtimes there too; the [module guides](README.md#shared-global-modules) distinguish their deployment configuration and native acceptance checks.
 - Change kit assets through their generator/source contract, then update the declared version, hashes and expected results together. Do not silently modify bytes under an already released package version.
 - Keep participant parameters, notebook guards and provisioner naming aligned. Verify both the emitted workflow and a native run.
 - God's Eye View publishes one readable `.py` per stream and one agent entry point from [its packaged notebooks](../apps/backend/app/labs/gods_eye_view/notebooks). Regenerate those artifacts with `python scripts/render_gods_eye_view_runtime.py`; use `--check` to fail on source or hash drift without writing. Deployment preserves the code body and substitutes only explicit nonsecret `RUNTIME_CONFIG`. Do not claim total-file byte equality across environments or hide decoding/import discovery in a running stream.
@@ -113,3 +113,6 @@ The [migration module](../apps/backend/app/gods_eye_view/control_migration.py) s
 ## Documentation ownership
 
 Keep the root README as an overview. Put shared setup in `getting-started.md`, runtime boundaries in `architecture.md`, procedures in `operations.md`, and domain behavior in `kits/` or `modules/`. Each behavioral claim should link to its manifest, implementation or executable check. Keep dates, tenant IDs, private receipts, temporary diagnostics and generated graphs out of reusable product guides.
+
+
+AI Social Network keeps its readable ingestion and Agent files under its versioned package. `scripts/check_social_delta.py` exercises real Delta failure recovery, and `scripts/check_social_graph.py` exercises the compiled LangGraph with offline native transports. The [module guide](modules/ai-social-network.md#reproducible-acceptance) distinguishes those checks from native model/memory and browser acceptance.

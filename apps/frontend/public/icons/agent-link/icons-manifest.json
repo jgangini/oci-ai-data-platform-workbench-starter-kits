@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "icons": [
+    {
+      "file": "lucide-bot-message-square.svg",
+      "label": "bot-message-square",
+      "category": "",
+      "aliases": [],
+      "status": "pinned",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/1ef60af944de207e0d5176905a0759ba12e6ee8d/icons/bot-message-square.svg",
+      "archive_member": "icons/bot-message-square.svg",
+      "archive_sha256": null,
+      "sha256": "40532529b520021d1ac8604c0848fa70db10ce5fbdf68b67a6ba2341a92fd266",
+      "preparation": {
+        "profile": "standard",
+        "removed": [],
+        "metadata_removed": 0,
+        "rights_notices": [],
+        "styles_inlined": 0,
+        "viewbox_from_dimensions": false,
+        "contrast": "review-on-both",
+        "source_sha256": "a9651a9084860f72ecfc4d4062e2d333c207a997a48fe9a52273b730c261604b"
+      },
+      "library": "lucide",
+      "name": "bot-message-square",
+      "theme": "default",
+      "bundled_sha256": "a7ad0b2343ba0467d5991e2da199a51b1ea4e474651ac47569bd7090d70694c0",
+      "color": "#625b55"
+    }
+  ]
+}

@@ -66,3 +66,18 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -f docker/Dockerfile -t aidp-lab:test .
       - run: docker build -f apps/gods-eye-view/Dockerfile -t gods-eye-view:test .
+
+  social-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: pip install pyspark==3.5.1 delta-spark==3.2.0 langgraph==0.6.7 oci==2.189.0
+      - run: python scripts/check_social_graph.py
+      - run: spark-submit --packages io.delta:delta-spark_2.12:3.2.0 scripts/check_social_delta.py

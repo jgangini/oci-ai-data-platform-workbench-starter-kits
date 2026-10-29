@@ -2,10 +2,10 @@
 
 [Documentation](README.md) · [Getting started](getting-started.md) · [Operations](operations.md)
 
-The portal provisions participant labs and administers two shared modules. AIDP
+The portal provisions participant labs and administers three shared modules. AIDP
 executes the data pipelines and agents; Master Catalog governs their tables and
 access. Participant labs, Governance metadata synchronization and God's Eye View
-capture/query processing have separate lifecycles.
+capture/query processing have separate lifecycles. AI Social Network adds an independent JSON-to-Gold workflow and memory-backed Agent; its [data model and publication protocol](modules/ai-social-network.md) keep the Agent off the Landing source.
 
 ## Deployment boundaries
 

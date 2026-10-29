@@ -337,7 +337,7 @@ test('Settings Governance icon opens one shared manager without navigation or de
   assert.equal(button.props['aria-haspopup'], 'dialog');
   assert.equal(h.find('GovernanceModuleManager').props.visible, false);
   h.act(() => button.props.onClick());
-  assert.equal(h.nodes().filter(node => node?.type?.name === 'GovernanceModuleManager').length, 1);
+  assert.equal(h.nodes().filter(node => node?.type?.name === 'GovernanceModuleManager' && !node.props.moduleId).length, 1);
   assert.equal(h.find('GovernanceModuleManager').props.visible, true);
   assert.ok(!h.nodes().some(node => node?.type?.name === 'ConfirmModal' && node.props.open));
   assert.equal(h.navigations.length, 0); assert.equal(h.mutations().length, 0);
@@ -1026,4 +1026,75 @@ test('failed time-zone save preserves the selection and requires confirmation fo
   assert.deepEqual(JSON.parse(h.mutations()[1].options.body), { time_zone: 'UTC' });
   h.mutations()[1].resolve({ ...settings, time_zone: 'UTC' }); await h.settle();
   assert.equal(save().props.disabled, true);
+});
+
+
+for (const status of ['not_installed', 'installing', 'redeploying', 'error', 'active']) {
+  test(`Agent URL button precedes deployment and requires active module: ${status}`, async t => {
+    const h = await harness(t, { ...release, packages: [{ package_id: 'ai_data_governance', display_name: 'AI Data Governance', scope: 'global', bundled_version: '3.0.4' }] });
+    h.act(() => h.find('GovernanceModuleManager').props.onStatusChange({ module: { ...governance, status }, busy: false, unverified: false }));
+    const card = h.find('ApplicationReleaseSettings');
+    const flatten = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? flatten(child) : [])];
+    const nodes = flatten(card.type(card.props));
+    const button = nodes.find(node => node?.props?.['aria-label'] === 'Copy AI Data Governance agent URL');
+    const deploy = nodes.find(node => node?.props?.className === 'module-configure module-deploy');
+    assert.ok(nodes.indexOf(button) < nodes.indexOf(deploy));
+    assert.equal(button.props.disabled, status !== 'active');
+    assert.equal(button.props.children.props.alt, '');
+    assert.equal(h.mutations().length, 0);
+  });
+}
+
+test('Agent URL copy fetches the verified native URL and exposes a manual fallback', async t => {
+  const h = await harness(t);
+  h.act(() => h.find('ApplicationReleaseSettings').props.onCopyAgent('ai_data_governance'));
+  const request = h.requests.find(item => item.path === '/api/admin/modules/ai_data_governance/agent-endpoint');
+  assert.ok(request);
+  const url = 'https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/agent/chat';
+  request.resolve({ url });
+  await h.settle();
+  assert.equal(h.find('ApplicationReleaseSettings').props.agentLink, url);
+  assert.equal(h.find('ApplicationReleaseSettings').props.agentLinkBusy, false);
+  assert.equal(h.mutations().length, 0);
+});
+const social = { module_id: 'ai_social_network', display_name: 'AI Social Network', installed: false, status: 'not_installed', enabled: false, bundled_version: '1.0.0', source_bucket: '', source_prefix: 'aidp-social/' };
+const socialHarness = (t, module = social, props = {}) => harness(t, release, '/admin/settings', { '/api/admin/users': { users: administrators }, '/api/admin/modules/ai_social_network': module }, { moduleId: 'ai_social_network', initialUserId: 'operator', ...props });
+
+test('Social is independent, supports a configurable source and does not deploy on open', async t => {
+  const h = await socialHarness(t);
+  assert.equal(h.find('h2').props.children, 'AI Social Network');
+  assert.equal(h.find('input', props => props.placeholder === 'Use the configured Landing bucket').props.value, '');
+  assert.equal(h.mutations().length, 0);
+  assert.equal(h.requests.some(request => request.path === '/api/admin/modules'), false);
+  h.act(() => h.find('input', props => props.placeholder === 'Use the configured Landing bucket').props.onChange({ target: { value: 'selected-landing' } }));
+  h.act(() => h.find('input', props => props.required && props.maxLength === 512).props.onChange({ target: { value: 'selected-social/' } }));
+  const pending = action(h, 'Deploy').props.onClick();
+  await h.settle();
+  const request = h.mutations()[0];
+  assert.equal(request.path, '/api/admin/users/operator/modules/ai_social_network');
+  const payload = JSON.parse(request.options.body);
+  assert.equal(payload.source_bucket, 'selected-landing'); assert.equal(payload.source_prefix, 'selected-social/'); assert.ok(payload.operation_id);
+  request.resolve({ status: 'active', operation_id: payload.operation_id, phase: 'active' });
+  await h.settle();
+  h.requests.filter(request => request.path === '/api/admin/modules/ai_social_network').at(-1).resolve({ ...social, installed: true, status: 'active', source_bucket: 'selected-landing', source_prefix: 'selected-social/' });
+  await h.settle();
+});
+
+test('Social installed source is immutable and deletion is not exposed by its manager', async t => {
+  const h = await socialHarness(t, { ...social, installed: true, status: 'active', source_bucket: 'selected-landing' });
+  assert.equal(h.find('input', props => props.placeholder === 'Use the configured Landing bucket').props.disabled, true);
+  assert.equal(h.find('input', props => props.placeholder === 'Use the configured Landing bucket').props.value, 'selected-landing');
+  assert.equal(h.nodes().some(node => node?.type === 'button' && text(node.props.children) === 'Delete'), false);
+  assert.ok(action(h, 'Redeploy')); assert.equal(h.mutations().length, 0);
+});
+
+test('Social endpoint button requires its own active state and precedes its deploy action', async t => {
+  const h = await harness(t, { ...release, packages: [{ package_id: social.module_id, display_name: social.display_name, scope: 'global', bundled_version: '1.0.0' }] });
+  const manager = h.find('GovernanceModuleManager', props => props.moduleId === 'ai_social_network');
+  h.act(() => manager.props.onStatusChange({ module: { ...social, installed: true, status: 'active' }, busy: false, unverified: false }));
+  const card = h.find('ApplicationReleaseSettings'), tree = card.type(card.props);
+  const nodes = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? nodes(child) : [])];
+  const list = nodes(tree), copy = list.find(node => node?.props?.['aria-label'] === 'Copy AI Social Network agent URL'), deploy = list.find(node => node?.props?.['aria-label'] === 'Deploy or redeploy AI Social Network');
+  assert.equal(copy.props.disabled, false); assert.ok(list.indexOf(copy) < list.indexOf(deploy));
+  assert.equal(h.mutations().length, 0);
 });

@@ -17,7 +17,7 @@ This is the canonical repository instruction file. Start with [docs/README.md](d
 
 ## AIDP content and acceptance
 
-- Participant kits are Banking, Telecommunications, Telco Customer 360 Lineage, Retail and Healthcare. AI Data Governance and God's Eye View are shared global modules, installed from Settings → Application, not private participant copies.
+- Participant kits are Banking, Telecommunications, Telco Customer 360 Lineage, Retail and Healthcare. AI Data Governance, AI Social Network and God's Eye View are shared global modules, installed from Settings → Application, not private participant copies.
 - Treat each `lab.json`, source dataset and notebook dependency list as one versioned contract. Update versions, hashes, row counts and expected results together; never silently change bytes under an immutable released package.
 - Keep the checked-in learning content and content deployed to AIDP aligned. Render environment configuration explicitly; do not claim complete byte equality when deployment injects configuration. Verify the common code body and declared differences. Governance's notebook/agent files are authoritative sources; God's Eye View's shared-code artifacts must pass `scripts/render_gods_eye_view_runtime.py --check` before publishing.
 - God's Eye View has one readable `.py` per stream (`social_network.py`, `sensor_stream.py`) and one `ai_gods_eye_view.py` agent under `/Workspace/medallion/gods_eye_view/`, organized by layer. Assembly occurs during packaging/deployment. Do not publish encoded runtime bundles, dynamic import discovery, hidden loaders or alternate numbered copies as the developer-facing implementation. Keep useful execution outputs.
