@@ -1659,6 +1659,10 @@ class AidpClient:
                 "continuous" not in payload
                 or details.get("continuous") == payload["continuous"]
             )
+            and (
+                "schedule" not in payload
+                or details.get("schedule") == payload["schedule"]
+            )
         )
 
     def _job_key(self, workspace_key: str, job_name: str) -> str:
@@ -1674,14 +1678,18 @@ class AidpClient:
         return str((jobs[0] if jobs else {}).get("key") or "")
 
     def _create_job(self, workspace_key: str, payload: dict[str, Any]) -> str:
+        creation = {
+            name: payload[name]
+            for name in ("name", "path", "description", "maxConcurrentRuns", "continuous", "schedule", "queue")
+            if name in payload
+        }
+        if isinstance(creation.get("schedule"), dict):
+            # Publish the notebook and complete task graph before allowing a trigger.
+            creation["schedule"] = {**creation["schedule"], "pauseStatus": "PAUSED"}
         created = self._request(
             "POST",
             f"/workspaces/{workspace_key}/jobs",
-            payload={
-                name: payload[name]
-                for name in ("name", "path", "description", "maxConcurrentRuns", "continuous")
-                if name in payload
-            },
+            payload=creation,
             phase="content",
         )
         job_key = str((created or {}).get("key") or "")
@@ -2806,6 +2814,9 @@ class AidpClient:
             )
         except (AidpProvisionError, AidpProvisionPending):
             return False
+        schedule = details.get("schedule") if isinstance(details, dict) else None
+        if isinstance(schedule, dict):
+            return str(schedule.get("pauseStatus") or "").upper() == "UNPAUSED"
         continuous = details.get("continuous") if isinstance(details, dict) else None
         return bool(
             isinstance(continuous, dict)
@@ -2909,9 +2920,15 @@ class AidpClient:
         return {
             "name": GOVERNANCE_JOB_NAME,
             "path": self._module_root,
-            "description": "Continuous 30-second Master Catalog metadata reconciliation",
+            "description": "Scheduled one-minute Master Catalog metadata reconciliation",
             "maxConcurrentRuns": 1,
-            "continuous": {"pauseStatus": "PAUSED" if paused else "UNPAUSED"},
+            "continuous": None,
+            "schedule": {
+                "quartzCronExpression": "0 * * * * ?",
+                "timezoneId": "UTC",
+                "pauseStatus": "PAUSED" if paused else "UNPAUSED",
+            },
+            "queue": {"isEnabled": False},
             "jobClusters": [{"clusterKey": compute_key}],
             "tasks": [{
                 "type": "NOTEBOOK_TASK",
