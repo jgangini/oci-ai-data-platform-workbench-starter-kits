@@ -2,7 +2,7 @@
   "schema_version": 1,
   "lab_id": "ai_social_network",
   "display_name": "AI Social Network",
-  "pack_version": "1.0.0",
+  "pack_version": "1.1.0",
   "status": "available",
   "kind": "global_module",
   "scope": "global",
@@ -18,9 +18,12 @@
     "name": "ai_social_network",
     "tools": [
       "summary",
+      "ranking",
+      "trend",
       "search",
       "history",
-      "details"
+      "details",
+      "comments"
     ],
     "memory": "AI_LAKEHOUSE",
     "read_layer": "gold"
@@ -29,13 +32,13 @@
     {
       "file": "notebooks/social_ingest.py",
       "workspace_path": "social_ingest.py",
-      "sha256": "8603401995830788971f21c51273b266afd1174e0bbbc15363d05b4b294beb95"
+      "sha256": "5aedd8f6e3aa4c0a4153b32cbaeebe798b22e64a4c39ca77a41b59193d4b2a70"
     },
     {
       "file": "notebooks/agent/social_agent.py",
       "workspace_path": "agent/social_agent.py",
-      "sha256": "42f368679fa7d45477733e6a01535c11e55104d0557f8df13d7ad67435f2b32a"
+      "sha256": "7ac24a587f4de5c32fdf80c8c2d503ba5aaf28fbe2151b99af160baf39641155"
     }
   ],
-  "pack_sha256": "306b90f8210705f6e086290bc4584e762d20d90e829bfb00ae1c4a1b06e20b52"
+  "pack_sha256": "2e5f807b666b09a04307c23d8172e43fa515667bf48a55cbfbc125ef50364141"
 }

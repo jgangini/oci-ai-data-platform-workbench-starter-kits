@@ -8,22 +8,26 @@ spec = importlib.util.spec_from_file_location('social_agent', path)
 agent = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(agent)
 CONFIG = {'catalog': 'oci_medallion', 'gold_schema': 'oci_gold'}
-SNAPSHOT = {'publication_id': 'v1', 'published_at':'2026-10-29T10:00:00Z', 'current_version':1, 'history_version':2, 'daily_version':3}
+SNAPSHOT = {'publication_id': 'v1', 'published_at':'2026-10-29T10:00:00Z', 'current_version':1, 'history_version':2, 'daily_version':3,
+            'comment_current_version':4, 'comment_history_version':5}
 
 
 def test_every_tool_uses_exact_committed_gold_versions_and_fixed_bounded_sql():
     for name in agent.TOOLS:
         args = {'platform':'instagram', 'post_key':'a'*64} if name in ('history','details') else {'platform':'instagram'}
         sql = agent.tool_sql(CONFIG, SNAPSHOT, name, args)
-        assert sql.startswith('SELECT ') and 'LIMIT 50' in sql and ';' not in sql
-        version = 2 if name == 'history' else 3 if name == 'summary' else 1
+        assert sql.startswith('SELECT ') and ('LIMIT 10' if name == 'ranking' else 'LIMIT 50') in sql and ';' not in sql
+        version = 2 if name == 'history' else 3 if name in ('summary','trend') else 4 if name == 'comments' else 1
         assert f'VERSION AS OF {version}' in sql
         assert 'oci_medallion.oci_gold.ai_social_' in sql
         assert 'ai_social_files' not in sql and 'oci_landing' not in sql
         if name == 'history':
             assert "observation_month BETWEEN '2026-09' AND '2026-10'" in sql
         if name == 'summary':
-            assert 'SUM(post_count)' in sql and 'published_month BETWEEN' in sql
+            assert 'SUM(post_count)' in sql and 'published_month BETWEEN' not in sql
+            ranged = agent.tool_sql(CONFIG, SNAPSHOT, name, {**args, 'date_from':'2026-10-01', 'date_to':'2026-10-28'})
+            assert "published_month BETWEEN '2026-10' AND '2026-10'" in ranged
+            assert "published_date BETWEEN DATE '2026-10-01' AND DATE '2026-10-28'" in ranged
 
 
 @pytest.mark.parametrize('name,args', [('sql',{}), ('search',{'sql':'DROP TABLE x'}), ('search',{'platform':'unknown'}),

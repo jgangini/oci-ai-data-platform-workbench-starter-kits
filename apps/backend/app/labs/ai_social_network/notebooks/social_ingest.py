@@ -12,13 +12,16 @@ from datetime import datetime, timezone
 
 CONFIG = {}
 NETWORKS = frozenset({'instagram', 'facebook', 'tiktok', 'x', 'linkedin', 'youtube'})
-GOLD_TABLES = ('ai_social_current', 'ai_social_history', 'ai_social_daily', 'ai_social_publication')
+GOLD_TABLES = ('ai_social_current', 'ai_social_history', 'ai_social_daily', 'ai_social_comment_current', 'ai_social_comment_history', 'ai_social_publication')
 CONTROL_TABLES = ('ai_social_files', 'ai_social_ingest_state')
+MODEL_VERSION = 2
 TABLE_DESCRIPTIONS = {
     'ai_social_current': 'Estado Gold más reciente por red e identificador original de publicación, con texto, métricas observadas y procedencia. El agente consulta las versiones Delta confirmadas por ai_social_publication.',
     'ai_social_history': 'Histórico Gold de cambios de publicaciones y métricas por instante de observación; conserva versiones distintas con procedencia y particiones mensuales UTC, sin duplicar capturas sin cambios.',
     'ai_social_daily': 'Agregados Gold por red y fecha UTC de publicación, calculados sobre el estado actual; los conteos y las métricas desconocidas se mantienen diferenciados.',
-    'ai_social_publication': 'Recibo de publicación Gold consistente de AI Social Network: fija las versiones Delta de current, history y daily, la fecha del último recorrido completo y los archivos pendientes o fallidos. No contiene publicaciones sociales.',
+    'ai_social_publication': 'Recibo de publicación Gold consistente de AI Social Network: fija las versiones Delta de publicaciones, agregados y comentarios, la fecha del último recorrido completo y los archivos pendientes o fallidos. No contiene publicaciones sociales.',
+    'ai_social_comment_current': 'Última observación Gold de cada comentario realmente capturado, vinculada a su publicación y origen; top_comments identifica una muestra parcial y su ausencia no prueba eliminación ni ausencia de comentarios.',
+    'ai_social_comment_history': 'Histórico idempotente de cambios observados en comentarios capturados, con texto y métricas informadas, origen verificable y particiones mensuales UTC de observación; no inventa comentarios faltantes.',
     'ai_social_files': 'Control protegido de versiones de archivos JSON por nombre de objeto y ETag, con estado de procesamiento, conteos y errores sanitizados para reintentos incrementales.',
     'ai_social_ingest_state': 'Estado protegido de ingesta AI Social Network: cursor de descubrimiento, recibo de ejecución y fechas afectadas para recuperar escrituras interrumpidas sin duplicar datos.',
 }
@@ -42,6 +45,12 @@ observed_at TIMESTAMP NOT NULL COMMENT 'UTC timestamp of the source observation'
 source_object STRING NOT NULL COMMENT 'Object Storage source path',
 source_etag STRING NOT NULL COMMENT 'Exact source object version read',
 source_event_id STRING COMMENT 'Huginn event ID for provenance'"""
+COMMENT_COLUMNS = """comment_key STRING NOT NULL COMMENT 'SHA256 of platform, parent post key and provider comment ID',
+platform STRING NOT NULL, post_key STRING NOT NULL, comment_id STRING NOT NULL,
+commented_at TIMESTAMP, commented_date DATE,
+text STRING, author STRING, url STRING, like_count BIGINT, version_hash STRING NOT NULL,
+observed_at TIMESTAMP NOT NULL, source_object STRING NOT NULL, source_etag STRING NOT NULL,
+source_event_id STRING, capture_scope STRING NOT NULL COMMENT 'top_comments is partial provider coverage'"""
 
 
 def canonical(value):
@@ -108,9 +117,11 @@ def definitions():
         'ai_social_current': (POST_COLUMNS, 'platform'),
         'ai_social_history': (POST_COLUMNS + ", observation_id STRING NOT NULL COMMENT 'Idempotent observation identity', observation_month STRING NOT NULL COMMENT 'UTC observation month; physical partition'", 'observation_month'),
         'ai_social_daily': ("platform STRING NOT NULL, published_date DATE, published_month STRING NOT NULL, post_count BIGINT NOT NULL, like_count BIGINT, comment_count BIGINT, share_count BIGINT, view_count BIGINT, updated_at TIMESTAMP NOT NULL", 'published_month'),
-        'ai_social_publication': ("module_id STRING NOT NULL, publication_id STRING NOT NULL, current_version BIGINT NOT NULL, history_version BIGINT NOT NULL, daily_version BIGINT NOT NULL, published_at TIMESTAMP NOT NULL, last_full_scan_at TIMESTAMP, pending_files BIGINT NOT NULL, failed_files BIGINT NOT NULL", ''),
+        'ai_social_comment_current': (COMMENT_COLUMNS, 'platform'),
+        'ai_social_comment_history': (COMMENT_COLUMNS + ', observation_id STRING NOT NULL, observation_month STRING NOT NULL', 'observation_month'),
+        'ai_social_publication': ("module_id STRING NOT NULL, publication_id STRING NOT NULL, current_version BIGINT NOT NULL, history_version BIGINT NOT NULL, daily_version BIGINT NOT NULL, published_at TIMESTAMP NOT NULL, last_full_scan_at TIMESTAMP, pending_files BIGINT NOT NULL, failed_files BIGINT NOT NULL, comment_current_version BIGINT, comment_history_version BIGINT", ''),
         'ai_social_files': ("file_key STRING NOT NULL, source_object STRING NOT NULL, etag STRING NOT NULL, size_bytes BIGINT NOT NULL, last_modified TIMESTAMP NOT NULL, status STRING NOT NULL, discovered_at TIMESTAMP NOT NULL, processed_at TIMESTAMP, record_count BIGINT, error_code STRING", ''),
-        'ai_social_ingest_state': ("module_id STRING NOT NULL, scan_cursor STRING, dirty_dates_json STRING, last_scan_completed_at TIMESTAMP, started_at TIMESTAMP, completed_at TIMESTAMP, status STRING, processed_files BIGINT, pending_files BIGINT, observed_records BIGINT, changed_records BIGINT, error_code STRING", ''),
+        'ai_social_ingest_state': ("module_id STRING NOT NULL, scan_cursor STRING, dirty_dates_json STRING, last_scan_completed_at TIMESTAMP, started_at TIMESTAMP, completed_at TIMESTAMP, status STRING, processed_files BIGINT, pending_files BIGINT, observed_records BIGINT, changed_records BIGINT, error_code STRING, model_version INT", ''),
     }
 
 
@@ -179,7 +190,7 @@ def normalize_event(event, source):
         'version_hash': version_hash, 'published_at': published, 'published_date': published.date() if published else None,
         'text': payload.get('text', ''), 'url': url, 'author': author_value(raw),
         'like_count': count_value(raw, 'likesCount', 'likeCount', 'likes', 'engagement.likes', 'engagement.reactions'),
-        'comment_count': count_value(raw, 'commentsCount', 'replyCount', 'engagement.comments'),
+        'comment_count': count_value(raw, 'commentsCount', 'replyCount', 'engagement.comments', 'comments'),
         'share_count': count_value(raw, 'shares', 'retweetCount', 'engagement.shares', 'engagement.reposts'),
         'view_count': count_value(raw, 'viewCount', 'viewsCount', 'views'),
         'media_json': canonical(payload.get('multimedia', [])), 'geography_json': canonical(payload.get('geography', {})),
@@ -222,6 +233,13 @@ def ensure_tables(spark, config):
             raise RuntimeError('An existing module table has incompatible partitioning')
         expected = spark.createDataFrame([], schema=definitions()[name][0]).schema
         actual = spark.table(table(config, name)).schema
+        additions = {'ai_social_publication': [('comment_current_version', 'BIGINT'), ('comment_history_version', 'BIGINT')],
+                     'ai_social_ingest_state': [('model_version', 'INT')]}.get(name, [])
+        if additions and [field.name for field in actual] == [field.name for field in expected][:-len(additions)]:
+            if [(field.name, field.dataType) for field in actual] != [(field.name, field.dataType) for field in expected][:-len(additions)]:
+                raise RuntimeError('The legacy module table has incompatible columns or types')
+            spark.sql(f"ALTER TABLE {table(config, name)} ADD COLUMNS (" + ', '.join(key + ' ' + kind for key, kind in additions) + ')')
+            actual = spark.table(table(config, name)).schema
         if [(field.name, field.dataType) for field in actual] != [(field.name, field.dataType) for field in expected]:
             raise RuntimeError('An existing module table has incompatible columns or types')
         if not str(detail.get('description') or '').strip():
@@ -383,6 +401,7 @@ def write_gold(spark, config, records, state, checkpoint):
             f't.platform IN ({network_predicate}) AND t.platform=s.platform AND t.post_key=s.post_key',
             condition='s.observed_at > t.observed_at OR (s.observed_at=t.observed_at AND s.version_hash<>t.version_hash)')
         refresh_daily(spark, config, date_frame(spark, dirty), sorted({row['platform'] for row in dirty}))
+        write_comments(spark, config, latest, bounded=True)
         return count
     finally:
         changed.unpersist()
@@ -419,7 +438,7 @@ def refresh_daily(spark, config, dates, networks):
 def publish_gold(spark, config, state, failed_files):
     from uuid import uuid4
     versions = {}
-    for name in ('current', 'history', 'daily'):
+    for name in ('current', 'history', 'daily', 'comment_current', 'comment_history'):
         result = spark.sql(f"DESCRIBE HISTORY {table(config, 'ai_social_' + name)} LIMIT 1").first()
         if result is None:
             raise RuntimeError('Gold table has no verifiable Delta snapshot')
@@ -429,6 +448,99 @@ def publish_gold(spark, config, state, failed_files):
            **versions, 'published_at': datetime.now(timezone.utc), 'last_full_scan_at': state['last_scan_completed_at'],
            'pending_files': state['pending_files'], 'failed_files': failed_files}
     merge_frame(spark, target, spark.createDataFrame([row], schema=spark.table(target).schema), 't.module_id=s.module_id')
+
+
+def comment_frame(spark, config, parents):
+    """Provider-specific observed comments; a partial top list never implies deletion."""
+    from pyspark.sql import functions as F
+    shape = 'ARRAY<STRUCT<commentId:STRING,id:STRING,text:STRING,date:STRING,likesCount:STRING,commentUrl:STRING,profileName:STRING,author:STRUCT<name:STRING>>>'
+    base = (parents.where(F.col('platform') == 'facebook')
+        .withColumn('_raw_comments', F.get_json_object('attributes_json', '$.topComments'))
+        .withColumn('_comments', F.from_json('_raw_comments', shape)))
+    if base.where(F.col('_raw_comments').isNotNull() & (F.col('_raw_comments') != 'null') & F.col('_comments').isNull()).limit(1).count():
+        raise RuntimeError('The observed provider comment collection is malformed')
+    selected = base.select(
+        'platform', 'post_key', 'observed_at', 'source_object', 'source_etag', 'source_event_id',
+        F.explode('_comments').alias('_comment'))
+    identifier = F.coalesce(F.when(F.length('_comment.commentId') > 0, F.col('_comment.commentId')), F.col('_comment.id'))
+    selected = selected.withColumn('comment_id', identifier)
+    if selected.where(F.col('comment_id').isNull() | (F.length('comment_id') > 1024) | (F.length('comment_id') == 0)).limit(1).count():
+        raise RuntimeError('An observed comment has no valid provider identity')
+    url = F.col('_comment.commentUrl')
+    if selected.where(url.isNotNull() & (F.length(url) > 0) & ~url.rlike(r'^https://(?:www\.|m\.)?facebook\.com/[^\x00-\x20]*$')).limit(1).count():
+        raise RuntimeError('An observed comment URL does not match its source network')
+    qualified_date = F.when(F.col('_comment.date').rlike(r'(?:Z|[+-]\d\d:\d\d)$'), F.col('_comment.date'))
+    likes = F.expr('try_cast(_comment.likesCount AS BIGINT)')
+    result = selected.select('platform', 'post_key', 'comment_id',
+        F.col('_comment.text').alias('text'), F.coalesce('_comment.author.name', '_comment.profileName').alias('author'),
+        F.when(F.length(url) > 0, url).alias('url'),
+        F.when(F.col('_comment.likesCount').rlike(r'^\d+$') & (likes >= 0), likes).alias('like_count'),
+        F.try_to_timestamp(qualified_date).alias('commented_at'),
+        'observed_at', 'source_object', 'source_etag', 'source_event_id', F.lit('top_comments').alias('capture_scope'))
+    result = (result.withColumn('commented_date', F.to_date('commented_at'))
+        .withColumn('comment_key', F.sha2(F.concat_ws('\0', 'platform', 'post_key', 'comment_id'), 256))
+        .withColumn('version_hash', F.sha2(F.to_json(F.struct('text', 'author', 'url', 'like_count', 'commented_at'), {'ignoreNullFields': 'false'}), 256)))
+    # The observed child and parent must refer to the same network and stable publication key.
+    known = spark.table(table(config, 'ai_social_current')).select('platform', 'post_key').distinct()
+    if result.select('platform', 'post_key').distinct().join(known, ['platform', 'post_key'], 'left_anti').limit(1).count():
+        raise RuntimeError('An observed comment parent is not present in Gold')
+    return result.select(*spark.table(table(config, 'ai_social_comment_current')).columns)
+
+
+def write_comments(spark, config, parents, *, bounded=False):
+    from pyspark.sql import functions as F, Window
+    incoming = comment_frame(spark, config, parents).dropDuplicates(['comment_key', 'observed_at', 'version_hash']).cache()
+    try:
+        if bounded and incoming.limit(config.get('max_records', 20000) + 1).count() > config.get('max_records', 20000):
+            raise RuntimeError('Observed comments exceed the bounded ingestion batch')
+        if not incoming.limit(1).count():
+            return
+        current = table(config, 'ai_social_comment_current')
+        keys = incoming.select('platform', 'comment_key').distinct()
+        previous = spark.table(current).where(F.col('platform') == 'facebook').join(keys, ['platform', 'comment_key'], 'inner')
+        combined = previous.withColumn('_incoming', F.lit(False)).unionByName(incoming.withColumn('_incoming', F.lit(True)))
+        order = Window.partitionBy('platform', 'comment_key').orderBy('observed_at', '_incoming', 'version_hash')
+        baseline = Window.partitionBy('platform', 'comment_key')
+        compared = (combined.withColumn('_previous_hash', F.lag('version_hash').over(order))
+            .withColumn('_baseline_hash', F.max(F.when(~F.col('_incoming'), F.col('version_hash'))).over(baseline))
+            .withColumn('_baseline_at', F.max(F.when(~F.col('_incoming'), F.col('observed_at'))).over(baseline)))
+        old_unchanged = (F.col('_baseline_hash').isNotNull() & (F.col('version_hash') == F.col('_baseline_hash')) & (F.col('observed_at') <= F.col('_baseline_at')))
+        changed = (compared.where(F.col('_incoming') & (F.col('_previous_hash').isNull() | (F.col('_previous_hash') != F.col('version_hash'))) & ~old_unchanged)
+            .drop('_incoming', '_previous_hash', '_baseline_hash', '_baseline_at').withColumn('observation_month', F.date_format('observed_at', 'yyyy-MM'))
+            .withColumn('observation_id', F.sha2(F.concat_ws('\0', 'comment_key', 'version_hash', F.date_format('observed_at', "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX")), 256)))
+        if changed.limit(1).count():
+            months = [row[0] for row in changed.select('observation_month').distinct().collect()]
+            predicate = ','.join("'" + month + "'" for month in months)
+            merge_frame(spark, table(config, 'ai_social_comment_history'), changed,
+                f't.observation_month IN ({predicate}) AND t.observation_id=s.observation_id', update=False)
+        descending = Window.partitionBy('platform', 'comment_key').orderBy(F.col('observed_at').desc(), F.col('_incoming').desc(), F.col('version_hash').desc())
+        latest = combined.withColumn('_rank', F.row_number().over(descending)).where(F.col('_rank') == 1).drop('_rank', '_incoming')
+        merge_frame(spark, current, latest, "t.platform='facebook' AND t.platform=s.platform AND t.comment_key=s.comment_key",
+            condition='s.observed_at > t.observed_at OR (s.observed_at=t.observed_at AND s.version_hash<>t.version_hash)')
+    finally:
+        incoming.unpersist()
+
+
+def backfill_model(spark, config):
+    """Retry-safe one-time repair; preserve source objects and observation identities."""
+    from pyspark.sql import functions as F
+    for name in ('ai_social_current', 'ai_social_history'):
+        target = table(config, name)
+        candidates = (spark.table(target).where(F.col('platform') == 'facebook')
+            .withColumn('_reported', F.from_json('attributes_json', 'STRUCT<comments:BIGINT>').getField('comments'))
+            .where(F.col('_reported') >= 0))
+        repaired = candidates.withColumn('comment_count', F.coalesce('comment_count', '_reported')).drop('_reported')
+        key = "t.platform='facebook' AND t.platform=s.platform AND t.post_key=s.post_key"
+        if name.endswith('history'):
+            key = 't.observation_id=s.observation_id AND t.observation_month=s.observation_month'
+        merge_frame(spark, target, repaired, key, condition='t.comment_count IS NULL AND s.comment_count IS NOT NULL')
+        if name.endswith('current'):
+            dates = candidates.select('platform', 'published_date').distinct()
+            if dates.limit(1).count():
+                refresh_daily(spark, config, dates, ['facebook'])
+    columns = spark.table(table(config, 'ai_social_current')).columns
+    parents = spark.table(table(config, 'ai_social_history')).select(*columns).unionByName(spark.table(table(config, 'ai_social_current')))
+    write_comments(spark, config, parents)
 
 
 def record_run(spark, config, state):
@@ -449,7 +561,7 @@ def run(config):
     state = {'module_id': 'ai_social_network', 'scan_cursor': old.get('scan_cursor'),
              'dirty_dates_json': old.get('dirty_dates_json'), 'last_scan_completed_at': old.get('last_scan_completed_at'), 'started_at': datetime.now(timezone.utc),
              'completed_at': None, 'status': 'RUNNING', 'processed_files': 0, 'pending_files': None,
-             'observed_records': 0, 'changed_records': 0, 'error_code': None}
+             'observed_records': 0, 'changed_records': 0, 'error_code': None, 'model_version': old.get('model_version')}
     record_run(spark, config, state)
     try:
         storage = credential_config(config)
@@ -457,6 +569,8 @@ def run(config):
         record_discovery(spark, config, metadata)
         records, accepted, rejected = collect_sources(spark, storage, config)
         state['changed_records'] = write_gold(spark, config, records, state, lambda: record_run(spark, config, state))
+        if state['model_version'] != MODEL_VERSION:
+            backfill_model(spark, config)
         pending = spark.table(table(config, 'ai_social_files')).where(F.col('status').isin('PENDING', 'ERROR')).count()
         state['pending_files'] = max(0, pending - len(accepted))
         if completed:
@@ -469,7 +583,7 @@ def run(config):
         # before marking the exact source file versions as processed.
         update_file_states(spark, config, accepted)
         state.update(dirty_dates_json=None, scan_cursor=cursor, completed_at=datetime.now(timezone.utc), status='SUCCESS',
-                     processed_files=len(accepted), observed_records=len(records))
+                     processed_files=len(accepted), observed_records=len(records), model_version=MODEL_VERSION)
         if completed:
             state['last_scan_completed_at'] = state['completed_at']
         state['pending_files'] = (spark.table(table(config, 'ai_social_files')).where(F.col('status').isin('PENDING', 'ERROR')).count())

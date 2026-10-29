@@ -92,7 +92,7 @@ def test_catalog_metadata_publishes_all_scoped_descriptions_before_waiting_for_v
     client._catalog = Mock(return_value={"key":"catalog-key"})
     client._list = Mock(return_value=[{"key":"gold-key","displayName":"oci_gold"},{"key":"control-key","displayName":"oci_artifacts"}])
     client._schema_tables = Mock(side_effect=lambda catalog,schema:[{"key":name,"displayName":name} for name in TABLE_DESCRIPTIONS if (name in GOLD_TABLES)==(schema=="gold-key")])
-    client._describe_catalog_table = Mock(side_effect=[False,True,True,True,True,True])
+    client._describe_catalog_table = Mock(side_effect=[False] + [True] * (len(TABLE_DESCRIPTIONS) - 1))
     with pytest.raises(AidpProvisionPending):
         client._catalog_descriptions()
     assert {call.args[2] for call in client._describe_catalog_table.call_args_list} == set(TABLE_DESCRIPTIONS)
