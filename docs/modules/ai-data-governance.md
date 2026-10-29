@@ -152,7 +152,7 @@ When disabled, the notebook records `DISABLED`; an externally disabled steady-st
 
 ## Lifecycle and preservation
 
-Redeploy reconciles generated content, workflow, agent deployment, compute, and permissions while retaining the four tables and their records. The native agent redeploy preserves its existing deployment name by omitting `displayName` from the update request; resubmitting the same name can be rejected as a duplicate. The operation waits for a visible deployment revision before completing.
+Redeploy reconciles generated content, workflow, agent deployment, compute, and permissions while retaining the four tables and their records. The native agent redeploy preserves its existing deployment name by omitting `displayName` from the update request; resubmitting the same name can be rejected as a duplicate. The operation waits for a visible deployment revision or replacement deployment key before completing. During native redeploy, an overlapping creating deployment is pending; retired deployments are excluded from live checks, while duplicate active deployments still fail closed.
 Delete is different: it disables synchronization, pauses the workflow, removes module-owned resources, then removes the four tables and their exact storage prefixes.
 The protected manifest is removed last so failures remain resumable.
 Deletion retains shared OCI credentials, the artifacts bucket and schema, shared Spark compute, the Autonomous database, and unrelated starter kits.
