@@ -137,7 +137,20 @@ def main():
     assert mentions == {'youtube':7,'facebook':None}, 'Missing reported comments must remain NULL, not zero'
     assert serving('summary',{'entity':"Oracle'); DROP TABLE ai_social_current; --",'metric':'comments'}) == []
     assert count('ai_social_current') == 57
-    print('PASS Delta: ingestion retries/history/date correction/NULLs/snapshots; actual Gold SQL for all-time counts, global ranking, Oracle scopes and metric coverage')
+    trend_args = {'platforms':['youtube','facebook'],'date_from':'2026-10-27','date_to':'2026-10-29','metric':'posts'}
+    trend = serving('trend',trend_args)
+    assert [row['period'] for row in trend] == ['2026-10-27','2026-10-28','2026-10-29']
+    assert [[row['youtube'],row['facebook']] for row in trend] == [[0,0],[51,1],[0,0]]
+    assert trend[0]['coverage']['youtube'] == {'post_count':0,'reported_count':0,'undated_count':1}
+    assert trend[1]['coverage']['facebook'] == {'post_count':1,'reported_count':1,'undated_count':1}
+    engagement = serving('trend',{**trend_args,'metric':'comments'})
+    assert [[row.get('youtube'),row.get('facebook')] for row in engagement] == [[None,None],[51,9],[None,None]]
+    visual = agent.build_visualization('line',[agent.query_evidence(snapshot,'trend',{**trend_args,'metric':'comments'},engagement)])
+    assert visual['columns'] == ['Fecha','YouTube','Facebook'] and visual['rows'][0] == ['2026-10-27',None,None]
+    oracle_trend = serving('trend',{**trend_args,'metric':'comments','entity':'Oracle'})
+    assert oracle_trend[1].get('youtube') is None and oracle_trend[1]['facebook'] == 9
+    assert oracle_trend[1]['coverage']['youtube']['undated_count'] == 1
+    print('PASS Delta: ingestion retries/history/date correction/NULLs/snapshots; real Gold SQL counts/ranking/entity/coverage and complete multi-network daily series with NULL gaps')
     spark.stop()
 
 

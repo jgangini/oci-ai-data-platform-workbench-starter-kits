@@ -237,4 +237,4 @@ def test_social_package_has_only_native_gold_runtime_and_memory_agent():
     assert pack.pack_version == "1.1.0"
     assert not pack.datasets and not pack.notebooks
     assert pack.agent["memory"] == "AI_LAKEHOUSE" and pack.agent["read_layer"] == "gold"
-    assert set(pack.agent["tools"]) == {"summary", "ranking", "search", "history", "details"}
+    assert set(pack.agent["tools"]) == {"summary", "ranking", "trend", "search", "history", "details", "comments"}

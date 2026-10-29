@@ -81,3 +81,4 @@ jobs:
       - run: pip install pyspark==3.5.1 delta-spark==3.2.0 langgraph==0.6.7 oci==2.189.0
       - run: python scripts/check_social_graph.py
       - run: spark-submit --packages io.delta:delta-spark_2.12:3.2.0 scripts/check_social_delta.py
+      - run: spark-submit --packages io.delta:delta-spark_2.12:3.2.0 scripts/check_social_comments.py

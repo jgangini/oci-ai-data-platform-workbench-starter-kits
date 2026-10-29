@@ -19,9 +19,11 @@
     "tools": [
       "summary",
       "ranking",
+      "trend",
       "search",
       "history",
-      "details"
+      "details",
+      "comments"
     ],
     "memory": "AI_LAKEHOUSE",
     "read_layer": "gold"
@@ -30,13 +32,13 @@
     {
       "file": "notebooks/social_ingest.py",
       "workspace_path": "social_ingest.py",
-      "sha256": "8603401995830788971f21c51273b266afd1174e0bbbc15363d05b4b294beb95"
+      "sha256": "5aedd8f6e3aa4c0a4153b32cbaeebe798b22e64a4c39ca77a41b59193d4b2a70"
     },
     {
       "file": "notebooks/agent/social_agent.py",
       "workspace_path": "agent/social_agent.py",
-      "sha256": "55fc0ed8b797e94c0668736f39852c5f08af18b92ac672fcf1d2bad8548dbae2"
+      "sha256": "7ac24a587f4de5c32fdf80c8c2d503ba5aaf28fbe2151b99af160baf39641155"
     }
   ],
-  "pack_sha256": "03e6fb4fb05a4f86daca1dbb2846b25a15dd07e28d2b4bb097752c333c667bf0"
+  "pack_sha256": "2e5f807b666b09a04307c23d8172e43fa515667bf48a55cbfbc125ef50364141"
 }

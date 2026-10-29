@@ -8,7 +8,8 @@ spec = importlib.util.spec_from_file_location('social_agent', path)
 agent = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(agent)
 CONFIG = {'catalog': 'oci_medallion', 'gold_schema': 'oci_gold'}
-SNAPSHOT = {'publication_id': 'v1', 'published_at':'2026-10-29T10:00:00Z', 'current_version':1, 'history_version':2, 'daily_version':3}
+SNAPSHOT = {'publication_id': 'v1', 'published_at':'2026-10-29T10:00:00Z', 'current_version':1, 'history_version':2, 'daily_version':3,
+            'comment_current_version':4, 'comment_history_version':5}
 
 
 def test_every_tool_uses_exact_committed_gold_versions_and_fixed_bounded_sql():
@@ -16,7 +17,7 @@ def test_every_tool_uses_exact_committed_gold_versions_and_fixed_bounded_sql():
         args = {'platform':'instagram', 'post_key':'a'*64} if name in ('history','details') else {'platform':'instagram'}
         sql = agent.tool_sql(CONFIG, SNAPSHOT, name, args)
         assert sql.startswith('SELECT ') and ('LIMIT 10' if name == 'ranking' else 'LIMIT 50') in sql and ';' not in sql
-        version = 2 if name == 'history' else 3 if name == 'summary' else 1
+        version = 2 if name == 'history' else 3 if name in ('summary','trend') else 4 if name == 'comments' else 1
         assert f'VERSION AS OF {version}' in sql
         assert 'oci_medallion.oci_gold.ai_social_' in sql
         assert 'ai_social_files' not in sql and 'oci_landing' not in sql

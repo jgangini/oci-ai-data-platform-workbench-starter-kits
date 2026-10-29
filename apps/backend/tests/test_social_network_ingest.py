@@ -52,6 +52,29 @@ def test_absent_metrics_locations_and_publication_time_remain_unknown():
     assert json.loads(row['geography_json']) == {}
 
 
+def test_facebook_reported_comments_are_not_mistaken_for_missing_metric():
+    raw = {'comments': 6, 'topComments': [{'commentId': 'observed', 'text': 'An observed comment'}]}
+    row = ingest.normalize_event(event(platform='facebook', raw=raw),
+        {**source(), 'source_object': 'aidp-social/events/network=facebook/date=2026-10-28/events.json'})
+    assert row['comment_count'] == 6
+    assert json.loads(row['attributes_json'])['topComments'] == raw['topComments']
+    assert row['comment_count'] != len(raw['topComments']), 'Captured top comments are not the reported total'
+    unknown = ingest.normalize_event(event(platform='facebook', raw={'comments':'6'}),
+        {**source(), 'source_object': 'aidp-social/events/network=facebook/date=2026-10-28/events.json'})
+    assert unknown['comment_count'] is None, 'Post count normalization accepts reported integers, not numeric strings'
+
+
+def test_observed_comment_model_is_separate_from_reported_metrics_and_provider_credentials():
+    definitions = ingest.definitions()
+    assert definitions['ai_social_comment_current'][1] == 'platform'
+    assert definitions['ai_social_comment_history'][1] == 'observation_month'
+    assert 'capture_scope' in definitions['ai_social_comment_current'][0]
+    assert 'comment_current_version BIGINT' in definitions['ai_social_publication'][0]
+    assert 'comment_history_version BIGINT' in definitions['ai_social_publication'][0]
+    assert 'model_version INT' in definitions['ai_social_ingest_state'][0]
+    assert 'profile_picture' not in ingest.COMMENT_COLUMNS and 'gender' not in ingest.COMMENT_COLUMNS
+
+
 @pytest.mark.parametrize('changes', [{'platform': 'unsupported'}, {'platform': 'youtube'}, {'id': ''}, {'id': None}])
 def test_invalid_identity_or_network_folder_is_rejected(changes):
     with pytest.raises(ValueError):
