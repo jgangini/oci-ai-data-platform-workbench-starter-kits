@@ -20,8 +20,9 @@ agent = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(agent)
 receipt = {'publication_id':'receipt-1','published_at':'2026-10-29T10:00:00Z','current_version':1,'history_version':2,'daily_version':3,
            'comment_current_version':14,'comment_history_version':15}
-queries, plans, active = [], [], []
+queries, plans, active, answers = [], [], [], []
 POST_KEY = 'a' * 64
+LINE_QUESTION = 'Compara las publicaciones de Instagram y Facebook del 2026-10-23 al 2026-10-29 con un gráfico de líneas.'
 
 
 class Model:
@@ -44,6 +45,16 @@ class Model:
             raise AssertionError('The three verified questions must bypass the model planner')
         if question == 'VALOR GRANDE':
             presentation = 'bar'
+        elif question == LINE_QUESTION:
+            # Captured native output: omitted both requested dates and supplied a generic row limit.
+            tool, presentation = 'trend', 'line'
+            args = {'platforms':['instagram','facebook'],'limit':50}
+        elif question in ('RECUPERA PLAN','ACLARA PLAN'):
+            if value.get('validation_error'):
+                assert value['original_question'] == question
+                assert set(value) == {'conversation','publication','queries','search_context','original_question','validation_error'}
+                assert 'hasta 50 días' in value['validation_error']
+            args = {'platform':'youtube','metric':'posts'} if question == 'RECUPERA PLAN' and value.get('validation_error') else {'platform':'unsupported'}
         elif question == 'Compara las búsquedas guardadas y explica su cobertura':
             args = {'entity':'Oracle','entity_scope':'any','metric':'comments'}
         elif question == 'Compara los comentarios de Oracle del 2026-10-01 al 2026-10-28':
@@ -80,6 +91,7 @@ class Model:
 
     async def answer(self, messages, **kwargs):
         value = json.loads(messages[-1].content)
+        answers.append(value['question'])
         keys = [(row.get('comment_key') or row['post_key']) for item in value['queries'] for row in item['rows'] if row.get('post_key')]
         if value['question'] == 'REFERENCIA INVALIDA':
             keys = ['f'*64]
@@ -111,8 +123,9 @@ def query(config, sql):
     if 'calendar.day' in sql:
         calendar = re.search(r"sequence\(DATE '([^']+)',DATE '([^']+)'",sql)
         start, end = [date.fromisoformat(value) for value in calendar.groups()]
+        posts = 'SUM(post_count)' in sql
         return [{'period':str(start+timedelta(days=index)), 'instagram':receipt['current_version']+index,
-                 'facebook':None if index == 1 else 2} for index in range((end-start).days+1)]
+                 'facebook':(0 if posts else None) if index == 1 else 2} for index in range((end-start).days+1)]
     if 'ai_social_daily' in sql:
         return [{'platform':'youtube','value':7,'post_count':7,'undated_count':2}]
     if 'SUM(comment_count)' in sql:
@@ -207,6 +220,14 @@ async def main():
         assert summary_to_line['query_context'][-1]['tool'] == 'trend'
         assert summary_to_line['query_context'][-1]['args']['entity'].casefold() == 'oracle'
         assert len(summary_to_line['visualization']['rows']) == 30 and len(plans) == planner_calls+1
+        captured_line, own = await invoke(LINE_QUESTION,'captured-native-line')
+        assert len(captured_line['visualization']['rows']) == 7
+        assert captured_line['visualization']['rows'][0][0] == '2026-10-23'
+        assert captured_line['visualization']['rows'][-1][0] == '2026-10-29'
+        assert captured_line['query_context'][-1]['args']['metric'] == 'posts'
+        assert 'limit' not in captured_line['query_context'][-1]['args']
+        assert plans[-1]['result']['args'] == {'platforms':['instagram','facebook'],'limit':50}
+        assert len(own) == 2, 'The malformed native plan must be normalized without retrying an executed query'
         planner_calls = len(plans)
         comment_word, own = await invoke('Busca la palabra Oracle en los comentarios capturados','verified-comment-word')
         assert len(plans) == planner_calls and comment_word['query_context'][-1]['tool'] == 'comments'
@@ -225,6 +246,20 @@ async def main():
         assert len(own) == 2 and len(repeated['query_context']) == 1
         bounded, own = await invoke('LIMITE','bounded')
         assert len(own) == 5 and len(bounded['query_context']) == 4
+        planner_calls = len(plans)
+        repaired, own = await invoke('RECUPERA PLAN','repair-once')
+        assert len(plans) == planner_calls+2 and len(own) == 2
+        assert repaired['query_context'][-1]['args']['platform'] == 'youtube'
+        planner_calls, answer_calls = len(plans), len(answers)
+        clarification, own = await invoke('ACLARA PLAN','clarification')
+        assert len(plans) == planner_calls+2 and len(answers) == answer_calls
+        assert len(own) == 1, 'An invalid plan and its failed repair must never execute data SQL'
+        assert clarification['sources'] == [] and clarification['query_context'] == [] and clarification['visualization'] is None
+        assert clarification['publication']['publication_id'] == receipt['publication_id'] and 'Precisa' in clarification['answer']
+        planner_calls = len(plans)
+        after_clarification, own = await invoke('RECUPERA PLAN','clarification')
+        assert len(plans) == planner_calls+2 and len(own) == 2
+        assert len(after_clarification['query_context']) == 1, 'Each turn resets repair budget and transient evidence'
         for question, message in [('FALLO SQL','Offline Gold query failure'),('REFERENCIA INVALIDA','unqueried evidence'),
                                   ('RESPUESTA LARGA','unqueried evidence')]:
             try:

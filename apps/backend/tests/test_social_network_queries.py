@@ -523,3 +523,73 @@ def test_verified_comment_word_with_punctuation_remains_an_encoded_search_litera
 ])
 def test_verified_comment_word_shortcut_does_not_erase_other_periods_or_scopes(question):
     assert agent.verified_plan(question) is None
+
+
+LINE_QUESTION = 'Compara las publicaciones de Instagram y Facebook del 2026-10-23 al 2026-10-29 con un gráfico de líneas.'
+
+
+def test_captured_native_line_plan_binds_requested_dates_and_drops_only_generic_row_limit():
+    captured = {'presentation': 'line', 'continue_query': False, 'tool': 'trend',
+                'args': {'platforms': ['instagram', 'facebook'], 'limit': 50}}
+    before = json.dumps(captured, sort_keys=True)
+    plan = agent.plan_for_question(SNAPSHOT, captured, LINE_QUESTION)
+    assert plan == {'presentation': 'line', 'continue_query': False, 'tool': 'trend', 'args': {
+        'platforms': ['instagram', 'facebook'], 'period': 'range', 'date_from': '2026-10-23',
+        'date_to': '2026-10-29', 'metric': 'posts'}}
+    assert json.dumps(captured, sort_keys=True) == before
+    agent.checked_plan(plan, [], SNAPSHOT)
+    sql = agent.tool_sql(CONFIG, SNAPSHOT, plan['tool'], plan['args'])
+    assert "sequence(DATE '2026-10-23',DATE '2026-10-29'" in sql
+
+
+def test_original_iso_range_overrides_wrong_model_dates_and_empty_unused_arguments():
+    raw = {'tool': 'summary', 'presentation': 'line', 'args': {'platform': '', 'platforms': [],
+        'entity': '', 'date_from': '2026-01-01', 'date_to': '2026-01-02', 'period': 'all', 'limit': 50}}
+    plan = agent.plan_for_question(SNAPSHOT, raw, LINE_QUESTION)
+    assert plan['tool'] == 'trend' and plan['args'] == {'period': 'range', 'date_from': '2026-10-23',
+                                                     'date_to': '2026-10-29', 'metric': 'posts'}
+    assert 'platforms' in raw['args'], 'Normalization must not mutate a model response held as evidence'
+
+
+def test_normalization_does_not_remove_a_real_limit_or_enable_free_sql():
+    search = {'tool': 'search', 'args': {'limit': 50}}
+    assert agent.plan_for_question(SNAPSHOT, search, 'Busca Oracle')['args']['limit'] == 50
+    trend = agent.plan_for_question(SNAPSHOT, {'tool': 'trend', 'args': {'limit': 7}}, LINE_QUESTION)
+    assert trend['args']['limit'] == 7
+    with pytest.raises(ValueError):
+        agent.tool_sql(CONFIG, SNAPSHOT, trend['tool'], trend['args'])
+    injected = agent.plan_for_question(SNAPSHOT, {'tool': 'trend', 'args': {'sql': 'DROP TABLE x'}}, LINE_QUESTION)
+    with pytest.raises(ValueError):
+        agent.checked_plan(injected, [], SNAPSHOT)
+
+
+def test_relative_days_are_inclusive_and_use_the_receipt_utc_date_not_local_wall_clock():
+    snapshot = {**SNAPSHOT, 'published_at': '2026-10-29T00:30:00+02:00'}
+    plan = agent.plan_for_question(snapshot, {'tool': 'trend', 'presentation': 'line', 'args': {}},
+                                   'Compara publicaciones de los últimos 7 días')
+    assert plan['args']['date_from'] == '2026-10-22' and plan['args']['date_to'] == '2026-10-28'
+    assert plan['args']['metric'] == 'posts'
+
+
+@pytest.mark.parametrize('question', ['Compara los posts con más comentarios', 'Compara las publicaciones y sus likes',
+                                      'Compara las publicaciones y su engagement', 'Compara las publicaciones y sus interacciones',
+                                      'Compara Instagram y Facebook'])
+def test_question_binding_preserves_engagement_metric_when_posts_are_not_the_requested_count(question):
+    raw = {'tool': 'trend', 'presentation': 'line', 'args': {'metric': 'likes'}}
+    assert agent.plan_for_question(SNAPSHOT, raw, question)['args']['metric'] == 'likes'
+
+
+@pytest.mark.parametrize('question', ['Compara publicaciones de los últimos 0 días',
+    'Compara publicaciones de los últimos 367 días',
+    'Compara publicaciones del 2026-02-30 al 2026-03-01',
+    'Compara 2026-01-01, 2026-01-02 y 2026-01-03'])
+def test_question_binding_rejects_invalid_or_ambiguous_ranges_before_sql(question):
+    with pytest.raises(ValueError):
+        agent.plan_for_question(SNAPSHOT, {'tool': 'trend', 'args': {}}, question)
+
+
+def test_explicit_fifty_one_day_request_remains_an_error_and_is_never_silently_truncated():
+    plan = agent.plan_for_question(SNAPSHOT, {'tool': 'trend', 'presentation': 'line', 'args': {'limit': 50}},
+                                   'Compara publicaciones del 2026-09-09 al 2026-10-29')
+    with pytest.raises(ValueError, match='50 inclusive UTC dates'):
+        agent.tool_sql(CONFIG, SNAPSHOT, plan['tool'], plan['args'])

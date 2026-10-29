@@ -10,7 +10,7 @@ import math
 import os
 import re
 import unicodedata
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 CONFIG = {}
 NETWORKS = ('instagram', 'facebook', 'tiktok', 'x', 'linkedin', 'youtube')
@@ -453,6 +453,42 @@ def previous_query(messages):
     return None
 
 
+def plan_for_question(snapshot, plan, question):
+    """Bind explicit request facts before validating an unexecuted plan."""
+    if not isinstance(plan, dict) or not isinstance(plan.get('args'), dict):
+        raise ValueError('Invalid social query plan')
+    result = dict(plan)
+    args = {key: value for key, value in plan['args'].items()
+            if value != '' and not (key == 'platforms' and value == [])}
+    result['args'] = args
+    if result.get('presentation') == 'line':
+        result['tool'] = 'trend'
+        args['period'] = 'range'
+    if result.get('tool') == 'trend' and type(args.get('limit')) is int and args['limit'] == 50:
+        args.pop('limit')
+    normalized = ''.join(char for char in unicodedata.normalize('NFD', question.lower()) if not unicodedata.combining(char))
+    explicit = re.findall(r'(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)', question)
+    if len(explicit) > 2:
+        raise ValueError('Choose one inclusive date range')
+    if len(explicit) == 2:
+        start, end = [date.fromisoformat(value) for value in explicit]
+        args.update(period='range', date_from=str(start), date_to=str(end))
+    else:
+        relative = re.search(r'\bultim[oa]s?\s+(\d{1,6})\s+dias?\b', normalized)
+        if relative:
+            days = int(relative[1])
+            if not 1 <= days <= 366:
+                raise ValueError('Choose an inclusive period of one to 366 days')
+            published = datetime.fromisoformat(snapshot['published_at'].replace('Z', '+00:00'))
+            end = published.replace(tzinfo=timezone.utc).date() if published.tzinfo is None else published.astimezone(timezone.utc).date()
+            args.update(period='range', date_from=str(end - timedelta(days=days - 1)), date_to=str(end))
+    if (result.get('tool') in ('summary', 'ranking', 'trend')
+        and re.search(r'\b(?:publicacion(?:es)?|posts?)\b', normalized)
+        and not re.search(r'\b(?:coment\w*|likes?|me\s+gusta|reacciones?|shares?|compartid\w*|views?|vistas?|visualizaciones?|engagement|interacciones?)\b', normalized)):
+        args['metric'] = 'posts'
+    return result
+
+
 def checked_plan(result, queries, snapshot=None):
     if not isinstance(result, dict) or not {'tool', 'args'} <= set(result) or set(result) - {'tool', 'args', 'presentation', 'continue_query'}:
         raise ValueError('Invalid social query plan')
@@ -533,6 +569,7 @@ class SocialNetworkAgent:
             plan: dict
             search_context: dict
             response: dict
+            plan_repairs: int
 
         config = CONFIG
         values = {key: secrets_api.secrets.get(name=config['credential_name'], key=key)
@@ -558,19 +595,34 @@ class SocialNetworkAgent:
 
         async def prepare(state):
             receipt = checked_snapshot(await asyncio.to_thread(query, config, snapshot_sql(config)))
-            return {'snapshot': receipt, 'queries': [], 'plan': {}, 'response': {}}
+            return {'snapshot': receipt, 'queries': [], 'plan': {}, 'response': {}, 'plan_repairs': 0}
 
         async def plan(state, config):
             history = conversation_context(state['messages'])
-            result = None if state['queries'] else verified_plan(str(state['messages'][-1].content), previous_query(state['messages']))
+            question = str(state['messages'][-1].content)
+            payload = {'conversation': history, 'publication': state['snapshot'], 'queries': state['queries'],
+                       'search_context': state.get('search_context', {})}
+            result = None if state['queries'] else verified_plan(question, previous_query(state['messages']))
             if result is None:
-                result = await planner.ainvoke([SystemMessage(content=PROMPT), HumanMessage(content=json.dumps({
-                    'conversation': history, 'publication': state['snapshot'], 'queries': state['queries'],
-                    'search_context': state.get('search_context', {})}, ensure_ascii=False))], config=config)
-            result = checked_plan(result, state['queries'], state['snapshot'])
-            if result['tool'] != 'finish':
-                tool_sql(CONFIG, state['snapshot'], result['tool'], result['args'])
-            return {'plan': result}
+                result = await planner.ainvoke([SystemMessage(content=PROMPT), HumanMessage(content=json.dumps(payload, ensure_ascii=False))], config=config)
+            repairs = state['plan_repairs']
+            for _ in range(2):
+                try:
+                    if not state['queries']:
+                        result = plan_for_question(state['snapshot'], result, question)
+                    result = checked_plan(result, state['queries'], state['snapshot'])
+                    if result['tool'] != 'finish':
+                        tool_sql(CONFIG, state['snapshot'], result['tool'], result['args'])
+                    return {'plan': result, 'plan_repairs': repairs}
+                except ValueError:
+                    if repairs >= 1:
+                        return {'plan': {'tool': 'clarify', 'args': {}}, 'plan_repairs': repairs}
+                    repairs += 1
+                repair = {**payload, 'original_question': question, 'validation_error':
+                    'El plan no cumple los filtros y períodos admitidos. Devuelve un plan corregido; '
+                    'respeta las fechas y redes solicitadas. trend requiere range, hasta 50 días inclusivos y sin limit.'}
+                result = await planner.ainvoke([SystemMessage(content=PROMPT),
+                    HumanMessage(content=json.dumps(repair, ensure_ascii=False))], config=config)
 
         async def execute(state):
             plan = state['plan']
@@ -603,15 +655,22 @@ class SocialNetworkAgent:
                 response.update(visualization=None, visualization_error='La visualización no puede representar fielmente estos valores; consulta la respuesta y las fuentes.')
             return {'messages': [AIMessage(content=json.dumps(response, ensure_ascii=False))]}
 
+        async def clarify(state):
+            response = {'answer': 'Precisa las redes, la métrica y el período de la consulta. '
+                        'Para gráficos de líneas, elige hasta 50 días.', 'sources': [],
+                        'publication': state['snapshot'], 'query_context': [], 'visualization': None}
+            return {'messages': [AIMessage(content=json.dumps(response, ensure_ascii=False))]}
+
         graph = StateGraph(State)
-        for name, node in (('prepare', prepare), ('plan_query', plan), ('execute', execute), ('answer', answer), ('present', present)):
+        for name, node in (('prepare', prepare), ('plan_query', plan), ('execute', execute), ('answer', answer), ('present', present), ('clarify', clarify)):
             graph.add_node(name, node)
         graph.add_edge(START, 'prepare')
         graph.add_edge('prepare', 'plan_query')
-        graph.add_conditional_edges('plan_query', lambda state: 'answer' if state['plan']['tool'] == 'finish' else 'execute')
+        graph.add_conditional_edges('plan_query', lambda state: 'clarify' if state['plan']['tool'] == 'clarify' else 'answer' if state['plan']['tool'] == 'finish' else 'execute')
         graph.add_conditional_edges('execute', lambda state: 'plan_query' if state['plan'].get('continue_query') and len(state['queries']) < 4 else 'answer')
         graph.add_edge('answer', 'present')
         graph.add_edge('present', END)
+        graph.add_edge('clarify', END)
         memory = AsyncProxyCheckpointClient(base_url=os.getenv('MEMORY_SERVER_URL') or os.getenv('MEMORY_URL') or 'http://127.0.0.1:21100', agent='ai_social_network')
         self.graph = graph.compile(checkpointer=memory)
 
