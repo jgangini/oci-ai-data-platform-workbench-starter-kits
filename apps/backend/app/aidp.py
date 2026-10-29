@@ -3428,9 +3428,13 @@ class AidpClient:
                 if visible_deployments
                 else ""
             )
+            previous = next(iter(visible_deployments), {})
             resources.update(
                 deployment_redeploy_requested=trigger_revision,
                 deployment_redeploy_baseline=baseline,
+                deployment_redeploy_baseline_key=str(
+                    previous.get("key") or previous.get("id", "")
+                ),
             )
             return
         completed_revision = str(resources.get("deployment_revision") or "")
@@ -3438,7 +3442,9 @@ class AidpClient:
             return
         current_marker = self._deployment_marker(deployment)
         baseline = str(resources.get("deployment_redeploy_baseline") or "")
-        previous_key = str(resources.get("deployment_key") or "")
+        previous_key = str(
+            resources.get("deployment_redeploy_baseline_key", resources.get("deployment_key", ""))
+        )
         current_key = str(deployment.get("key") or deployment.get("id") or "")
         replaced = bool(previous_key and current_key and previous_key != current_key)
         if not baseline or (current_marker == baseline and not replaced):
@@ -3449,6 +3455,7 @@ class AidpClient:
         resources["deployment_revision"] = redeploy_revision
         resources.pop("deployment_redeploy_requested", None)
         resources.pop("deployment_redeploy_baseline", None)
+        resources.pop("deployment_redeploy_baseline_key", None)
 
     def _ensure_global_agent_deployment(
         self,

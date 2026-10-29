@@ -1049,3 +1049,37 @@ def test_same_deployment_without_visible_revision_does_not_complete_redeploy():
     with pytest.raises(AidpProvisionPending, match="revision"):
         client._record_governance_redeploy(state, "revision", "", [], {"key": "same"})
     assert "deployment_revision" not in state
+
+
+def test_full_agent_redeploy_retains_previous_identity_across_receipt_checkpoint():
+    import copy
+    client = module_client()
+    client._governance_oci_config = lambda: {"credential_name": "AidpRuntime", "identity_sha256": "a" * 64}
+    client._ensure_agent_compute = lambda _workspace: ({"key": "compute"}, False)
+    client._ensure_agent = lambda *_args, **_kwargs: ("agent", False)
+    state = manifest("redeploy", phase="agent")
+    state["status"] = "redeploying"
+    state["resources"]["deployment_key"] = "previous"
+    previous = {"key": "previous", "lifecycleState": "ACTIVE"}
+    replacement = {"key": "replacement", "lifecycleState": "ACTIVE"}
+    writes = []
+    client._list = lambda *_args, **_kwargs: [replacement if writes else previous]
+
+    def request(method, path, **kwargs):
+        assert method == "POST" and path.endswith("/deployments/actions/redeploy")
+        assert "displayName" not in kwargs["payload"]
+        writes.append(kwargs)
+        return {**replacement, "lifecycleState": "CREATING"}
+
+    client._request = request
+    assert client._ensure_global_agent("workspace", state) is True
+    assert state["resources"]["deployment_key"] == "replacement"
+    assert state["resources"]["deployment_redeploy_baseline_key"] == "previous"
+    # Simulate saving and reloading the complete protected operation receipt.
+    state = copy.deepcopy(state)
+    assert client._ensure_global_agent("workspace", state) is False
+    assert client._ensure_global_agent("workspace", state) is False
+    assert len(writes) == 1
+    assert state["resources"]["deployment_revision"].startswith(OPERATION_ID + ":")
+    assert "deployment_redeploy_baseline_key" not in state["resources"]
+    assert "deployment_redeploy_requested" not in state["resources"]
