@@ -2,7 +2,7 @@
   "schema_version": 1,
   "lab_id": "ai_social_network",
   "display_name": "AI Social Network",
-  "pack_version": "1.1.0",
+  "pack_version": "1.1.1",
   "status": "available",
   "kind": "global_module",
   "scope": "global",
@@ -37,8 +37,8 @@
     {
       "file": "notebooks/agent/social_agent.py",
       "workspace_path": "agent/social_agent.py",
-      "sha256": "7ac24a587f4de5c32fdf80c8c2d503ba5aaf28fbe2151b99af160baf39641155"
+      "sha256": "913465d5a5d40706619d7ef4006568f9287541e22de33e12b77dafba1e8b96dc"
     }
   ],
-  "pack_sha256": "2e5f807b666b09a04307c23d8172e43fa515667bf48a55cbfbc125ef50364141"
+  "pack_sha256": "5a8b3553af25a5a275477211c1f392471de08341d464a67654ae7ccfe3545bf1"
 }
