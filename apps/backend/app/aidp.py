@@ -3189,6 +3189,7 @@ class AidpClient:
         inheritable: bool = False,
         reject_inherited_editors: bool = False,
         allowed_inherited_editors: set[tuple[str, str]] | None = None,
+        platform_admin_grantees: set[tuple[str, str]] | None = None,
     ) -> bool:
         permissions_path = f"{resource_path}/permissions"
         current = self._list(permissions_path, phase="permissions")
@@ -3196,7 +3197,25 @@ class AidpClient:
             self._assert_no_inherited_governance_editor(
                 current, allowed_inherited_editors
             )
-        direct = [item for item in current if item.get("isInherited") is not True]
+        # Native permission listings include platform administrators without an
+        # isInherited flag. Their existing ADMIN rights are outside module grants.
+        def platform_admin(item: dict[str, Any]) -> bool:
+            return bool(
+                self._permission_grantee(item) in (platform_admin_grantees or set())
+                and self._permission_values(item) == {"ADMIN"}
+            )
+
+        preserved_grantees = {
+            self._permission_grantee(item) for item in current if platform_admin(item)
+        }
+        managed_expected = tuple(
+            entry for entry in expected
+            if not (entry[1] == "ADMIN" and (entry[0], "ROLE") in preserved_grantees)
+        )
+        direct = [
+            item for item in current
+            if item.get("isInherited") is not True and not platform_admin(item)
+        ]
         expected_signatures = {
             (
                 role_name,
@@ -3206,7 +3225,7 @@ class AidpClient:
                 frozenset(),
                 frozenset(),
             )
-            for role_name, permission, expected_inheritable in expected
+            for role_name, permission, expected_inheritable in managed_expected
         }
         signatures = {
             self._permission_signature(
@@ -3229,14 +3248,14 @@ class AidpClient:
         remaining = [
             item
             for item in self._list(permissions_path, phase="permissions")
-            if item.get("isInherited") is not True
+            if item.get("isInherited") is not True and not platform_admin(item)
         ]
         if remaining:
             raise AidpProvisionPending(
                 "AIDP is still revoking divergent governance permissions.",
                 "permissions",
             )
-        for role_name, permission, expected_inheritable in expected:
+        for role_name, permission, expected_inheritable in managed_expected:
             self._ensure_role_permission(
                 resource_path,
                 assignment_key,
@@ -3505,6 +3524,7 @@ class AidpClient:
                 inheritable=True,
                 reject_inherited_editors=True,
                 allowed_inherited_editors=admin_grantees,
+                platform_admin_grantees=admin_grantees,
             ) or changed
         agent_path = f"/workspaces/{workspace_key}/agents/{agent_key}"
         changed = self._reconcile_role_permissions_exact(
@@ -3518,6 +3538,7 @@ class AidpClient:
             include_columns=True,
             reject_inherited_editors=True,
             allowed_inherited_editors=admin_grantees,
+            platform_admin_grantees=admin_grantees,
         ) or changed
         compute_path = f"/workspaces/{workspace_key}/clusters/{compute_key}"
         changed = self._reconcile_role_permissions_exact(
@@ -3525,6 +3546,7 @@ class AidpClient:
             "assignClusterPermissionDetails",
             "revokeClusterPermissionDetails",
             (),
+            platform_admin_grantees=admin_grantees,
         ) or changed
         module_object_key = self._workspace_object_key(workspace_key, self._module_root)
         module_path = f"/workspaces/{workspace_key}/objects/{quote(module_object_key, safe='')}"
@@ -3536,6 +3558,7 @@ class AidpClient:
             inheritable=True,
             reject_inherited_editors=True,
             allowed_inherited_editors=admin_grantees,
+            platform_admin_grantees=admin_grantees,
         ) or changed
         for path, is_folder in (
             (self._module_manifest_path, False),
@@ -3554,6 +3577,7 @@ class AidpClient:
                 inheritable=is_folder,
                 reject_inherited_editors=True,
                 allowed_inherited_editors=admin_grantees,
+                platform_admin_grantees=admin_grantees,
             ) or changed
         return changed
 

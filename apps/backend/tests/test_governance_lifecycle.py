@@ -315,11 +315,12 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
         "include_columns": True,
         "reject_inherited_editors": True,
         "allowed_inherited_editors": admin_grantees,
+        "platform_admin_grantees": admin_grantees,
     }
     compute = next(
         item for item in reconciliations if item[1] == "assignClusterPermissionDetails"
     )
-    assert compute[3:] == ((), {})
+    assert compute[3:] == ((), {"platform_admin_grantees": admin_grantees})
     workspace_objects = {
         item[0].rsplit("/", 1)[-1]: (item[3], item[4])
         for item in reconciliations
@@ -332,6 +333,7 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
                 "inheritable": True,
                 "reject_inherited_editors": True,
                 "allowed_inherited_editors": admin_grantees,
+                "platform_admin_grantees": admin_grantees,
             },
         ),
         "modules": (
@@ -340,6 +342,7 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
                 "inheritable": True,
                 "reject_inherited_editors": True,
                 "allowed_inherited_editors": admin_grantees,
+                "platform_admin_grantees": admin_grantees,
             },
         ),
         "ai_data_governance": (
@@ -348,6 +351,7 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
                 "inheritable": True,
                 "reject_inherited_editors": True,
                 "allowed_inherited_editors": admin_grantees,
+                "platform_admin_grantees": admin_grantees,
             },
         ),
         "manifest.json": (
@@ -356,6 +360,7 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
                 "inheritable": False,
                 "reject_inherited_editors": True,
                 "allowed_inherited_editors": admin_grantees,
+                "platform_admin_grantees": admin_grantees,
             },
         ),
         "agent": (
@@ -364,6 +369,7 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
                 "inheritable": True,
                 "reject_inherited_editors": True,
                 "allowed_inherited_editors": admin_grantees,
+                "platform_admin_grantees": admin_grantees,
             },
         ),
         "governance_agent.py": (
@@ -372,6 +378,7 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
                 "inheritable": False,
                 "reject_inherited_editors": True,
                 "allowed_inherited_editors": admin_grantees,
+                "platform_admin_grantees": admin_grantees,
             },
         ),
         "requirements.txt": (
@@ -380,6 +387,7 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
                 "inheritable": False,
                 "reject_inherited_editors": True,
                 "allowed_inherited_editors": admin_grantees,
+                "platform_admin_grantees": admin_grantees,
             },
         ),
         "agent-manifest.json": (
@@ -388,6 +396,7 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
                 "inheritable": False,
                 "reject_inherited_editors": True,
                 "allowed_inherited_editors": admin_grantees,
+                "platform_admin_grantees": admin_grantees,
             },
         ),
         "data_governance_sync.ipynb": (
@@ -396,6 +405,7 @@ def test_governance_rbac_grants_only_agent_use_and_admin() -> None:
                 "inheritable": False,
                 "reject_inherited_editors": True,
                 "allowed_inherited_editors": admin_grantees,
+                "platform_admin_grantees": admin_grantees,
             },
         ),
     }
@@ -475,6 +485,47 @@ def test_folder_permission_revoke_preserves_aidp_default_inheritance() -> None:
             "isPermissionsInheritable": True,
         }
     }]
+
+
+@pytest.mark.parametrize("expected", [(), (("AI_DATA_PLATFORM_ADMIN", "ADMIN", True),)])
+def test_native_platform_admin_grants_without_inheritance_flag_are_preserved(expected) -> None:
+    client = module_client()
+    permissions = [
+        {"grantee": "AI_DATA_PLATFORM_ADMIN", "granteeType": "ROLE", "granteePermissions": ["ADMIN"], "isPermissionsInheritable": True},
+        {"grantee": USER_OCID, "granteeType": "USER", "granteePermissions": ["ADMIN"], "isPermissionsInheritable": True},
+    ]
+    client._list = lambda *_args, **_kwargs: permissions
+    client._request = lambda *_args, **_kwargs: pytest.fail("Existing platform administrators must not be revoked or regranted")
+    assert client._reconcile_role_permissions_exact(
+        "/workspaces/workspace/objects/control", "assignWorkspaceObjectPermissionDetails",
+        "revokeWorkspaceObjectPermissionDetails", expected, inheritable=True,
+        platform_admin_grantees={("AI_DATA_PLATFORM_ADMIN", "ROLE"), (USER_OCID, "USER")},
+    ) is False
+
+
+def test_native_platform_admin_preservation_does_not_exempt_an_unverified_admin() -> None:
+    client = module_client()
+    trusted = {"grantee": USER_OCID, "granteeType": "USER", "granteePermissions": ["ADMIN"]}
+    rogue = {"grantee": "unverified-user", "granteeType": "USER", "granteePermissions": ["ADMIN"]}
+    permissions = [trusted, rogue]
+    payloads = []
+    client._list = lambda *_args, **_kwargs: list(permissions)
+
+    def request(method, _path, *, payload, **_kwargs):
+        assert method == "POST"
+        details = payload["revokeClusterPermissionDetails"]
+        assert details["assignees"] == {"type": "USER", "targets": ["unverified-user"]}
+        payloads.append(payload)
+        permissions.remove(rogue)
+
+    client._request = request
+    assert client._reconcile_role_permissions_exact(
+        "/workspaces/workspace/clusters/compute", "assignClusterPermissionDetails",
+        "revokeClusterPermissionDetails", (),
+        platform_admin_grantees={(USER_OCID, "USER")},
+    ) is True
+    assert len(payloads) == 1
+    assert permissions == [trusted]
 
 
 def test_governance_redeploy_revokes_drift_before_restoring_exact_agent_roles() -> None:
