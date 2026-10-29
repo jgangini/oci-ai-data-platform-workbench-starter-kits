@@ -172,6 +172,9 @@ class LocalAidpClient:
     async def list_modules(self) -> list[dict[str, Any]]:
         return [_module_payload(self._module)]
 
+    async def governance_agent_endpoint(self) -> str:
+        raise AidpProvisionConflict("Agent URLs require a verified native AIDP deployment.")
+
     async def install_governance_module(
         self,
         user_ocid: str,
@@ -317,6 +320,13 @@ class LocalAidpClient:
                 self._operations.pop(operation_key, None)
 
 class AidpClient:
+    _agent_compute_name = AGENT_COMPUTE_NAME
+    _agent_name = GOVERNANCE_AGENT_NAME
+    _agent_entry_filename = "governance_agent.py"
+    _sync_notebook_filename = "data_governance_sync.ipynb"
+    _module_job_name = GOVERNANCE_JOB_NAME
+    _agent_description = "Global read-only Master Catalog governance Agent"
+
     @property
     def _module_root(self) -> str:
         return getattr(self, "_governance_root", MODULE_ROOT)
@@ -613,7 +623,7 @@ class AidpClient:
             action = str(item.get("actionType") or "").upper()
             resource_name = str(item.get("resourceName") or "")
             if (
-                item.get("resourceDisplayName") != AGENT_COMPUTE_NAME
+                item.get("resourceDisplayName") != self._agent_compute_name
                 or action not in {"CREATE_CLUSTER", "DELETE_CLUSTER"}
                 or not resource_name.startswith(workspace_prefix)
                 or not resource_name.removeprefix(workspace_prefix)
@@ -651,10 +661,10 @@ class AidpClient:
             )
         if operation_status in {"FAILED", "ERROR", "CANCELED", "CANCELLED"}:
             raise AidpProvisionError(
-                "The dedicated governance AI compute deletion failed closed."
+                "The dedicated Agent AI compute deletion failed closed."
             )
         raise AidpProvisionPending(
-            "AIDP is still deleting the dedicated governance AI compute.",
+            "AIDP is still deleting the dedicated Agent AI compute.",
             "workspace",
         )
 
@@ -669,7 +679,7 @@ class AidpClient:
         )
         if not isinstance(candidate, dict):
             return None
-        if self._resource_name(candidate) != AGENT_COMPUTE_NAME:
+        if self._resource_name(candidate) != self._agent_compute_name:
             return None
         resource_type = str(
             candidate.get("type") or candidate.get("sourceApi") or ""
@@ -702,7 +712,7 @@ class AidpClient:
                 "The failed governance AI compute creation has no operation identifier.",
             )
         raise AidpProvisionPending(
-            "AIDP is still creating the dedicated governance AI compute.",
+            "AIDP is still creating the dedicated Agent AI compute.",
             "workspace",
         )
 
@@ -752,7 +762,7 @@ class AidpClient:
                 for item in self._list(
                     f"/workspaces/{workspace_key}/clusters", phase="workspace"
                 )
-                if self._resource_name(item) == AGENT_COMPUTE_NAME
+                if self._resource_name(item) == self._agent_compute_name
                 and str(item.get("type") or item.get("sourceApi") or "").upper()
                 in {"AI_COMPUTE"}
             ]
@@ -763,7 +773,7 @@ class AidpClient:
             if hidden:
                 current = [hidden]
         if len(current) > 1:
-            raise AidpProvisionError(f"AIDP has duplicate AI compute named {AGENT_COMPUTE_NAME}.")
+            raise AidpProvisionError(f"AIDP has duplicate AI compute named {self._agent_compute_name}.")
         self._remove_failed_agent_compute(workspace_key, current[0] if current else None)
         if not current:
             self._request(
@@ -771,8 +781,8 @@ class AidpClient:
                 f"/workspaces/{workspace_key}/clusters",
                 payload={
                     "type": "AI_COMPUTE",
-                    "displayName": AGENT_COMPUTE_NAME,
-                    "description": "Dedicated AI compute for the global data governance Agent",
+                    "displayName": self._agent_compute_name,
+                    "description": "Dedicated AI compute for the managed global Agent",
                     "driverConfig": {"driverShapeConfig": {"ocpus": 1, "memoryInGBs": 16}},
                     "replicaConfig": {"minReplica": 1, "maxReplica": 1},
                 },
@@ -782,7 +792,7 @@ class AidpClient:
             current = matches()
             if len(current) != 1:
                 raise AidpProvisionPending(
-                    "AIDP has not published the dedicated governance AI compute yet.", "workspace"
+                    "AIDP has not published the dedicated Agent AI compute yet.", "workspace"
                 )
             created = True
         else:
@@ -817,7 +827,7 @@ class AidpClient:
         expected_key: str = "",
     ) -> tuple[str, bool]:
         session_config = {"variables": {}}
-        entry_path = f"{root}/governance_agent.py"
+        entry_path = f"{root}/{self._agent_entry_filename}"
         dependencies_path = f"{root}/requirements.txt"
         descriptor_path = f"{root}/agent-manifest.json"
         changed = self._upload_file(
@@ -847,7 +857,7 @@ class AidpClient:
                 f"/workspaces/{workspace_key}/agents",
                 payload={
                     "displayName": name,
-                    "description": "Global read-only Master Catalog governance Agent",
+                    "description": self._agent_description,
                     "pathInfo": root,
                     "type": "CODE",
                     "entryFilePath": entry_path,
@@ -878,7 +888,7 @@ class AidpClient:
                 f"/workspaces/{workspace_key}/agents/{agent_key}",
                 payload={
                     "displayName": name,
-                    "description": "Global read-only Master Catalog governance Agent",
+                    "description": self._agent_description,
                     "entryFilePath": entry_path,
                     "dependenciesFilePath": dependencies_path,
                     "computeKey": compute_key,
@@ -2839,6 +2849,39 @@ class AidpClient:
     async def list_modules(self) -> list[dict[str, Any]]:
         return [await asyncio.to_thread(self._module_status)]
 
+    def _active_agent_endpoint(self, workspace_key: str, resources: dict[str, Any]) -> str:
+        agent_key = str(resources.get("agent_key") or "")
+        deployment_key = str(resources.get("deployment_key") or "")
+        if not agent_key or not deployment_key or not resources.get("agent_compute_key"):
+            raise AidpProvisionConflict("The module has no verified Agent deployment yet.")
+        path = "/workspaces/{}/agents/{}/deployments/{}".format(
+            *(quote(value, safe="") for value in (workspace_key, agent_key, deployment_key))
+        )
+        details = self._request("GET", path, allow_not_found=True, phase="agent")
+        if not isinstance(details, dict) or (
+            details.get("key") != deployment_key
+            or details.get("agentKey") != agent_key
+            or details.get("agentComputeKey") != resources.get("agent_compute_key")
+            or str(details.get("lifecycleState") or details.get("state")) != "ACTIVE"
+        ):
+            raise AidpProvisionConflict("The recorded Agent deployment is not active or no longer matches.")
+        expected = f"https://gateway.aidp.{self.settings.aidp_region}.oci.oraclecloud.com/agentendpoint/{agent_key}/chat"
+        endpoint = str(details.get("endpointUrl") or "").rstrip("/")
+        if endpoint == expected.removesuffix("/chat"):
+            endpoint += "/chat"
+        if endpoint != expected:
+            raise AidpProvisionError("AIDP returned an invalid Agent endpoint.")
+        return endpoint
+
+    async def governance_agent_endpoint(self) -> str:
+        def verified_endpoint():
+            workspace_key = str(self._workspace()["key"])
+            manifest = self._module_manifest(workspace_key)
+            if not manifest or manifest.get("status") != "active":
+                raise AidpProvisionConflict("Deploy the module before copying its Agent URL.")
+            return self._active_agent_endpoint(workspace_key, manifest.get("resources") or {})
+        return await asyncio.to_thread(verified_endpoint)
+
     def _ensure_governance_bucket(self) -> bool:
         try:
             self.object_storage.head_bucket(
@@ -2965,7 +3008,7 @@ class AidpClient:
         paused: bool,
         bootstrap_snapshot: bool = False,
     ) -> tuple[str, bool]:
-        job_key = self._job_key(workspace_key, GOVERNANCE_JOB_NAME)
+        job_key = self._job_key(workspace_key, self._module_job_name)
         payload, changed = self._governance_job_payload(
             workspace_key,
             compute_key,
@@ -3476,7 +3519,7 @@ class AidpClient:
             workspace_key,
             agent_key,
             compute_key,
-            GOVERNANCE_AGENT_NAME,
+            self._agent_name,
             redeploy_revision=trigger_revision,
         )
         self._record_governance_redeploy(
@@ -3494,7 +3537,7 @@ class AidpClient:
         agent_key, agent_changed = self._ensure_agent(
             workspace_key,
             str(compute["key"]),
-            GOVERNANCE_AGENT_NAME,
+            self._agent_name,
             f"{self._module_root}/agent",
             source,
             descriptor,
@@ -3601,10 +3644,10 @@ class AidpClient:
         for path, is_folder in (
             (self._module_manifest_path, False),
             (f"{self._module_root}/agent", True),
-            (f"{self._module_root}/agent/governance_agent.py", False),
+            (f"{self._module_root}/agent/{self._agent_entry_filename}", False),
             (f"{self._module_root}/agent/requirements.txt", False),
             (f"{self._module_root}/agent/agent-manifest.json", False),
-            (f"{self._module_root}/data_governance_sync.ipynb", False),
+            (f"{self._module_root}/{self._sync_notebook_filename}", False),
         ):
             object_key = self._workspace_object_key(workspace_key, path)
             changed = self._reconcile_role_permissions_exact(
@@ -3991,12 +4034,12 @@ class AidpClient:
     def _delete_governance_compute(self, workspace_key: str) -> None:
         matches = [item for item in self._list(f"/workspaces/{workspace_key}/clusters", phase="cleanup") if self._resource_name(item) == GOVERNANCE_AGENT_COMPUTE_NAME]
         if len(matches) > 1:
-            raise AidpProvisionError("AIDP has duplicate dedicated governance AI compute resources.")
+            raise AidpProvisionError("AIDP has duplicate dedicated Agent AI compute resources.")
         if matches:
             key = str(matches[0].get("key") or matches[0].get("id") or "")
             if key:
                 self._request("DELETE", f"/workspaces/{workspace_key}/clusters/{quote(key, safe='')}", allow_not_found=True, phase="cleanup")
-            raise AidpProvisionPending("The dedicated governance AI compute deletion is still in progress.", "cleanup")
+            raise AidpProvisionPending("The dedicated Agent AI compute deletion is still in progress.", "cleanup")
 
     def _delete_governance_tables(self) -> None:
         catalog = self._catalog(CATALOG_NAME, allow_missing=True)

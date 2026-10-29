@@ -1,0 +1,407 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "AI Social Network: pipeline Gold y agente",
+    "locale": "es",
+    "quality_profile": "showcase",
+    "output": "docs/diagrams/ai-social-network.html",
+    "repository": {
+      "url": "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits.git",
+      "revision": "1c4d21653e427af113bfb7080da36e2e29de4089"
+    }
+  },
+  "lanes": [
+    {
+      "id": "source",
+      "label": "Entrada configurable"
+    },
+    {
+      "id": "ingest",
+      "label": "Ingesta cada 5 min"
+    },
+    {
+      "id": "data",
+      "label": "Delta y publicación"
+    },
+    {
+      "id": "agent",
+      "label": "Agente LangGraph"
+    },
+    {
+      "id": "memory",
+      "label": "Memoria nativa"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "json",
+      "lane": "source",
+      "col": 0,
+      "type": "cloud",
+      "label": "JSON de redes",
+      "sublabel": "Bucket y prefijo elegidos",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 289,
+          "end_line": 304
+        }
+      ]
+    },
+    {
+      "id": "timer",
+      "lane": "source",
+      "col": 2,
+      "type": "messagebus",
+      "label": "Schedule AIDP",
+      "sublabel": "UTC; concurrencia 1",
+      "sources": [
+        {
+          "path": "apps/backend/app/social_network.py",
+          "line": 100,
+          "end_line": 118
+        }
+      ]
+    },
+    {
+      "id": "scan",
+      "lane": "ingest",
+      "col": 0,
+      "type": "backend",
+      "label": "Listar metadatos",
+      "sublabel": "Páginas acotadas y cursor",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 241,
+          "end_line": 261
+        }
+      ]
+    },
+    {
+      "id": "delta",
+      "lane": "ingest",
+      "col": 1,
+      "type": "backend",
+      "label": "Detectar cambios",
+      "sublabel": "Ruta + ETag; no reprocesar iguales",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 264,
+          "end_line": 286
+        }
+      ]
+    },
+    {
+      "id": "parse",
+      "lane": "ingest",
+      "col": 2,
+      "type": "backend",
+      "label": "Normalizar lote",
+      "sublabel": "ID estable; hash de negocio",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 156,
+          "end_line": 191
+        },
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 289,
+          "end_line": 304
+        }
+      ]
+    },
+    {
+      "id": "merge",
+      "lane": "ingest",
+      "col": 3,
+      "type": "backend",
+      "label": "MERGE idempotente",
+      "sublabel": "Cambios; particiones afectadas",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 329,
+          "end_line": 386
+        }
+      ]
+    },
+    {
+      "id": "ack",
+      "lane": "ingest",
+      "col": 4,
+      "type": "backend",
+      "label": "ACK en control",
+      "sublabel": "Archivos procesados tras Gold",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 439,
+          "end_line": 478
+        }
+      ]
+    },
+    {
+      "id": "files",
+      "lane": "data",
+      "col": 1,
+      "type": "database",
+      "label": "Control protegido",
+      "sublabel": "Archivos, cursor y fechas sucias",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 106,
+          "end_line": 115
+        },
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 434,
+          "end_line": 478
+        }
+      ]
+    },
+    {
+      "id": "gold",
+      "lane": "data",
+      "col": 3,
+      "type": "database",
+      "label": "Gold y publicación",
+      "sublabel": "Current, history, daily y recibo",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 106,
+          "end_line": 115
+        },
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py",
+          "line": 357,
+          "end_line": 431
+        }
+      ]
+    },
+    {
+      "id": "invoke",
+      "lane": "agent",
+      "col": 0,
+      "type": "security",
+      "label": "Pregunta autenticada",
+      "sublabel": "Contexto nativo y sesión requerida",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/agent/social_agent.py",
+          "line": 255,
+          "end_line": 265
+        }
+      ]
+    },
+    {
+      "id": "plan",
+      "lane": "agent",
+      "col": 1,
+      "type": "backend",
+      "label": "Planificar pregunta",
+      "sublabel": "Recibo y filtros permitidos",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/agent/social_agent.py",
+          "line": 208,
+          "end_line": 219
+        }
+      ]
+    },
+    {
+      "id": "query",
+      "lane": "agent",
+      "col": 2,
+      "type": "security",
+      "label": "Consultar Gold",
+      "sublabel": "SELECT fijo; VERSION AS OF",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/agent/social_agent.py",
+          "line": 29,
+          "end_line": 64
+        },
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/agent/social_agent.py",
+          "line": 109,
+          "end_line": 144
+        },
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/agent/social_agent.py",
+          "line": 221,
+          "end_line": 224
+        }
+      ]
+    },
+    {
+      "id": "answer",
+      "lane": "agent",
+      "col": 3,
+      "type": "backend",
+      "label": "Validar respuesta",
+      "sublabel": "Solo evidencia de este turno",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/agent/social_agent.py",
+          "line": 226,
+          "end_line": 242
+        }
+      ]
+    },
+    {
+      "id": "checkpoints",
+      "lane": "memory",
+      "col": 0,
+      "type": "database",
+      "label": "AI Lakehouse existente",
+      "sublabel": "Memoria del hilo de conversación",
+      "sources": [
+        {
+          "path": "apps/backend/app/labs/ai_social_network/notebooks/agent/social_agent.py",
+          "line": 244,
+          "end_line": 265
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "json-scan",
+      "from": "json",
+      "to": "scan",
+      "variant": "default",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight"
+    },
+    {
+      "id": "timer-scan",
+      "from": "timer",
+      "to": "scan",
+      "variant": "default",
+      "label": "Disparar"
+    },
+    {
+      "id": "scan-delta",
+      "from": "scan",
+      "to": "delta",
+      "variant": "default"
+    },
+    {
+      "id": "delta-files",
+      "from": "delta",
+      "to": "files",
+      "variant": "default",
+      "label": "Registrar ETag"
+    },
+    {
+      "id": "delta-parse",
+      "from": "delta",
+      "to": "parse",
+      "variant": "default",
+      "label": "Pendiente"
+    },
+    {
+      "id": "parse-merge",
+      "from": "parse",
+      "to": "merge",
+      "variant": "default"
+    },
+    {
+      "id": "merge-gold",
+      "from": "merge",
+      "to": "gold",
+      "variant": "default",
+      "label": "Escribir"
+    },
+    {
+      "id": "invoke-plan",
+      "from": "invoke",
+      "to": "plan",
+      "variant": "default"
+    },
+    {
+      "id": "plan-query",
+      "from": "plan",
+      "to": "query",
+      "variant": "default",
+      "label": "Consultar"
+    },
+    {
+      "id": "query-gold",
+      "from": "query",
+      "to": "gold",
+      "variant": "default",
+      "label": "Solo snapshots Gold"
+    },
+    {
+      "id": "query-plan",
+      "from": "query",
+      "to": "plan",
+      "variant": "default"
+    },
+    {
+      "id": "plan-answer",
+      "from": "plan",
+      "to": "answer",
+      "variant": "default",
+      "label": "Finalizar con evidencia",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "route": "bottom-channel"
+    },
+    {
+      "id": "plan-checkpoints",
+      "from": "plan",
+      "to": "checkpoints",
+      "variant": "default",
+      "label": "Leer y guardar hilo",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "gold-ack",
+      "from": "gold",
+      "to": "ack",
+      "label": "Publicar antes de ACK",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Modelo y consistencia",
+      "items": [
+        "History se particiona por mes de observación; current por red.",
+        "Daily resume por fecha de publicación, con meses y fecha desconocida.",
+        "Cada turno consulta las versiones exactas del recibo Gold."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Reintentos y escala",
+      "items": [
+        "MERGE y recibos permiten recuperar lotes interrumpidos.",
+        "El cursor y los límites hacen visible el trabajo pendiente.",
+        "La cadencia de 5 min no garantiza latencia fija a cualquier volumen.",
+        "Events/Queue es una evolución documentada, no implementada."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Fronteras de consulta",
+      "items": [
+        "El agente no consulta Landing ni tablas de control.",
+        "Máximo cuatro consultas y 50 filas por herramienta.",
+        "Memoria guía filtros; cada turno vuelve a consultar Gold.",
+        "El cliente web autenticado es una integración externa a este repositorio."
+      ]
+    }
+  ]
+}

@@ -70,6 +70,7 @@ button { min-height: 48px; border: 0; border-radius: 10px; color: white; backgro
 .release-packages .release-package-actions { width: 1%; text-align: right; white-space: nowrap; }
 .module-configure { display: inline-grid; width: 40px; height: 40px; min-height: 40px; padding: 0; place-items: center; color: #665c56; background: transparent; border: 1px solid #ded5cb; border-radius: 8px; }
 .module-configure svg { width: 22px; height: 22px; }
+.module-agent-link img { width: 22px; height: 22px; }
 .module-configure + .module-configure { margin-left: 8px; }
 .module-manager-dialog { padding: 0; max-width: calc(100vw - 32px); }
 .module-manager-dialog::backdrop { background: rgba(20,16,13,.52); backdrop-filter: blur(5px); }
@@ -84,3 +85,7 @@ button { min-height: 48px; border: 0; border-radius: 10px; color: white; backgro
 .loading-indicator-inline .progress-orbit { width: 20px; height: 20px; border-width: 2px; }
 
 @media (max-width: 520px) { .settings-registration-controls { grid-template-columns: minmax(0,1fr); }.settings-registration-controls .settings-save { justify-self: end; } }
+
+.social-source-fields { display:grid; gap:1rem; margin:1rem 0; }
+.social-source-fields label { display:grid; gap:.4rem; font-weight:600; }
+.social-source-fields input { width:100%; }

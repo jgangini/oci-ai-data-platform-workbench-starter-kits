@@ -1083,3 +1083,52 @@ def test_full_agent_redeploy_retains_previous_identity_across_receipt_checkpoint
     assert state["resources"]["deployment_revision"].startswith(OPERATION_ID + ":")
     assert "deployment_redeploy_baseline_key" not in state["resources"]
     assert "deployment_redeploy_requested" not in state["resources"]
+
+
+@pytest.mark.parametrize("state", ["not_installed", "installing", "redeploying", "error"])
+def test_agent_url_unavailable_until_module_is_active(state):
+    client = module_client()
+    client._module_manifest = lambda _workspace: {"status": state}
+    client._request = lambda *_args, **_kwargs: pytest.fail("No deployment probe before activation")
+    with pytest.raises(AidpProvisionConflict, match="Deploy the module"):
+        asyncio.run(client.governance_agent_endpoint())
+
+
+@pytest.mark.parametrize("override", [
+    {"lifecycleState": "CREATING"}, {"key": "other"}, {"agentKey": "other"},
+    {"agentComputeKey": "other"},
+])
+def test_agent_url_checks_the_exact_recorded_active_deployment(override):
+    client = module_client()
+    resources = {"agent_key": "agent", "deployment_key": "deployment", "agent_compute_key": "compute"}
+    client._request = lambda *_args, **_kwargs: {"key": "deployment", "agentKey": "agent", "agentComputeKey": "compute", "lifecycleState": "ACTIVE", **override}
+    with pytest.raises(AidpProvisionConflict, match="not active or no longer matches"):
+        client._active_agent_endpoint("workspace", resources)
+
+
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1/chat", "https://example.test/agentendpoint/agent/chat",
+    "https://gateway.aidp.us-ashburn-1.oci.oraclecloud.com/agentendpoint/agent/chat",
+    "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/other/chat",
+    "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/agent/chat?token=example",
+])
+def test_agent_url_rejects_unexpected_hosts_identity_or_query(url):
+    client = module_client()
+    resources = {"agent_key": "agent", "deployment_key": "deployment", "agent_compute_key": "compute"}
+    client._request = lambda *_args, **_kwargs: {"key": "deployment", "agentKey": "agent", "agentComputeKey": "compute", "lifecycleState": "ACTIVE", "endpointUrl": url}
+    with pytest.raises(AidpProvisionError, match="invalid Agent endpoint"):
+        client._active_agent_endpoint("workspace", resources)
+
+
+def test_agent_url_is_read_from_the_native_deployment_and_never_includes_credentials():
+    client = module_client()
+    resources = {"agent_key": "agent", "deployment_key": "deployment", "agent_compute_key": "compute"}
+    client._module_manifest = lambda _workspace: {"status": "active", "resources": resources}
+    expected = "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/agent/chat"
+    requests = []
+    def request(method, path, **_kwargs):
+        requests.append((method, path))
+        return {"key": "deployment", "agentKey": "agent", "agentComputeKey": "compute", "lifecycleState": "ACTIVE", "endpointUrl": expected}
+    client._request = request
+    assert asyncio.run(client.governance_agent_endpoint()) == expected
+    assert requests == [("GET", "/workspaces/workspace/agents/agent/deployments/deployment")]

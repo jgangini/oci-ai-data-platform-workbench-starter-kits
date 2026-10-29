@@ -19,7 +19,7 @@ ACTIVE_LABS = ("banking", "telecommunications", "telco_lineage", "retail", "heal
 def test_catalog_separates_five_participant_labs_from_global_modules() -> None:
     packs = lab_catalog()
     public = public_lab_catalog()
-    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "ai_data_governance", "gods_eye_view")
+    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "ai_data_governance", "gods_eye_view", "ai_social_network")
     assert tuple(item["lab_id"] for item in public) == ACTIVE_LABS
     assert all(pack.available for pack in packs[:5])
     assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == dict.fromkeys(
@@ -27,7 +27,7 @@ def test_catalog_separates_five_participant_labs_from_global_modules() -> None:
     )
     assert all(item["description"].strip() for item in public)
     assert "transactions" in public[0]["description"]
-    governance = packs[-2]
+    governance = load_lab_pack("ai_data_governance")
     assert governance.status == "available"
     assert governance.pack_version == "3.0.4"
     assert governance.kind == "governance_extension"
@@ -35,7 +35,7 @@ def test_catalog_separates_five_participant_labs_from_global_modules() -> None:
     assert governance.installation_modes == ("laboratory", "production")
     assert governance.display_name == "AI Data Governance"
     assert not governance.datasets and not governance.notebooks
-    assert module_catalog() == packs[-2:]
+    assert module_catalog() == packs[5:]
     module = load_lab_pack("ai_data_governance")
     assert module.agent["editable_by"] == "AI_DATA_PLATFORM_ADMIN"
     assert module.agent["tools"] == ["catalog_inventory", "catalog_lineage"]
@@ -201,7 +201,7 @@ def test_canonical_assets_are_identical_for_every_participant() -> None:
 
 def test_global_runtime_sources_are_declared_and_not_participant_kits():
     modules = module_catalog()
-    assert {pack.lab_id for pack in modules} == {"ai_data_governance", "gods_eye_view"}
+    assert {pack.lab_id for pack in modules} == {"ai_data_governance", "gods_eye_view", "ai_social_network"}
     assert {len(pack.runtime_files) for pack in modules} == {2, 3}
     for pack in modules:
         assert pack.lab_id not in lab_packs.available_lab_ids()
@@ -229,3 +229,12 @@ def test_deploy_bundle_needs_runtime_only_and_rejects_source_drift(tmp_path, mon
 def test_module_assets_reject_unsafe_paths(tmp_path, filename):
     with pytest.raises(lab_packs.LabPackError, match="asset path"):
         lab_packs._module_assets(tmp_path, [{"file": filename, "sha256": "0" * 64}], "notebooks")
+
+
+def test_social_package_has_only_native_gold_runtime_and_memory_agent():
+    pack = load_lab_pack("ai_social_network")
+    assert pack.scope == "global" and pack.kind == "global_module"
+    assert pack.pack_version == "1.0.0"
+    assert not pack.datasets and not pack.notebooks
+    assert pack.agent["memory"] == "AI_LAKEHOUSE" and pack.agent["read_layer"] == "gold"
+    assert set(pack.agent["tools"]) == {"summary", "search", "history", "details"}

@@ -24,6 +24,8 @@ from .aidp import (
     participant_owner_key,
 )
 from .config import Settings, SettingsStore
+from .social_network import SocialAidpClient
+from .social_network_api import LocalSocialClient, mount_social_network
 from .viewer_identity import mount_identity
 from .viewer_auth import _application as viewer_application, mount_viewer_login
 from .identity import IdentityClient, IdentityConflict, IdentityPending, IdentityRejected, LocalIdentityClient
@@ -203,7 +205,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 gods_eye_view_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await gods_eye_view_task
-        for client in (app.state.identity_client, app.state.aidp_client, app.state.gods_eye_view_aidp_client):
+        for client in (app.state.identity_client, app.state.aidp_client, app.state.gods_eye_view_aidp_client, app.state.social_client):
             if client is not None:
                 await client.close()
 
@@ -222,6 +224,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.identity_client = None
     app.state.aidp_client = None
     app.state.gods_eye_view_aidp_client = None
+    app.state.social_client = None
     app.state.release_manager = ApplicationReleaseManager(settings)
     app.state.health_lock = asyncio.Lock()
     app.state.health_expires_at = 0.0
@@ -249,6 +252,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return app.state.aidp_client
 
     app.state.aidp_factory = default_aidp_factory
+
+    def social_factory():
+        if app.state.social_client is None:
+            app.state.social_client = LocalSocialClient() if settings.local_development_mode else SocialAidpClient(settings)
+        return app.state.social_client
+
+    app.state.social_factory = social_factory
 
     def gods_eye_view_aidp_factory():
         if not settings.local_development_mode or settings.gods_eye_view_local_mode:
@@ -651,6 +661,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return dict(matches[0])
 
     mount_gods_eye_view(app, require_admin, require_viewer, selected_platform_admin)
+    mount_social_network(app, require_admin, selected_platform_admin)
 
     async def module_pending_response(
         operation_id: str, operation_type: str, exc: AidpProvisionPending
@@ -697,6 +708,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except AidpProvisionPending as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         except AidpProvisionError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+
+    @app.get("/api/admin/modules/ai_data_governance/agent-endpoint")
+    async def governance_agent_endpoint(_admin: str = Depends(require_admin)) -> dict[str, str]:
+        if not settings.aidp_ready():
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
+        try:
+            return {"url": await app.state.aidp_factory().governance_agent_endpoint()}
+        except AidpProvisionConflict as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+        except (AidpProvisionPending, AidpProvisionError) as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
     @app.post("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension", include_in_schema=False)
