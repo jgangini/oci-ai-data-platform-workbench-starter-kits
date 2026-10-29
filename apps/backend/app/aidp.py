@@ -912,10 +912,6 @@ class AidpClient:
                         "POST",
                         f"{path}/actions/redeploy",
                         payload={
-                            "displayName": (
-                                self._resource_name(deployment)
-                                or f"{agent_name}_deployment"
-                            ),
                             "description": (
                                 "Production deployment for the global governance Agent"
                             ),

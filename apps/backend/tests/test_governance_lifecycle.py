@@ -977,3 +977,34 @@ def test_module_status_reads_native_schedule(paused):
     client._request = lambda *_args, **_kwargs: {
         "continuous": None, "schedule": {"pauseStatus": "PAUSED" if paused else "UNPAUSED"}}
     assert asyncio.run(client.list_modules())[0]["enabled"] is (not paused)
+
+
+def test_native_redeploy_preserves_name_and_completes_same_operation_revision():
+    client = module_client()
+    state = manifest("redeploy", phase="agent")
+    state["status"] = "redeploying"
+    original = {"key": "deployment", "displayName": "retained-name", "lifecycleState": "ACTIVE", "deploymentVersion": "1"}
+    deployed = {**original, "deploymentVersion": "2"}
+    writes = []
+    client._list = lambda *_args, **_kwargs: [deployed if writes else original]
+
+    def request(method, path, **kwargs):
+        assert method == "POST" and path.endswith("/deployments/actions/redeploy")
+        # Native AIDP rejects even its own unchanged name as a duplicate.
+        if "displayName" in kwargs["payload"]:
+            raise AidpProvisionPending("Deployment with Name already exists", "deployment")
+        writes.append(kwargs)
+        return deployed
+
+    client._request = request
+    args = ("workspace", "compute", "agent", state, "a" * 64)
+    assert client._ensure_global_agent_deployment(*args) == (deployed, True)
+    assert client._ensure_global_agent_deployment(*args) == (deployed, False)
+    assert client._ensure_global_agent_deployment(*args) == (deployed, False)
+    assert len(writes) == 1
+    assert writes[0]["payload"] == {
+        "description": "Production deployment for the global governance Agent",
+        "agentComputeKey": "compute", "agentKey": "agent"}
+    assert state["resources"]["deployment_revision"] == f"{OPERATION_ID}:{'a' * 64}"
+    assert "deployment_redeploy_requested" not in state["resources"]
+    assert original["displayName"] == deployed["displayName"] == "retained-name"
