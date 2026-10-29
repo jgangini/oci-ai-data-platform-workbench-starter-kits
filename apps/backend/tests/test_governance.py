@@ -267,7 +267,7 @@ def test_catalog_lineage_removes_control_nodes_descendants_and_links() -> None:
 
 
 @pytest.mark.parametrize("bucket", ["oci_artifacts", "environment-artifacts.01"])
-def test_sync_notebook_declares_exact_delta_contract_and_continuous_delay(bucket) -> None:
+def test_sync_notebook_declares_exact_delta_contract_without_timer_delay(bucket) -> None:
     source = rendered_sync(bootstrap_snapshot=True, artifacts_bucket_name=bucket)
     compile(source, "data_governance_sync.py", "exec")
     location = _function(source, "_location", {"CONFIG": rendered_config(source)})
@@ -277,7 +277,7 @@ def test_sync_notebook_declares_exact_delta_contract_and_continuous_delay(bucket
     assert 'CONTROL_SCHEMA = "oci_medallion.oci_artifacts"' in source
     assert "has_access INT" in source
     assert "enabled INT" in source
-    assert "time.sleep(max(0, 30 - elapsed))" in source
+    assert "time.sleep" not in source
     assert "data_governance_access_policy target" not in source
     assert 'status="ERROR"' in source
     assert "error_code = hashlib.sha256(type(exc).__name__.encode())" in source
@@ -511,3 +511,60 @@ def test_sync_uses_source_ordinal_and_one_based_fallback() -> None:
     assert "enumerate(columns, start=1)" in source
     assert 'column.get("fieldPosition")' in source
     assert 'column.get("ordinalPosition")' in source
+
+
+@pytest.mark.parametrize("with_catalog", [False, True])
+def test_empty_catalog_snapshot_is_valid_without_fabricated_rows(with_catalog):
+    source = rendered_sync()
+    paths = []
+
+    def list_objects(_session, _signer, path, parameters=None):
+        paths.append(path)
+        return [{"key": "empty", "name": "empty", "state": "ACTIVE"}] if with_catalog and path == "/catalogs" else []
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("An empty inventory must not fetch or manufacture table rows")
+
+    snapshot = _function(source, "_snapshot", {
+        "requests": SimpleNamespace(Session=lambda: object()),
+        "_credential_signer": lambda: object(),
+        "spark": SimpleNamespace(table=lambda _name: SimpleNamespace(collect=lambda: [])),
+        "CONTROL_SCHEMA": "oci_medallion.oci_artifacts",
+        "_list": list_objects, "_request": unexpected, "Row": unexpected,
+        "_resolve_identities": _generated_identity_resolver(source),
+    })
+    assert snapshot() == ([], [])
+    assert paths == (["/catalogs", "/schemas"] if with_catalog else ["/catalogs"])
+
+
+@pytest.mark.parametrize("scheduled", [False, True])
+def test_external_disable_pauses_native_trigger_preserving_task_graph(scheduled):
+    from urllib.parse import quote
+    source = rendered_sync()
+    details = {"name": "sync", "tasks": [{"taskKey": "sync_master_catalog"}],
+               "jobClusters": [{"clusterKey": "shared"}], "maxConcurrentRuns": 1}
+    schedule = {"quartzCronExpression": "0 * * * * ?", "timezoneId": "UTC", "pauseStatus": "UNPAUSED"}
+    details.update({"schedule": schedule} if scheduled else {"continuous": {"pauseStatus": "UNPAUSED"}})
+    writes = []
+
+    def request(_session, _signer, method, path, **kwargs):
+        if method == "GET":
+            return details, {}
+        writes.append(kwargs["payload"])
+        return {}, {}
+
+    pause = _function(source, "_pause_workflow", {
+        "CONFIG": rendered_config(source), "quote": quote,
+        "requests": SimpleNamespace(Session=lambda: object()),
+        "_credential_signer": lambda: object(), "_request": request,
+    })
+    pause()
+    assert len(writes) == 1
+    assert writes[0]["tasks"] == details["tasks"]
+    assert writes[0]["jobClusters"] == details["jobClusters"]
+    if scheduled:
+        assert writes[0]["schedule"] == {**schedule, "pauseStatus": "PAUSED"}
+        assert writes[0]["continuous"] is None
+        assert schedule["pauseStatus"] == "UNPAUSED"
+    else:
+        assert writes[0]["continuous"] == {"pauseStatus": "PAUSED"}

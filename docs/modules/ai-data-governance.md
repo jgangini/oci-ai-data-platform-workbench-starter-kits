@@ -1,7 +1,7 @@
 # AI Data Governance
 
 AI Data Governance is a shared AIDP module for discovering catalog metadata and explaining entity or column lineage using DAMA-DMBOK concepts.
-It combines a read-only conversational agent with a continuous metadata synchronization workflow.
+It combines a read-only conversational agent with a scheduled metadata synchronization workflow.
 This guide describes the implementation; installation and runtime acceptance must be verified in the target environment.
 Start with [Getting started](../getting-started.md), [Architecture](../architecture.md), and [Operations](../operations.md).
 
@@ -85,7 +85,7 @@ Permission reconciliation accepts the native folder representation `/Workspace/`
 ```mermaid
 flowchart TD
     Request[Authorized install or redeploy] --> Verify[Verify bucket and singleton manifest]
-    Verify --> Control[Reconcile credential, notebook and continuous job]
+    Verify --> Control[Reconcile credential, notebook and scheduled job]
     Control --> Sync[Verify synchronization for the current revision]
     Sync --> Agent[Reconcile AI Compute, agent and deployment]
     Agent --> Permissions[Reconcile exact roles and inherited permissions]
@@ -140,14 +140,15 @@ Each table uses `oci://<artifacts_bucket_name>@<namespace>/oci_artifacts/<table>
 | `data_governance_access_policy` | Explicit group/column mappings with `has_access` as `0` or `1` and audit fields. |
 | `data_governance_sync_state` | Source snapshot hash/version, status, observed/change counts, start/last-success timestamps and sanitized error code. |
 
-`wf_ai_data_governance_metadata_sync` is a native continuous job with `maxConcurrentRuns=1` and task retries disabled.
+`wf_ai_data_governance_metadata_sync` is provisioned and reconciled with a native UTC schedule (`0 * * * * ?`, every minute), `maxConcurrentRuns=1`, queueing disabled and task retries disabled. One minute is the minimum interval accepted by the native scheduler; this is not a guarantee of one-minute freshness when compute or execution takes longer.
+The deployment plan creates the initial workflow paused, uploads the configured notebook and publishes its complete task graph before enabling its schedule. Reconciliation preserves the workflow identity and history, clears the mutually exclusive legacy `continuous` setting, and verifies the persisted schedule. No manual schedule setup is required.
 Each notebook execution scans active catalogs with bounded pagination, resolves column identities, and hashes the observed metadata.
+An empty inventory is a valid successful snapshot on first use: deployment does not require participant data and does not create sample business tables. Only the four module control tables above are initialized.
 An unchanged successful snapshot skips the metadata MERGE; a changed one upserts observed objects and soft-deletes missing columns.
 Synchronization does not modify access-policy rows.
 An unambiguous rename can retain its object ID; an ambiguous identity receives a new ID rather than inheriting a mapping accidentally.
-The execution waits for any remainder of a 30-second cycle; a slower cycle completes before the next starts.
-This is a minimum cycle duration, not a promise of 30-second freshness or an overlapping timer.
-When disabled, the notebook records `DISABLED`; an externally disabled steady-state configuration also pauses the continuous job.
+The native scheduler owns the cadence; notebook execution adds no artificial timer delay.
+When disabled, the notebook records `DISABLED`; an externally disabled steady-state configuration also pauses the native schedule, retaining compatibility with legacy continuous jobs.
 
 ## Lifecycle and preservation
 

@@ -201,7 +201,7 @@ def governance_sync_notebook(
     control_module_id: str = GOVERNANCE_MODULE_ID,
     artifacts_bucket_name: str = GOVERNANCE_BUCKET_NAME,
 ) -> dict[str, Any]:
-    """Return the protected Spark notebook used by the single continuous workflow."""
+    """Return the protected Spark notebook used by the single scheduled workflow."""
     if not all((namespace, platform_id, region)):
         raise ValueError("The governance synchronization runtime contract is incomplete")
     if control_module_id not in {GOVERNANCE_MODULE_ID, LEGACY_GOVERNANCE_MODULE_ID}:

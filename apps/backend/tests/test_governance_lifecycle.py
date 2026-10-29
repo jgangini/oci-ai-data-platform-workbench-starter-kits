@@ -127,7 +127,7 @@ def test_module_status_compares_installed_and_bundled_versions() -> None:
     module = asyncio.run(client.list_modules())[0]
 
     assert module["installed_version"] == "2.0.0"
-    assert module["bundled_version"] == "3.0.3"
+    assert module["bundled_version"] == "3.0.4"
     assert module["update_available"] is True
 
 
@@ -932,3 +932,48 @@ def test_governance_redeploy_never_replaces_a_recorded_agent(agents):
     with pytest.raises(AidpProvisionError, match="recorded governance Agent identity"):
         client._ensure_agent("workspace", "compute", GOVERNANCE_AGENT_NAME, "/Workspace/agent", b"source", b"{}",
             repair_drift=True, expected_key="retained-agent")
+
+
+@pytest.mark.parametrize("paused", [False, True])
+def test_governance_provisioning_declares_native_schedule_and_staged_activation(paused):
+    client = module_client()
+    client._governance_oci_config = lambda: {}
+    client._upload_notebook = lambda *_args, **_kwargs: False
+    payload, changed = client._governance_job_payload(
+        "workspace", "shared", desired_enabled=None, paused=paused)
+    assert changed is False
+    assert payload["continuous"] is None
+    assert payload["schedule"] == {"quartzCronExpression": "0 * * * * ?",
+                                   "timezoneId": "UTC", "pauseStatus": "PAUSED" if paused else "UNPAUSED"}
+    assert payload["maxConcurrentRuns"] == 1
+    assert payload["queue"] == {"isEnabled": False}
+    assert payload["tasks"][0]["taskKey"] == "sync_master_catalog"
+    assert payload["tasks"][0]["maxRetries"] == 0
+    calls = []
+
+    def request(method, path, **kwargs):
+        calls.append((method, kwargs.get("payload")))
+        if method == "POST":
+            return {"key": "job"}
+        return payload
+
+    client._request = request
+    assert client._create_job("workspace", payload) == "job"
+    assert calls[0][1]["schedule"]["pauseStatus"] == "PAUSED"
+    assert "tasks" not in calls[0][1]
+    client._publish_job("workspace", "job", payload, "shared")
+    assert calls[1] == ("PUT", payload)
+    assert payload["schedule"]["pauseStatus"] == ("PAUSED" if paused else "UNPAUSED")
+    drifted = {**payload, "schedule": {**payload["schedule"], "timezoneId": "America/Lima"}}
+    assert not client._job_contract_is_visible(drifted, payload, "shared")
+
+
+@pytest.mark.parametrize("paused", [False, True])
+def test_module_status_reads_native_schedule(paused):
+    client = module_client()
+    state = manifest("install")
+    state.update(status="active", phase="active", enabled=True)
+    client._module_manifest = lambda _workspace: state
+    client._request = lambda *_args, **_kwargs: {
+        "continuous": None, "schedule": {"pauseStatus": "PAUSED" if paused else "UNPAUSED"}}
+    assert asyncio.run(client.list_modules())[0]["enabled"] is (not paused)
