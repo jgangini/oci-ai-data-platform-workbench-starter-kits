@@ -36,6 +36,8 @@ class Model:
         args, tool, presentation, again = {}, 'summary', 'auto', False
         if question == 'cuantos post hay en yotube':
             args, presentation = {'platform':'yotube','metric':'posts'}, 'none'
+        elif question == 'VALOR GRANDE':
+            presentation = 'bar'
         elif question == 'realiza un ranking de los post mas comentados':
             tool, args = 'ranking', {'metric':'comments'}
         elif question == 'en que red social hay mas comentarios de oracle':
@@ -85,6 +87,8 @@ def query(config, sql):
         return [dict(receipt)]
     if 'FALLO SQL'.encode().hex() in sql:
         raise RuntimeError('Offline Gold query failure')
+    if active[-1] == 'unsafe-chart':
+        return [{'platform':'youtube','value':9007199254740992,'post_count':9007199254740992}]
     if 'ai_social_daily' in sql:
         return [{'platform':'youtube','value':7,'post_count':7,'undated_count':2}]
     if 'SUM(comment_count)' in sql:
@@ -171,6 +175,9 @@ async def main():
             assert not active
         recovered, own = await invoke('cuantos post hay en yotube','failure')
         assert len(own) == 2 and len(recovered['query_context']) == 1
+        unsafe, own = await invoke('VALOR GRANDE','unsafe-chart')
+        assert unsafe['visualization'] is None and unsafe['visualization_error']
+        assert unsafe['answer'] == 'Datos Gold actuales' and unsafe['sources'] == []
         try:
             await instance.invoke('Sin sesion')
             raise AssertionError('Stateless fallback must not be allowed')
