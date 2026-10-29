@@ -352,6 +352,17 @@ variable "availability_domain_index" {
   default     = 0
 }
 
+variable "ssh_allowed_cidr" {
+  description = "Optional IPv4 source CIDR for VM SSH. Leave empty to keep public SSH closed; the emailed key remains installed for future authorized access."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ssh_allowed_cidr == "" ? true : (can(cidrnetmask(var.ssh_allowed_cidr)) && !can(regex("/0$", var.ssh_allowed_cidr)))
+    error_message = "Use a valid IPv4 source CIDR narrower than /0, preferably your public IP with /32, or leave SSH disabled."
+  }
+}
+
 variable "_oci_vcn" {
   description = "VCN defaults aligned with the Select AI Analyzer application host."
 

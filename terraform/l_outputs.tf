@@ -172,6 +172,11 @@ output "public_ip" {
   value = data.oci_core_vnic.lab.public_ip_address
 }
 
+output "ssh_username" {
+  description = "Default Oracle Linux account for the emailed VM SSH access key."
+  value       = "opc"
+}
+
 output "vm_shape" {
   description = "Explicit shape used by this APPLY."
   value       = oci_core_instance.lab.shape

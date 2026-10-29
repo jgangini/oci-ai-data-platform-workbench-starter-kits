@@ -1,5 +1,6 @@
 # Mock state transition: installing a module must leave the central portal untouched.
 mock_provider "time" {}
+mock_provider "tls" {}
 
 mock_provider "oci" {
   mock_resource "oci_database_autonomous_database" {

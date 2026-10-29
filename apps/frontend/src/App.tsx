@@ -987,7 +987,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, onStatusC
             <p id={descriptionId}>One shared module for all AIDP developers, managed by AI Data Platform administrators.</p>
           </div>
           {governanceModule && <span className={`lab-state ${governanceModule.enabled ? "installed" : "unassigned"}`}>
-            {governanceModule.status.replaceAll("_", " ")}
+            {moduleOperating ? "in progress" : governanceModule.status.replaceAll("_", " ")}
           </span>}
         </header>
         <div className="governance-module-body">
@@ -1010,7 +1010,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, onStatusC
             }}>Retry settings</button>
           </>}
           {confirmDelete && !moduleOperating && <p className="lab-manager-warning" role="alert"><strong>Delete global governance module?</strong> This permanently deletes its Agent deployment, dedicated AI Compute, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema, shared Spark compute and shared OCI credentials are retained.</p>}
-          {(moduleOperationError || governanceModule?.status === "error") && <p className="lab-manager-error" role="alert">{moduleOperationError || governanceModule?.message || "The module operation failed. Resume to retry."}</p>}
+          {(moduleOperationError || (!moduleOperating && governanceModule?.status === "error")) && <p className="lab-manager-error" role="alert">{moduleOperationError || governanceModule?.message || "The module operation failed. Resume to retry."}</p>}
           {moduleOperating && <div className="registration-result module-install-progress" role="status" aria-live="polite" aria-busy="true">
             <span className="progress-orbit" aria-hidden="true" />
             <p className="eyebrow">Deployment progress</p>

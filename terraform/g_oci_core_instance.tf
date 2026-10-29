@@ -2,6 +2,11 @@ data "oci_identity_availability_domains" "lab" {
   compartment_id = var.tenancy_ocid
 }
 
+resource "tls_private_key" "instance_ssh" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
 locals {
   availability_domain = data.oci_identity_availability_domains.lab.availability_domains[var.availability_domain_index].name
 }
@@ -90,6 +95,7 @@ resource "oci_core_instance" "lab" {
   }
 
   metadata = {
+    ssh_authorized_keys = tls_private_key.instance_ssh.public_key_openssh
     user_data = base64encode(templatefile("${path.module}/templatefile/user_data.sh", {
       admin_username                 = var.admin_username
       admin_password_hash            = var.admin_password_hash

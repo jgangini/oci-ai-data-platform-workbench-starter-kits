@@ -42,6 +42,15 @@
   "form": {
     "fields": [
       {
+        "name": "ssh_allowed_cidr",
+        "label": "SSH allowed source CIDR (optional)",
+        "type": "text",
+        "required": false,
+        "default": "",
+        "max_length": 18,
+        "group": "application_vm"
+      },
+      {
         "name": "admin_username",
         "label": "Username",
         "type": "text",
@@ -337,7 +346,7 @@
         ]
       }
     ],
-    "attachments": ["adb_wallet.zip", "resource-manager-terraform-source.zip", "deployment.log"]
+    "attachments": ["adb_wallet.zip", "resource-manager-terraform-source.zip", "deployment.log", "ssh-private-key.pem"]
   },
   "outputs": [
     "portal_managed_modules",
@@ -391,9 +400,10 @@
     "identity_domain_url",
     "instance_id",
     "public_ip",
+    "ssh_username",
     "vm_shape"
   ],
-  "artifacts": ["aidp_lab_summary.json", "adb_wallet.zip"],
+  "artifacts": ["aidp_lab_summary.json", "adb_wallet.zip", "ssh-private-key.pem"],
   "preflight": {
     "entrypoint": "terraform/m_preflight.py",
     "timeout_seconds": 300,
