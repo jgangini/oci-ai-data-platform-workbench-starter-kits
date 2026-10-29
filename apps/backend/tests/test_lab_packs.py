@@ -234,7 +234,7 @@ def test_module_assets_reject_unsafe_paths(tmp_path, filename):
 def test_social_package_has_only_native_gold_runtime_and_memory_agent():
     pack = load_lab_pack("ai_social_network")
     assert pack.scope == "global" and pack.kind == "global_module"
-    assert pack.pack_version == "1.0.0"
+    assert pack.pack_version == "1.1.0"
     assert not pack.datasets and not pack.notebooks
     assert pack.agent["memory"] == "AI_LAKEHOUSE" and pack.agent["read_layer"] == "gold"
-    assert set(pack.agent["tools"]) == {"summary", "search", "history", "details"}
+    assert set(pack.agent["tools"]) == {"summary", "ranking", "search", "history", "details"}
