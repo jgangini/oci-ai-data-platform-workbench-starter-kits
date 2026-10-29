@@ -29,7 +29,8 @@ class Model:
     async def plan(self, messages, **kwargs):
         value = json.loads(messages[-1].content)
         if value['queries']:
-            return {'tool':'finish','args':{}}
+            # Reproduce the native model repeating a successful query instead of finishing.
+            return {key: value['queries'][-1][key] for key in ('tool', 'args')}
         own_context = any('CONTEXTO_A' in item['content'] for item in value['conversation'])
         choice = {'tool':'search','args':{'text':'Oracle'}} if own_context else {'tool':'summary','args':{}}
         plans.append(choice)
@@ -95,7 +96,7 @@ async def main():
         except ValueError:
             pass
         assert not active
-    print('PASS LangGraph: compiles, same-session follow-up, isolated sessions, fresh Gold queries and mandatory native memory context')
+    print('PASS LangGraph: repeated plans finalize without duplicate queries, compiles, same-session follow-up, isolated sessions, fresh Gold queries and mandatory native memory context')
 
 
 if __name__=='__main__':

@@ -34,8 +34,8 @@
     {
       "file": "notebooks/agent/social_agent.py",
       "workspace_path": "agent/social_agent.py",
-      "sha256": "667e76f12361ef7ea381eca6cbf14e6943c88908a7c901b87e866d9b372fe1a4"
+      "sha256": "42f368679fa7d45477733e6a01535c11e55104d0557f8df13d7ad67435f2b32a"
     }
   ],
-  "pack_sha256": "558c18e92a8a551a1cdcb5d0f4670d1d8a82782487609fe56e2a75485fbb06d6"
+  "pack_sha256": "306b90f8210705f6e086290bc4584e762d20d90e829bfb00ae1c4a1b06e20b52"
 }

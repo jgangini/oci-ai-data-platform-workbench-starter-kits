@@ -164,7 +164,8 @@ def checked_plan(result, queries):
         return result
     repeated = any(item['tool'] == result['tool'] and item['args'] == result['args'] for item in queries)
     if len(queries) >= 4 or repeated:
-        raise RuntimeError('The bounded query plan repeated or exceeded four queries')
+        # A repeated plan adds no evidence: finish from successful current-turn queries.
+        return {'tool': 'finish', 'args': {}}
     return result
 
 

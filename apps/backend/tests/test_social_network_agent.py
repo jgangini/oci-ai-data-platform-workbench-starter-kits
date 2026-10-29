@@ -46,3 +46,13 @@ def test_missing_publication_is_not_reported_as_no_data():
         with pytest.raises(RuntimeError):
             agent.checked_snapshot(rows)
     assert agent.checked_snapshot([SNAPSHOT]) == SNAPSHOT
+
+
+def test_repeated_or_exhausted_plan_finishes_with_current_turn_evidence():
+    plan = {'tool': 'summary', 'args': {'date_from': '2026-10-01', 'date_to': '2026-10-28'}}
+    queries = [{**plan, 'rows': [{'platform': 'facebook', 'views': 26566}]}]
+    assert agent.checked_plan(plan, queries) == {'tool': 'finish', 'args': {}}
+    assert agent.checked_plan({'tool': 'search', 'args': {}}, queries * 4) == {'tool': 'finish', 'args': {}}
+    assert agent.checked_plan(plan, []) == plan
+    with pytest.raises(ValueError, match='current-turn Gold query'):
+        agent.checked_plan({'tool': 'finish', 'args': {}}, [])
