@@ -236,7 +236,7 @@ class SocialAidpClient(AidpClient):
         source = source.replace('CONFIG = {}', 'CONFIG = ' + repr(config), 1).encode('utf-8')
         digest = hashlib.sha256(source).hexdigest()
         descriptor = json.dumps({'schema_version': 1, 'module_id': MODULE_ID, 'entry_file': self._agent_entry_filename,
-            'entry_sha256': digest, 'tools': ['summary', 'search', 'history', 'details'], 'memory': 'AI_LAKEHOUSE'}, sort_keys=True, separators=(',', ':')).encode()
+            'entry_sha256': digest, 'tools': ['summary', 'ranking', 'search', 'history', 'details'], 'memory': 'AI_LAKEHOUSE'}, sort_keys=True, separators=(',', ':')).encode()
         return source, descriptor, digest
 
     def _activate_social(self, workspace_key, manifest, _operation_type):
