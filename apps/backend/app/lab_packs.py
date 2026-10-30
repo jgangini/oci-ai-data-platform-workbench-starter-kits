@@ -232,7 +232,8 @@ def _module_assets(root: Path, entries: Any, folder: str) -> tuple[LabAsset, ...
 def _shared_module_assets(lab_id,entries):
     # Shared source has a fixed allowlist; never expand the laboratory file root.
     allowed={'sonda_contract.py','sonda_exchange.py','sonda_runtime.py',
-        'sonda_source_limits.py','sonda_source_limits_transport.py'} if lab_id=='ai_social_network' else set()
+        'sonda_source_limits.py','sonda_source_limits_transport.py','sonda_activity_runtime.py',
+        'sonda_activity.py','sonda_activity_entry.py','sonda_activity_admission.py'} if lab_id=='ai_social_network' else set()
     if not isinstance(entries,list):
         raise LabPackError('Shared module assets must be a list')
     assets=[]

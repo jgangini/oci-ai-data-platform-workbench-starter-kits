@@ -137,8 +137,55 @@ def test_work_identity_is_stable_and_result_must_confirm_exact_input():
 
 
 @pytest.mark.parametrize('uncertain',[False,True])
+def test_activity_dispatch_precedes_one_post_and_saved_result_or_uncertainty_never_reposts(monkeypatch,uncertain):
+    import requests as http
+    binding={'registry_id':str(UUID(int=1)),'generation_id':str(UUID(int=2)),
+        'investigator_agent_key':str(UUID(int=3)),'region':'us-chicago-1'}
+    request={'version':1,'work_id':str(UUID(int=4)),'sha256':'a'*64}
+    objects=Objects()
+    root=runner.operational_prefix(binding)+'work/'+request['work_id']+'/'
+    objects.put('artifacts',root+'input.json',b'synthetic protected input',None)
+    events=[]
+    ref=str(UUID(int=5))
+    def prepare(store,actual_binding,actual_request,raw,now):
+        assert store is objects and actual_binding==binding and actual_request==request
+        assert raw==b'synthetic protected input'
+        events.append('prepared')
+        return SimpleNamespace(ref=ref)
+    def reserve(store,handle,now):
+        assert store is objects and handle.ref==ref
+        if 'reserved' in events:
+            raise RuntimeError('Dispatch already reserved; preserve uncertainty')
+        events.append('reserved')
+    monkeypatch.setattr(runner,'prepare_autonomous_activity',prepare)
+    monkeypatch.setattr(runner,'reserve_autonomous_dispatch',reserve)
+    def post(url,**kwargs):
+        assert events==['prepared','reserved']
+        assert kwargs['json']['metadata']=={'sessionvariables.sondaActivityRef':ref}
+        assert kwargs['json']['input'][0]['content'][0]['text']==runner.encoded(request).decode('utf-8')
+        events.append('POST')
+        if uncertain:
+            raise http.Timeout('Synthetic uncertain native response')
+        value={'work_id':request['work_id'],'input_sha256':request['sha256'],'result':{'state':{}}}
+        objects.put('artifacts',root+'result.json',runner.encoded(value),None)
+        return SimpleNamespace(status_code=200,json=lambda:{'output':[{'role':'assistant',
+            'content':[{'type':'output_text','text':'{}'}]}]})
+    monkeypatch.setattr(http,'post',post)
+    if uncertain:
+        with pytest.raises(RuntimeError,match='outcome'):
+            runner.invoke_case(binding,objects,None,request,activity=True)
+        with pytest.raises(RuntimeError,match='already reserved'):
+            runner.invoke_case(binding,objects,None,request,activity=True)
+    else:
+        assert runner.invoke_case(binding,objects,None,request,activity=True)=={'state':{}}
+        assert runner.invoke_case(binding,objects,None,request,activity=True)=={'state':{}}
+    assert events.count('POST')==1 and events.count('reserved')==1
+
+
+@pytest.mark.parametrize('uncertain',[False,True])
 @pytest.mark.parametrize('limits_pending',[False,True])
-def test_production_loop_resumes_uncertainty_before_consuming_and_keeps_noop_predecessor(monkeypatch,uncertain,limits_pending):
+@pytest.mark.parametrize('observing',[False,True])
+def test_production_loop_resumes_uncertainty_before_consuming_and_keeps_noop_predecessor(monkeypatch,uncertain,limits_pending,observing):
     binding={'registry_id':str(UUID(int=1)),'generation_id':str(UUID(int=2)),
         'contract_sha256':'a'*64,'source_prefix':'aidp-social/','namespace':'test',
         'source_bucket':'source','artifacts_bucket':'artifacts',
@@ -150,6 +197,7 @@ def test_production_loop_resumes_uncertainty_before_consuming_and_keeps_noop_pre
     monkeypatch.setattr(runner,'runtime_storage',lambda _: (None,None))
     monkeypatch.setattr(runner,'generation_enabled',lambda *args:True)
     monkeypatch.setattr(runner,'generation_inference',lambda *args:True)
+    monkeypatch.setattr(runner,'activity_enabled',lambda *args:observing)
     monkeypatch.setattr(runner,'ensure_tables',lambda *args:None)
     monkeypatch.setattr(runner,'OciObjects',lambda *args:Objects())
     monkeypatch.setattr(runner,'Exchange',lambda *args,**kwargs:None)
@@ -164,11 +212,15 @@ def test_production_loop_resumes_uncertainty_before_consuming_and_keeps_noop_pre
         return {'state':{'version':5},'work':{},'configuration':{},'execution_results':[]}
     monkeypatch.setattr(runner,'load_case_work',load)
     monkeypatch.setattr(runner,'create_case_work',lambda *args:{'work_id':str(UUID(int=3))})
-    monkeypatch.setattr(runner,'invoke_case',lambda *args:{'state':{'version':5,'predecessor_revision':4}})
+    def invoke(*args,activity=False):
+        assert activity is observing
+        return {'state':{'version':5,'predecessor_revision':4}}
+    monkeypatch.setattr(runner,'invoke_case',invoke)
     committed=[]
     monkeypatch.setattr(runner,'apply_case_study_results',lambda *args,**kwargs:committed.append(kwargs))
     if uncertain:
-        def fail(*args):
+        def fail(*args,activity=False):
+            assert activity is observing
             raise RuntimeError('Native result is still uncertain')
         def forbidden(*args,**kwargs):
             pytest.fail('Inbound must not invalidate the pending native work')
@@ -195,7 +247,8 @@ def test_uncertain_case_reuses_pending_work_even_when_new_evidence_changes_proje
         return {'configuration':{},'work':{'input_revision':len(loaded)},'state':None,'execution_results':[]}
     monkeypatch.setattr(runner,'load_case_work',load)
     requests=[]
-    def invoke(binding,objects,signer,request):
+    def invoke(binding,objects,signer,request,*,activity=False):
+        assert activity is False
         requests.append(request)
         if len(requests)==1:
             raise RuntimeError('unknown HTTP outcome')

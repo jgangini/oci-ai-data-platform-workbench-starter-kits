@@ -11,11 +11,12 @@ LAB=APP/'labs/ai_social_network'
 
 def render(check=False):
     metadata=json.loads((LAB/'lab.json').read_text(encoding='utf-8'))
-    metadata['pack_version']='1.3.0'
+    metadata['pack_version']='1.4.0'
     metadata['agent']['investigator_name']='ai_social_network_investigator'
     metadata['agent']['contract_version']='1.0.2'
     shared=('sonda_contract.py','sonda_exchange.py','sonda_runtime.py',
-        'sonda_source_limits.py','sonda_source_limits_transport.py')
+        'sonda_source_limits.py','sonda_source_limits_transport.py','sonda_activity_runtime.py',
+        'sonda_activity.py','sonda_activity_entry.py','sonda_activity_admission.py')
     paths=sorted((LAB/'notebooks').glob('sonda_*.py'))+sorted((LAB/'notebooks/agent').glob('sonda_*.py'))
     paths += [LAB/'notebooks/social_ingest.py',LAB/'notebooks/agent/social_agent.py']
     drift=[]

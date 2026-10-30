@@ -365,7 +365,8 @@ def _prepare_configuration(spark, binding, message):
         if prior and prior[0]['decision_json'] and prior[0]['decision_json'] != canonical(decision):
             raise ValueError('Proposal already has a different terminal decision')
     _check_managed_history(spark, binding, p)
-    return {'tool_catalog': tool_catalog_rows(p, validated=True)}
+    catalog_rows = _find(spark, binding, 'tool_catalog', config_revision=p['revision'])
+    return {'tool_catalog': list(_compatible_tool_catalog(binding, p, catalog_rows).values())}
 
 
 def _prepare_budget_round(spark, binding, message):
@@ -569,22 +570,36 @@ def _publish_study_outputs(spark, binding, studies, table):
         _rows(spark, binding, table, [study], ('result_id',), update=True)
 
 
+def _tool_catalog_matches(binding, existing, expected):
+    keys = [row.get('snapshot_key') for row in existing]
+    return (len(set(keys)) == len(keys) and all(
+        row == {**_scope(binding), **expected.get(row.get('snapshot_key'), {})} for row in existing))
+
+
+def _compatible_tool_catalog(binding, configuration, existing):
+    current = {row['snapshot_key']: row for row in tool_catalog_rows(configuration, validated=True)}
+    if _tool_catalog_matches(binding, existing, current):
+        return current
+    legacy = {row['snapshot_key']: row for row in
+        tool_catalog_rows(configuration, validated=True, include_x_targets=False)}
+    if _tool_catalog_matches(binding, existing, legacy):
+        return legacy
+    raise ValueError('Conflicting immutable tool catalog snapshot')
+
+
 def sync_tool_catalog(spark, binding):
     """Recover the current derived snapshot without resetting configuration/history.
 
     Called under the writer lease after interrupted inbound effects are repaired.
     Earlier snapshots remain immutable; partial inserts replay the same keys.
+    A complete exact pre-X projection is retained until a new configuration uses
+    current schemas. Mixed or unknown projections are never adopted.
     """
     revision = _latest_revision(spark, binding)
     if not revision:
         return False
-    expected = {row['snapshot_key']: row for row in
-        tool_catalog_rows(_configuration(spark, binding, revision), validated=True)}
     existing = _find(spark, binding, 'tool_catalog', config_revision=revision)
-    for row in existing:
-        actual = {key: value for key, value in row.items() if key not in _scope(binding)}
-        if actual != expected.get(row['snapshot_key']):
-            raise ValueError('Conflicting immutable tool catalog snapshot')
+    expected = _compatible_tool_catalog(binding, _configuration(spark, binding, revision), existing)
     present = {row['snapshot_key'] for row in existing}
     missing = [row for key, row in expected.items() if key not in present]
     _rows(spark, binding, 'tool_catalog', missing, ('snapshot_key',))
@@ -1457,14 +1472,89 @@ def _approved_case_queries(current, criterion):
     return approved
 
 
-def _load_case_evaluations(read, work, pending, case_observations, case_discoveries, jobs, model_identity):
+def _case_research_request(work, payload, requests):
+    wrapped = requests.get(payload['request_id'])
+    if wrapped is None or wrapped['status'] != 'completed' or wrapped['observations_committed'] is not True:
+        return None
+    request = wrapped['request']
+    identity = (request['investigation_id'], request['criterion_id'], request['criterion_revision'])
+    expected = (work['investigation_id'], work['criterion']['criterion_id'], work['criterion']['revision'])
+    if identity != expected or wrapped['observation_message_ids'] != payload['observation_message_ids']:
+        return None
+    fields = ('config_revision', 'query_id', 'query_revision', 'budget_round_id')
+    if any(request[key] != payload[key] for key in fields):
+        return None
+    queries = work['criterion']['query_ids']
+    if queries and request['query_id'] not in queries:
+        return None
+    return request
+
+
+def _case_authorized_research_executions(work, execution_rows):
+    if len(execution_rows) > 20:
+        raise ValueError('Research origin execution history exceeds its case bound')
+    requests = {row['request']['request_id']: row for row in work['requests']}
+    if len(requests) != len(work['requests']):
+        raise ValueError('Research origin requires distinct case request identities')
+    authorized, identities = {}, {}
+    for row in execution_rows:
+        payload, message = json.loads(row['payload_json']), json.loads(row['message_json'])
+        if (payload['status'], message['kind'], message['direction']) != ('completed', 'execution_result', 'huginn_to_aidp'):
+            continue
+        if message['payload'] != payload or any(message[key] != value for key, value in work['scope'].items()):
+            continue
+        fields = ('execution_id', 'status', 'config_revision', 'query_id', 'query_revision')
+        if any(row[key] != payload[key] for key in fields):
+            continue
+        request = _case_research_request(work, payload, requests)
+        if request is None:
+            continue
+        execution_id, request_id = payload['execution_id'], payload['request_id']
+        if request_id in identities and identities[request_id] != execution_id:
+            raise ValueError('A case research request has ambiguous completed executions')
+        if execution_id in authorized and authorized[execution_id] != payload:
+            raise ValueError('Conflicting completed research execution identity')
+        identities[request_id], authorized[execution_id] = execution_id, payload
+    return authorized
+
+
+def _case_research_origin(work, discovery, authorized):
+    payload = authorized.get(discovery['execution_id'])
+    if payload is None or discovery['source_id'] not in work['criterion']['source_ids']:
+        return None
+    fields = ('config_revision', 'query_id', 'query_revision', 'budget_round_id')
+    if any(discovery[key] != payload[key] for key in fields):
+        return None
+    if discovery['message_id'] not in payload['observation_message_ids']:
+        return None
+    return payload['request_id']
+
+
+def _case_research_origin_order(authorized):
+    from pyspark.sql import functions as F
+    priority = F.lit(1)
+    for payload in authorized.values():
+        matches = F.col('message_id').isin(payload['observation_message_ids'])
+        for key in ('execution_id', 'config_revision', 'query_id', 'query_revision', 'budget_round_id'):
+            matches = matches & (F.col(key) == payload[key])
+        priority = F.when(matches, 0).otherwise(priority)
+    return priority
+
+
+def _load_case_evaluations(read, work, pending, case_observations, case_discoveries, jobs, model_identity, execution_rows=()):
     from pyspark.sql import functions as F, Window
     keys = [r['observation_key'] for r in pending]
     observations = {r['observation_key']: r.asDict() for r in case_observations.where(F.col('observation_key').isin(keys)).collect()}
-    provenance = (case_discoveries.where(F.col('observation_key').isin(keys)).alias('d')
+    authorized = _case_authorized_research_executions(work, execution_rows)
+    sources = work['criterion']['source_ids']
+    discovery = case_discoveries.where(F.col('source_id').isin(sources))
+    if work['criterion']['query_ids']:
+        discovery = discovery.where(F.col('query_id').isin(work['criterion']['query_ids']))
+    provenance = (discovery.where(F.col('observation_key').isin(keys)).alias('d')
         .join(jobs.select('observation_key', 'config_revision').alias('j'),
               (F.col('d.observation_key') == F.col('j.observation_key')) & (F.col('d.config_revision') == F.col('j.config_revision')), 'inner')
-        .select('d.*').withColumn('_order', F.row_number().over(Window.partitionBy('observation_key').orderBy('query_id', 'execution_id')))
+        .select('d.*').withColumn('_order', F.row_number().over(Window.partitionBy('observation_key').orderBy(
+            _case_research_origin_order(authorized), 'query_id', 'execution_id', 'message_id')))
         .where('_order=1').collect())
     contexts = {r['observation_key']: r.asDict() for r in provenance}
     for job in pending:
@@ -1472,7 +1562,8 @@ def _load_case_evaluations(read, work, pending, case_observations, case_discover
         if context is None:
             raise RuntimeError('Pending work has no captured source/query provenance')
         work['pending_inputs'].append({'observation': _observation_dto(observations[job['observation_key']]),
-            'config_revision': job['config_revision'], 'source_id': context['source_id'], 'query_id': context['query_id']})
+            'config_revision': job['config_revision'], 'source_id': context['source_id'], 'query_id': context['query_id'],
+            'research_request_id': _case_research_origin(work, context, authorized)})
     cached = read('evaluation_results').where(F.col('investigation_id') == work['investigation_id']).where(F.col('observation_key').isin(keys))
     if model_identity is not None:
         if set(model_identity) != {'model_id', 'model_revision', 'prompt_version'} or any(not isinstance(v, str) or not v for v in model_identity.values()):
@@ -1485,7 +1576,49 @@ def _load_case_evaluations(read, work, pending, case_observations, case_discover
     work['completed_evaluation_keys'] = [r['evaluation_key'] for r in completed[:100]]
 
 
-def _load_case_report(read, work, case_observations):
+def _case_research_observation_rows(work, rows):
+    """Keep original fingerprint-bearing observations within the private work bound."""
+    selected, size = [], 0
+    limited = len(rows) > 100
+    for row in rows[:100]:
+        value = {'source_id': row['source_id'], 'query_id': row['query_id'],
+            'observation': _observation_dto(row)}
+        encoded_size = len(canonical(value).encode('utf-8'))
+        if size + encoded_size > 245760:
+            limited = True
+            continue
+        selected.append(value)
+        size += encoded_size
+    work['research_observations'] = selected
+    if limited:
+        work['limitations'].append('El contexto para investigar usa hasta 100 observaciones relevantes completas y 240 KiB; otras observaciones permanecen en Gold.')
+
+
+def _load_case_research_observations(work, case_observations, case_discoveries, jobs, latest_results, current):
+    from pyspark.sql import functions as F
+    keys = sorted({row['observation_key'] for row in work['evidence']})
+    criterion = work['criterion']
+    pairs = [row['source_id'] + ':' + row['query_id'] for row in current['queries']
+        if row['source_id'] in criterion['source_ids']
+        and (not criterion['query_ids'] or row['query_id'] in criterion['query_ids'])]
+    if not keys or not pairs:
+        return
+    relevant = latest_results.where(F.col('decision') == 'relevant').select('observation_key')
+    observations = (case_observations.where(F.col('observation_key').isin(keys))
+        .join(relevant, 'observation_key', 'left_semi'))
+    provenance = (case_discoveries.where(F.col('observation_key').isin(keys))
+        .where(F.concat_ws(':', F.col('source_id'), F.col('query_id')).isin(pairs)).alias('d')
+        .join(jobs.select('observation_key', 'config_revision').distinct().alias('j'),
+            (F.col('d.observation_key') == F.col('j.observation_key')) &
+            (F.col('d.config_revision') == F.col('j.config_revision')), 'inner')
+        .select('d.observation_key', 'd.source_id', 'd.query_id').distinct())
+    rows = (observations.alias('o').join(provenance.alias('d'), 'observation_key', 'inner')
+        .select('o.*', 'd.source_id', 'd.query_id').dropDuplicates(['observation_key', 'source_id', 'query_id'])
+        .orderBy('observation_key', 'source_id', 'query_id').limit(101).collect())
+    _case_research_observation_rows(work, [row.asDict() for row in rows])
+
+
+def _load_case_report(read, work, case_observations, case_discoveries, jobs, current):
     from pyspark.sql import functions as F, Window
     latest_documents = (case_observations.withColumn('_document_order', F.row_number().over(Window.partitionBy('document_key')
         .orderBy(F.desc('observed_at'), F.desc('observation_key')))).where('_document_order=1').drop('_document_order'))
@@ -1503,6 +1636,7 @@ def _load_case_report(read, work, case_observations):
         'relevant_documents': int(facts['relevant'] or 0) if missing < documents else None, 'missing_evaluations': missing}
     evaluated = latest_results.orderBy(F.desc('evaluated_at'), 'evaluation_key').limit(100).collect()
     work['evaluations'], work['evidence'] = _report_selection([json.loads(r['payload_json']) for r in evaluated])
+    _load_case_research_observations(work, case_observations, case_discoveries, jobs, latest_results, current)
     ids = [r['evidence_id'] for r in work['evidence']]
     if ids:
         base = {'evidence_ids': ids, 'population_count': documents}
@@ -1563,6 +1697,7 @@ def load_case_work(spark, binding, investigation_id, *, batch_size=10, model_ide
         'input_revision': _case_input_revision(signal['input_revision'], 'evaluate' if pending else 'report', [r['observation_key'] for r in pending]),
         'pending_inputs': [], 'completed_evaluation_keys': [],
         'evaluations': [], 'evidence': [], 'facts': None, 'indicators': [], 'query_ids': [], 'requests': [],
+        'research_observations': [],
         'requests_complete': True, 'budget_round': None, 'report_revision': 0,
         'approved_query_ids': [], 'limitations': []}
     work['source_limits'] = _load_case_source_limits(read, current['revision'])
@@ -1582,9 +1717,9 @@ def load_case_work(spark, binding, investigation_id, *, batch_size=10, model_ide
     reports = read('reports').where(F.col('investigation_id') == investigation_id).agg(F.max('revision')).first()[0]
     work['report_revision'] = int(reports or 0)
     if pending:
-        _load_case_evaluations(read, work, pending, case_observations, case_discoveries, jobs, model_identity)
+        _load_case_evaluations(read, work, pending, case_observations, case_discoveries, jobs, model_identity, execution_rows)
     else:
-        _load_case_report(read, work, case_observations)
+        _load_case_report(read, work, case_observations, case_discoveries, jobs, current)
     return json_mode({'work': work, 'state': prior, 'execution_results': [json.loads(r['message_json']) for r in execution_rows],
         'configuration': json.loads(current_row['message_json']), 'publication_id': publication['publication_id'],
         'publication_sha256': fingerprint(json_mode(publication))})

@@ -18,6 +18,85 @@ from uuid import UUID
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def prepare_research_observation_fixture(core, delta, configuration, observed, evaluation):
+    """Independent next-day case with original author metadata and scoped provenance."""
+    message = copy.deepcopy(observed)
+    message['message_id'] = str(UUID(int=1400))
+    message['payload'].update(execution_id=str(UUID(int=1401)), initiated_by='agent')
+    original = message['payload']['observations'][0]
+    original.update(author='northstar_official', observed_at='2026-01-02T00:00:00Z')
+    original.update(core.observation_fingerprints(original))
+    message['payload']['observations'] = [original]
+    message = core.ObservationsMessage.model_validate(message).model_dump(mode='json')
+    rows = delta.observation_rows(message, configuration['payload'])
+    case_id = rows['investigations'][0]['investigation_id']
+    result = copy.deepcopy(evaluation)
+    result.update(observation_key=original['observation_key'], model_revision='synthetic-author-research',
+        evaluated_at='2026-01-02T00:01:00Z')
+    quote = result['evidence'][0]['quote']
+    result['evidence'] = [{**result['evidence'][0], 'observation_key': original['observation_key'],
+        'document_key': original['document_key'], 'captured_at': original['observed_at'],
+        'evidence_id': core.sha256(core.encoded([original['observation_key'], quote]))}]
+    result['evaluation_key'] = core.evaluation_fingerprint(result)
+    result = core.Evaluation.model_validate(result).model_dump(mode='json')
+    job = rows['evaluations'][0]
+    job.update(state='completed', payload_json=delta.canonical(result),
+        **{key: result[key] for key in ('evaluation_key', 'model_id', 'model_revision', 'prompt_version', 'score', 'decision')})
+    record = {key: result[key] for key in ('evaluation_key', 'observation_key', 'criterion_id', 'criterion_revision',
+        'config_revision', 'rule_sha256', 'model_id', 'model_revision', 'prompt_version', 'score', 'decision')}
+    record.update(investigation_id=case_id, evaluated_at=result['evaluated_at'], payload_sha256=delta.fingerprint(result),
+        payload_json=delta.canonical(result), observation_month=rows['observations'][0]['observation_month'])
+    rows['evaluation_results'] = [record]
+    # A different captured configuration can discover the same logical content.
+    # It is not provenance for this case's config-1 evaluation job.
+    foreign = copy.deepcopy(rows['discoveries'][0])
+    foreign.update(config_revision=2, query_id=configuration['payload']['queries'][2]['query_id'],
+        execution_id=str(UUID(int=1402)))
+    foreign['discovery_key'] = delta.fingerprint([foreign['query_id'], foreign['query_revision'],
+        foreign['execution_id'], foreign['observation_key']])
+    rows['discoveries'].append(foreign)
+    rows['case_work'] = [{'investigation_id': case_id, 'input_revision': delta.fingerprint(['author-research', case_id]),
+        'dirty': True, 'updated_at': result['evaluated_at']}]
+    request = json.loads((ROOT/'contracts/sonda/v1/fixtures/03-investigation-request.json').read_text(encoding='utf-8'))['payload']
+    request.update(request_id=str(UUID(int=1500)), investigation_id=case_id,
+        expires_at='2026-01-02T01:00:00Z', evidence_ids=[result['evidence'][0]['evidence_id']])
+    request = core.InvestigationRequest.model_validate(request).model_dump(mode='json')
+    execution = json.loads((ROOT/'contracts/sonda/v1/fixtures/04-execution-result.json').read_text(encoding='utf-8'))
+    execution.update(message_id=str(UUID(int=1501)), created_at='2026-01-02T00:01:00Z')
+    execution['payload'].update(execution_id=message['payload']['execution_id'], request_id=request['request_id'],
+        status='completed', observation_message_ids=[message['message_id']], record_count=1,
+        spent_microusd=1000, coverage='requested_scope', explanation='Synthetic completed case research; no provider was called.')
+    execution = core.ExecutionMessage.model_validate(execution).model_dump(mode='json')
+    request_row = {key: request[key] for key in ('request_id', 'investigation_id', 'config_revision',
+        'query_id', 'query_revision', 'budget_round_id', 'expires_at')}
+    request_row.update(state='completed', payload_sha256=delta.fingerprint(request), payload_json=delta.canonical(request))
+    execution_row = {key: execution['payload'][key] for key in ('execution_id', 'status', 'config_revision',
+        'query_id', 'query_revision', 'record_count', 'spent_microusd')}
+    execution_row.update(payload_json=delta.canonical(execution['payload']), message_json=delta.canonical(execution))
+    primary = copy.deepcopy(rows['discoveries'][0])
+    primary.update(execution_id=str(UUID(int=1399)), message_id=str(UUID(int=1398)))
+    primary['discovery_key'] = delta.fingerprint([primary['query_id'], primary['query_revision'],
+        primary['execution_id'], primary['observation_key']])
+    return delta.json_mode({'case_id': case_id, 'expected_observation': original,
+        'source_id': message['payload']['source_id'], 'query_id': message['payload']['query_id'],
+        'research_request_id': request['request_id'],
+        'origin_rows': {'requests': [request_row], 'executions': [execution_row], 'discoveries': [primary]},
+        'rows': {key: rows[key] for key in ('observations', 'discoveries', 'evaluations',
+            'evaluation_results', 'investigations', 'case_work')}})
+
+
+def write_research_fixture_rows(spark, delta, binding, fixture_rows, keys):
+    for suffix, rows in fixture_rows.items():
+        records = copy.deepcopy(rows)
+        for row in records:
+            for field in ('observed_at', 'published_at', 'evaluated_at', 'window_start', 'updated_at', 'expires_at'):
+                if row.get(field):
+                    row[field] = delta.utc(row[field])
+            if row.get('published_date'):
+                row['published_date'] = delta.utc(row['published_date']+'T00:00:00Z').date()
+        delta._rows(spark, binding, suffix, records, keys[suffix])
+
+
 def prepare(path):
     import sys
     sys.path.insert(0, str(ROOT / 'apps/backend'))
@@ -133,6 +212,8 @@ def prepare(path):
         successors.append({'configuration_key':key,'snapshot':previous.model_dump(mode='json')})
     output = {'messages': values, 'studies': studies, 'case_evaluation': case_evaluation,
               'chat_sql': prepare_chat_sql_checks(values), 'source_limits': limits,'source_limits_successors':successors}
+    output['research_observation_fixture'] = prepare_research_observation_fixture(c, d, config,
+        observed, report['evaluations'][0])
     target = Path(path)
     if not target.parent.is_dir():
         target.parent.mkdir(parents=True)
@@ -341,6 +422,7 @@ def main(path):
         assert any(r['investigation_id'] == case_id and r['phase'] == 'evaluate' for r in selected['cases'])
         hydrated = m.load_case_work(spark, binding, case_id)
         work = hydrated['work']
+        assert all(row['research_request_id'] is None for row in work['pending_inputs']), 'Primary capture must not claim authorized research'
         assert work['phase'] == 'evaluate' and len(work['pending_inputs']) == 1 and hydrated['state'] is None
         assert work['pending_inputs'][0]['observation']['observation_key'] == inputs['case_evaluation']['observation_key']
         state = {'scope': work['scope'], 'investigation_id': case_id, 'version': 1, 'predecessor_revision': 0,
@@ -430,6 +512,51 @@ def main(path):
         assert 'Northstar' not in m.canonical(isolated['state'])
         from check_sonda_chat_sql import run_chat_sql_checks
         run_chat_sql_checks(spark,m,binding,inputs['chat_sql'])
+        # Research context hydrates complete original observations only from
+        # this case's relevant evidence and matching captured configuration.
+        research_fixture = inputs['research_observation_fixture']
+        research_keys = {'observations': ('observation_key',), 'discoveries': ('discovery_key',),
+            'evaluations': ('work_key',), 'evaluation_results': ('evaluation_key',),
+            'investigations': ('investigation_id',), 'case_work': ('investigation_id',)}
+        write_research_fixture_rows(spark, m, binding, research_fixture['rows'], research_keys)
+        m.publish(spark, binding, metadata_changed=True)
+        author_case = m.load_case_work(spark, binding, research_fixture['case_id'])['work']
+        expected_context = {'source_id': research_fixture['source_id'], 'query_id': research_fixture['query_id'],
+            'observation': research_fixture['expected_observation']}
+        assert author_case['phase'] == 'report' and author_case['facts']['relevant_documents'] == 1
+        assert len(author_case['research_observations']) == 1, 'A foreign configuration discovery must not enter this case'
+        context = author_case['research_observations'][0]
+        assert context['source_id'] == expected_context['source_id'] and context['query_id'] == expected_context['query_id']
+        assert context['observation']['author'] == 'northstar_official'
+        assert context['observation']['text'] == expected_context['observation']['text']
+        assert context['observation']['title'] == expected_context['observation']['title']
+        assert context['observation']['observation_key'] == expected_context['observation']['observation_key']
+        assert context['observation']['content_sha256'] == expected_context['observation']['content_sha256']
+        unchanged_case = m.load_case_work(spark, binding, case_id)['work']
+        assert unchanged_case['facts'] == report_work['facts']
+        assert unchanged_case['research_observations'] == report_work['research_observations']
+        # A confirmed case request, its completed RootExecution and the exact
+        # referenced observation message prove origin; text never supplies it.
+        origin_keys = {'requests': ('request_id',), 'executions': ('execution_id',), 'discoveries': ('discovery_key',)}
+        write_research_fixture_rows(spark, m, binding, research_fixture['origin_rows'], origin_keys)
+        job = m._find(spark, binding, 'evaluations', investigation_id=research_fixture['case_id'])[0]
+        job['state'] = 'pending'
+        m._rows(spark, binding, 'evaluations', [job], ('work_key',), update=True)
+        m.publish(spark, binding, metadata_changed=True)
+        research_input = m.load_case_work(spark, binding, research_fixture['case_id'])['work']['pending_inputs'][0]
+        assert research_input['research_request_id'] == research_fixture['research_request_id']
+        assert research_input['observation']['observation_key'] == research_fixture['expected_observation']['observation_key']
+        # The lower-sorting primary execution shares the same content; an
+        # execution from another case cannot transfer research authorization.
+        foreign_request = m._find(spark, binding, 'requests', request_id=research_fixture['research_request_id'])[0]
+        request_payload = json.loads(foreign_request['payload_json'])
+        request_payload['investigation_id'] = case_id
+        foreign_request.update(investigation_id=case_id, payload_json=m.canonical(request_payload),
+            payload_sha256=m.fingerprint(request_payload))
+        m._rows(spark, binding, 'requests', [foreign_request], ('request_id',), update=True)
+        m.publish(spark, binding, metadata_changed=True)
+        primary_input = m.load_case_work(spark, binding, research_fixture['case_id'])['work']['pending_inputs'][0]
+        assert primary_input['research_request_id'] is None
         assert len(metadata_reads)==28, 'Writes must reuse the initially validated bound paths'
         print('PASS: real Spark/Delta Sonda input/study replay, exact versions, production per-case CAS/state, bounded 1000-other-case isolation, full SQL facts and safe transport rejection')
     finally:

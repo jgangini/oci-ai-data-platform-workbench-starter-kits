@@ -12,3 +12,4 @@ apps/backend/app/labs/gods_eye_view/source/**/*.webp -text
 contracts/sonda-chat-actions/** text eol=lf
 contracts/sonda-source-limits/** text eol=lf
 contracts/sonda-source-limits-transport/** text eol=lf
+contracts/sonda-activity/** text eol=lf

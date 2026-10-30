@@ -23,6 +23,8 @@ from app.sonda_contract import (BudgetMessage, ConfigMessage, Count, Criterion, 
     Record, Report, Revision, Score, StrictBool, canonical_url, canonical_utc,
     encoded, evaluation_fingerprint, reject_secrets, sha256)
 from app.sonda_source_limits import SourceLimitsSnapshot
+from app.labs.ai_social_network.notebooks.agent.sonda_x_research import (
+    CaseResearchObservation, x_research_target_allowed, x_research_normalized_target)
 
 
 class Identity(Record):
@@ -100,16 +102,12 @@ def evidence_for(observation, quote):
         'url': observation['url'], 'quote': quote, 'captured_at': observation['observed_at']})
 
 
-def target_allowed(target, source, query, connector):
-    if target is not None and 'target' not in connector['research_fields']:
-        return False
-    if query['mode'] not in ('pages', 'indicators'):
-        # Account/search Actor input semantics are owned by Huginn; do not invent an override.
-        return target is None or target == query['target']
+def public_research_url_allowed(target, domains):
+    """Validate the reviewed HTTP domain boundary independently of tool dispatch."""
     try:
-        parsed = urlsplit(canonical_url(target or query['target']))
+        parsed = urlsplit(canonical_url(target))
         host = parsed.hostname
-        if host not in source['allowed_domains'] or host in ('localhost', 'localhost.localdomain') or host.endswith('.local'):
+        if host not in domains or host in ('localhost', 'localhost.localdomain') or host.endswith('.local'):
             return False
         try:
             if not ipaddress.ip_address(host).is_global:
@@ -119,6 +117,18 @@ def target_allowed(target, source, query, connector):
         return True  # DNS/redirect and Actor-schema validation still belongs to Huginn.
     except (ValueError, UnicodeError):
         return False
+
+
+def target_allowed(target, source, query, connector, *, research_context=None):
+    if source['platform']=='x' and connector['connector_id']=='x' and query['mode']=='posts':
+        context=research_context or {}
+        return x_research_target_allowed(target,source,query,connector,
+            context.get('observations',[]),context.get('evidence',[]),context.get('relevant_keys',[]))
+    if target is not None and 'target' not in connector['research_fields']:
+        return False
+    if query['mode'] not in ('pages', 'indicators'):
+        return target is None or target == query['target']
+    return public_research_url_allowed(target or query['target'],source['allowed_domains'])
 
 
 def eligible_queries(config, criterion):
@@ -144,6 +154,7 @@ class CaseInput(Record):
     config_revision: Revision
     source_id: UUID
     query_id: UUID
+    research_request_id: UUID | None = None
 
 
 class CaseRequest(Record):
@@ -172,6 +183,7 @@ class CaseWork(Record):
     completed_evaluation_keys: Annotated[list[Hash], Field(max_length=100)] = Field(default_factory=list)
     evaluations: Annotated[list[Evaluation], Field(max_length=100)] = Field(default_factory=list)
     evidence: Annotated[list[Evidence], Field(max_length=100)] = Field(default_factory=list)
+    research_observations: Annotated[list[CaseResearchObservation], Field(max_length=100)] = Field(default_factory=list)
     facts: CaseFacts | None = None
     indicators: Annotated[list[Indicator], Field(max_length=100)] = Field(default_factory=list)
     query_ids: Annotated[list[UUID], Field(max_length=100)] = Field(default_factory=list)
@@ -250,7 +262,21 @@ def _case_study_execution_history(execution_results, requests, binding):
             raise ValueError('Reconcile execution results in Gold before loading case work')
 
 
-def _case_study_evaluate_projection(work, current_revision):
+def _case_input_research_provenance(row, requests, execution_results):
+    identity = row.get('research_request_id')
+    if identity is None:
+        return
+    record = requests.get(identity)
+    if (record is None or record['status']!='completed' or record['observations_committed'] is not True
+            or (record['request']['query_id'],record['request']['config_revision'])!=(row['query_id'],row['config_revision'])):
+        raise ValueError('Research input lacks its completed case request')
+    results = [value['payload'] for value in execution_results if value['payload']['request_id']==identity]
+    if (len(results)!=1 or results[0]['status']!='completed' or results[0]['record_count']<1
+            or not results[0]['observation_message_ids']):
+        raise ValueError('Research input lacks its confirmed observation execution')
+
+
+def _case_study_evaluate_projection(work, current_revision, requests, execution_results):
     if work['facts'] is not None or work['evaluations'] or work['evidence'] or work['indicators']:
         raise ValueError('Evaluate work cannot report pre-commit aggregate facts')
     criterion = work['criterion']
@@ -259,6 +285,7 @@ def _case_study_evaluate_projection(work, current_revision):
                 or row['source_id'] not in criterion['source_ids']
                 or criterion['query_ids'] and row['query_id'] not in criterion['query_ids']):
             raise ValueError('Pending input is outside the captured criterion scope')
+        _case_input_research_provenance(row,requests,execution_results)
 
 
 def _case_study_report_counts(facts):
@@ -301,7 +328,7 @@ def case_projection(configuration, work, previous, execution_results):
         raise ValueError('Budget belongs to another generation')
     _case_study_source_limits(current['payload'], work, binding)
     if work['phase'] == 'evaluate':
-        _case_study_evaluate_projection(work, current_revision)
+        _case_study_evaluate_projection(work, current_revision, requests, execution_results)
     else:
         _case_study_report_projection(work)
     return current['payload'], work, previous
@@ -357,16 +384,31 @@ def _case_study_open_budget(work, current_revision, timestamp):
     return None
 
 
+def _case_research_context(work):
+    observations=work.get('research_observations',[])
+    keys={row['observation']['observation_key'] for row in observations}
+    return {'observations':observations,'evidence':[row for row in work['evidence'] if row['observation_key'] in keys],
+        'relevant_keys':sorted({row['observation_key'] for row in work['evaluations']
+            if row['decision']=='relevant' and row['observation_key'] in keys})}
+
+
+def _research_identity_target(target, query, connector):
+    if query['mode']=='posts' and connector['connector_id']=='x' and connector['operation']=='search_posts':
+        return x_research_normalized_target(target)
+    return target
+
+
 def _case_study_research_target(current, work, step, query):
     source = next(row for row in current['sources'] if row['source_id'] == query['source_id'])
     connector = next(row for row in current['connectors'] if row['connector_id'] == source['connector_id'])
-    if not target_allowed(step['target_override'], source, query, connector):
+    if not target_allowed(step['target_override'], source, query, connector,research_context=_case_research_context(work)):
         return None
     target = step['target_override'] or query['target']
     if query['mode'] in ('pages', 'indicators'):
         target = canonical_url(target)
     request_id = str(uuid5(UUID(work['scope']['generation_id']), encoded([
-        work['investigation_id'], step['step'].strip(), query['query_id'], query['revision'], target]).decode()))
+        work['investigation_id'], step['step'].strip(), query['query_id'], query['revision'],
+        _research_identity_target(target,query,connector)]).decode()))
     return connector, target, request_id
 
 
@@ -409,7 +451,7 @@ def case_research(current, work, plan, timestamp):
             limits.append('El destino propuesto no pertenece al alcance aprobado.')
             continue
         connector, target, request_id = target_info
-        if request_id in existing or _case_study_target_requested(work, query, target):
+        if request_id in existing or _case_study_target_requested(work, query, target, connector=connector):
             continue
         if len(existing) >= current['policy']['max_research_requests_per_case']:
             limits.append('Se alcanzó el máximo de solicitudes de este caso.')
@@ -438,7 +480,7 @@ def case_research(current, work, plan, timestamp):
     return requests, limits
 
 
-def _case_study_target_requested(work, query, target):
+def _case_study_target_requested(work, query, target, *, connector=None):
     """Preserve semantic dedup when upgrading earlier model-worded step IDs."""
     for row in work['requests']:
         request = row['request']
@@ -447,7 +489,9 @@ def _case_study_target_requested(work, query, target):
         previous = request['target_override'] or query['target']
         if query['mode'] in ('pages', 'indicators'):
             previous = canonical_url(previous)
-        if previous == target:
+        same = (_research_identity_target(previous,query,connector)==_research_identity_target(target,query,connector)
+            if connector is not None else previous==target)
+        if same:
             return True
     return False
 
@@ -554,7 +598,9 @@ async def _case_study_evaluate(work, model, identity, timestamp, output):
         if key in seen:
             continue
         try:
-            verdict = dto(Verdict, await case_infer(model, 'evaluate', {'criterion':rule_context(criterion), 'observation':observation}))
+            verdict = dto(Verdict, await case_infer(model, 'evaluate', {'criterion':rule_context(criterion),
+                'observation':observation,'provenance':{'authorized_research':row['research_request_id'] is not None,
+                    'research_request_id':row['research_request_id']}}))
             value = {**base, 'evaluation_key':key, 'score':verdict['score'], 'reason':verdict['reason'],
                 'decision':'relevant' if verdict['score'] >= criterion['threshold'] else 'not_relevant',
                 'evidence':[evidence_for(observation, quote) for quote in dict.fromkeys(verdict['quotes'])]}
@@ -591,7 +637,8 @@ async def _case_study_plan_report(current, work, model, timestamp, context, outp
                 'criterion':rule_context(work['criterion']), 'facts':work['facts'], 'evaluations':context['verdicts'],
                 'evidence':context['quotes'], 'approved_queries':context['allowed'], 'limitations':limits,
                 '_tool_context':{'configuration':current, 'scope':work['scope'],
-                    'approved_query_ids':work['approved_query_ids'], 'source_limits':work['source_limits']}}))
+                    'approved_query_ids':work['approved_query_ids'], 'source_limits':work['source_limits'],
+                    'research_context':_case_research_context(work)}}))
             output['investigation_requests'], reasons = case_research(current, work, plan, timestamp)
             limits.extend(reasons)
             return plan['propose']

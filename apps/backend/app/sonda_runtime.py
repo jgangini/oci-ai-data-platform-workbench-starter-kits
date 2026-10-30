@@ -54,8 +54,11 @@ def readable_source(paths,*,excluded=None):
 
 def investigator_source():
     return readable_source(('sonda_contract.py','sonda_source_limits.py',
+        'sonda_exchange.py','sonda_activity_runtime.py','sonda_activity.py',
         'labs/ai_social_network/notebooks/sonda_io.py',
+        'sonda_activity_entry.py',
         'labs/ai_social_network/notebooks/sonda_tools.py',
+        'labs/ai_social_network/notebooks/agent/sonda_x_research.py',
         'labs/ai_social_network/notebooks/agent/sonda_study.py',
         'labs/ai_social_network/notebooks/agent/sonda_research_tools.py',
         'labs/ai_social_network/notebooks/agent/sonda_model.py',
@@ -66,8 +69,13 @@ def investigator_source():
 def ingestion_source():
     return readable_source(('sonda_contract.py','sonda_source_limits.py',
         'sonda_source_limits_transport.py','sonda_exchange.py',
+        'sonda_activity_runtime.py','sonda_activity.py',
         'labs/ai_social_network/notebooks/sonda_io.py',
+        'sonda_activity_entry.py',
         'labs/ai_social_network/notebooks/sonda_tools.py',
+        'labs/ai_social_network/notebooks/agent/sonda_x_research.py',
+        'labs/ai_social_network/notebooks/agent/sonda_study.py',
+        'sonda_activity_admission.py',
         'labs/ai_social_network/notebooks/sonda_delta.py',
         'labs/ai_social_network/notebooks/sonda_limits_io.py',
         'labs/ai_social_network/notebooks/sonda_runner.py'))
@@ -75,7 +83,8 @@ def ingestion_source():
 
 def chat_source():
     legacy='labs/ai_social_network/notebooks/agent/social_agent.py'
-    return readable_source(('sonda_contract.py','labs/ai_social_network/notebooks/sonda_io.py',
+    return readable_source(('sonda_contract.py','sonda_exchange.py','sonda_activity_runtime.py','sonda_activity.py',
+        'labs/ai_social_network/notebooks/sonda_io.py','sonda_activity_entry.py',
         legacy,'labs/ai_social_network/notebooks/agent/sonda_chat.py',
         'labs/ai_social_network/notebooks/agent/sonda_memory.py',
         'labs/ai_social_network/notebooks/agent/sonda_chat_entry.py'),excluded={legacy:{

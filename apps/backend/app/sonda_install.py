@@ -228,7 +228,8 @@ class SondaAidpClient(SocialAidpClient):
             raise AidpProvisionError('The managed Sonda generation is not configured')
         resources = manifest['resources']
         return {**manifest['config'], 'gold_query_compute_id': compute_key or resources.get('gold_query_compute_id', ''),
-                'investigator_agent_key': (resources.get('investigator') or {}).get('agent_key', '')}
+                'investigator_agent_key': (resources.get('investigator') or {}).get('agent_key', ''),
+                'activity_agent_id':resources.get('agent_key','')}
 
     def _governance_job_payload(self, workspace_key, compute_key, **kwargs):
         binding = self._runtime_binding(workspace_key, compute_key)
@@ -349,6 +350,42 @@ class SondaAidpClient(SocialAidpClient):
         workspace = str(self._workspace()['key'])
         return self._agent_artifacts(self._runtime_binding(workspace))
 
+    def _ensure_activity_session(self,workspace_key,agent_key):
+        path=f'/workspaces/{workspace_key}/agents/{quote(agent_key,safe="")}'
+        desired={'name':'sondaActivityRef','description':'Opaque invocation admission reference',
+            'isRequired':False,'isSystem':False,'shouldLog':False}
+        def matches(detail):
+            ref=((detail.get('sessionConfig') or {}).get('variables') or {}).get('sondaActivityRef')
+            return (isinstance(ref,dict) and all(ref.get(key)==value for key,value in desired.items())
+                and not any(ref.get(key) is not None for key in ('value','defaultValue','initialValue')))
+        detail=self._request('GET',path,phase='agent')
+        if matches(detail):
+            return False
+        variables=dict((detail.get('sessionConfig') or {}).get('variables') or {})
+        variables['sondaActivityRef']=desired
+        payload={key:detail[key] for key in ('displayName','description','entryFilePath','dependenciesFilePath','computeKey')}
+        payload['sessionConfig']={**(detail.get('sessionConfig') or {}),'variables':variables}
+        self._request('PUT',path,payload=payload,phase='agent')
+        if not matches(self._request('GET',path,phase='agent')):
+            raise AidpProvisionPending('The private Activity session reference is not ready','agent')
+        return True
+
+    def _ensure_bound_agent_source(self,workspace_key,compute_key,name,root,binding,ledger,*,private):
+        """Create identity before the final source binding, then verify it before deployment."""
+        configured=str(ledger.get('agent_key') or UUID(int=0))
+        source,descriptor,digest=self._agent_artifacts({**binding,'activity_agent_id':configured},investigator=private)
+        options={'repair_drift':True,'entry_filename':'sonda_worker.py' if private else self._agent_entry_filename,
+            'description':'Private bounded Sonda case investigator' if private else 'Read-only Sonda Gold chat with scoped sources and native memory'}
+        agent,altered=self._ensure_agent(workspace_key,compute_key,name,root,source,descriptor,
+            expected_key=str(ledger.get('agent_key') or ''),**options)
+        if configured!=agent:
+            source,descriptor,digest=self._agent_artifacts({**binding,'activity_agent_id':agent},investigator=private)
+            verified,updated=self._ensure_agent(workspace_key,compute_key,name,root,source,descriptor,expected_key=agent,**options)
+            if verified!=agent:
+                raise AidpProvisionConflict('The created Agent identity changed before deployment')
+            altered=altered or updated
+        return agent,altered,digest
+
     def _ensure_global_agent(self, workspace_key, manifest):
         compute, changed = self._ensure_agent_compute(workspace_key)
         compute_key = str(compute['key'])
@@ -364,16 +401,13 @@ class SondaAidpClient(SocialAidpClient):
                     raise AidpProvisionConflict('An unrecorded private Sonda investigator already exists; reconcile its identity first')
                 ledger['create_operation_id']=manifest['operation']['operation_id']
                 self._write_module_manifest(workspace_key,manifest)
-            source, descriptor, digest = self._agent_artifacts(binding, investigator=private)
+            agent,altered,digest=self._ensure_bound_agent_source(workspace_key,compute_key,name,root,binding,ledger,private=private)
             first_private=(private and ledger.get('create_operation_id')==manifest['operation']['operation_id']
                 and not ledger.get('deployed_source_hash')
                 and ledger.get('agent_source_hash') in (None,digest))
-            agent, altered = self._ensure_agent(workspace_key, compute_key, name, root, source, descriptor,
-                repair_drift=True, expected_key=str(ledger.get('agent_key') or ''),
-                entry_filename='sonda_worker.py' if private else self._agent_entry_filename,
-                description='Private bounded Sonda case investigator' if private else 'Read-only Sonda Gold chat with scoped sources and native memory')
             ledger.update(agent_key=agent, agent_compute_key=compute_key, agent_source_hash=digest)
             self._write_module_manifest(workspace_key, manifest)
+            altered=self._ensure_activity_session(workspace_key,agent) or altered
             component = {'status': 'installing' if first_private else manifest['status'],
                 'operation': manifest['operation'], 'resources': ledger}
             try:

@@ -9,10 +9,11 @@ import json
 from typing import Annotated, Literal, Union
 
 from pydantic import Field
+from app.sonda_activity import current_activity
 
 from app.sonda_contract import Configuration, CriterionChange, QueryChange, Record, Scope, encoded, reject_secrets
-from app.labs.ai_social_network.notebooks.agent.sonda_study import Identity, Plan, Prose, Verdict, _case_study_source_limits
-from app.labs.ai_social_network.notebooks.agent.sonda_research_tools import build_research_tools, plan_research_tools
+from app.labs.ai_social_network.notebooks.agent.sonda_study import Identity, Plan, Prose, Verdict, _case_study_source_limits, context_rows
+from app.labs.ai_social_network.notebooks.agent.sonda_research_tools import ResearchContext, build_research_tools, plan_research_tools
 
 
 class DraftChange(Record):
@@ -29,6 +30,12 @@ PROMPTS = {
     'evaluate': (
         'Evalúa la relevancia SEMÁNTICA de la observación para el criterio y sus ejemplos etiquetados. '
         'No basta que comparta palabras: distingue el sentido, el sujeto, la negación y el contexto. '
+        'provenance.authorized_research indica contexto capturado por una solicitud verificada '
+        'del mismo caso; no demuestra relevancia, veracidad ni sentimiento negativo. '
+        'Distingue la muestra inicial del contexto investigado y aplica el alcance semántico '
+        'del criterio: el contexto autorizado puede no repetir el hashtag de detección. '
+        'Atribuye opiniones a su entidad: una crítica de un lugar no es una crítica de otra '
+        'marca mencionada favorablemente. No conviertas relevancia en sentimiento. '
         'Devuelve score entre0 y1 y una razón breve en español. quotes contiene una o más citas '
         'literales del texto o título de la observación, sin corregirlas ni traducirlas. '
         'Una cita también debe respaldar una evaluación negativa. No inventes hechos.'),
@@ -38,6 +45,9 @@ PROMPTS = {
         'de sus argumentos; no elijas Actors ni repitas objetivos ya investigados. '
         'Preparar una solicitud no captura información ni la pone en cola: el proceso '
         'publicará las solicitudes aceptadas y esperará evidencia confirmada en Gold. '
+        'En X sólo puedes proponer autores públicos de research_authors o frases literales '
+        'presentes en las observaciones relevantes. No uses operadores, URLs ni identidad '
+        'inferida; esas búsquedas siguen sujetas a validación y presupuesto. '
         'Puedes no llamar herramientas. Solicita revisión de configuración sólo si hace '
         'falta una propuesta para aprobación humana; esa herramienta no modifica nada.'),
     'report': (
@@ -59,7 +69,8 @@ STUDY_PROMPT_VERSION = 'sonda-study-' + hashlib.sha256(
 
 def _research_planning_tools(payload):
     context = payload.pop('_tool_context', None)
-    if not isinstance(context, dict) or set(context) != {'configuration','scope','approved_query_ids','source_limits'}:
+    required = {'configuration','scope','approved_query_ids','source_limits'}
+    if not isinstance(context, dict) or not required <= set(context) or set(context)-required-{'research_context'}:
         raise ValueError('Research planning requires its trusted case tool context')
     if len(encoded(context)) > 4194304:
         raise ValueError('Trusted tool context exceeds its bounded size')
@@ -67,8 +78,13 @@ def _research_planning_tools(payload):
     binding = Scope.model_validate(context['scope']).model_dump(mode='json')
     _case_study_source_limits(configuration, {'source_limits':context['source_limits']}, binding)
     policies = context['source_limits']['policies'] if context['source_limits'] is not None else None
+    research = ResearchContext.model_validate(context.get('research_context') or {}).model_dump(mode='json')
     tools = build_research_tools(configuration,payload['criterion'],context['approved_query_ids'],
-        source_policies=policies,include_configuration_review=True)
+        source_policies=policies,include_configuration_review=True,research_context=research)
+    relevant = set(research['relevant_keys']) & {row['observation_key'] for row in research['evidence']}
+    payload['research_authors'] = context_rows([{'observation_key':row['observation']['observation_key'],
+        'author':row['observation']['author']} for row in research['observations']
+        if row['observation']['observation_key'] in relevant],16384)
     payload.pop('approved_queries', None)
     return tools
 
@@ -100,4 +116,8 @@ class StudyModel:
         messages = [SystemMessage(content=boundary+PROMPTS[role]), HumanMessage(content=raw)]
         if role == 'plan':
             return await plan_research_tools(self.invoker,messages,tools)
+        activity=current_activity()
+        if role=='report' and activity:
+            return await activity.stream_answer(self.runners[role],messages,field='summary',
+                max_text_chars=8000,max_text_bytes=32000)
         return await self.runners[role].ainvoke(messages)

@@ -57,11 +57,28 @@ def _tool_catalog_configuration(value, validated):
     return Configuration.model_validate(value).model_dump(mode='json')
 
 
-def _tool_catalog_input_schema(query, source, connector, max_items):
+def x_research_capable(source, query, connector):
+    return (connector['connector_id'] == source['connector_id'] == 'x'
+        and source['connector_revision'] == connector['revision']
+        and source['platform'] == 'x' and query['source_id'] == source['source_id']
+        and query['mode'] == 'posts' and connector['operation'] == 'search_posts'
+        and 'target' in connector['research_fields'])
+
+
+def x_research_override_schema():
+    return {'anyOf':[{'type':'string','minLength':2,'maxLength':120,
+        'pattern':r'^(?:@[A-Za-z0-9_]{1,15}|[\p{L}\p{N} #_-]{2,120})$',
+        'description':'A public @handle or literal phrase from relevant case evidence; no operators or URLs.'},
+        {'type':'null'}],'default':None}
+
+
+def _tool_catalog_input_schema(query, source, connector, max_items, include_x_targets):
     properties = {
         'purpose': {'type': 'string', 'minLength': 1, 'maxLength': 2000},
         'max_items': {'type': 'integer', 'minimum': 1, 'maximum': max_items},
     }
+    if include_x_targets and x_research_capable(source, query, connector):
+        properties['target_override'] = x_research_override_schema()
     if query['mode'] in ('pages', 'indicators') and 'target' in connector['research_fields']:
         domains = '|'.join(re.escape(domain) for domain in sorted(source['allowed_domains']))
         if domains:
@@ -73,7 +90,7 @@ def _tool_catalog_input_schema(query, source, connector, max_items):
         'required': ['purpose', 'max_items'], 'properties': properties}
 
 
-def _tool_catalog_row(configuration, query, source, connector):
+def _tool_catalog_row(configuration, query, source, connector, include_x_targets):
     # Core parameters may contain provider inputs. They never become tool arguments
     # or replicated payloads; only these explicitly projected fields are served.
     target_url = urlsplit(query['target'])
@@ -103,23 +120,25 @@ def _tool_catalog_row(configuration, query, source, connector):
         'max_items': max_items, 'max_cost_microusd': max_cost,
         'max_cost_microusd_per_item': connector['max_cost_microusd_per_item'],
         'allowed_domains_json': _tool_catalog_encoded(sorted(source['allowed_domains'])).decode('utf-8'),
-        'input_schema_json': _tool_catalog_encoded(_tool_catalog_input_schema(query, source, connector, max_items)).decode('utf-8'),
+        'input_schema_json': _tool_catalog_encoded(_tool_catalog_input_schema(query, source, connector, max_items, include_x_targets)).decode('utf-8'),
     }
     payload = _tool_catalog_encoded({**metadata, 'reviewed_connector': connector})
     return {**metadata, 'metadata_sha256': hashlib.sha256(payload).hexdigest(), 'payload_json': payload.decode('utf-8')}
 
 
-def tool_catalog_rows(configuration, *, validated=False):
+def tool_catalog_rows(configuration, *, validated=False, include_x_targets=True):
     """One deterministic row per query/revision, including ineligible metadata.
 
     Accept a Configuration or ConfigMessage dict/DTO. Envelope validation here is
     structural; the caller must authenticate the installation pin and scope before
     injecting them into these rows. Spark may pass validated=True only with JSON
     already parsed by the pinned core contract. No network, provider or model is called.
+    include_x_targets=False reproduces the immutable pre-X projection for recovery
+    only; new configuration revisions use the current projection by default.
     """
     configuration = _tool_catalog_configuration(configuration, validated)
     sources = {source['source_id']: source for source in configuration['sources']}
     connectors = {connector['connector_id']: connector for connector in configuration['connectors']}
     return [_tool_catalog_row(configuration, query, sources[query['source_id']],
-        connectors[sources[query['source_id']]['connector_id']])
+        connectors[sources[query['source_id']]['connector_id']], include_x_targets)
         for query in sorted(configuration['queries'], key=lambda item: UUID(item['query_id']).hex)]

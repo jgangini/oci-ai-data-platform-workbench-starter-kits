@@ -606,3 +606,45 @@ def execution(request, status, *, number, observations=None):
         observation_message_ids=observations or [], spent_microusd=None if status=='uncertain' else 1000,
         record_count=0 if status=='uncertain' else 1, coverage='unknown' if status=='uncertain' else 'partial')
     return value
+
+
+def research_evaluation_work():
+    request = run_case(model=Model(research=True))['investigation_requests'][0]
+    work = case_work('evaluate')
+    work['requests'] = [{'request':request, 'status':'completed', 'observations_committed':True}]
+    query = next(row for row in fixture('01-configuration.json')['payload']['queries'] if row['query_id']==request['query_id'])
+    work['pending_inputs'][0].update(query_id=query['query_id'], source_id=query['source_id'])
+    work['pending_inputs'][0]['research_request_id'] = request['request_id']
+    result = execution(request, 'completed', number=62001, observations=[str(UUID(int=62002))])
+    return work, result
+
+
+def test_evaluation_receives_verified_research_provenance_without_forcing_relevance():
+    work, result = research_evaluation_work()
+    model = Model()
+    run_case(work, model=model, results=[result])
+    calls = [payload for role,payload in model.calls if role=='evaluate']
+    assert calls[0]['provenance'] == {'authorized_research':True,
+        'research_request_id':work['requests'][0]['request']['request_id']}
+    assert calls[1]['provenance'] == {'authorized_research':False, 'research_request_id':None}
+    assert calls[0]['observation'] == work['pending_inputs'][0]['observation']
+
+
+@pytest.mark.parametrize('fault', ['unknown_request','uncommitted','missing_execution','empty_execution','foreign_execution'])
+def test_unverified_research_origin_is_rejected_before_inference(fault):
+    work, result = research_evaluation_work()
+    results = [result]
+    if fault=='unknown_request':
+        work['pending_inputs'][0]['research_request_id'] = str(UUID(int=62003))
+    elif fault=='uncommitted':
+        work['requests'][0]['observations_committed'] = False
+    elif fault=='missing_execution':
+        results = []
+    elif fault=='empty_execution':
+        result['payload'].update(record_count=0, observation_message_ids=[])
+    else:
+        result['generation_id'] = str(UUID(int=62004))
+    model = Model()
+    with pytest.raises(ValueError):
+        run_case(work, model=model, results=results)
+    assert not model.calls

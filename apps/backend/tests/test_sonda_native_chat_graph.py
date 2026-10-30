@@ -5,7 +5,7 @@ readable source and no exec/loader. No model, credential or SQL service is calle
 """
 import asyncio
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import partial
 import json
 from pathlib import Path
@@ -77,6 +77,16 @@ class FakeStructuredOutput:
         payload=json.loads(messages[-1].content)
         self.owner.model_calls.append((self.role,payload))
         return self.plan(payload) if self.role=='plan' else self.answer(payload)
+
+    async def astream(self,messages):
+        assert self.role=='answer'
+        payload=json.loads(messages[-1].content)
+        self.owner.model_calls.append(('answer_stream',payload))
+        result=self.answer(payload)
+        yield {'answer':result['answer'][:8],'post_keys':[]}
+        self.owner.stream_paused.set()
+        await self.owner.release_stream.wait()
+        yield result
 
     def plan(self,payload):
         owner=self.owner
@@ -166,6 +176,7 @@ class NativeFixture:
         exec(compile(chat_source(),'trusted-generated-sonda-chat.py','exec'),self.module.__dict__)
         self.module.runtime_storage=lambda binding:(object(),object())
         self.module.generation_inference=lambda storage,binding:not self.paused
+        self.module.generation_control=lambda storage,binding:{}  # Legacy fixture has Activity disabled.
         self.module.native_memory=lambda generation,agent:GenerationMemory(self.memory,generation)
 
     def agent(self,generation=None):
@@ -578,4 +589,129 @@ def test_prepare_query_failure_can_resume_before_a_snapshot_exists(native):
             await native.invoke(agent,'cuantos post hay en yotube')
         native.module.query=original
         assert (await native.invoke(agent,'cuantos post hay en yotube'))['answer']
+    asyncio.run(check())
+
+
+class ActivityObjects:
+    """Fake authenticated object adapter with strict ETag CAS, never SDK IO."""
+    def __init__(self):
+        self.rows={}
+        self.puts=[]
+
+    def get(self,role,key):
+        assert role=='artifacts'
+        return self.rows.get(key)
+
+    def put(self,role,key,raw,expected):
+        assert role=='artifacts'
+        prior=self.rows.get(key)
+        if (prior.etag if prior else None)!=expected:
+            raise RuntimeError('Synthetic conditional-write conflict')
+        self.puts.append((key,raw,expected))
+        self.rows[key]=types.SimpleNamespace(data=raw,etag=str(len(self.puts)))
+        return self.rows[key].etag
+
+
+def enable_chat_activity(native,monkeypatch,question):
+    module=native.module
+    objects=ActivityObjects()
+    now=datetime.now(timezone.utc)-timedelta(seconds=1)
+    agent_id,ref=str(UUID(int=777)),str(UUID(int=778))
+    native.binding.update(namespace='synthetic',artifacts_bucket='synthetic-artifacts',activity_agent_id=agent_id)
+    raw_input=native.envelope(question)
+    request=module.ChatInput.model_validate(json.loads(raw_input))
+    digest=module.sha256(module.encoded(request.model_dump(mode='json')))
+    session_sha=module.hashlib.sha256(b'native-session').hexdigest()
+    descriptor=module.ActivityProducer_AdmissionDescriptor.model_validate(dict(
+        schema_version=module.ActivityProducer_PRODUCER_VERSION,admission_id=ref,
+        scope={key:native.binding[key] for key in ('registry_id','generation_id')},
+        run=dict(run_id=str(UUID(int=779)),request_id=str(UUID(int=780)),attempt_id=str(UUID(int=781)),
+            work_id=None,investigation_id=None,execution_kind='native_invocation',component='native_agent',
+            agent_id=agent_id,agent_name='ai_social_network',source='huginn_chat',created_at=now.isoformat(),synthetic=True),
+        native_session_sha256=session_sha,input_sha256=digest,config_revision=1,tool_catalog_sha256='a'*64,
+        created_at=now.isoformat(),expires_at=(now+timedelta(minutes=30)).isoformat(),work_input_sha256=None))
+    current=module.ActivityProducer_CurrentPointer(schema_version=descriptor.schema_version,scope=descriptor.scope,
+        agent_id=agent_id,native_session_sha256=session_sha,admission_id=ref,run_id=descriptor.run.run_id,
+        request_id=descriptor.run.request_id,attempt_id=descriptor.run.attempt_id,epoch=1,status='admitted',
+        owner_nonce=None,expires_at=descriptor.expires_at)
+    root,key=module.ActivityJournal_admission_keys(descriptor.scope,agent_id,session_sha,ref)
+    objects.rows[root+'descriptor.json']=types.SimpleNamespace(data=module.ActivityProducer_producer_encoded(descriptor.model_dump(mode='json')),etag='descriptor')
+    objects.rows[key]=types.SimpleNamespace(data=module.ActivityProducer_producer_encoded(current.model_dump(mode='json')),etag='current')
+    module.generation_control=lambda storage,binding:{'activity':{'enabled':True,'manifest_sha256':module.ACTIVITY_MANIFEST_SHA256}}
+    module.OciObjects=lambda *args:objects
+    context=types.ModuleType('aidputils.agents.toolkit.chat_context')
+    context.session_context_var=types.SimpleNamespace(get=lambda:{'sessionvariables.sondaActivityRef':{'value':ref}})
+    monkeypatch.setitem(sys.modules,context.__name__,context)
+    native.stream_paused,native.release_stream=asyncio.Event(),asyncio.Event()
+    return objects,root,raw_input
+
+
+def activity_events(objects):
+    batches=[json.loads(blob.data) for key,blob in objects.rows.items() if '/batches/' in key]
+    return [event for batch in batches for event in batch['events']]
+
+
+def test_enabled_chat_real_graph_persists_first_delta_before_final_and_validates_artifact(native,monkeypatch):
+    async def check():
+        objects,root,raw=enable_chat_activity(native,monkeypatch,'Busca publicaciones disponibles')
+        agent=native.agent()
+        task=asyncio.create_task(agent.invoke(raw,session_id='native-session'))
+        await asyncio.wait_for(native.stream_paused.wait(),3)
+        events=activity_events(objects)
+        assert not task.done()
+        assert [event['public_text_delta'] for event in events if event.get('type')=='text_delta']
+        assert any(key.endswith('/head.json') for key in objects.rows)
+        assert not any(event.get('kind')=='execution_completion' for event in events)
+        assert not any('/results/' in key for key in objects.rows)
+        assert [event['type'] for event in events if event.get('type','').startswith('tool_')]==['tool_start','tool_finish']
+        native.release_stream.set()
+        result=await asyncio.wait_for(task,3)
+        response=json.loads(result['messages'][0].content)
+        events=activity_events(objects)
+        receipt=[event for event in events if event.get('kind')=='execution_completion']
+        assert len(receipt)==1
+        artifact=[blob.data for key,blob in objects.rows.items() if '/results/' in key]
+        assert len(artifact)==1
+        final=json.loads(artifact[0])
+        assert final['kind']=='chat_response' and final['payload']==response
+        assert native.module.ActivityProducer_producer_sha256(artifact[0])==receipt[0]['final_ref']['sha256']
+        assert len([role for role,_ in native.model_calls if role=='answer_stream'])==1
+        assert not [role for role,_ in native.model_calls if role=='answer']
+        assert len(native.sql_calls)==3
+        assert all('sondaActivityRef' not in json.dumps(payload) for _,payload in native.model_calls)
+        journal=json.dumps(events)
+        assert all(sql not in journal for sql in native.sql_calls)
+        assert all(not any(key in event for key in ('authority','received_at','ingestion_sequence','sql','args','queries')) for event in events)
+        state=await agent.graph.aget_state({'configurable':{'thread_id':core.session_key(native.binding,'native-session')}})
+        assert 'sondaActivityRef' not in json.dumps(state.values,default=str)
+    asyncio.run(check())
+
+
+def test_enabled_chat_invalid_citation_after_partial_has_no_artifact_or_completion(native,monkeypatch):
+    async def check():
+        objects,root,raw=enable_chat_activity(native,monkeypatch,'Busca publicaciones disponibles')
+        native.bad_ref=True
+        task=asyncio.create_task(native.agent().invoke(raw,session_id='native-session'))
+        await asyncio.wait_for(native.stream_paused.wait(),3)
+        assert any(event.get('type')=='text_delta' for event in activity_events(objects))
+        native.release_stream.set()
+        with pytest.raises(ValueError,match='unqueried evidence'):
+            await task
+        assert not any('/results/' in key for key in objects.rows)
+        assert not any(event.get('kind')=='execution_completion' for event in activity_events(objects))
+        assert len([role for role,_ in native.model_calls if role=='answer_stream'])==1
+        assert not [role for role,_ in native.model_calls if role=='answer']
+    asyncio.run(check())
+
+
+def test_enabled_chat_mismatched_admission_denies_before_graph_sql_or_model(native,monkeypatch):
+    async def check():
+        objects,root,raw=enable_chat_activity(native,monkeypatch,'Busca publicaciones disponibles')
+        blob=objects.rows[root+'descriptor.json']
+        descriptor=native.module.ActivityProducer_parse_producer_document(blob.data)
+        wrong=descriptor.model_copy(update={'input_sha256':'f'*64})
+        blob.data=native.module.ActivityProducer_producer_encoded(wrong.model_dump(mode='json'))
+        with pytest.raises(native.module.ActivityJournal_DeliveryError,match='admission_denied'):
+            await native.agent().invoke(raw,session_id='native-session')
+        assert not native.model_calls and not native.sql_calls and not objects.puts
     asyncio.run(check())

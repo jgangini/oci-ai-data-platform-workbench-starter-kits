@@ -1,3 +1,4 @@
+import ast
 import copy
 import hashlib
 import io
@@ -53,6 +54,7 @@ def client(binding):
     value._oci_config = {}
     value.signer = object()
     value._agents=Mock(return_value=[])
+    value._ensure_activity_session=Mock(return_value=False)
     return value
 
 
@@ -370,12 +372,39 @@ def test_catalog_description_write_uses_etag(client, binding):
     assert client._request.call_args_list[1].kwargs['headers'] == {'If-Match': 'v2'}
 
 
+def test_activity_session_reference_is_optional_unlogged_without_a_stale_default(client):
+    detail={'displayName':'agent','description':'Managed agent','entryFilePath':'/entry.py',
+        'dependenciesFilePath':'/requirements.txt','computeKey':'compute',
+        'sessionConfig':{'variables':{'existing':{'name':'existing','shouldLog':False},
+            'sondaActivityRef':{'name':'sondaActivityRef','defaultValue':'old-reference','shouldLog':True}}}}
+    desired={'name':'sondaActivityRef','description':'Opaque invocation admission reference',
+        'isRequired':False,'isSystem':False,'shouldLog':False}
+    updated=copy.deepcopy(detail)
+    updated['sessionConfig']['variables']['sondaActivityRef']=desired
+    client._request=Mock(side_effect=[detail,{},updated])
+    assert install.SondaAidpClient._ensure_activity_session(client,'workspace','agent')
+    payload=client._request.call_args_list[1].kwargs['payload']
+    assert payload['sessionConfig']['variables']['sondaActivityRef']==desired
+    assert payload['sessionConfig']['variables']['existing']==detail['sessionConfig']['variables']['existing']
+    client._request=Mock(return_value=updated)
+    assert not install.SondaAidpClient._ensure_activity_session(client,'workspace','agent')
+    assert client._request.call_count==1
+
+
+def test_activity_reference_not_visible_blocks_agent_readiness(client):
+    detail={'displayName':'agent','description':'Managed agent','entryFilePath':'/entry.py',
+        'dependenciesFilePath':'/requirements.txt','computeKey':'compute','sessionConfig':None}
+    client._request=Mock(side_effect=[detail,{},detail])
+    with pytest.raises(AidpProvisionPending):
+        install.SondaAidpClient._ensure_activity_session(client,'workspace','agent')
+
+
 def test_two_agents_keep_original_chat_identity_and_one_shared_compute(client, binding, monkeypatch):
     state = manifest(binding)
     state['resources']['agent_key'] = 'original-chat'
     client._ensure_agent_compute = Mock(return_value=({'key': 'ai-compute'}, False))
     client._ensure_workspace_layout = Mock()
-    client._ensure_agent = Mock(side_effect=[('original-chat', False), ('private-worker', False)])
+    client._ensure_agent = Mock(side_effect=[('original-chat', False), ('private-worker', False),('private-worker',False)])
     client._ensure_global_agent_deployment = Mock(side_effect=[({'key': 'chat-deployment'}, False), ({'key': 'worker-deployment'}, False)])
     monkeypatch.setattr(install, 'chat_source', lambda: b'CHAT_BINDING = {}\n')
     monkeypatch.setattr(install, 'investigator_source', lambda: b'WORKER_BINDING = {}\n')
@@ -384,13 +413,17 @@ def test_two_agents_keep_original_chat_identity_and_one_shared_compute(client, b
     assert state['resources']['agent_key'] == 'original-chat'
     assert state['resources']['investigator']['agent_key'] == 'private-worker'
     assert client._agent_name == 'ai_social_network' and client._agent_entry_filename == 'social_agent.py'
-    for call, name, filename in zip(client._ensure_agent.call_args_list,
+    for call, name, filename in zip((client._ensure_agent.call_args_list[0],client._ensure_agent.call_args_list[-1]),
         ('ai_social_network', 'ai_social_network_investigator'), ('social_agent.py', 'sonda_worker.py')):
         assert call.args[1:3] == ('ai-compute', name) and call.kwargs['entry_filename'] == filename
         descriptor = json.loads(call.args[5])
         assert descriptor['entry_sha256'] == hashlib.sha256(call.args[4]).hexdigest()
         assert descriptor['contract_sha256'] == install.CONTRACT_SHA256
     assert client._ensure_agent.call_args_list[0].kwargs['expected_key'] == 'original-chat'
+    private_source=ast.parse(client._ensure_agent.call_args_list[-1].args[4].decode()).body[0]
+    assert ast.literal_eval(private_source.value)['activity_agent_id']=='private-worker'
+    client._ensure_activity_session.assert_any_call('workspace','original-chat')
+    client._ensure_activity_session.assert_any_call('workspace','private-worker')
     assert client._ensure_global_agent_deployment.call_args_list[1].kwargs['agent_name'] == 'ai_social_network_investigator'
     assert client._ensure_global_agent_deployment.call_args_list[0].args[3]['resources'] is state['resources']
     assert client._ensure_global_agent_deployment.call_args_list[1].args[3]['resources'] is state['resources']['investigator']
@@ -411,7 +444,7 @@ def test_deployment_pending_persists_updated_ledger_before_propagating(client, b
     with pytest.raises(AidpProvisionPending):
         client._ensure_global_agent('workspace', state)
     assert persisted[-1]['resources']['deployment_redeploy_requested'] == 'request-revision'
-    assert client._ensure_agent.call_count == 1
+    assert client._ensure_agent.call_count == 2
 
 
 def test_first_private_deployment_during_module_upgrade_has_no_redeploy_baseline_deadlock(client,binding):
@@ -424,7 +457,7 @@ def test_first_private_deployment_during_module_upgrade_has_no_redeploy_baseline
     client._ensure_agent_compute=Mock(return_value=({'key':'compute'},False))
     client._ensure_workspace_layout=Mock()
     client._agent_artifacts=Mock(return_value=(b'reviewed-source',b'{}',digest))
-    client._ensure_agent=Mock(side_effect=[('chat',False),('private-worker',False)])
+    client._ensure_agent=Mock(side_effect=[('chat',False),('chat',False),('private-worker',False)])
     active={'key':'fresh-deployment','lifecycleState':'ACTIVE'}
     client._agent_deployments=Mock(return_value=[active])
     client._ensure_agent_deployment=Mock(return_value=(active,False))
@@ -446,7 +479,8 @@ def test_unrecorded_private_agent_is_not_silently_adopted(client,binding):
     client._agents=Mock(return_value=[{'key':'unowned-investigator'}])
     with pytest.raises(AidpProvisionConflict,match='unrecorded private'):
         client._ensure_global_agent('workspace',state)
-    assert client._ensure_agent.call_count==1
+    assert client._ensure_agent.call_count==2
+    assert all(call.args[2]=='ai_social_network' for call in client._ensure_agent.call_args_list)
 
 
 @pytest.mark.parametrize('builder,slot', [(install.investigator_source, 'WORKER_BINDING'),

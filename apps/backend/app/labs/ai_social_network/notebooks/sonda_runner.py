@@ -7,10 +7,13 @@ Delta: the job alone applies/replays and publishes business effects.
 """
 import hashlib
 import json
+from datetime import datetime, timezone
 from time import perf_counter
 from uuid import UUID, uuid5
 
 from app.sonda_contract import encoded, no_duplicate_keys
+from app.sonda_activity_entry import activity_enabled
+from app.sonda_activity_admission import prepare_autonomous_activity, reserve_autonomous_dispatch
 from app.sonda_exchange import Exchange, OciObjects, PreparedPublication, RejectedMessage, StreamConflict
 from app.labs.ai_social_network.notebooks.sonda_io import (
     generation_enabled, generation_bootstrap, generation_inference, operational_prefix, runtime_storage)
@@ -140,7 +143,7 @@ def decode_case_result(value,request):
     return value['result']
 
 
-def invoke_case(binding,objects,signer,request):
+def invoke_case(binding,objects,signer,request,*,activity=False):
     # Prefer a durable result after a previous unknown HTTP outcome.
     key=operational_prefix(binding)+'work/'+request['work_id']+'/result.json'
     saved=objects.get('artifacts',key)
@@ -152,10 +155,20 @@ def invoke_case(binding,objects,signer,request):
     if not isinstance(region,str) or not region or any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-' for c in region):
         raise ValueError('Invalid bound OCI region')
     url=f'https://gateway.aidp.{region}.oci.oraclecloud.com/agentendpoint/{agent}/chat'
+    text=json.dumps(request,separators=(',',':'))
+    metadata={}
+    if activity:
+        incoming=objects.get('artifacts',operational_prefix(binding)+'work/'+request['work_id']+'/input.json')
+        if incoming is None:
+            raise RuntimeError('The protected native work input is not available')
+        admission=prepare_autonomous_activity(objects,binding,request,incoming.data,datetime.now(timezone.utc))
+        reserve_autonomous_dispatch(objects,admission,datetime.now(timezone.utc))
+        text=encoded(request).decode('utf-8')
+        metadata={'metadata':{'sessionvariables.sondaActivityRef':admission.ref}}
     try:
         response=requests.post(url,auth=signer,json={'sessionKey':request['work_id'],
             'isStreamEnabled':False,'trace':False,'input':[{'role':'User','content':[
-                {'type':'INPUT_TEXT','text':json.dumps(request,separators=(',',':'))}]}]},
+                {'type':'INPUT_TEXT','text':text}]}],**metadata},
             headers={'x-session-id':request['work_id']},timeout=(10,240),allow_redirects=False)
     except requests.RequestException:
         raise RuntimeError('Native case inference outcome is not yet known') from None
@@ -175,7 +188,7 @@ def invoke_case(binding,objects,signer,request):
     return decode_case_result(json.loads(saved.data,object_pairs_hook=no_duplicate_keys),request)
 
 
-def process_case(spark,binding,objects,signer,case_key,identity):
+def process_case(spark,binding,objects,signer,case_key,identity,*,activity=False):
     """Pin uncertain work before invoking; new same-case input cannot replace it."""
     if not isinstance(case_key,str) or len(case_key)!=64 or any(c not in '0123456789abcdef' for c in case_key):
         raise ValueError('Invalid investigation identity')
@@ -194,7 +207,7 @@ def process_case(spark,binding,objects,signer,case_key,identity):
     else:
         request=pointer['request']
         etag=saved.etag
-    result=timed_call('case_inference',invoke_case,binding,objects,signer,request)
+    result=timed_call('case_inference',invoke_case,binding,objects,signer,request,activity=activity)
     timed_call('case_commit',apply_case_study_results,spark,binding,result,
         result_id=request['work_id'],predecessor_revision=result['state']['predecessor_revision'])
     # A crash before this marker replays the same idempotent result, never inference.
@@ -213,7 +226,7 @@ def record_runtime(spark,binding,objects,result):
     return result
 
 
-def resume_pending_cases(spark,binding,objects,signer,identity):
+def resume_pending_cases(spark,binding,objects,signer,identity,*,activity=False):
     """Resolve uncertain work against its original input before advancing inbound."""
     resolved=0
     for item in list_pending_cases(spark,binding,limit=5)['cases']:
@@ -221,7 +234,7 @@ def resume_pending_cases(spark,binding,objects,signer,identity):
         pointer=objects.get('artifacts',operational_prefix(binding)+'pending_cases/'+key+'.json')
         if not pointer or json.loads(pointer.data,object_pairs_hook=no_duplicate_keys).get('status')!='pending':
             continue
-        process_case(spark,binding,objects,signer,key,identity)
+        process_case(spark,binding,objects,signer,key,identity,activity=activity)
         resolved+=1
     return resolved
 
@@ -245,9 +258,10 @@ def run_sonda(binding,*,validation=False):
     outbound=Exchange(objects,**common,direction='aidp_to_huginn')
     timed_call('inbound_recovery',apply_messages,spark,binding,[])
     identity={key:binding[key] for key in ('model_id','model_revision','prompt_version')}
+    observing=activity_enabled(storage,binding) if active or validating else False
     if active or validating:
         try:
-            timed_call('case_recovery',resume_pending_cases,spark,binding,objects,signer,identity)
+            timed_call('case_recovery',resume_pending_cases,spark,binding,objects,signer,identity,activity=observing)
         except (RuntimeError,TimeoutError):
             published=timed_call('outbox',flush_outbox,spark,binding,objects,outbound)
             return record_runtime(spark,binding,objects,{'status':'deferred','processed_messages':0,
@@ -262,13 +276,13 @@ def run_sonda(binding,*,validation=False):
     if bootstrap and not validating:
         return record_runtime(spark,binding,objects,{'status':'prepared','processed_messages':processed,
             'processed_case_phases':0,'published_messages':published})
-    batch=_run_sonda_case_batch(spark,binding,storage,objects,outbound,signer,identity)
+    batch=_run_sonda_case_batch(spark,binding,storage,objects,outbound,signer,identity,activity=observing)
     return record_runtime(spark,binding,objects,{'status':'success','processed_messages':processed,
         'processed_case_phases':batch['processed'],'deferred_case_phases':batch['deferred'],
         'published_messages':published+batch['published']})
 
 
-def _run_sonda_case_batch(spark,binding,storage,objects,outbound,signer,identity):
+def _run_sonda_case_batch(spark,binding,storage,objects,outbound,signer,identity,*,activity=False):
     """Run the bounded case phase after configuration and policy synchronization."""
     cases=deferred=published=0
     pending_cases=timed_call('case_selection',list_pending_cases,spark,binding,limit=5)
@@ -277,7 +291,7 @@ def _run_sonda_case_batch(spark,binding,storage,objects,outbound,signer,identity
             break
         key=item['investigation_id'] if isinstance(item,dict) else item
         try:
-            process_case(spark,binding,objects,signer,key,identity)
+            process_case(spark,binding,objects,signer,key,identity,activity=activity)
         except (RuntimeError,TimeoutError):
             # Keep the same immutable work/result identity for the next scheduled run.
             # No capture start or budget reservation occurs in this process.

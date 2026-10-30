@@ -109,6 +109,133 @@ def test_tool_catalog_empty_install_does_not_invent_configuration(monkeypatch):
     assert delta.sync_tool_catalog(object(), binding()) is False
 
 
+def x_catalog_configuration(revision=20):
+    config = fixture('01-configuration.json')['payload']
+    config.update(revision=revision, previous_revision=revision-1)
+    config['queries'] = config['queries'][:2]
+    config['connectors'][0].update(connector_id='x', operation='search_posts', modes=['posts'], research_fields=['target'])
+    config['sources'][0].update(connector_id='x', category='social', platform='x', allowed_domains=[])
+    for query, target in zip(config['queries'], ['@oracle', '#OracleCloud']):
+        query.update(mode='posts', target=target)
+    config['catalog_sha256'] = contract.catalog_fingerprint(config['connectors'])
+    return contract.Configuration.model_validate(config).model_dump(mode='json')
+
+
+def catalog_store(monkeypatch, config, initial):
+    stored = [{**delta._scope(binding()), **copy.deepcopy(row)} for row in initial]
+    writes = []
+    monkeypatch.setattr(delta, '_latest_revision', lambda *args: config['revision'])
+    monkeypatch.setattr(delta, '_configuration', lambda *args: copy.deepcopy(config))
+    def find(spark, bound, suffix, **where):
+        if suffix == 'tool_catalog':
+            return copy.deepcopy([row for row in stored if row['config_revision'] == where['config_revision']])
+        if suffix == 'registry':
+            return [{'payload_sha256': delta.fingerprint(config)}] if where['config_revision'] == config['revision'] else []
+        return []
+    def write(spark, bound, suffix, rows, keys, **kwargs):
+        if suffix != 'tool_catalog':
+            return
+        assert keys == ('snapshot_key',)
+        present = {row['snapshot_key'] for row in stored}
+        for row in rows:
+            if row['snapshot_key'] not in present:
+                writes.append(copy.deepcopy(row))
+                stored.append({**delta._scope(bound), **copy.deepcopy(row)})
+                present.add(row['snapshot_key'])
+    monkeypatch.setattr(delta, '_find', find)
+    monkeypatch.setattr(delta, '_rows', write)
+    return stored, writes
+
+
+def test_pre_x_projection_reproduces_original_prepared_runner_bytes():
+    config = x_catalog_configuration()
+    legacy = delta.tool_catalog_rows(config, validated=True, include_x_targets=False)
+    # Golden bytes cross-checked against the reviewed tool-projection functions
+    # from prepared runner SHA 6d3ca3d429538836e6024a51cf990ba19590006b3e5b75cec8539d4393400286.
+    assert contract.sha256(contract.encoded(legacy)) == '3cadd6e012d90bfab9f9dd7a90b481156a99c384774949156859d31ab779886a'
+    assert all('target_override' not in json.loads(row['input_schema_json'])['properties'] for row in legacy)
+    current = delta.tool_catalog_rows(config, validated=True)
+    assert {row['snapshot_key'] for row in current} == {row['snapshot_key'] for row in legacy}
+    assert all('target_override' in json.loads(row['input_schema_json'])['properties'] for row in current)
+    assert all(before['metadata_sha256'] != after['metadata_sha256'] for before, after in zip(legacy, current))
+
+
+def test_legacy_catalog_recovery_completes_only_its_own_projection(monkeypatch):
+    config = x_catalog_configuration()
+    legacy = delta.tool_catalog_rows(config, validated=True, include_x_targets=False)
+    stored, writes = catalog_store(monkeypatch, config, legacy[:1])
+    before = copy.deepcopy(stored[0])
+    assert delta.sync_tool_catalog(object(), binding()) is True
+    assert writes == legacy[1:] and stored[0] == before
+    assert delta.sync_tool_catalog(object(), binding()) is False
+    assert writes == legacy[1:]
+
+
+def test_interrupted_configuration_replay_uses_legacy_plan_before_effects(monkeypatch):
+    config = x_catalog_configuration()
+    legacy = delta.tool_catalog_rows(config, validated=True, include_x_targets=False)
+    stored, writes = catalog_store(monkeypatch, config, legacy[:1])
+    monkeypatch.setattr(delta, '_check_managed_history', lambda *args: None)
+    monkeypatch.setattr(delta, '_check_record_successors', lambda *args: None)
+    message = {'kind': 'configuration', 'payload': config}
+    plan = delta._prepare_configuration(object(), binding(), message)
+    assert plan['tool_catalog'] == legacy
+    delta._effect(object(), binding(), message, plan)
+    assert stored == [{**delta._scope(binding()), **row} for row in legacy]
+    assert writes == legacy[1:]
+    assert delta.sync_tool_catalog(object(), binding()) is False
+
+
+@pytest.mark.parametrize('failure', ['mixed', 'payload', 'digest', 'limits', 'unknown_field', 'duplicate_key'])
+def test_unknown_or_mixed_catalog_projection_is_never_adopted(monkeypatch, failure):
+    config = x_catalog_configuration()
+    legacy = delta.tool_catalog_rows(config, validated=True, include_x_targets=False)
+    current = delta.tool_catalog_rows(config, validated=True)
+    initial = copy.deepcopy(legacy)
+    if failure == 'mixed':
+        initial[1] = current[1]
+    elif failure == 'payload':
+        initial[0]['payload_json'] += ' '
+    elif failure == 'digest':
+        initial[0]['metadata_sha256'] = '0'*64
+    elif failure == 'limits':
+        initial[0]['max_items'] += 1
+    elif failure == 'unknown_field':
+        initial[0]['unreviewed_projection'] = True
+    else:
+        initial.append(copy.deepcopy(initial[0]))
+    stored, writes = catalog_store(monkeypatch, config, initial)
+    before = copy.deepcopy(stored)
+    with pytest.raises(ValueError, match='Conflicting immutable tool catalog'):
+        delta.sync_tool_catalog(object(), binding())
+    with pytest.raises(ValueError, match='Conflicting immutable tool catalog'):
+        delta._prepare_configuration(object(), binding(), {'kind': 'configuration', 'payload': config})
+    assert not writes and stored == before
+
+
+def test_next_configuration_uses_new_x_projection_without_mutating_legacy(monkeypatch):
+    config = x_catalog_configuration()
+    legacy = delta.tool_catalog_rows(config, validated=True, include_x_targets=False)
+    stored, writes = catalog_store(monkeypatch, config, legacy)
+    old = copy.deepcopy(stored)
+    assert delta.sync_tool_catalog(object(), binding()) is False
+    config.update(revision=21, previous_revision=20)
+    current = delta.tool_catalog_rows(config, validated=True)
+    assert not {row['snapshot_key'] for row in current} & {row['snapshot_key'] for row in legacy}
+    plan = delta._prepare_configuration(object(), binding(), {'kind': 'configuration', 'payload': config})
+    assert plan['tool_catalog'] == current
+    assert delta.sync_tool_catalog(object(), binding()) is True
+    assert writes == current and stored[:len(old)] == old
+    assert all('target_override' in json.loads(row['input_schema_json'])['properties'] for row in writes)
+
+
+def test_fresh_catalog_uses_current_projection(monkeypatch):
+    config = x_catalog_configuration()
+    _, writes = catalog_store(monkeypatch, config, [])
+    assert delta.sync_tool_catalog(object(), binding()) is True
+    assert writes == delta.tool_catalog_rows(config, validated=True)
+
+
 def test_empty_tool_catalog_upgrade_publishes_once_without_new_messages(monkeypatch):
     config = fixture('01-configuration.json')['payload']
     config.update(queries=[], criteria=[])
@@ -581,3 +708,153 @@ def test_report_hydration_bounds_bytes_without_fabricating_counts():
     assert sum(len(delta.canonical(r).encode('utf-8')) for r in values) <= 32768
     assert sum(len(delta.canonical(r).encode('utf-8')) for r in evidence) <= 24576
     assert {r['evidence_id'] for r in evidence} <= {e['evidence_id'] for row in [large] + result['evaluations'] for e in row['evidence']}
+
+
+def test_research_observation_projection_preserves_original_author_and_fingerprints():
+    message = fixture('02-observations.json')
+    original = message['payload']['observations'][0]
+    original['author'] = 'northstar_official'
+    original.update(contract.observation_fingerprints(original))
+    original = contract.Observation.model_validate(original).model_dump(mode='json')
+    message['payload']['observations'] = [original]
+    persisted = delta.observation_rows(message, fixture('01-configuration.json')['payload'])['observations'][0]
+    persisted.update(source_id=message['payload']['source_id'], query_id=message['payload']['query_id'])
+    before = copy.deepcopy(persisted)
+    work = {'limitations': []}
+    delta._case_research_observation_rows(work, [persisted])
+    result = work['research_observations'][0]
+    assert result['source_id'] == message['payload']['source_id']
+    assert result['query_id'] == message['payload']['query_id']
+    assert contract.Observation.model_validate(result['observation']).model_dump(mode='json') == original
+    assert result['observation']['author'] == 'northstar_official'
+    assert result['observation']['text'] == original['text'] and result['observation']['title'] == original['title']
+    assert persisted == before and not work['limitations']
+
+
+def test_research_observation_driver_count_and_bytes_are_bounded_without_truncation():
+    config = fixture('01-configuration.json')['payload']
+    message = fixture('02-observations.json')
+    rows = delta.observation_rows(message, config)['observations']
+    provenance = {'source_id': message['payload']['source_id'], 'query_id': message['payload']['query_id']}
+    work = {'limitations': []}
+    delta._case_research_observation_rows(work, [{**rows[0], **provenance}] * 101)
+    assert len(work['research_observations']) == 100 and len(work['limitations']) == 1
+    original = message['payload']['observations'][0]
+    original['text'] = '文' * 20000
+    original.update(contract.observation_fingerprints(original))
+    message['payload']['observations'] = [original]
+    large = delta.observation_rows(message, config)['observations'][0]
+    work = {'limitations': []}
+    delta._case_research_observation_rows(work, [{**large, **provenance}] * 10)
+    assert 0 < len(work['research_observations']) < 10
+    assert len(work['limitations']) == 1
+    assert sum(len(delta.canonical(row).encode('utf-8')) for row in work['research_observations']) <= 245760
+    assert all(contract.Observation.model_validate(row['observation']).text == original['text']
+        for row in work['research_observations'])
+
+
+def research_origin_fixture():
+    configuration, captured, study = study_fixture()
+    discovery = copy.deepcopy(captured['discoveries'][0])
+    request = fixture('03-investigation-request.json')['payload']
+    request['investigation_id'] = captured['investigations'][0]['investigation_id']
+    result = fixture('04-execution-result.json')
+    result['payload'].update(status='completed', execution_id=discovery['execution_id'],
+        request_id=request['request_id'], observation_message_ids=[discovery['message_id']],
+        record_count=1, spent_microusd=1000, coverage='requested_scope')
+    result = contract.ExecutionMessage.model_validate(result).model_dump(mode='json')
+    execution = {key: result['payload'][key] for key in (
+        'execution_id', 'status', 'config_revision', 'query_id', 'query_revision', 'record_count', 'spent_microusd')}
+    execution.update(payload_json=delta.canonical(result['payload']), message_json=delta.canonical(result))
+    work = {'scope': study['state']['scope'], 'investigation_id': request['investigation_id'],
+        'criterion': configuration['criteria'][0], 'requests': [{'request': request, 'status': 'completed',
+            'observations_committed': True, 'observation_message_ids': result['payload']['observation_message_ids']}]}
+    return work, execution, discovery
+
+
+def test_research_origin_requires_completed_exact_case_request_and_discovery():
+    work, execution, discovery = research_origin_fixture()
+    index = delta._case_authorized_research_executions(work, [execution])
+    assert delta._case_research_origin(work, discovery, index) == work['requests'][0]['request']['request_id']
+    primary = copy.deepcopy(discovery)
+    primary['execution_id'] = str(UUID(int=999))
+    assert delta._case_research_origin(work, primary, index) is None
+    assert delta._case_research_origin(work, discovery, {}) is None
+
+
+def test_research_origin_accepts_spark_row_index_access_without_dict_get():
+    work, execution, discovery = research_origin_fixture()
+    class IndexedRow:
+        def __getitem__(self, key):
+            return execution[key]
+    index = delta._case_authorized_research_executions(work, [IndexedRow()])
+    assert delta._case_research_origin(work, discovery, index) == work['requests'][0]['request']['request_id']
+
+
+@pytest.mark.parametrize('field,value', [
+    ('investigation_id', 'a'*64), ('criterion_id', str(UUID(int=999))), ('criterion_revision', 2),
+    ('config_revision', 2), ('query_id', str(UUID(int=999))), ('query_revision', 2),
+    ('budget_round_id', str(UUID(int=999))),
+])
+def test_foreign_or_mismatched_request_never_grants_research_origin(field, value):
+    work, execution, discovery = research_origin_fixture()
+    work['requests'][0]['request'][field] = value
+    index = delta._case_authorized_research_executions(work, [execution])
+    assert not index and delta._case_research_origin(work, discovery, index) is None
+
+
+@pytest.mark.parametrize('failure', ['pending', 'uncertain', 'not_committed', 'wrong_observations',
+    'foreign_scope', 'unknown_request', 'primary_execution', 'failed_execution', 'wrong_message', 'wrong_gold_row'])
+def test_unconfirmed_or_foreign_execution_never_grants_research_origin(failure):
+    work, execution, discovery = research_origin_fixture()
+    message = json.loads(execution['message_json'])
+    if failure in ('pending', 'uncertain'):
+        work['requests'][0]['status'] = failure
+    elif failure == 'not_committed':
+        work['requests'][0]['observations_committed'] = False
+    elif failure == 'wrong_observations':
+        work['requests'][0]['observation_message_ids'] = []
+    elif failure == 'foreign_scope':
+        message['generation_id'] = str(UUID(int=999))
+    elif failure == 'unknown_request':
+        message['payload']['request_id'] = str(UUID(int=999))
+        execution['payload_json'] = delta.canonical(message['payload'])
+    elif failure == 'primary_execution':
+        message['payload']['request_id'] = None
+        execution['payload_json'] = delta.canonical(message['payload'])
+    elif failure == 'failed_execution':
+        message['payload']['status'] = 'failed'
+        execution.update(status='failed', payload_json=delta.canonical(message['payload']))
+    elif failure == 'wrong_gold_row':
+        execution['query_revision'] = 2
+    else:
+        message['payload']['record_count'] = 0
+    execution['message_json'] = delta.canonical(message)
+    index = delta._case_authorized_research_executions(work, [execution])
+    assert not index and delta._case_research_origin(work, discovery, index) is None
+
+
+@pytest.mark.parametrize('field,value', [
+    ('source_id', str(UUID(int=999))), ('message_id', str(UUID(int=999))),
+    ('config_revision', 2), ('query_id', str(UUID(int=999))), ('query_revision', 2),
+    ('budget_round_id', str(UUID(int=999))),
+])
+def test_discovery_requires_exact_completed_execution_link(field, value):
+    work, execution, discovery = research_origin_fixture()
+    index = delta._case_authorized_research_executions(work, [execution])
+    discovery[field] = value
+    assert delta._case_research_origin(work, discovery, index) is None
+
+
+def test_criterion_query_scope_and_ambiguous_executions_fail_closed():
+    work, execution, discovery = research_origin_fixture()
+    work['criterion']['query_ids'] = [str(UUID(int=999))]
+    assert not delta._case_authorized_research_executions(work, [execution])
+    work['criterion']['query_ids'] = []
+    duplicate = copy.deepcopy(execution)
+    message = json.loads(duplicate['message_json'])
+    message['payload']['execution_id'] = str(UUID(int=999))
+    duplicate.update(execution_id=message['payload']['execution_id'],
+        payload_json=delta.canonical(message['payload']), message_json=delta.canonical(message))
+    with pytest.raises(ValueError, match='ambiguous completed'):
+        delta._case_authorized_research_executions(work, [execution, duplicate])

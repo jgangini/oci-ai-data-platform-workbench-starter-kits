@@ -277,7 +277,7 @@ not delete data or silently claim acceptance of an unverified generation.
 
 ## Installer preparation and release boundary
 
-`SondaAidpClient` is the application installer for candidate component 1.3.0. It resolves the
+`SondaAidpClient` is the application installer for candidate component 1.4.0. It resolves the
 selected OCI model by its exact server-configured ID and actual active catalog
 revision. An unversioned alias, another identity or inconsistent storage binding
 stops preparation before capture. Spark uses its injected secret API; AI compute
@@ -580,3 +580,175 @@ A temporary isolated check on the actual AI compute confirmed native
 LangGraph 1.2.4, Pydantic 2.14.1). It made zero model, provider, SQL or memory calls;
 its agent and files were removed. This establishes SDK binding compatibility,
 not model behavior or end-to-end provider acceptance of candidate 1.3.0.
+
+### Evidence-bound X research targets
+
+The candidate investigator can prepare a new X search target using the existing
+`InvestigationRequest.target_override`; the frozen exchange DTO and Chat Actions
+capability are unchanged. This applies only to reviewed connector `x`, matching
+source/connector revisions, platform `x`, `search_posts`, posts mode and an
+explicit `target` research capability. Other social connectors keep fixed targets;
+public-page domain checks keep their existing behavior.
+
+A dynamic target is either a public `@handle` of 1–15 ASCII handle characters
+present in the canonical author field, or a literal phrase of 2–120 characters
+present in a relevant observation's text/title. Author fields may contain the bare
+handle or its `@` form; display names, profile URLs and mentions in text do not
+establish authorship. Phrase characters are Unicode letters/numbers, ASCII spaces,
+`#`, `_` and internal `-`. URLs, quotes, controls, OR/AND/NOT tokens and tokens
+beginning with `-` are denied even if they occur in evidence. Targets must already
+be NFC and have no surrounding whitespace. Matching and semantic deduplication
+use NFC/lowercase without removing accents; the provider argument is preserved.
+
+The private `CaseWork.research_observations` projection supplies original
+Observation objects from the same publication/case, source and query. It
+intersects evidence keys with latest relevant evaluations and captured
+configuration membership. It returns at most 100 complete rows and 240 KiB,
+recording a limitation when bounded; it never truncates or rewrites observation
+fingerprints. The tool closure and final case admission both check this context,
+including evidence document, URL and quote. A model-supplied purpose or identity
+cannot replace those checks. Only bounded author references are added to the
+planning prompt; trusted configuration remains separate from untrusted content.
+
+Tool preparation performs no provider I/O and creates no reservation. Huginn's
+broker must independently validate the target against its authorized observations
+and enforce the current source/round ledger before any provider start. Relevance
+does not mean negative sentiment: criticism of an unspecified product or place
+cannot be assigned to a positively mentioned brand. New research becomes report
+evidence only after confirmed Gold publication.
+
+Pending evaluation inputs carry a private nullable `research_request_id`.
+Gold derives it from the same case's completed request and execution, with
+matching query, configuration, budget and observation-message membership.
+Unmatched or primary captures retain `null`; text cannot assert this origin.
+The investigator revalidates that history before inference and passes a bounded
+provenance flag to the evaluator. Authorized context may differ from the initial
+hashtag sample; its relevance and sentiment still depend on the approved
+criterion and actual text. This projection changes neither core wire messages
+nor the Delta schema.
+
+The changed tool input schema requires a new configuration revision and matching
+Source Limits publication; historical tool-catalog rows remain immutable. Local
+paused recovery recognizes only the exact original projection without X targets
+or the exact new projection. It completes missing rows using that same projection,
+including interrupted configuration effects; mixed, corrupt or unknown rows fail
+closed. A later configuration revision receives new keys and schemas. Recovery
+never overwrites an older snapshot to make an upgrade pass. Local
+tool/case tests and Spark projections are separate checks from actual model
+selection and provider execution. Native X research acceptance is still pending.
+
+## Live chat and cross-application activity: integration requirements
+
+Status: implemented in the 1.4.0 native component and deployed for controlled
+integration testing on 2026-10-30; the capability remains off and unaccepted.
+The graph still uses `ainvoke`, while its public answer/report node streams the
+same structured model invocation into a private journal. The observer's streaming
+request alone does not establish visibility of Huginn-originated and autonomous
+runs. This section remains the requirements source; candidate artifact hashes
+are drift checks until the three owners complete rendered integration acceptance.
+
+An executable [candidate codec, JSON Schema and synthetic fixtures](../../contracts/sonda-activity/candidate-v1/README.md)
+are available for consumer review. They include the broker read codec, native
+admission/journal protocol and validated result envelopes, and remain unaccepted.
+Native writer tests and an isolated OCI journal probe verified incremental
+persistence and deterministic replay; rendered cross-project acceptance remains
+a separate gate.
+
+The extension has two separate outputs. Public answer text must become visible
+while it is being generated, followed by the validated final answer and chart
+payload. Operational activity must identify the active agent, stage and tool,
+its actual start, completion or failure, and a bounded result summary. Replaying
+a completed answer in small chunks does not satisfy streaming. Model changes
+require evidence that the existing model cannot meet the needed streaming and
+structured-output contract; operational events do not require a different model.
+
+Ownership remains explicit: AIDP emits native activity, Huginn owns provider
+execution, budgets, chat persistence and the observation broker, and the observer
+owns its read-only subscription and rendering. Tool preparation is not capture;
+only the provider broker can confirm execution, and only the Gold writer can
+confirm publication. Events must carry their producer authority and distinguish
+requested, prepared, queued, executed and committed effects.
+
+Both Huginn chat and autonomous market-study activity must reach the observer
+without initiating a second agent invocation from the observer. The proposed
+transport is a private generation-scoped OCI event journal consumed by Huginn,
+then a read-only authenticated observation stream to the local observer. Native
+agents must not call a browser-supplied callback or a new public local endpoint.
+OCI credentials stay on the existing trusted server/runtime boundaries. This
+transport remains a proposal until both consumers and the native writer agree.
+
+The event contract must bind registry/generation, origin, request, run, producer,
+event and span identities, explicit parent/causation references, and emission
+time. Each producer has its own sequence; a broker replay cursor is independent
+of that sequence and of wall-clock ordering across producers. A resumed attempt
+must preserve its durable work identity while distinguishing execution attempts.
+Receiving a start after a completion must not regress a terminal state. Missing
+parents, delivery gaps, duplicates and unknown event versions must remain
+observable rather than being replaced with invented relationships or success.
+
+Activity uses an allowlist of bounded public fields. Do not export graph state,
+checkpoints, raw prompts, private reasoning, SQL, connector parameters,
+credentials or arbitrary exception text. Public text deltas are separate from
+activity and final structured results. Partial text is provisional; only the
+validated final result establishes success and chart contents. A failure after
+partial output must remain a failure. Any delivery failure must not trigger a
+second model call, provider start or data write merely to recreate telemetry.
+
+Acceptance requires the actual rendered Huginn chat and observer, with clearly
+separate evidence for local fixtures and native behavior:
+
+1. A Huginn-originated query produces public text before its final response;
+   the observer displays that same run without submitting another query.
+2. A controlled autonomous market-study run appears without a chat submission.
+   Its tool start is visible before its finish, with actual producer authority.
+3. Refresh, disconnection and cursor replay restore the run without a second
+   invocation, capture or budget reservation. Existing chat history persists.
+4. Duplicate/out-of-order events and late parents preserve identities; scope
+   mismatch is denied and one user's run cannot enter another user's stream.
+5. Native failure after partial output and telemetry unavailability are shown
+   accurately; final tables/charts are rendered only from validated results.
+
+Tests must preserve existing capture pauses and budget gates. Synthetic event
+fixtures must be labeled as synthetic and do not establish native acceptance.
+No cron activation or paid provider capture is necessary to test the transport.
+Latency must be measured from emission to rendering; traces received only at
+completion must not be presented as live execution.
+
+The local 1.4.0 component pack composes the invocation adapter and a generated
+helper asset. `scripts/render_sonda_activity.py --check` verifies that asset
+against the five canonical sources. The adapter isolates each admitted invocation
+with context variables, serializes writes/timer flushes and preserves a valid
+final model result if observation delivery fails. A source-only deployment on
+2026-10-30 verified both existing cloud agent identities as ACTIVE with the new
+source and the optional non-logging session reference, and verified the managed
+notebook's exact runner source. The generation fence remains closed and its
+five-minute schedule paused. Local graph tests, isolated OCI journal tests and
+the pending rendered acceptance are separate evidence.
+
+Activity is off when the protected generation fence omits `activity` or declares
+`{"enabled":false}`. Opt-in requires `{"enabled":true,"manifest_sha256":"..."}`
+matching the helper's compiled manifest hash and an accepted generation or the
+existing bounded operator validation window. The reference comes from Oracle's
+optional, non-logging `sondaActivityRef` session variable, never from model text.
+Enabled invocations reject a missing/stale reference or mismatched input before
+model execution; they do not silently fall back to legacy execution. The
+installer binds each real agent ID before its deployment and removes a stale
+default from the reference declaration.
+
+The chat streams only its existing structured answer run and retains the existing
+`public_response` validation for citations, charts and publication context.
+Query spans wrap the actual read and result validation. The investigator streams
+only report `summary`; evaluation and planning JSON remain private. A completed
+worker step publishes bounded work/count/report references with publication still
+pending. It does not claim Gold publication or a completed investigation.
+
+Gold prepares an autonomous admission from its immutable work input, with stable
+UUIDv5 identities per work and role, then reserves one dispatch before the
+existing POST. A prior dispatch, consumed claim or expired admission is deferred
+for reconciliation; expiry never creates a second model call. A saved business
+result is resolved first without admission or telemetry replay. Autonomous
+discovery may use bounded, authenticated listing of the fixed generation prefix;
+following a known run uses deterministic GET paths. Browser-supplied prefixes or
+bucket names never select that scope. Its broker discovery, both rendered
+interfaces and Gold publication child receipts remain integration acceptance
+work; no scheduler or production flag is enabled by this local pack change.

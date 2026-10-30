@@ -3,6 +3,21 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from uuid import UUID
+from app.sonda_contract import no_duplicate_keys
+
+
+def worker_request(raw):
+    """One command decoder shared by the Gold dispatcher and native investigator."""
+    if not isinstance(raw,str) or not 1<=len(raw)<=1000:
+        raise ValueError('Invalid native work request')
+    value=json.loads(raw,object_pairs_hook=no_duplicate_keys)
+    if (not isinstance(value,dict) or set(value)!={'version','work_id','sha256'}
+        or type(value['version']) is not int or value['version']!=1
+        or not isinstance(value['work_id'],str) or str(UUID(value['work_id']))!=value['work_id']
+        or not isinstance(value['sha256'],str) or len(value['sha256'])!=64
+        or any(c not in '0123456789abcdef' for c in value['sha256'])):
+        raise ValueError('Native work request identity is invalid')
+    return value
 
 
 def runtime_storage(binding):

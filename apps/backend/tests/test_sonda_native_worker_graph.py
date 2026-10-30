@@ -102,6 +102,15 @@ class WorkerFixture:
             def with_structured_output(self,schema,**kwargs):
                 role={'Verdict':'evaluate','Plan':'plan','Prose':'report','Drafts':'propose'}[schema['title']]
                 class Inference:
+                    async def astream(self,messages):
+                        assert role=='report'
+                        payload=json.loads(messages[-1].content)
+                        owner.model_calls.append(('report_stream',payload))
+                        yield {'summary':'La evidencia','title':'Informe'}
+                        owner.stream_paused.set()
+                        await owner.release_stream.wait()
+                        yield {'title':'Informe','summary':'La evidencia disponible respalda este informe.'}
+
                     async def ainvoke(self,messages):
                         payload=json.loads(messages[-1].content)
                         owner.model_calls.append((role,payload))
@@ -130,6 +139,7 @@ class WorkerFixture:
         exec(compile(investigator_source(),'trusted-generated-sonda-investigator.py','exec'),self.module.__dict__)
         self.module.runtime_storage=lambda binding:(self.storage,object())
         self.module.generation_inference=lambda storage,binding:self.enabled
+        self.module.generation_control=lambda storage,binding:{}  # Legacy fixture has Activity disabled.
         self.module.native_memory=lambda generation,agent:GenerationMemory(self.memory,generation)
         self.module.WORKER_BINDING=dict(self.binding)
         self.agent=self.module.SondaInvestigator()
@@ -321,4 +331,166 @@ def test_cached_object_must_bind_input_hash_before_any_model_or_result_overwrite
             await worker.invoke()
         assert not worker.model_calls and not worker.storage.puts
         assert worker.storage.objects[key]==invalid
+    asyncio.run(check())
+
+
+class ActivityObjects:
+    """Conditional Activity IO only; private work remains in the storage fixture."""
+    def __init__(self):
+        self.rows={}
+        self.puts=[]
+
+    def get(self,role,key):
+        assert role=='artifacts'
+        return self.rows.get(key)
+
+    def put(self,role,key,raw,expected):
+        assert role=='artifacts'
+        prior=self.rows.get(key)
+        if (prior.etag if prior else None)!=expected:
+            raise RuntimeError('Synthetic conditional-write conflict')
+        self.puts.append((key,raw,expected))
+        self.rows[key]=types.SimpleNamespace(data=raw,etag=str(len(self.puts)))
+        return self.rows[key].etag
+
+
+def enable_worker_activity(worker,monkeypatch):
+    module=worker.module
+    objects=ActivityObjects()
+    now=datetime.now(timezone.utc)-timedelta(seconds=1)
+    agent_id,ref=str(UUID(int=777)),str(UUID(int=778))
+    worker.binding['activity_agent_id']=agent_id
+    worker.agent.binding['activity_agent_id']=agent_id
+    digest=hashlib.sha256(contract.encoded(worker.request)).hexdigest()
+    session_sha=hashlib.sha256(worker.request['work_id'].encode()).hexdigest()
+    descriptor=module.ActivityProducer_AdmissionDescriptor.model_validate(dict(
+        schema_version=module.ActivityProducer_PRODUCER_VERSION,admission_id=ref,
+        scope={key:worker.binding[key] for key in ('registry_id','generation_id')},
+        run=dict(run_id=str(UUID(int=779)),request_id=str(UUID(int=780)),attempt_id=str(UUID(int=781)),
+            work_id=worker.request['work_id'],investigation_id=worker.projection['work']['investigation_id'],
+            execution_kind='native_invocation',component='native_agent',agent_id=agent_id,
+            agent_name='ai_social_network_investigator',source='autonomous_study',created_at=now.isoformat(),synthetic=True),
+        native_session_sha256=session_sha,input_sha256=digest,config_revision=1,tool_catalog_sha256='a'*64,
+        created_at=now.isoformat(),expires_at=(now+timedelta(minutes=30)).isoformat(),work_input_sha256=worker.request['sha256']))
+    current=module.ActivityProducer_CurrentPointer(schema_version=descriptor.schema_version,scope=descriptor.scope,
+        agent_id=agent_id,native_session_sha256=session_sha,admission_id=ref,run_id=descriptor.run.run_id,
+        request_id=descriptor.run.request_id,attempt_id=descriptor.run.attempt_id,epoch=1,status='admitted',
+        owner_nonce=None,expires_at=descriptor.expires_at)
+    root,key=module.ActivityJournal_admission_keys(descriptor.scope,agent_id,session_sha,ref)
+    objects.rows[root+'descriptor.json']=types.SimpleNamespace(data=module.ActivityProducer_producer_encoded(descriptor.model_dump(mode='json')),etag='descriptor')
+    objects.rows[key]=types.SimpleNamespace(data=module.ActivityProducer_producer_encoded(current.model_dump(mode='json')),etag='current')
+    module.generation_control=lambda storage,binding:{'activity':{'enabled':True,'manifest_sha256':module.ACTIVITY_MANIFEST_SHA256}}
+    module.OciObjects=lambda *args:objects
+    context=types.ModuleType('aidputils.agents.toolkit.chat_context')
+    context.session_context_var=types.SimpleNamespace(get=lambda:{'sessionvariables.sondaActivityRef':{'value':ref}})
+    monkeypatch.setitem(sys.modules,context.__name__,context)
+    worker.stream_paused,worker.release_stream=asyncio.Event(),asyncio.Event()
+    return objects,root
+
+
+def activity_events(objects):
+    return [event for key,blob in objects.rows.items() if '/batches/' in key for event in json.loads(blob.data)['events']]
+
+
+def report_projection(worker):
+    projection=copy.deepcopy(worker.projection)
+    projection['work'].update(phase='report',pending_inputs=[],
+        facts={'distinct_documents':0,'distinct_observations':0,'relevant_documents':0,'missing_evaluations':0})
+    worker.projection=projection
+    worker.request=worker.store_projection(projection)
+
+
+async def invoke_activity_worker(worker):
+    return await worker.agent.invoke(json.dumps(worker.request),session_id=worker.request['work_id'])
+
+
+def test_enabled_worker_real_graph_streams_only_public_report_summary_and_returns_pending_step(worker,monkeypatch):
+    async def check():
+        report_projection(worker)
+        objects,root=enable_worker_activity(worker,monkeypatch)
+        task=asyncio.create_task(invoke_activity_worker(worker))
+        await asyncio.wait_for(worker.stream_paused.wait(),3)
+        assert not task.done()
+        events=activity_events(objects)
+        assert [event['public_text_delta'] for event in events if event.get('type')=='text_delta']==['La evidencia']
+        assert any(key.endswith('/head.json') for key in objects.rows)
+        assert not any(event.get('kind')=='execution_completion' for event in events)
+        assert not any('/results/' in key for key in objects.rows)
+        assert worker.object(worker.request,'result') not in worker.storage.objects
+        worker.release_stream.set()
+        response=await asyncio.wait_for(task,3)
+        assert json.loads(response['messages'][0].content)['committed'] is True
+        stored=worker.stored_result()['result']
+        artifact=[json.loads(blob.data) for key,blob in objects.rows.items() if '/results/' in key]
+        assert len(artifact)==1 and artifact[0]['kind']=='native_step'
+        payload=artifact[0]['payload']
+        assert payload=={'work_id':worker.request['work_id'],'input_sha256':worker.request['sha256'],
+            'investigation_id':worker.projection['work']['investigation_id'],'phase':'report_prepared',
+            'report_refs':[{'report_id':stored['reports'][0]['report_id'],'revision':stored['reports'][0]['revision']}],
+            'evaluation_count':0,'request_count':0,'proposal_count':0,'publication_status':'pending'}
+        events=activity_events(objects)
+        assert len([event for event in events if event.get('kind')=='execution_completion'])==1
+        text=''.join(event['public_text_delta'] for event in events if event.get('type')=='text_delta')
+        assert text=='La evidencia disponible respalda este informe.'
+        assert 'Informe' not in text and 'reason' not in text and 'requests' not in text
+        assert [role for role,_ in worker.model_calls]==['report_stream']
+        puts=len(objects.puts)
+        private_puts=len(worker.storage.puts)
+        replay=await invoke_activity_worker(worker)
+        assert replay==response and len(objects.puts)==puts and len(worker.storage.puts)==private_puts
+        assert [role for role,_ in worker.model_calls]==['report_stream']
+    asyncio.run(check())
+
+
+def test_enabled_worker_evaluation_emits_no_reason_or_model_json_and_reports_pending(worker,monkeypatch):
+    async def check():
+        objects,root=enable_worker_activity(worker,monkeypatch)
+        await invoke_activity_worker(worker)
+        events=activity_events(objects)
+        assert not any(event.get('type')=='text_delta' for event in events)
+        artifact=next(json.loads(blob.data) for key,blob in objects.rows.items() if '/results/' in key)
+        assert artifact['kind']=='native_step'
+        assert artifact['payload']['phase']=='evaluated'
+        assert artifact['payload']['evaluation_count']==2
+        assert artifact['payload']['publication_status']=='pending'
+        assert artifact['payload']['report_refs']==[]
+        assert all(role=='evaluate' for role,_ in worker.model_calls)
+        public=json.dumps(events)+json.dumps(artifact)
+        assert 'Synthetic semantic fixture.' not in public
+        assert 'score' not in public and 'observation' not in public
+    asyncio.run(check())
+
+
+def test_cached_large_private_work_result_never_becomes_public_artifact_or_new_admission(worker,monkeypatch):
+    async def check():
+        await worker.invoke()
+        saved=worker.stored_result()
+        now=datetime.now(timezone.utc).isoformat()
+        evidence=[]
+        for index in range(500):
+            quote='Synthetic private supporting evidence '+('x'*3900)+str(index)
+            observation='a'*64
+            evidence.append({'evidence_id':contract.sha256(contract.encoded([observation,quote])),
+                'observation_key':observation,'document_key':'b'*64,'url':'https://example.com/evidence',
+                'quote':quote,'captured_at':now})
+        criterion=worker.projection['work']['criterion']
+        report=contract.Report.model_validate(dict(report_id='c'*64,investigation_id=worker.projection['work']['investigation_id'],
+            revision=1,config_revision=1,criterion_id=criterion['criterion_id'],criterion_revision=criterion['revision'],
+            status='completed_with_limits',title='Informe privado sintético',summary='Evidencia privada acotada.',
+            indicators=[],evidence=evidence,evaluations=[],coverage=dict(distinct_documents=500,distinct_observations=500,
+                query_ids=[],pending_requests=0,failed_requests=0,exhausted_budget=False,limitations=['Synthetic fixture']),
+            model_id=worker.binding['model_id'],model_revision=worker.binding['model_revision'],prompt_version=worker.agent.model.identity['prompt_version'],
+            created_at=now)).model_dump(mode='json')
+        saved['result']['reports']=[report]
+        raw=contract.encoded(saved)
+        assert 1048576<len(raw)<=4194304
+        worker.storage.objects[worker.object(worker.request,'result')]=raw
+        objects,root=enable_worker_activity(worker,monkeypatch)
+        calls=len(worker.model_calls)
+        response=await invoke_activity_worker(worker)
+        assert json.loads(response['messages'][0].content)['committed'] is True
+        assert not objects.puts and not activity_events(objects)
+        assert not any('/results/' in key for key in objects.rows)
+        assert len(worker.model_calls)==calls
+        assert worker.storage.objects[worker.object(worker.request,'result')]==raw
     asyncio.run(check())
