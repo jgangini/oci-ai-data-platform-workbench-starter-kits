@@ -266,16 +266,17 @@ class SocialAidpClient(AidpClient):
         if not role_membership_verified and not await self.is_platform_admin(user_ocid):
             raise AidpProvisionConflict('The selected user is not an AI_DATA_PLATFORM_ADMIN')
         async with self._locks.setdefault(MODULE_ID, asyncio.Lock()):
-            def configure():
-                workspace = str(self._workspace()['key'])
-                existing = self._module_manifest(workspace)
-                self._ensure_governance_credential()
-                proposed = self.source_config(bucket, prefix)
-                if existing and any(proposed[key] != existing['config'][key] for key in ('source_bucket', 'source_prefix', 'gold_bucket', 'artifacts_bucket', 'identity_sha256')):
-                    raise AidpProvisionConflict('The installed social source and storage identity are immutable; use a planned data migration to change them')
-                self._social_config = existing['config'] if existing else proposed
-            await asyncio.to_thread(configure)
+            await asyncio.to_thread(self._configure_social,bucket,prefix)
             return await self._run_module_operation(self._reconcile_social, user_ocid, operation_id, operation_type)
+
+    def _configure_social(self,bucket,prefix):
+        workspace = str(self._workspace()['key'])
+        existing = self._module_manifest(workspace)
+        self._ensure_governance_credential()
+        proposed = self.source_config(bucket, prefix)
+        if existing and any(proposed[key] != existing['config'][key] for key in ('source_bucket', 'source_prefix', 'gold_bucket', 'artifacts_bucket', 'identity_sha256')):
+            raise AidpProvisionConflict('The installed social source and storage identity are immutable; use a planned data migration to change them')
+        self._social_config = existing['config'] if existing else proposed
 
     async def agent_endpoint(self):
         return await self.governance_agent_endpoint()

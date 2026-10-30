@@ -1,4 +1,6 @@
 *.sh text eol=lf
+contracts/sonda/** text eol=lf
+apps/backend/app/sonda_*.py text eol=lf
 apps/backend/app/labs/** text eol=lf
 apps/frontend/public/brand-icons/** text eol=lf
 apps/gods-eye-view/public/brand-icons/** text eol=lf
