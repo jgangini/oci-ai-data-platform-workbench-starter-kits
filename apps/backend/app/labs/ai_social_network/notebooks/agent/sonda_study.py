@@ -384,7 +384,7 @@ def case_proposals(response, current, work, identity):
     return values
 
 
-async def study_case(configuration, work, prior_operational_state, execution_results, *, model, now):
+async def study_case(configuration, work, prior_operational_state, execution_results, *, model, now, within_parent_graph=False):
     """Production entry: one bounded Gold case with compact CAS operational state.
 
     The runner claims work under its writer lease, hydrates committed Gold data and
@@ -513,5 +513,8 @@ async def study_case(configuration, work, prior_operational_state, execution_res
     graph.add_edge(START, work['phase'])
     graph.add_edge('evaluate', END)
     graph.add_edge('report', END)
-    await graph.compile().ainvoke({'output':output})
+    if within_parent_graph:
+        await {'evaluate':evaluate,'report':report}[work['phase']]({})
+    else:
+        await graph.compile().ainvoke({'output':output})
     return {**output, 'state':dto(CaseState, state)}

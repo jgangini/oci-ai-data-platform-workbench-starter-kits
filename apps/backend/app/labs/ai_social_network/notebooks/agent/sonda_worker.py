@@ -55,11 +55,14 @@ class InvestigatorState(TypedDict):
     work: dict
     result: dict
     response: dict
+    model_identity: dict
+    started_at: str
 
 
 class SondaInvestigator:
     def setup(self):
         from aidputils.agents.toolkit.agent_helper import GenAIChatInvoker, GenerativeAiInferenceV2Client
+        from langgraph.func import task
         from langgraph.graph import START, END, StateGraph
         self.binding=dict(WORKER_BINDING)
         self.storage,self.signer=runtime_storage(self.binding)
@@ -70,6 +73,16 @@ class SondaInvestigator:
             model_kwargs={'temperature':0,'max_tokens':4096},guardrails_config={'policies':[]})
         self.model=StudyModel(invoker,identity={'model_id':self.binding['model_id'],
             'model_revision':self.binding['model_revision'],'prompt_version':STUDY_PROMPT_VERSION})
+
+        @task(name='sonda_case_inference')
+        async def infer(role,payload):
+            if not await asyncio.to_thread(generation_inference,self.storage,self.binding):
+                raise RuntimeError('Sonda generation was paused before inference')
+            return await self.model(role,payload)
+
+        async def durable_model(role,payload):
+            return await infer(role,payload)
+        durable_model.identity=self.model.identity
 
         async def load(state):
             if not await asyncio.to_thread(generation_inference,self.storage,self.binding):
@@ -87,14 +100,16 @@ class SondaInvestigator:
             for key in ('registry_id','generation_id','contract_sha256'):
                 if scope.get(key)!=self.binding[key]:
                     raise ValueError('Native work belongs to another generation')
-            return {'work':work}
+            return {'work':work,'model_identity':dict(self.model.identity),
+                'started_at':datetime.now(timezone.utc).isoformat()}
 
         async def investigate(state):
             if not await asyncio.to_thread(generation_inference,self.storage,self.binding):
                 raise RuntimeError('Sonda generation was paused before inference')
             work=state['work']
             result=await study_case(work['configuration'],work['work'],work['state'],
-                work['execution_results'],model=self.model,now=datetime.now(timezone.utc))
+                work['execution_results'],model=durable_model,
+                now=datetime.fromisoformat(state['started_at']),within_parent_graph=True)
             return {'result':result}
 
         async def persist(state):
@@ -146,6 +161,8 @@ class SondaInvestigator:
             values=previous.values or {}
             if values and values.get('request')!=request:
                 raise ValueError('A work identity cannot be reused with another hash')
+            if values.get('model_identity') not in (None,self.model.identity):
+                raise ValueError('Pending work belongs to another model or prompt revision')
             if response is not None:
                 response={'work_id':request['work_id'],'input_sha256':request['sha256'],'committed':True}
                 if values and (previous.next or values.get('work') or values.get('result')):

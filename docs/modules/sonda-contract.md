@@ -181,6 +181,15 @@ format errors use at most two attempts; infrastructure failures remain failures.
 These boundaries follow LangGraph's [checkpointer guidance](https://docs.langchain.com/oss/python/langgraph/checkpointers)
 and [error classification](https://docs.langchain.com/oss/python/langgraph/thinking-in-langgraph).
 
+Native investigation wraps each inference in a LangGraph task within its parent
+graph. Completed task results survive a later interruption in the same immutable
+work item; replay rebuilds the bounded case output without repeating those calls.
+The work start time is checkpointed to keep replay branches deterministic; Gold
+still checks current approvals and budget validity before commit. Pending work
+rejects a different model or prompt revision. This uses the existing
+AI Lakehouse checkpointer, not a second cache or checkpoint database. See the
+[Functional API](https://docs.langchain.com/oss/python/langgraph/functional-api).
+
 The runner records a conditional per-case pending-work pointer before inference.
 An unknown HTTP outcome resumes that exact immutable work even if new evidence
 for the same case arrives meanwhile. Its result is applied idempotently before

@@ -70,6 +70,7 @@ class WorkerFixture:
         self.enabled=True
         self.pause_after_model=False
         self.model_calls=[]
+        self.cancel_evaluation_call=None
         self.flow_calls=[]
         config=json.loads((ROOT/'contracts/sonda/v1/fixtures/01-configuration.json').read_text())
         captured=json.loads((ROOT/'contracts/sonda/v1/fixtures/02-observations.json').read_text())['payload']
@@ -104,6 +105,8 @@ class WorkerFixture:
                     async def ainvoke(self,messages):
                         payload=json.loads(messages[-1].content)
                         owner.model_calls.append((role,payload))
+                        if role=='evaluate' and len([entry for entry in owner.model_calls if entry[0]=='evaluate'])==owner.cancel_evaluation_call:
+                            raise asyncio.CancelledError('Synthetic process interruption between evaluations')
                         if owner.pause_after_model:
                             owner.enabled=False
                         if role=='evaluate':
@@ -153,6 +156,39 @@ class WorkerFixture:
 
     def stored_result(self,request=None):
         return json.loads(self.storage.objects[self.object(request or self.request,'result')])
+
+
+def test_resume_partial_evaluation_batch_reuses_completed_inference_tasks(worker):
+    async def check():
+        assert len(worker.projection['work']['pending_inputs'])>=2
+        worker.cancel_evaluation_call=2
+        with pytest.raises(asyncio.CancelledError):
+            await worker.invoke()
+        checkpoint=(await worker.agent.graph.aget_state(worker.checkpoint_config())).values
+        started_at=contract.canonical_utc(checkpoint['started_at'])
+        worker.cancel_evaluation_call=None
+        response=await worker.invoke()
+        assert response['committed'] is True
+        keys=[payload['observation']['observation_key'] for role,payload in worker.model_calls if role=='evaluate']
+        first=worker.projection['work']['pending_inputs'][0]['observation']['observation_key']
+        assert keys.count(first)==1
+        assert len(worker.stored_result()['result']['evaluations'])==2
+        assert {row['evaluated_at'] for row in worker.stored_result()['result']['evaluations']}=={started_at}
+    asyncio.run(check())
+
+
+def test_partial_work_cannot_reuse_cached_inference_after_model_revision_changes(worker):
+    async def check():
+        worker.cancel_evaluation_call=2
+        with pytest.raises(asyncio.CancelledError):
+            await worker.invoke()
+        calls=len(worker.model_calls)
+        worker.cancel_evaluation_call=None
+        worker.agent.model.identity={**worker.agent.model.identity,'model_revision':'another-revision'}
+        with pytest.raises(ValueError,match='another model or prompt'):
+            await worker.invoke()
+        assert len(worker.model_calls)==calls
+    asyncio.run(check())
 
 
 @pytest.fixture
