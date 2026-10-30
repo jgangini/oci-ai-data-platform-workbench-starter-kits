@@ -185,6 +185,13 @@ class Exchange:
         self.objects.put('artifacts', self.root+'head.json', prepared.head, etag)
         return entry.sequence
 
+    def _verify_head_tip(self, head):
+        if head.last_sequence:
+            tip = self.objects.get('artifacts', self._entry(head.last_sequence))
+            if (tip is None or contract.sha256(tip.data) != head.last_entry_sha256
+                or self._parse(tip.data,'stream_entry').sequence != head.last_sequence):
+                raise StreamConflict('Committed head does not match its entry hash')
+
     def read_entries(self, start, head, *, previous_hash=None, maximum=100):
         """Verify a bounded contiguous window and the head tip, without rescanning history.
 
@@ -193,11 +200,7 @@ class Exchange:
         """
         if type(maximum) is not int or not 1 <= maximum <= 1000:
             raise ValueError('A stream read window must contain one to 1000 entries')
-        if head.last_sequence:
-            tip = self.objects.get('artifacts', self._entry(head.last_sequence))
-            if (tip is None or contract.sha256(tip.data) != head.last_entry_sha256
-                or self._parse(tip.data,'stream_entry').sequence != head.last_sequence):
-                raise StreamConflict('Committed head does not match its entry hash')
+        self._verify_head_tip(head)
         rows = []
         for sequence in range(start, min(head.last_sequence+1,start+maximum)):
             blob = self.objects.get('artifacts', self._entry(sequence))

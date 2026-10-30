@@ -51,9 +51,9 @@ class Model:
             args = {'platforms':['instagram','facebook'],'limit':50}
         elif question in ('RECUPERA PLAN','ACLARA PLAN'):
             if value.get('validation_error'):
-                assert value['original_question'] == question
-                assert set(value) == {'conversation','publication','queries','search_context','original_question','validation_error'}
-                assert 'hasta 50 días' in value['validation_error']
+                assert set(value) == {'conversation','publication','queries','search_context','validation_error'}
+                assert value['validation_error']['stage']=='plan_validation'
+                assert value['validation_error']['code']=='unsupported_platform'
             args = {'platform':'youtube','metric':'posts'} if question == 'RECUPERA PLAN' and value.get('validation_error') else {'platform':'unsupported'}
         elif question == 'Compara las búsquedas guardadas y explica su cobertura':
             args = {'entity':'Oracle','entity_scope':'any','metric':'comments'}
@@ -255,7 +255,8 @@ async def main():
         assert len(plans) == planner_calls+2 and len(answers) == answer_calls
         assert len(own) == 1, 'An invalid plan and its failed repair must never execute data SQL'
         assert clarification['sources'] == [] and clarification['query_context'] == [] and clarification['visualization'] is None
-        assert clarification['publication']['publication_id'] == receipt['publication_id'] and 'Precisa' in clarification['answer']
+        assert clarification['publication']['publication_id'] == receipt['publication_id']
+        assert clarification['answer']=='No pude completar esta consulta. Inténtalo de nuevo o reformula la pregunta.'
         planner_calls = len(plans)
         after_clarification, own = await invoke('RECUPERA PLAN','clarification')
         assert len(plans) == planner_calls+2 and len(own) == 2

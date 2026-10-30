@@ -177,9 +177,40 @@ Chat retries identify the canonical v2 input. An interrupted identical turn resu
 its pending node and pinned data snapshot after rechecking the generation fence
 and approved configuration revision. A different question retires the incomplete
 read-only turn and its temporary rows before starting afresh. Structured planner
-format errors use at most two attempts; infrastructure failures remain failures.
+format errors allow one local repair per turn, shared across dependent plans;
+up to four valid Gold queries remain available. Infrastructure failures propagate
+without a graph-level automatic retry. A resumed interrupted node can still repeat
+a model call whose result was not checkpointed; this is not an exactly-once billing
+guarantee.
+Both chat entry points derive their planner schemas from the same allowed
+networks, metrics, periods and entity scopes used by runtime validation. A local
+repair receives a reviewed stage, code and instruction, never rejected argument
+values, SQL or an exception dump. Up to two compact diagnostics remain in the
+current turn's checkpoint and reset for a new turn. These diagnostics explain
+future rejected plans; they cannot establish why an older unrecorded plan failed.
+If planning still fails, the chat reports that it could not complete the query
+and offers a new attempt or reformulation, without asserting that the user omitted
+filters or showing technical diagnostics.
+For ranged summaries, NULL publication dates are excluded before aggregation:
+`undated_count=0` describes that dated population, not complete date coverage
+outside the requested range.
 These boundaries follow LangGraph's [checkpointer guidance](https://docs.langchain.com/oss/python/langgraph/checkpointers)
 and [error classification](https://docs.langchain.com/oss/python/langgraph/thinking-in-langgraph).
+
+The owning modules separate envelope and snapshot validation, SQL compilation,
+response presentation and graph setup. The Delta writer validates inbound
+envelopes and binds transport identity before dispatching business-reference
+validation by message kind. It journals business effects before publishing
+receipts. Study validation checks evaluations,
+reports, proposals and research budgets before writing; case hydration separates
+pending evaluation inputs from full-population report facts. These are ordinary
+functions assembled into the same readable native files. The Sonda chat bundle
+omits the legacy entry point and its private helpers; source analysis still
+covers those helpers. The exported 1.0.2 reference and its hash remain unchanged.
+The contract manifest hashes the complete reference implementation, including
+internal validator code. Refactoring that reference requires a versioned contract
+migration even when its JSON schema is unchanged; refreshing its hash under the
+same released version is not a compatibility-preserving change.
 
 Native investigation wraps each inference in a LangGraph task within its parent
 graph. Completed task results survive a later interruption in the same immutable
@@ -210,6 +241,24 @@ transactional with their checkpoints. A process failure before a verdict/result
 commits can repeat a model call on recovery. This is not a guarantee of exactly
 one billed inference per observation. Monitor OCI model/compute consumption
 separately: the Huginn capture budget controls Apify, not those OCI charges.
+
+The writer still validates every table's Delta format, configured location,
+partitions and schema at the start of each run. Subsequent MERGEs use that
+configured location directly through `DeltaTable.forPath`, avoiding a repeated
+catalog-location lookup for every write. Registry/generation predicates, current
+version ordering, case compare-and-swap and publication recovery remain in place.
+Administrative DDL must not run concurrently with the managed writer; this does
+not promise a consistent view across concurrent catalog changes.
+
+Driver output includes `SONDA_PHASE` records with a fixed phase name, monotonic
+elapsed milliseconds and completion/error status. They cover table validation,
+inbound and case recovery, consumption, outbox, case selection/projection,
+inference, commit and final publication without extra Spark actions or payload
+logging. Parent phases include nested phases, so their times must not be added
+as independent work. A closed or broken metrics stream does not replace the
+work's result or original exception. Use task/SQL evidence to locate bottlenecks before
+changing creation checks, recovery or publication scans. Local regression proves
+fewer Python-side catalog lookups, not a native latency or five-minute SLA.
 
 A protected generation binding fences ingestion and inference. Missing or
 inconsistent binding or incomplete reset keeps the service paused. With an

@@ -11,7 +11,7 @@ from app.labs.ai_social_network.notebooks.agent.sonda_chat import (
     BoundChat, SONDA_PROMPT, checked_binding, checked_plan_v2, configuration_sql,
     public_response, query_evidence, session_key, snapshot_from_row, snapshot_sql, tool_sql, validate_input)
 from app.labs.ai_social_network.notebooks.agent.social_agent import (
-    TOOLS, NETWORKS, conversation_context, plan_for_question, previous_query, query, verified_plan)
+    CLARIFICATION_ANSWER, conversation_context, plan_for_question, planning_error, planning_schema, previous_query, query, verified_plan)
 
 CHAT_BINDING = {}
 
@@ -25,6 +25,8 @@ class ChatStateV2(TypedDict):
     queries: list
     response: dict
     request_sha256: str
+    planning_diagnostics: list
+    plan_repairs: int
 
 
 class SondaChatAgent:
@@ -40,16 +42,8 @@ class SondaChatAgent:
             compartment_id=self.binding['compartment_id'],service_endpoint=endpoint,
             client=GenerativeAiInferenceV2Client(endpoint=endpoint,signer=signer),is_stream=False,
             model_kwargs={'temperature':0,'max_tokens':2048},guardrails_config={'policies':[]})
-        args_schema={'type':'object','additionalProperties':False,'properties':{
-            **{key:{'type':'string'} for key in ('platform','date_from','date_to','text','post_key','period','entity','entity_scope','metric')},
-            'document_type':{'type':'string','enum':['post','comment','page','indicator']},
-            'platforms':{'type':'array','minItems':1,'maxItems':6,'items':{'type':'string','enum':list(NETWORKS)}},
-            'limit':{'type':'integer','minimum':1,'maximum':50}}}
-        planner=llm.with_structured_output({'title':'SondaQuery','type':'object','additionalProperties':False,
-            'required':['tool','args','presentation','continue_query'],'properties':{
-                'tool':{'type':'string','enum':[*TOOLS,'finish']},'args':args_schema,
-                'presentation':{'type':'string','enum':['none','auto','table','bar','pie','line']},
-                'continue_query':{'type':'boolean'}}},method='json_schema')
+        planner=llm.with_structured_output(planning_schema('SondaQuery',('post','comment','page','indicator')),
+            method='json_schema')
 
         async def prepare(state):
             if not await asyncio.to_thread(generation_inference,self.storage,self.binding):
@@ -62,7 +56,8 @@ class SondaChatAgent:
             if len(configurations)!=1:
                 raise RuntimeError('Approved Sonda configuration is not available')
             bound=validate_input(state['raw_input'],self.binding,snapshot,configurations[0])
-            return {'bound':asdict(bound),'snapshot':snapshot,'queries':[],'plan':{},'response':{},
+            return {'bound':asdict(bound),'snapshot':snapshot,'queries':[],'plan':{},'response':{},'planning_diagnostics':[],
+                'plan_repairs':0,
                 'messages':state['messages'][-8:]+[HumanMessage(content=bound.question)]}
 
         async def plan(state):
@@ -70,21 +65,31 @@ class SondaChatAgent:
             payload={'question':bound.question,'conversation':conversation_context(state['messages']),
                 'publication':state['snapshot'],'queries':state['queries'],'search_context':bound.search_context()}
             candidate=None if state['queries'] else verified_plan(bound.question,previous_query(state['messages']))
-            for attempt in range(2):
+            diagnostics=list(state.get('planning_diagnostics',[]))
+            repairs=state.get('plan_repairs',0)
+            attempts=2 if repairs==0 else 1
+            for attempt in range(attempts):
+                stage='structured_output'
                 try:
                     if candidate is None:
                         candidate=await planner.ainvoke([SystemMessage(content=SONDA_PROMPT),
                             HumanMessage(content=json.dumps(payload,ensure_ascii=False))])
                     if not state['queries']:
+                        stage='request_normalization'
                         candidate=plan_for_question(state['snapshot'],candidate,bound.question)
+                    stage='plan_validation'
                     candidate=checked_plan_v2(candidate,state['queries'],state['snapshot'])
                     if candidate['tool']!='finish':
+                        stage='query_validation'
                         tool_sql(self.binding,state['snapshot'],bound,candidate['tool'],candidate['args'])
-                    return {'plan':candidate}
-                except ValueError:
-                    payload['validation_error']='Corrige el plan usando sólo las métricas, períodos y tipos de documento permitidos.'
+                    return {'plan':candidate,'planning_diagnostics':diagnostics,'plan_repairs':repairs}
+                except ValueError as error:
+                    diagnostic=planning_error(stage,error)
+                    diagnostics=[*diagnostics,diagnostic][-2:]
+                    repairs=1
+                    payload['validation_error']=diagnostic
                     candidate=None
-            return {'plan':{'tool':'clarify','args':{}}}
+            return {'plan':{'tool':'clarify','args':{}},'planning_diagnostics':diagnostics,'plan_repairs':repairs}
 
         async def execute(state):
             bound=BoundChat(**state['bound'])
@@ -96,7 +101,7 @@ class SondaChatAgent:
         async def answer(state):
             bound=BoundChat(**state['bound'])
             if state['plan']['tool']=='clarify':
-                result={'answer':'Precisa las fuentes, la métrica y el período de la consulta. Para líneas, elige hasta 50 días.', 'post_keys':[]}
+                result={'answer':CLARIFICATION_ANSWER,'post_keys':[]}
             else:
                 schema={'title':'SondaAnswer','type':'object','additionalProperties':False,
                     'required':['answer','post_keys'],'properties':{'answer':{'type':'string','maxLength':1800},

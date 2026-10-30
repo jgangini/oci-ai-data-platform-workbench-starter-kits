@@ -195,73 +195,112 @@ class CaseState(Record):
     proposal_ids: Annotated[list[UUID], Field(max_length=5)] = Field(default_factory=list)
 
 
-def case_projection(configuration, work, previous, execution_results):
-    current, work = dto(ConfigMessage, configuration), dto(CaseWork, work)
-    binding, key = scope(current), work['investigation_id']
-    if work['scope'] != binding or work['config_revision'] > current['payload']['revision']:
+def _case_study_case_identity(work, binding, current_revision):
+    if work['scope'] != binding or work['config_revision'] > current_revision:
         raise ValueError('Case work is outside the current generation/configuration')
     criterion = work['criterion']
     start = canonical_utc(work['window_start'])
-    if not approved(criterion) or case_key(criterion, start) != key:
+    if not approved(criterion) or case_key(criterion, start) != work['investigation_id']:
         raise ValueError('Case identity must bind its approved original criterion and UTC window')
     seconds = criterion['case_window_hours'] * 3600
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     if (instant(start) - epoch).total_seconds() % seconds:
         raise ValueError('Case window start is not aligned with its approved duration')
     work['window_start'] = start
+
+
+def _case_study_previous_state(previous, binding, work):
     previous = dto(CaseState, previous) if previous else None
-    if previous and (previous['scope'] != binding or previous['investigation_id'] != key
+    if previous and (previous['scope'] != binding or previous['investigation_id'] != work['investigation_id']
             or previous['version'] != previous['predecessor_revision'] + 1):
         raise ValueError('Operational state belongs to another case/generation')
     if previous and previous['report_revision'] > work['report_revision']:
         raise ValueError('Gold report revision cannot roll back operational state')
-    request_ids = [row['request']['request_id'] for row in work['requests']]
-    if len(request_ids) != len(set(request_ids)) or any(row['request']['investigation_id'] != key
-            or row['request']['criterion_id'] != criterion['criterion_id']
-            or row['request']['criterion_revision'] != criterion['revision']
-            or row['request']['config_revision'] > current['payload']['revision'] for row in work['requests']):
+    return previous
+
+
+def _case_study_request_history(work, previous, current_revision):
+    requests = [row['request'] for row in work['requests']]
+    request_ids = [row['request_id'] for row in requests]
+    expected = (work['investigation_id'], work['criterion']['criterion_id'], work['criterion']['revision'])
+    if len(request_ids) != len(set(request_ids)):
         raise ValueError('Case request history is duplicated or belongs to another case')
+    for request in requests:
+        identity = (request['investigation_id'], request['criterion_id'], request['criterion_revision'])
+        if identity != expected or request['config_revision'] > current_revision:
+            raise ValueError('Case request history is duplicated or belongs to another case')
     if previous and not set(previous['request_ids']) <= set(request_ids):
         raise ValueError('The runner must hydrate the complete committed request history')
+    return {row['request']['request_id']: row for row in work['requests']}
+
+
+def _case_study_execution_history(execution_results, requests, binding):
     if len(execution_results) > 20:
         raise ValueError('Case execution results exceed their bounded projection')
     for value in execution_results:
         message = dto(ExecutionMessage, value)
         result = message['payload']
-        request = next((row for row in work['requests'] if row['request']['request_id'] == result['request_id']), None)
+        request = requests.get(result['request_id'])
         if scope(message) != binding or request is None or any(result[field] != request['request'][field]
                 for field in ('config_revision', 'query_id', 'query_revision', 'budget_round_id')):
             raise ValueError('Execution does not belong to this committed case request')
         if result['status'] != request['status']:
             raise ValueError('Reconcile execution results in Gold before loading case work')
+
+
+def _case_study_evaluate_projection(work, current_revision):
+    if work['facts'] is not None or work['evaluations'] or work['evidence'] or work['indicators']:
+        raise ValueError('Evaluate work cannot report pre-commit aggregate facts')
+    criterion = work['criterion']
+    for row in work['pending_inputs']:
+        if (not work['config_revision'] <= row['config_revision'] <= current_revision
+                or row['source_id'] not in criterion['source_ids']
+                or criterion['query_ids'] and row['query_id'] not in criterion['query_ids']):
+            raise ValueError('Pending input is outside the captured criterion scope')
+
+
+def _case_study_report_counts(facts):
+    if (facts['distinct_observations'] < facts['distinct_documents'] or facts['missing_evaluations'] > facts['distinct_documents']
+            or facts['relevant_documents'] is not None and facts['relevant_documents'] > facts['distinct_documents'] - facts['missing_evaluations']):
+        raise ValueError('Gold case aggregate counts are inconsistent')
+    if facts['distinct_documents'] and facts['missing_evaluations'] == facts['distinct_documents'] and facts['relevant_documents'] is not None:
+        raise ValueError('Entirely unknown relevance must remain NULL')
+
+
+def _case_study_report_references(work):
+    refs = {row['evidence_id'] for row in work['evidence']}
+    if len(refs) != len(work['evidence']) or any(row['evidence_id'] != digest([row['observation_key'], row['quote']]) for row in work['evidence']):
+        raise ValueError('Gold evidence identity is duplicated or inconsistent')
+    if any(not set(row['evidence_ids']) <= refs for row in work['indicators']):
+        raise ValueError('Gold indicator references unavailable case evidence')
+
+
+def _case_study_report_projection(work):
+    if work['pending_inputs'] or work['facts'] is None:
+        raise ValueError('Report work requires fresh committed Gold facts, without pending inputs')
+    _case_study_report_counts(work['facts'])
+    _case_study_report_references(work)
+    criterion = work['criterion']
+    expected = (criterion['criterion_id'], criterion['revision'], digest(criterion), criterion['threshold'])
+    for value in work['evaluations']:
+        identity = (value['criterion_id'], value['criterion_revision'], value['rule_sha256'], value['threshold'])
+        if identity != expected:
+            raise ValueError('Hydrated evaluation belongs to another criterion revision')
+
+
+def case_projection(configuration, work, previous, execution_results):
+    current, work = dto(ConfigMessage, configuration), dto(CaseWork, work)
+    binding, current_revision = scope(current), current['payload']['revision']
+    _case_study_case_identity(work, binding, current_revision)
+    previous = _case_study_previous_state(previous, binding, work)
+    requests = _case_study_request_history(work, previous, current_revision)
+    _case_study_execution_history(execution_results, requests, binding)
     if work['budget_round'] and scope(work['budget_round']) != binding:
         raise ValueError('Budget belongs to another generation')
     if work['phase'] == 'evaluate':
-        if work['facts'] is not None or work['evaluations'] or work['evidence'] or work['indicators']:
-            raise ValueError('Evaluate work cannot report pre-commit aggregate facts')
-        for row in work['pending_inputs']:
-            if (not work['config_revision'] <= row['config_revision'] <= current['payload']['revision']
-                    or row['source_id'] not in criterion['source_ids']
-                    or criterion['query_ids'] and row['query_id'] not in criterion['query_ids']):
-                raise ValueError('Pending input is outside the captured criterion scope')
+        _case_study_evaluate_projection(work, current_revision)
     else:
-        facts = work['facts']
-        if work['pending_inputs'] or facts is None:
-            raise ValueError('Report work requires fresh committed Gold facts, without pending inputs')
-        if (facts['distinct_observations'] < facts['distinct_documents'] or facts['missing_evaluations'] > facts['distinct_documents']
-                or facts['relevant_documents'] is not None and facts['relevant_documents'] > facts['distinct_documents'] - facts['missing_evaluations']):
-            raise ValueError('Gold case aggregate counts are inconsistent')
-        if facts['distinct_documents'] and facts['missing_evaluations'] == facts['distinct_documents'] and facts['relevant_documents'] is not None:
-            raise ValueError('Entirely unknown relevance must remain NULL')
-        refs = {row['evidence_id'] for row in work['evidence']}
-        if len(refs) != len(work['evidence']) or any(row['evidence_id'] != digest([row['observation_key'], row['quote']]) for row in work['evidence']):
-            raise ValueError('Gold evidence identity is duplicated or inconsistent')
-        if any(not set(row['evidence_ids']) <= refs for row in work['indicators']):
-            raise ValueError('Gold indicator references unavailable case evidence')
-        for value in work['evaluations']:
-            if (value['criterion_id'] != criterion['criterion_id'] or value['criterion_revision'] != criterion['revision']
-                    or value['rule_sha256'] != digest(criterion) or value['threshold'] != criterion['threshold']):
-                raise ValueError('Hydrated evaluation belongs to another criterion revision')
+        _case_study_report_projection(work)
     return current['payload'], work, previous
 
 
@@ -288,55 +327,81 @@ async def case_infer(model, role, payload):
     return await model(role, copy.deepcopy(payload))
 
 
+def _case_study_open_budget(work, current_revision, timestamp):
+    budget = work['budget_round']['payload'] if work['budget_round'] else None
+    if (budget and budget['status'] == 'open' and budget['config_revision'] == current_revision
+            and instant(budget['opened_at']) <= timestamp < instant(budget['expires_at'])
+            and all(budget[field] is not None for field in ('remaining_microusd', 'research_remaining_microusd', 'remaining_items'))):
+        return budget
+    return None
+
+
+def _case_study_research_target(current, work, step, query):
+    source = next(row for row in current['sources'] if row['source_id'] == query['source_id'])
+    connector = next(row for row in current['connectors'] if row['connector_id'] == source['connector_id'])
+    if not target_allowed(step['target_override'], source, query, connector):
+        return None
+    target = step['target_override'] or query['target']
+    if query['mode'] in ('pages', 'indicators'):
+        target = canonical_url(target)
+    request_id = str(uuid5(UUID(work['scope']['generation_id']), encoded([
+        work['investigation_id'], step['step'].strip(), query['query_id'], query['revision'], target]).decode()))
+    return connector, target, request_id
+
+
+def _case_study_request_capacity(current, work, budget, query, connector, step, used):
+    price = connector['max_cost_microusd_per_item']
+    if budget is None or price is None or not work['evidence']:
+        return None, 'No hay ronda vigente, precio conocido o evidencia verificable; no se solicita gasto.'
+    outstanding = [row['request'] for row in work['requests'] if row['status'] in ('pending', 'uncertain')]
+    committed_cost = sum(row['max_cost_microusd'] for row in outstanding if row['budget_round_id'] == budget['budget_round_id'])
+    committed_items = sum(row['max_items'] for row in outstanding if row['budget_round_id'] == budget['budget_round_id'])
+    available = min(budget['remaining_microusd'], budget['research_remaining_microusd'],
+        current['policy']['round_budget_microusd'], current['policy']['research_reserve_microusd']) - committed_cost - used[0]
+    cap = min(available, query['max_charge_microusd'])
+    items = min(step['max_items'], query['max_items'], current['policy']['max_items_per_round'],
+        budget['remaining_items'] - committed_items - used[1])
+    if price:
+        items = min(items, cap // price)
+    if items <= 0 or cap < 0:
+        return None, 'El saldo conocido no permite otra solicitud.'
+    return (items, price * items), None
+
+
 def case_research(current, work, plan, timestamp):
     criterion, key = work['criterion'], work['investigation_id']
     requests, limits = [], []
     existing = {row['request']['request_id'] for row in work['requests']}
     permitted = {row['query_id']: row for row in eligible_queries(current, criterion)
                  if row['query_id'] in work['approved_query_ids']}
-    budget = work['budget_round']['payload'] if work['budget_round'] else None
-    valid_budget = budget and budget['status'] == 'open' and budget['config_revision'] == current['revision'] and instant(budget['opened_at']) <= timestamp < instant(budget['expires_at']) and all(budget[field] is not None for field in ('remaining_microusd', 'research_remaining_microusd', 'remaining_items'))
+    budget = _case_study_open_budget(work, current['revision'], timestamp)
     cost_used = items_used = 0
-    outstanding = [row['request'] for row in work['requests'] if row['status'] in ('pending', 'uncertain')]
     refs = [row['evidence_id'] for row in work['evidence']]
     for step in plan['requests']:
         query = permitted.get(step['query_id'])
         if query is None:
             limits.append('Una consulta propuesta no tiene autorización vigente para investigar.')
             continue
-        source = next(row for row in current['sources'] if row['source_id'] == query['source_id'])
-        connector = next(row for row in current['connectors'] if row['connector_id'] == source['connector_id'])
-        if not target_allowed(step['target_override'], source, query, connector):
+        target_info = _case_study_research_target(current, work, step, query)
+        if target_info is None:
             limits.append('El destino propuesto no pertenece al alcance aprobado.')
             continue
-        target = step['target_override'] or query['target']
-        if query['mode'] in ('pages', 'indicators'):
-            target = canonical_url(target)
-        request_id = str(uuid5(UUID(work['scope']['generation_id']), encoded([key, step['step'].strip(), query['query_id'], query['revision'], target]).decode()))
+        connector, target, request_id = target_info
         if request_id in existing:
             continue
         if len(existing) >= current['policy']['max_research_requests_per_case']:
             limits.append('Se alcanzó el máximo de solicitudes de este caso.')
             break
-        price = connector['max_cost_microusd_per_item']
-        if not valid_budget or price is None or not refs:
-            limits.append('No hay ronda vigente, precio conocido o evidencia verificable; no se solicita gasto.')
+        capacity, refusal = _case_study_request_capacity(current, work, budget, query, connector, step, (cost_used, items_used))
+        if capacity is None:
+            limits.append(refusal)
             continue
-        committed_cost = sum(row['max_cost_microusd'] for row in outstanding if row['budget_round_id'] == budget['budget_round_id'])
-        committed_items = sum(row['max_items'] for row in outstanding if row['budget_round_id'] == budget['budget_round_id'])
-        available = min(budget['remaining_microusd'], budget['research_remaining_microusd'], current['policy']['round_budget_microusd'], current['policy']['research_reserve_microusd']) - committed_cost - cost_used
-        cap = min(available, query['max_charge_microusd'])
-        items = min(step['max_items'], query['max_items'], current['policy']['max_items_per_round'], budget['remaining_items'] - committed_items - items_used)
-        if price:
-            items = min(items, cap // price)
-        if items <= 0 or cap < 0:
-            limits.append('El saldo conocido no permite otra solicitud.')
-            continue
+        items, cost = capacity
         request = dto(InvestigationRequest, {'request_id':request_id, 'investigation_id':key,
             'config_revision':current['revision'], 'criterion_id':criterion['criterion_id'], 'criterion_revision':criterion['revision'],
             'query_id':query['query_id'], 'query_revision':query['revision'], 'budget_round_id':budget['budget_round_id'],
             'purpose':step['purpose'], 'target_override':target if step['target_override'] is not None else None,
-            'max_items':items, 'max_cost_microusd':price * items, 'expires_at':canonical_utc(budget['expires_at']), 'evidence_ids':refs})
+            'max_items':items, 'max_cost_microusd':cost, 'expires_at':canonical_utc(budget['expires_at']), 'evidence_ids':refs})
         requests.append(request)
         existing.add(request_id)
         cost_used += request['max_cost_microusd']
@@ -344,44 +409,217 @@ def case_research(current, work, plan, timestamp):
     return requests, limits
 
 
+_STUDY_PROPOSAL_MANAGED_FIELDS = ('revision', 'origin', 'author_id', 'proposal_id', 'approval', 'status')
+
+
+def _case_study_record_content(record, excluded=()):
+    managed = (*excluded, *_STUDY_PROPOSAL_MANAGED_FIELDS)
+    return {key:value for key,value in record.items() if key not in managed}
+
+
+def _case_study_checked_change(change, current):
+    reject_secrets(change)
+    if not isinstance(change, dict) or set(change) != {'operation', 'change', 'rationale'}:
+        raise ValueError('Invalid proposal fields')
+    record, kind = copy.deepcopy(change['change']['record']), change['change']['target_kind']
+    if kind not in ('query', 'criterion'):
+        raise ValueError('Only query/criterion proposals are supported')
+    field = kind + '_id'
+    existing = next((row for row in current['queries' if kind == 'query' else 'criteria'] if row[field] == record.get(field)), None)
+    if change['operation'] != 'create' and existing is None or change['operation'] == 'create' and existing:
+        raise ValueError('Proposal operation must match record identity')
+    return record, kind, existing
+
+
+def _case_study_draft_record(change, current, work, identity):
+    record, kind, existing = _case_study_checked_change(change, current)
+    if existing and change['operation'] == 'update' and _case_study_record_content(record) == _case_study_record_content(existing):
+        return None
+    if existing is None:
+        field = kind + '_id'
+        semantic = _case_study_record_content(record, (field,))
+        record[field] = str(uuid5(UUID(work['scope']['generation_id']), encoded([work['investigation_id'], kind, semantic]).decode()))
+    record.update(origin='agent', author_id=identity['model_id'], proposal_id=None,
+        approval={'status':'pending', 'decided_by':None, 'decided_at':None}, status='draft', revision=existing['revision']+1 if existing else 1)
+    proposal_id = str(uuid5(UUID(work['scope']['generation_id']), encoded([
+        work['investigation_id'], change['operation'], kind, record, change['rationale']]).decode()))
+    record['proposal_id'] = proposal_id
+    return record, kind, proposal_id
+
+
+def _case_study_query_proposal_scope(record, current):
+    source = next((row for row in current['sources'] if row['source_id'] == record.get('source_id') and approved(row)), None)
+    connector = next((row for row in current['connectors'] if source and row['connector_id'] == source['connector_id']), None)
+    if not connector or record.get('mode') not in connector['modes']:
+        raise ValueError('A proposed query requires a known source capability')
+
+
+def _case_study_criterion_proposal_scope(record, current):
+    query_sources = {row['query_id']:row['source_id'] for row in current['queries']}
+    if not set(record['source_ids']) <= {row['source_id'] for row in current['sources']} or any(
+            query not in query_sources or query_sources[query] not in record['source_ids'] for query in record['query_ids']):
+        raise ValueError('A criterion proposal requires bound source/query references')
+
+
 def case_proposals(response, current, work, identity):
     if not isinstance(response, dict) or set(response) != {'changes'} or not isinstance(response['changes'], list) or len(response['changes']) > 5:
         raise ValueError('Invalid proposal response')
     values = []
+    checks = {'query':_case_study_query_proposal_scope, 'criterion':_case_study_criterion_proposal_scope}
     for change in response['changes']:
-        reject_secrets(change)
-        if not isinstance(change, dict) or set(change) != {'operation', 'change', 'rationale'}:
-            raise ValueError('Invalid proposal fields')
-        record, kind = copy.deepcopy(change['change']['record']), change['change']['target_kind']
-        if kind not in ('query', 'criterion'):
-            raise ValueError('Only query/criterion proposals are supported')
-        field = kind + '_id'
-        existing = next((row for row in current['queries' if kind == 'query' else 'criteria'] if row[field] == record.get(field)), None)
-        if change['operation'] != 'create' and existing is None or change['operation'] == 'create' and existing:
-            raise ValueError('Proposal operation must match record identity')
-        managed = ('revision', 'origin', 'author_id', 'proposal_id', 'approval', 'status')
-        if existing and change['operation'] == 'update' and {k:v for k,v in record.items() if k not in managed} == {k:v for k,v in existing.items() if k not in managed}:
+        prepared = _case_study_draft_record(change, current, work, identity)
+        if prepared is None:
             continue
-        if existing is None:
-            semantic = {name:value for name,value in record.items() if name not in (field, *managed)}
-            record[field] = str(uuid5(UUID(work['scope']['generation_id']), encoded([work['investigation_id'], kind, semantic]).decode()))
-        record.update(origin='agent', author_id=identity['model_id'], proposal_id=None,
-            approval={'status':'pending', 'decided_by':None, 'decided_at':None}, status='draft', revision=existing['revision']+1 if existing else 1)
-        proposal_id = str(uuid5(UUID(work['scope']['generation_id']), encoded([work['investigation_id'], change['operation'], kind, record, change['rationale']]).decode()))
-        record['proposal_id'] = proposal_id
-        if kind == 'query':
-            source = next((row for row in current['sources'] if row['source_id'] == record.get('source_id') and approved(row)), None)
-            connector = next((row for row in current['connectors'] if source and row['connector_id'] == source['connector_id']), None)
-            if not connector or record.get('mode') not in connector['modes']:
-                raise ValueError('A proposed query requires a known source capability')
-        else:
-            query_sources = {row['query_id']:row['source_id'] for row in current['queries']}
-            if not set(record['source_ids']) <= {row['source_id'] for row in current['sources']} or any(q not in query_sources or query_sources[q] not in record['source_ids'] for q in record['query_ids']):
-                raise ValueError('A criterion proposal requires bound source/query references')
+        record, kind, proposal_id = prepared
+        checks[kind](record, current)
         values.append(dto(Proposal, {'proposal_id':proposal_id, 'investigation_id':work['investigation_id'],
             'base_config_revision':current['revision'], **change, 'change':{'target_kind':kind, 'record':record},
             'evidence_ids':[row['evidence_id'] for row in work['evidence']]}))
     return values
+
+
+async def _case_study_evaluate(work, model, identity, timestamp, output):
+    seen = set(work['completed_evaluation_keys'])
+    criterion = work['criterion']
+    for row in work['pending_inputs']:
+        observation = row['observation']
+        base = {'observation_key':observation['observation_key'], 'criterion_id':criterion['criterion_id'],
+            'criterion_revision':criterion['revision'], 'config_revision':row['config_revision'], **identity,
+            'rule_sha256':digest(criterion), 'threshold':criterion['threshold'], 'evaluated_at':canonical_utc(timestamp.isoformat())}
+        key = evaluation_fingerprint(base)
+        if key in seen:
+            continue
+        try:
+            verdict = dto(Verdict, await case_infer(model, 'evaluate', {'criterion':rule_context(criterion), 'observation':observation}))
+            value = {**base, 'evaluation_key':key, 'score':verdict['score'], 'reason':verdict['reason'],
+                'decision':'relevant' if verdict['score'] >= criterion['threshold'] else 'not_relevant',
+                'evidence':[evidence_for(observation, quote) for quote in dict.fromkeys(verdict['quotes'])]}
+        except Exception:
+            value = {**base, 'evaluation_key':key, 'score':None, 'decision':'error', 'evidence':[],
+                'reason':'La evaluación no está disponible o no produjo citas verificables.'}
+        output['evaluations'].append(dto(Evaluation, value))
+        seen.add(key)
+    return {}
+
+
+def _case_study_report_context(current, work):
+    limits = list(work['limitations'])
+    waiting = [row for row in work['requests'] if row['status'] in ('pending', 'uncertain') or row['status'] == 'completed' and not row['observations_committed']]
+    exhausted = any(row['status'] == 'budget_exhausted' for row in work['requests'])
+    allowed = [row for row in eligible_queries(current, work['criterion']) if row['query_id'] in work['approved_query_ids']]
+    quotes = context_rows(work['evidence'], 24576)
+    # Facts remain full-population; display/reference metadata is unnecessary for inference.
+    indicators = context_rows([{k:v for k,v in row.items() if k != 'evidence_ids'} for row in work['indicators']], 24576)
+    verdicts = context_rows([{k:v for k,v in row.items() if k != 'evidence'} for row in work['evaluations']], 16384)
+    return {'waiting':waiting, 'exhausted':exhausted, 'allowed':allowed, 'quotes':quotes,
+        'indicators':indicators, 'verdicts':verdicts, 'limits':limits}
+
+
+async def _case_study_plan_report(current, work, model, timestamp, context, output):
+    limits = context['limits']
+    if context['waiting']:
+        limits.append('Hay solicitudes pendientes o inciertas; se espera su reconciliación.')
+    elif context['exhausted']:
+        limits.append('El presupuesto se agotó; se informa con la evidencia disponible.')
+    elif work['facts']['relevant_documents'] and work['evidence']:
+        try:
+            plan = dto(Plan, await case_infer(model, 'plan', {'investigation_id':work['investigation_id'],
+                'criterion':rule_context(work['criterion']), 'facts':work['facts'], 'evaluations':context['verdicts'],
+                'evidence':context['quotes'], 'approved_queries':context['allowed'], 'limitations':limits}))
+            output['investigation_requests'], reasons = case_research(current, work, plan, timestamp)
+            limits.extend(reasons)
+            return plan['propose']
+        except Exception:
+            limits.append('No se obtuvo un plan de investigación válido.')
+    return False
+
+
+def _case_study_report_limits(work, context):
+    facts, limits = work['facts'], context['limits']
+    if facts['missing_evaluations']:
+        limits.append('Hay evaluaciones desconocidas; no equivalen a resultados negativos.')
+    if facts['distinct_observations'] > len(work['evaluations']):
+        limits.append('Las cifras cubren el caso completo; las citas y evaluaciones mostradas son una selección acotada.')
+    if (len(context['quotes']) < len(work['evidence']) or len(context['indicators']) < len(work['indicators'])
+            or len(context['verdicts']) < len(work['evaluations'])):
+        limits.append('El contexto del modelo usa una selección acotada por tamaño; los totales provienen de Gold.')
+    if facts['distinct_documents'] and not work['evidence']:
+        limits.append('No hay citas disponibles en esta proyección; las cifras provienen de los agregados publicados.')
+    return list(dict.fromkeys(limits))[:30]
+
+
+async def _case_study_report_prose(work, model, context):
+    try:
+        prose = dto(Prose, await case_infer(model, 'report', {'criterion':rule_context(work['criterion']), 'facts':work['facts'],
+            'indicators':context['indicators'], 'evidence':context['quotes'], 'limitations':context['limits']}))
+        numbers = set(re.findall(r'-?\d+(?:[.,]\d+)?', encoded([work['facts'], [row['value'] for row in work['indicators']], [row['quote'] for row in work['evidence']]]).decode()))
+        if not set(re.findall(r'-?\d+(?:[.,]\d+)?', prose['title'] + ' ' + prose['summary'])) <= numbers:
+            raise ValueError('Report prose introduced an unsupported number')
+        return prose
+    except Exception:
+        context['limits'].append('La prosa del modelo no estaba disponible o no se pudo verificar.')
+        return {'title':work['criterion']['label'], 'summary':'Informe basado en las observaciones y citas disponibles.'}
+
+
+def _case_study_report_status(work, pending, limits):
+    if pending:
+        return 'awaiting_evidence'
+    facts = work['facts']
+    if facts['distinct_documents'] and facts['missing_evaluations'] == facts['distinct_documents']:
+        return 'failed'
+    return 'completed_with_limits' if limits else 'completed'
+
+
+def _case_study_build_report(work, identity, timestamp, context, output, prose):
+    criterion, facts = work['criterion'], work['facts']
+    count = len(context['waiting']) + len(output['investigation_requests'])
+    return dto(Report, {'report_id':digest([work['investigation_id'], 'report']), 'investigation_id':work['investigation_id'],
+        'revision':work['report_revision']+1, 'config_revision':work['config_revision'],
+        'criterion_id':criterion['criterion_id'], 'criterion_revision':criterion['revision'], **prose,
+        'status':_case_study_report_status(work, count, context['limits']),
+        'indicators':work['indicators'], 'evidence':work['evidence'], 'evaluations':work['evaluations'],
+        'coverage':{'distinct_documents':facts['distinct_documents'], 'distinct_observations':facts['distinct_observations'],
+            'query_ids':work['query_ids'], 'pending_requests':count,
+            'failed_requests':sum(row['status'] in ('failed', 'cancelled') for row in work['requests']),
+            'exhausted_budget':context['exhausted'], 'limitations':list(dict.fromkeys(context['limits']))[:30]}, **identity,
+        'created_at':canonical_utc(timestamp.isoformat())})
+
+
+def _case_study_proposal_configuration(current, work, allowed):
+    source_ids = {row['source_id'] for row in allowed}
+    sources = [row for row in current['sources'] if row['source_id'] in source_ids]
+    live_criterion = next((row for row in current['criteria'] if row['criterion_id'] == work['criterion']['criterion_id']), None)
+    return {'sources':sources, 'queries':allowed, 'criteria':[live_criterion] if live_criterion else [],
+        'connectors':[row for row in current['connectors'] if row['connector_id'] in {source['connector_id'] for source in sources}]}
+
+
+async def _case_study_propose_report(current, work, model, identity, state, context, output, report):
+    configuration = _case_study_proposal_configuration(current, work, context['allowed'])
+    try:
+        summary = {key:report[key] for key in ('report_id', 'investigation_id', 'title', 'summary', 'coverage')}
+        response = await case_infer(model, 'propose', {'report':{**summary, 'indicators':context['indicators'], 'evidence':context['quotes']},
+            'configuration':configuration})
+        candidates = case_proposals(response, {**configuration, 'revision':current['revision']}, work, identity)
+        decisions = {row['proposal_id'] for row in current['proposal_decisions']}
+        output['proposals'] = [row for row in candidates if row['proposal_id'] not in set(state['proposal_ids']) | decisions]
+        # Bounded operational IDs; immutable Gold proposals own older dedup.
+        state['proposal_ids'] = [row['proposal_id'] for row in candidates]
+    except Exception:
+        pass  # A failed proposal cannot activate configuration or invalidate a factual report.
+
+
+async def _case_study_report(current, work, model, identity, timestamp, output, state):
+    context = _case_study_report_context(current, work)
+    propose = await _case_study_plan_report(current, work, model, timestamp, context, output)
+    context['limits'] = _case_study_report_limits(work, context)
+    prose = await _case_study_report_prose(work, model, context)
+    report = _case_study_build_report(work, identity, timestamp, context, output, prose)
+    output['reports'].append(report)
+    state['report_revision'] = report['revision']
+    state['request_ids'].extend(row['request_id'] for row in output['investigation_requests'])
+    if propose and work['evidence']:
+        await _case_study_propose_report(current, work, model, identity, state, context, output, report)
+    return {}
 
 
 async def study_case(configuration, work, prior_operational_state, execution_results, *, model, now, within_parent_graph=False):
@@ -409,103 +647,10 @@ async def study_case(configuration, work, prior_operational_state, execution_res
         return {**output, 'state':previous}
 
     async def evaluate(_):
-        seen = set(work['completed_evaluation_keys'])
-        criterion = work['criterion']
-        for row in work['pending_inputs']:
-            observation = row['observation']
-            base = {'observation_key':observation['observation_key'], 'criterion_id':criterion['criterion_id'],
-                'criterion_revision':criterion['revision'], 'config_revision':row['config_revision'], **identity,
-                'rule_sha256':digest(criterion), 'threshold':criterion['threshold'], 'evaluated_at':canonical_utc(timestamp.isoformat())}
-            key = evaluation_fingerprint(base)
-            if key in seen:
-                continue
-            try:
-                verdict = dto(Verdict, await case_infer(model, 'evaluate', {'criterion':rule_context(criterion), 'observation':observation}))
-                value = {**base, 'evaluation_key':key, 'score':verdict['score'], 'reason':verdict['reason'],
-                    'decision':'relevant' if verdict['score'] >= criterion['threshold'] else 'not_relevant',
-                    'evidence':[evidence_for(observation, quote) for quote in dict.fromkeys(verdict['quotes'])]}
-            except Exception:
-                value = {**base, 'evaluation_key':key, 'score':None, 'decision':'error', 'evidence':[],
-                    'reason':'La evaluación no está disponible o no produjo citas verificables.'}
-            output['evaluations'].append(dto(Evaluation, value))
-            seen.add(key)
-        return {}
+        return await _case_study_evaluate(work, model, identity, timestamp, output)
 
     async def report(_):
-        criterion, facts = work['criterion'], work['facts']
-        limits = list(work['limitations'])
-        waiting = [row for row in work['requests'] if row['status'] in ('pending', 'uncertain') or row['status'] == 'completed' and not row['observations_committed']]
-        exhausted = any(row['status'] == 'budget_exhausted' for row in work['requests'])
-        allowed = [row for row in eligible_queries(current, criterion) if row['query_id'] in work['approved_query_ids']]
-        quotes = context_rows(work['evidence'], 24576)
-        # Facts remain full-population; display/reference metadata is unnecessary for inference.
-        indicators = context_rows([{k:v for k,v in row.items() if k != 'evidence_ids'} for row in work['indicators']], 24576)
-        verdicts = context_rows([{k:v for k,v in row.items() if k != 'evidence'} for row in work['evaluations']], 16384)
-        propose = False
-        if waiting:
-            limits.append('Hay solicitudes pendientes o inciertas; se espera su reconciliación.')
-        elif exhausted:
-            limits.append('El presupuesto se agotó; se informa con la evidencia disponible.')
-        elif facts['relevant_documents'] and work['evidence']:
-            try:
-                plan = dto(Plan, await case_infer(model, 'plan', {'investigation_id':work['investigation_id'],
-                    'criterion':rule_context(criterion), 'facts':facts, 'evaluations':verdicts,
-                    'evidence':quotes, 'approved_queries':allowed, 'limitations':limits}))
-                output['investigation_requests'], reasons = case_research(current, work, plan, timestamp)
-                limits.extend(reasons)
-                propose = plan['propose']
-            except Exception:
-                limits.append('No se obtuvo un plan de investigación válido.')
-        if facts['missing_evaluations']:
-            limits.append('Hay evaluaciones desconocidas; no equivalen a resultados negativos.')
-        if facts['distinct_observations'] > len(work['evaluations']):
-            limits.append('Las cifras cubren el caso completo; las citas y evaluaciones mostradas son una selección acotada.')
-        if len(quotes) < len(work['evidence']) or len(indicators) < len(work['indicators']) or len(verdicts) < len(work['evaluations']):
-            limits.append('El contexto del modelo usa una selección acotada por tamaño; los totales provienen de Gold.')
-        if facts['distinct_documents'] and not work['evidence']:
-            limits.append('No hay citas disponibles en esta proyección; las cifras provienen de los agregados publicados.')
-        limits = list(dict.fromkeys(limits))[:30]
-        try:
-            prose = dto(Prose, await case_infer(model, 'report', {'criterion':rule_context(criterion), 'facts':facts,
-                'indicators':indicators, 'evidence':quotes, 'limitations':limits}))
-            numbers = set(re.findall(r'-?\d+(?:[.,]\d+)?', encoded([facts, [row['value'] for row in work['indicators']], [row['quote'] for row in work['evidence']]]).decode()))
-            if not set(re.findall(r'-?\d+(?:[.,]\d+)?', prose['title'] + ' ' + prose['summary'])) <= numbers:
-                raise ValueError('Report prose introduced an unsupported number')
-        except Exception:
-            prose = {'title':criterion['label'], 'summary':'Informe basado en las observaciones y citas disponibles.'}
-            limits.append('La prosa del modelo no estaba disponible o no se pudo verificar.')
-        count = len(waiting) + len(output['investigation_requests'])
-        value = dto(Report, {'report_id':digest([work['investigation_id'], 'report']), 'investigation_id':work['investigation_id'],
-            'revision':work['report_revision']+1, 'config_revision':work['config_revision'],
-            'criterion_id':criterion['criterion_id'], 'criterion_revision':criterion['revision'], **prose,
-            'status':'awaiting_evidence' if count else 'failed' if facts['distinct_documents'] and facts['missing_evaluations'] == facts['distinct_documents'] else 'completed_with_limits' if limits else 'completed',
-            'indicators':work['indicators'], 'evidence':work['evidence'], 'evaluations':work['evaluations'],
-            'coverage':{'distinct_documents':facts['distinct_documents'], 'distinct_observations':facts['distinct_observations'],
-                'query_ids':work['query_ids'], 'pending_requests':count,
-                'failed_requests':sum(row['status'] in ('failed', 'cancelled') for row in work['requests']),
-                'exhausted_budget':exhausted, 'limitations':list(dict.fromkeys(limits))[:30]}, **identity,
-            'created_at':canonical_utc(timestamp.isoformat())})
-        output['reports'].append(value)
-        state['report_revision'] = value['revision']
-        state['request_ids'].extend(row['request_id'] for row in output['investigation_requests'])
-        if propose and work['evidence']:
-            source_ids = {row['source_id'] for row in allowed}
-            sources = [row for row in current['sources'] if row['source_id'] in source_ids]
-            live_criterion = next((row for row in current['criteria'] if row['criterion_id'] == criterion['criterion_id']), None)
-            configuration = {'sources':sources, 'queries':allowed, 'criteria':[live_criterion] if live_criterion else [],
-                'connectors':[row for row in current['connectors'] if row['connector_id'] in {s['connector_id'] for s in sources}]}
-            try:
-                summary = {k:value[k] for k in ('report_id', 'investigation_id', 'title', 'summary', 'coverage')}
-                response = await case_infer(model, 'propose', {'report':{**summary, 'indicators':indicators, 'evidence':quotes},
-                    'configuration':configuration})
-                candidates = case_proposals(response, {**configuration, 'revision':current['revision']}, work, identity)
-                decisions = {row['proposal_id'] for row in current['proposal_decisions']}
-                output['proposals'] = [row for row in candidates if row['proposal_id'] not in set(state['proposal_ids']) | decisions]
-                # Bounded operational IDs; immutable Gold proposals own older dedup.
-                state['proposal_ids'] = [row['proposal_id'] for row in candidates]
-            except Exception:
-                pass  # A failed proposal cannot activate configuration or invalidate a factual report.
-        return {}
+        return await _case_study_report(current, work, model, identity, timestamp, output, state)
 
     graph = StateGraph(CaseGraphState)
     graph.add_node('evaluate', evaluate)

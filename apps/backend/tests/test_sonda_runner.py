@@ -10,6 +10,45 @@ from app.sonda_exchange import Blob, RejectedMessage, StreamConflict
 from app.sonda_runtime import ingestion_source
 
 
+@pytest.mark.parametrize('fails',[False,True])
+def test_phase_timings_are_monotonic_and_do_not_hide_failures(monkeypatch,capsys,fails):
+    ticks=iter((10.0,10.125))
+    monkeypatch.setattr(runner,'perf_counter',lambda:next(ticks))
+    def work():
+        if fails:
+            raise RuntimeError('private provider response')
+        return 'committed'
+    if fails:
+        with pytest.raises(RuntimeError,match='private provider response'):
+            runner.timed_call('case_commit',work)
+    else:
+        assert runner.timed_call('case_commit',work)=='committed'
+    output=capsys.readouterr().out
+    assert 'private provider response' not in output
+    assert output.startswith('SONDA_PHASE=')
+    assert json.loads(output.split('=',1)[1])=={
+        'phase':'case_commit','elapsed_ms':125.0,'status':'error' if fails else 'completed'}
+
+
+@pytest.mark.parametrize('sink_error',[BrokenPipeError('pipe closed'),ValueError('stream closed')])
+@pytest.mark.parametrize('fails',[False,True])
+def test_phase_timing_sink_failure_preserves_work_outcome(monkeypatch,sink_error,fails):
+    failure=RuntimeError('original failure')
+    def broken_print(*args,**kwargs):
+        raise sink_error
+    def work():
+        if fails:
+            raise failure
+        return 0
+    monkeypatch.setattr(runner,'print',broken_print,raising=False)
+    if fails:
+        with pytest.raises(RuntimeError) as raised:
+            runner.timed_call('case_commit',work)
+        assert raised.value is failure
+    else:
+        assert runner.timed_call('case_commit',work)==0
+
+
 def test_native_ingestion_is_readable_and_uses_case_pipeline():
     raw=ingestion_source()
     assert b'def run_sonda' in raw

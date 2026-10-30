@@ -141,6 +141,13 @@ def main(path):
         .config('spark.sql.warehouse.dir', str(scratch / 'warehouse')).getOrCreate())
     spark.sparkContext.setLogLevel('ERROR')
     spark.conf.set('spark.sql.session.timeZone', 'UTC')
+    sql=spark.sql
+    metadata_reads=[]
+    def measured_sql(query,*args,**kwargs):
+        if query.startswith('DESCRIBE DETAIL '):
+            metadata_reads.append(query)
+        return sql(query,*args,**kwargs)
+    spark.sql=measured_sql
     binding = {'catalog': 'spark_catalog', 'gold_schema': 'sonda_gold', 'control_schema': 'sonda_control',
         'namespace': 'synthetic', 'source_bucket': 'fixture_source', 'gold_bucket': 'fixture_gold',
         'artifacts_bucket': 'fixture_artifacts', 'registry_id': str(UUID(int=1)),
@@ -155,6 +162,7 @@ def main(path):
         return spark.table(table(suffix)).count()
     try:
         m.ensure_tables(spark, binding)
+        assert len(metadata_reads)==len(m.definitions(binding))==26
         assert all(count(suffix) == 0 for suffix in ('document_current', 'observations', 'reports', 'outbox'))
         first = m.apply_messages(spark, binding, [messages[k] for k in ('configuration', 'opened', 'observations')])
         assert {r['state'] for r in first['receipts']} == {'APPLIED'}
@@ -354,6 +362,7 @@ def main(path):
         assert 'Northstar' not in m.canonical(isolated['state'])
         from check_sonda_chat_sql import run_chat_sql_checks
         run_chat_sql_checks(spark,m,binding,inputs['chat_sql'])
+        assert len(metadata_reads)==26, 'Writes must reuse the initially validated bound paths'
         print('PASS: real Spark/Delta Sonda input/study replay, exact versions, production per-case CAS/state, bounded 1000-other-case isolation, full SQL facts and safe transport rejection')
     finally:
         spark.stop()

@@ -84,15 +84,7 @@ def snapshot_sql(binding):
     return 'SELECT to_json(struct(p.*)) AS payload FROM ' + table + ' p WHERE ' + scope_sql(binding,'p') + ' LIMIT 2'
 
 
-def snapshot_from_row(binding, row):
-    checked_binding(binding)
-    if hasattr(row,'asDict'):
-        row = row.asDict(recursive=True)
-    if not isinstance(row,dict) or any(row.get(key) != binding[key] for key in ('registry_id','generation_id')):
-        raise ValueError('Publication belongs to another registry/generation')
-    revision = row.get('config_revision')
-    if type(revision) is not int or revision < 1:
-        raise ValueError('Publication has no configuration revision')
+def publication_versions(row):
     versions = row.get('versions_json')
     if not isinstance(versions,str) or len(versions.encode('utf-8')) > 65536:
         raise ValueError('Invalid publication version map')
@@ -101,6 +93,10 @@ def snapshot_from_row(binding, row):
             or any(not re.fullmatch(r'ai_social_[a-z_]+',key) for key in versions)
             or any(type(value) is not int or value < 0 for value in versions.values())):
         raise ValueError('Publication lacks exact known serving snapshots')
+    return versions
+
+
+def publication_metadata(binding, row, revision, versions):
     expected = sha256(encoded([{key:binding[key] for key in ('registry_id','generation_id')},revision,versions]))
     if row.get('publication_id') != expected:
         raise ValueError('Publication identity does not bind its committed versions')
@@ -119,6 +115,20 @@ def snapshot_from_row(binding, row):
         if value is not None and (type(value) is not int or not 0 <= value <= 9007199254740991):
             raise ValueError('Invalid publication operational counter')
         metadata[field] = value
+    return metadata
+
+
+def snapshot_from_row(binding, row):
+    checked_binding(binding)
+    if hasattr(row,'asDict'):
+        row = row.asDict(recursive=True)
+    if not isinstance(row,dict) or any(row.get(key) != binding[key] for key in ('registry_id','generation_id')):
+        raise ValueError('Publication belongs to another registry/generation')
+    revision = row.get('config_revision')
+    if type(revision) is not int or revision < 1:
+        raise ValueError('Publication has no configuration revision')
+    versions = publication_versions(row)
+    metadata = publication_metadata(binding, row, revision, versions)
     return {**metadata,'versions':versions,
         'current_version':versions.get('ai_social_document_current'),
         'history_version':versions.get('ai_social_observations'),
@@ -132,8 +142,7 @@ def configuration_sql(binding, snapshot):
         + ' c WHERE ' + scope_sql(binding,'c') + ' AND c.config_revision=' + str(snapshot['config_revision']) + ' LIMIT 2')
 
 
-def validate_input(value, binding, snapshot, configuration):
-    checked_binding(binding)
+def validated_chat_envelope(value, binding, snapshot):
     if isinstance(value,str):
         if len(value.encode('utf-8')) > 131072:
             raise ValueError('Chat input exceeds its bounded envelope')
@@ -147,6 +156,10 @@ def validate_input(value, binding, snapshot, configuration):
         raise ValueError('Chat is outside the bound generation')
     if context['config_revision'] != snapshot['config_revision']:
         raise ValueError('Refresh the stale search configuration before querying')
+    return parsed
+
+
+def approved_chat_records(binding, configuration, context):
     config = ConfigMessage.model_validate(configuration).model_dump(mode='json')
     if (config['contract_sha256'] != binding['contract_sha256'] or any(config[key] != binding[key] for key in ('registry_id','generation_id'))
             or config['payload']['revision'] != context['config_revision']):
@@ -155,6 +168,10 @@ def validate_input(value, binding, snapshot, configuration):
     approved = lambda row:row['status'] in ('active','paused') and row['approval']['status']=='approved'
     sources = {row['source_id']:row for row in current['sources'] if approved(row)}
     queries = {row['query_id']:row for row in current['queries'] if approved(row) and row['source_id'] in sources}
+    return sources, queries
+
+
+def selected_search_scope(context, sources, queries):
     selected_sources, selected_queries = context['source_ids'], context['query_ids']
     if (len(set(selected_sources)) != len(selected_sources) or len(set(selected_queries)) != len(selected_queries)
             or not set(selected_sources)<=sources.keys() or not set(selected_queries)<=queries.keys()):
@@ -163,8 +180,17 @@ def validate_input(value, binding, snapshot, configuration):
         raise ValueError('Selected queries do not belong to the selected sources')
     allowed_sources = set(selected_sources) if selected_sources else set(sources)
     allowed_queries = [key for key,row in queries.items() if key in (selected_queries or queries) and row['source_id'] in allowed_sources]
+    return tuple(sorted(allowed_sources)), tuple(sorted(allowed_queries))
+
+
+def validate_input(value, binding, snapshot, configuration):
+    checked_binding(binding)
+    parsed = validated_chat_envelope(value, binding, snapshot)
+    context = parsed['search_context']
+    sources, queries = approved_chat_records(binding, configuration, context)
+    allowed_sources, allowed_queries = selected_search_scope(context, sources, queries)
     return BoundChat(parsed['question'],binding['registry_id'],binding['generation_id'],context['config_revision'],
-        tuple(sorted(allowed_sources)),tuple(sorted(allowed_queries)),tuple(selected_sources),tuple(selected_queries))
+        allowed_sources,allowed_queries,tuple(context['source_ids']),tuple(context['query_ids']))
 
 
 def session_key(binding, native_session):
@@ -315,13 +341,7 @@ def query_evidence(snapshot, chat, name, args, rows):
         'search_context':chat.search_context(),'capture_scopes':sorted({row['capture_scope'] for row in rows if row.get('capture_scope')})}
 
 
-def public_response(snapshot, chat, answer, queries, presentation='auto', post_keys=()):
-    if not isinstance(chat,BoundChat) or any(snapshot.get(key)!=getattr(chat,key) for key in ('registry_id','generation_id','config_revision')):
-        raise ValueError('Answer context belongs to another publication scope')
-    if not isinstance(answer,str) or not 1<=len(answer.strip())<=1800 or not isinstance(post_keys,(list,tuple)) or len(post_keys)>8:
-        raise ValueError('Invalid bounded answer')
-    if any(query.get('publication_id')!=snapshot['publication_id'] or query.get('search_context')!=chat.search_context() for query in queries):
-        raise ValueError('Answer evidence belongs to another publication/search scope')
+def response_sources(queries, post_keys):
     refs = {(row.get('comment_key') or row['post_key']):row for query in queries for row in query['rows'] if row.get('post_key')}
     if any(key not in refs for key in post_keys):
         raise ValueError('Answer referenced unqueried evidence')
@@ -330,22 +350,41 @@ def public_response(snapshot, chat, answer, queries, presentation='auto', post_k
         row=refs[key]
         public_reference(row['url'])
         sources.append({field:row.get(field) for field in ('post_key','comment_key','document_key','parent_document_key','platform','url','published_at','commented_at','observed_at','document_type','capture_scope')})
-    publication={key:value for key,value in snapshot.items() if key!='versions'}
-    result={'answer':answer,'sources':sources,'publication':publication,'search_context':chat.search_context(),
-        'query_context':[{'tool':query['tool'],'args':query['args']} for query in queries]}
+    return sources
+
+
+def label_document_visualization(visual, query):
+    document_type=query['args']['document_type']
+    if document_type=='post':
+        return
+    label={'comment':'Comentarios capturados','page':'Páginas web','indicator':'Documentos de indicadores'}[document_type]
+    visual['caption']=visual['caption'].replace('publicaciones','comentarios capturados' if document_type=='comment' else 'documentos')
+    visual['caption']=(visual['caption']+' Tipo de documento: '+label+'.')[:700]
+    if query['args'].get('metric','posts')=='posts':
+        visual['title']=label+(' por fecha' if query['tool']=='trend' else '')
+        if query['tool']=='summary' and len(visual['columns'])==2:
+            visual['columns'][1]=label
+
+
+def response_visualization(presentation, queries):
     try:
-        result['visualization']=build_visualization(presentation,queries)
-        if result['visualization'] and queries:
-            document_type=queries[-1]['args']['document_type']
-            if document_type!='post':
-                label={'comment':'Comentarios capturados','page':'Páginas web','indicator':'Documentos de indicadores'}[document_type]
-                visual=result['visualization']
-                visual['caption']=visual['caption'].replace('publicaciones','comentarios capturados' if document_type=='comment' else 'documentos')
-                visual['caption']=(visual['caption']+' Tipo de documento: '+label+'.')[:700]
-                if queries[-1]['args'].get('metric','posts')=='posts':
-                    visual['title']=label+(' por fecha' if queries[-1]['tool']=='trend' else '')
-                    if queries[-1]['tool']=='summary' and len(visual['columns'])==2:
-                        visual['columns'][1]=label
+        visual=build_visualization(presentation,queries)
+        if visual and queries:
+            label_document_visualization(visual,queries[-1])
+        return {'visualization':visual}
     except (RuntimeError,ValueError,TypeError,OverflowError):
-        result.update(visualization=None,visualization_error='La visualización no puede representar fielmente estos valores; consulta la respuesta y las fuentes.')
-    return result
+        return {'visualization':None,'visualization_error':'La visualización no puede representar fielmente estos valores; consulta la respuesta y las fuentes.'}
+
+
+def public_response(snapshot, chat, answer, queries, presentation='auto', post_keys=()):
+    if not isinstance(chat,BoundChat) or any(snapshot.get(key)!=getattr(chat,key) for key in ('registry_id','generation_id','config_revision')):
+        raise ValueError('Answer context belongs to another publication scope')
+    if not isinstance(answer,str) or not 1<=len(answer.strip())<=1800 or not isinstance(post_keys,(list,tuple)) or len(post_keys)>8:
+        raise ValueError('Invalid bounded answer')
+    if any(query.get('publication_id')!=snapshot['publication_id'] or query.get('search_context')!=chat.search_context() for query in queries):
+        raise ValueError('Answer evidence belongs to another publication/search scope')
+    sources=response_sources(queries,post_keys)
+    publication={key:value for key,value in snapshot.items() if key!='versions'}
+    return {'answer':answer,'sources':sources,'publication':publication,'search_context':chat.search_context(),
+        'query_context':[{'tool':query['tool'],'args':query['args']} for query in queries],
+        **response_visualization(presentation,queries)}

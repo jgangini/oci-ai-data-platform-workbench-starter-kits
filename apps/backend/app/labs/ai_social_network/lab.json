@@ -33,7 +33,7 @@
   "runtime_files": [
     {
       "file": "notebooks/sonda_delta.py",
-      "sha256": "fbe0374040e63cfa5e14c4442282a14931f1e3cadb456a13f23d4094f073f640",
+      "sha256": "3a37efa5839bbd7b70aeb1323de40cd35cd93b99631d6e02cac82c708ee7d1c9",
       "workspace_path": "sonda_delta.py"
     },
     {
@@ -43,17 +43,17 @@
     },
     {
       "file": "notebooks/sonda_runner.py",
-      "sha256": "fbae4129a232f77c0e8cb0f8a9bfad844f41519ec6c9a8b06fbbe8b4e86dadce",
+      "sha256": "9a7d060ddd26897965f1ed10c827bbb891ddb317ad6db06dbe82bd1a8235ccad",
       "workspace_path": "sonda_runner.py"
     },
     {
       "file": "notebooks/agent/sonda_chat.py",
-      "sha256": "55b5424b1b0bdf0e1c78b316815db05e5c5a63d0295aba18b6f1d0efe257ddb4",
+      "sha256": "4f5b4e789577b6202905c18258e5f42a791fc453ec822933836aa90c35586bac",
       "workspace_path": "agent/sonda_chat.py"
     },
     {
       "file": "notebooks/agent/sonda_chat_entry.py",
-      "sha256": "e17d0afe8d4b4ef67fd9874e732acade53217a08b39e4ebafae56ee6d7284cf5",
+      "sha256": "0f3524d57b4ace408c76820d5b0d5bab80b04fe73536123ecca04932769825b0",
       "workspace_path": "agent/sonda_chat_entry.py"
     },
     {
@@ -68,7 +68,7 @@
     },
     {
       "file": "notebooks/agent/sonda_study.py",
-      "sha256": "5450904de8475db37856efa9808aa7204ae0ea643241ad5282f1fb560b9c263e",
+      "sha256": "66cd90b826e26e8e16f48c15854c97f8986dece472a3b12da9fe4e49b2b87bf2",
       "workspace_path": "agent/sonda_study.py"
     },
     {
@@ -83,11 +83,11 @@
     },
     {
       "file": "notebooks/agent/social_agent.py",
-      "sha256": "913465d5a5d40706619d7ef4006568f9287541e22de33e12b77dafba1e8b96dc",
+      "sha256": "3fbccf919d7f7f86d32c44d1c20d6d1661b16278206302c55c170ca21da5ed1d",
       "workspace_path": "agent/social_agent.py"
     }
   ],
-  "pack_sha256": "a1ff101edf60ec1cd909728f309083275cc7e036a1ed1ac571f4d1d33f40ffaa",
+  "pack_sha256": "73097c3c4b73e07affb899d45eab218e0a0ed5871b94189db4a46176134b739e",
   "shared_runtime_files": [
     {
       "file": "sonda_contract.py",
@@ -95,11 +95,11 @@
     },
     {
       "file": "sonda_exchange.py",
-      "sha256": "e9d95afb048020a67b6f9cf5fd8d7bf8de95348dfbbdaa3cf305a896a7fd3e9a"
+      "sha256": "5b97304a66441bcef7f59d4d857e050f591c0290291eeea3f5fbea24d7cf63c0"
     },
     {
       "file": "sonda_runtime.py",
-      "sha256": "cd5cdfba95751b9d8192e60a902e3a3bbf98870ec21c3a4cc58fc5fa6ca88451"
+      "sha256": "a9ed040f3167681ac87e1aa8fe27ac1e1315d54875870a69bc5e60016d89f99f"
     }
   ]
 }

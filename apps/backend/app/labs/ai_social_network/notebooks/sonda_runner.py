@@ -7,6 +7,7 @@ Delta: the job alone applies/replays and publishes business effects.
 """
 import hashlib
 import json
+from time import perf_counter
 from uuid import UUID, uuid5
 
 from app.sonda_contract import encoded, no_duplicate_keys
@@ -18,6 +19,23 @@ from app.labs.ai_social_network.notebooks.sonda_delta import (
     definitions, ensure_tables, json_mode, list_pending_cases, load_case_work, publish, reject_transport_message)
 
 RUNNER_BINDING = {}
+
+
+def timed_call(phase, function, *args, **kwargs):
+    """Emit task-local timings without payloads or extra Spark actions."""
+    started=perf_counter()
+    completed=False
+    try:
+        result=function(*args, **kwargs)
+        completed=True
+        return result
+    finally:
+        try:
+            print('SONDA_PHASE='+json.dumps({'phase':phase,
+                'elapsed_ms':round((perf_counter()-started)*1000,3),
+                'status':'completed' if completed else 'error'},sort_keys=True),flush=True)
+        except (OSError, ValueError):
+            pass
 
 
 def pending_outbox(spark,binding,limit=100):
@@ -167,23 +185,24 @@ def process_case(spark,binding,objects,signer,case_key,identity):
         or pointer['investigation_id']!=case_key or pointer['status'] not in ('pending','applied')):
         raise StreamConflict('Pending case identity changed')
     if not pointer or pointer['status']=='applied':
-        projection=load_case_work(spark,binding,case_key,model_identity=identity,batch_size=10)
+        projection=timed_call('case_projection',load_case_work,spark,binding,case_key,
+            model_identity=identity,batch_size=10)
         request=create_case_work(objects,binding,projection)
         pointer={'investigation_id':case_key,'request':request,'status':'pending'}
         etag=objects.put('artifacts',key,encoded(pointer),saved.etag if saved else None)
     else:
         request=pointer['request']
         etag=saved.etag
-    result=invoke_case(binding,objects,signer,request)
-    apply_case_study_results(spark,binding,result,result_id=request['work_id'],
-        predecessor_revision=result['state']['predecessor_revision'])
+    result=timed_call('case_inference',invoke_case,binding,objects,signer,request)
+    timed_call('case_commit',apply_case_study_results,spark,binding,result,
+        result_id=request['work_id'],predecessor_revision=result['state']['predecessor_revision'])
     # A crash before this marker replays the same idempotent result, never inference.
     objects.put('artifacts',key,encoded({**pointer,'status':'applied'}),etag)
 
 
 def record_runtime(spark,binding,objects,result):
     from datetime import datetime, timezone
-    publication=publish(spark,binding)
+    publication=timed_call('publication',publish,spark,binding)
     receipt={**result,**_scope(binding),'contract_sha256':binding['contract_sha256'],
         'table_count':len(definitions(binding)),'publication':json_mode(publication),
         'completed_at':datetime.now(timezone.utc).isoformat()}
@@ -217,30 +236,30 @@ def run_sonda(binding,*,validation=False):
         return {'status':'paused','processed_messages':0,'processed_case_phases':0}
     spark=SparkSession.builder.getOrCreate()
     spark.conf.set('spark.sql.session.timeZone','UTC')
-    ensure_tables(spark,binding)
+    timed_call('ensure_tables',ensure_tables,spark,binding)
     objects=OciObjects(storage,binding['namespace'],{
         'source':binding['source_bucket'],'artifacts':binding['artifacts_bucket']})
     common={key:binding[key] for key in ('registry_id','generation_id','contract_sha256','source_prefix')}
     inbound=Exchange(objects,**common,direction='huginn_to_aidp')
     outbound=Exchange(objects,**common,direction='aidp_to_huginn')
-    apply_messages(spark,binding,[])  # Repair interrupted inbound publication first.
+    timed_call('inbound_recovery',apply_messages,spark,binding,[])
     identity={key:binding[key] for key in ('model_id','model_revision','prompt_version')}
     if active or validating:
         try:
-            resume_pending_cases(spark,binding,objects,signer,identity)
+            timed_call('case_recovery',resume_pending_cases,spark,binding,objects,signer,identity)
         except (RuntimeError,TimeoutError):
-            published=flush_outbox(spark,binding,objects,outbound)
+            published=timed_call('outbox',flush_outbox,spark,binding,objects,outbound)
             return record_runtime(spark,binding,objects,{'status':'deferred','processed_messages':0,
                 'processed_case_phases':0,'deferred_case_phases':1,'published_messages':published})
-    processed=(consume_batch(spark,binding,inbound,configuration_only=True) if bootstrap and not validating
-        else consume_batch(spark,binding,inbound))
-    published=flush_outbox(spark,binding,objects,outbound)
+    processed=(timed_call('consume',consume_batch,spark,binding,inbound,configuration_only=True)
+        if bootstrap and not validating else timed_call('consume',consume_batch,spark,binding,inbound))
+    published=timed_call('outbox',flush_outbox,spark,binding,objects,outbound)
     if bootstrap and not validating:
         return record_runtime(spark,binding,objects,{'status':'prepared','processed_messages':processed,
             'processed_case_phases':0,'published_messages':published})
     cases=0
     deferred=0
-    pending_cases=list_pending_cases(spark,binding,limit=5)
+    pending_cases=timed_call('case_selection',list_pending_cases,spark,binding,limit=5)
     for item in pending_cases['cases']:
         if not generation_inference(storage,binding):
             break
@@ -253,6 +272,6 @@ def run_sonda(binding,*,validation=False):
             deferred+=1
             continue
         cases+=1
-        published+=flush_outbox(spark,binding,objects,outbound)
+        published+=timed_call('outbox',flush_outbox,spark,binding,objects,outbound)
     return record_runtime(spark,binding,objects,{'status':'success','processed_messages':processed,
         'processed_case_phases':cases,'deferred_case_phases':deferred,'published_messages':published})

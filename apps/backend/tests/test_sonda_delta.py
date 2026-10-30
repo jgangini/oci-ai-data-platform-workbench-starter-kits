@@ -2,6 +2,8 @@
 import copy
 import json
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -10,6 +12,43 @@ from app import sonda_contract as contract
 from app.labs.ai_social_network.notebooks import sonda_delta as delta
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.mark.parametrize('update',[False,True])
+def test_merge_stays_on_bound_location_without_catalog_path_lookup(monkeypatch,update):
+    events=[]
+    operation=SimpleNamespace()
+    def step(name):
+        def call(*args,**kwargs):
+            events.append((name,args,kwargs))
+            return operation
+        return call
+    for name in ('alias','merge','whenMatchedUpdateAll','whenNotMatchedInsertAll','execute'):
+        setattr(operation,name,step(name))
+    def for_path(spark,path):
+        events.append(('path',path))
+        return operation
+    monkeypatch.setitem(sys.modules,'delta.tables',SimpleNamespace(DeltaTable=SimpleNamespace(forPath=for_path)))
+    frame=SimpleNamespace(alias=lambda _:frame)
+    written=[]
+    def create(rows,schema):
+        written.extend(rows)
+        assert schema=='validated-schema'
+        return frame
+    def forbidden_sql(_):
+        pytest.fail('A write must not follow a different catalog location')
+    spark=SimpleNamespace(sql=forbidden_sql,table=lambda _:SimpleNamespace(schema='validated-schema'),createDataFrame=create)
+    bound=binding()
+    condition='s.version > t.version'
+    delta._rows(spark,bound,'receipts',[{'message_id':'m'}],('message_id',),condition,update)
+    assert events[0]==('path',delta.definitions(bound)['ai_social_receipts']['location'])
+    assert written==[{**delta._scope(bound),'message_id':'m'}]
+    predicate=next(args[1] for name,args,*_ in events if name=='merge')
+    assert all('t.'+key+' <=> s.'+key in predicate for key in ('registry_id','generation_id','message_id'))
+    matched=[e for e in events if e[0]=='whenMatchedUpdateAll']
+    expected=[('whenMatchedUpdateAll',(),{'condition':condition})] if update else []
+    assert matched==expected
+    assert events[-1][0]=='execute'
 
 
 def fixture(name):

@@ -75,4 +75,6 @@ def chat_source():
         'labs/ai_social_network/notebooks/agent/sonda_memory.py',
         'labs/ai_social_network/notebooks/agent/sonda_chat_entry.py'),excluded={legacy:{
             'SocialNetworkAgent','relation','snapshot_sql','checked_snapshot','tool_sql',
-            'query_evidence','input_context'}})
+            'query_evidence','input_context','social_conditions','social_period_conditions',
+            'social_query_source','social_summary_sql','checked_saved_network','checked_saved_search',
+            'social_chat_model','compile_social_graph'}})

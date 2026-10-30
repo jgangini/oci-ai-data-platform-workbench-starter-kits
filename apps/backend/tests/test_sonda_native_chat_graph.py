@@ -6,6 +6,7 @@ readable source and no exec/loader. No model, credential or SQL service is calle
 import asyncio
 from contextlib import contextmanager
 from datetime import date, timedelta
+from functools import partial
 import json
 from pathlib import Path
 import re
@@ -38,6 +39,64 @@ class AuthenticatedSaver(InMemorySaver):
         return await super().aput_writes(self.forced(config),writes,task_id,task_path=task_path)
 
 
+class FakeGenAI:
+    """Injected provider with the structured-output interface used by native agents."""
+    def __init__(self,owner,**kwargs):
+        self.owner=owner
+        assert kwargs['auth_type']=='API_KEY' and kwargs['client'] is not None
+
+    def with_structured_output(self,schema,**kwargs):
+        if schema['title']=='SondaQuery':
+            self.owner.plan_schema=schema
+        return FakeStructuredOutput(self.owner,schema['title'])
+
+
+class FakeStructuredOutput:
+    def __init__(self,owner,title):
+        self.owner=owner
+        self.role='plan' if title=='SondaQuery' else 'answer'
+
+    async def ainvoke(self,messages):
+        payload=json.loads(messages[-1].content)
+        self.owner.model_calls.append((self.role,payload))
+        return self.plan(payload) if self.role=='plan' else self.answer(payload)
+
+    def plan(self,payload):
+        owner=self.owner
+        if owner.plan_parse_errors:
+            owner.plan_parse_errors-=1
+            raise ValueError('Synthetic structured-output parsing failure')
+        if owner.bad_plan:
+            return {'tool':'summary','args':{'sql':'DROP TABLE anything'},'presentation':'none','continue_query':False}
+        if owner.plan_results:
+            result=owner.plan_results.pop(0)
+            if isinstance(result,Exception):
+                raise result
+            return result
+        question=payload['question'].lower()
+        if 'línea' in question or 'linea' in question:
+            return {'tool':'trend','args':{'platforms':['instagram','facebook'],'limit':50},'presentation':'line','continue_query':False}
+        return {'tool':'search','args':{},'presentation':'table','continue_query':False}
+
+    def answer(self,payload):
+        owner=self.owner
+        if owner.answer_error:
+            raise TimeoutError('Synthetic answer interruption after verified SQL')
+        queries=payload['queries']
+        last=queries[-1]
+        rows=last['rows']
+        refs=[row['post_key'] for row in rows if row.get('post_key')][:1]
+        if owner.bad_ref:
+            refs=['f'*64]
+        if last['tool']=='summary' and last['args'].get('platform')=='youtube':
+            answer='YouTube tiene '+str(rows[0]['value'])+' publicación disponible.'
+        elif last['tool'] in ('ranking','summary'):
+            answer='Facebook encabeza la comparación con las métricas informadas.'
+        else:
+            answer='La consulta muestra los datos disponibles en el período indicado.'
+        return {'answer':answer,'post_keys':refs}
+
+
 class NativeFixture:
     def __init__(self,monkeypatch):
         self.config=json.loads((ROOT/'contracts/sonda/v1/fixtures/01-configuration.json').read_text())
@@ -49,6 +108,8 @@ class NativeFixture:
         self.paused,self.sql_error,self.bad_plan,self.bad_ref=False,False,False,False
         self.answer_error=False
         self.plan_parse_errors=0
+        self.plan_results=[]
+        self.plan_schema=None
         self.unsafe_value=False
         self.memory=AuthenticatedSaver()
         for name in ('aidputils','aidputils.agents','aidputils.agents.toolkit'):
@@ -57,42 +118,7 @@ class NativeFixture:
             monkeypatch.setitem(sys.modules,name,module)
         helper=types.ModuleType('aidputils.agents.toolkit.agent_helper')
         owner=self
-        class GenAI:
-            def __init__(self,**kwargs):
-                assert kwargs['auth_type']=='API_KEY' and kwargs['client'] is not None
-            def with_structured_output(self,schema,**kwargs):
-                class Runner:
-                    async def ainvoke(self,messages):
-                        payload=json.loads(messages[-1].content)
-                        role='plan' if schema['title']=='SondaQuery' else 'answer'
-                        owner.model_calls.append((role,payload))
-                        if role=='plan':
-                            if owner.plan_parse_errors:
-                                owner.plan_parse_errors-=1
-                                raise ValueError('Synthetic structured-output parsing failure')
-                            if owner.bad_plan:
-                                return {'tool':'summary','args':{'sql':'DROP TABLE anything'},'presentation':'none','continue_query':False}
-                            question=payload['question'].lower()
-                            if 'línea' in question or 'linea' in question:
-                                return {'tool':'trend','args':{'platforms':['instagram','facebook'],'limit':50},'presentation':'line','continue_query':False}
-                            return {'tool':'search','args':{},'presentation':'table','continue_query':False}
-                        if owner.answer_error:
-                            raise TimeoutError('Synthetic answer interruption after verified SQL')
-                        queries=payload['queries']
-                        last=queries[-1]
-                        rows=last['rows']
-                        refs=[row['post_key'] for row in rows if row.get('post_key')][:1]
-                        if owner.bad_ref:
-                            refs=['f'*64]
-                        if last['tool']=='summary' and last['args'].get('platform')=='youtube':
-                            answer='YouTube tiene '+str(rows[0]['value'])+' publicación disponible.'
-                        elif last['tool'] in ('ranking','summary'):
-                            answer='Facebook encabeza la comparación con las métricas informadas.'
-                        else:
-                            answer='La consulta muestra los datos disponibles en el período indicado.'
-                        return {'answer':answer,'post_keys':refs}
-                return Runner()
-        helper.GenAIChatInvoker=GenAI
+        helper.GenAIChatInvoker=partial(FakeGenAI,self)
         helper.GenerativeAiInferenceV2Client=lambda **kwargs:object()
         @contextmanager
         def flow_setup(**kwargs):
@@ -306,6 +332,160 @@ def test_structured_plan_parser_errors_use_only_two_repair_attempts(native):
         response=await native.invoke(native.agent(),'Busca documentos sobre un producto')
         assert response['query_context']==[] and response['visualization'] is None
         assert len([role for role,_ in native.model_calls if role=='plan'])==2
+        repair=[payload for role,payload in native.model_calls if role=='plan'][-1]['validation_error']
+        assert repair['stage']=='structured_output' and repair['code']=='invalid_structured_output'
+        assert 'Synthetic' not in json.dumps(repair)
+    asyncio.run(check())
+
+
+def test_native_planner_uses_closed_filter_enums(native):
+    native.agent()
+    schema=native.plan_schema['properties']['args']['properties']
+    assert schema['period']['enum']==['all','range']
+    assert schema['metric']['enum']==['posts','comments','likes','shares','views']
+    assert 'all' not in schema['platform']['enum']
+
+
+def test_gold_network_coverage_question_repairs_before_any_data_sql(native):
+    async def check():
+        question='¿Qué redes tienen publicaciones Gold disponibles en los últimos 30 días? Indica cobertura.'
+        invalid={'tool':'summary','args':{'platform':'all'},'presentation':'table','continue_query':False}
+        valid={'tool':'summary','args':{},'presentation':'table','continue_query':False}
+        native.plan_results=[invalid,valid]
+        agent=native.agent()
+        response=await native.invoke(agent,question)
+        plans=[payload for role,payload in native.model_calls if role=='plan']
+        assert len(plans)==2
+        assert plans[0]['question']==question
+        repair=plans[1]['validation_error']
+        assert repair['stage']=='plan_validation'
+        assert repair['code']=='unsupported_platform'
+        assert set(repair)=={'stage','code','instruction'}
+        assert 'platform' in repair['instruction']
+        assert 'all' not in json.dumps(repair)
+        data=[sql for sql in native.sql_calls if '.ai_social_registry ' not in sql and '.ai_social_publication ' not in sql]
+        assert len(data)==1
+        assert 'GROUP BY platform' in data[0]
+        assert 'COUNT(*) AS value' in data[0]
+        assert "d.published_date BETWEEN DATE '2026-09-30' AND DATE '2026-10-29'" in data[0]
+        assert 'EXISTS (SELECT 1 FROM' in data[0]
+        args=response['query_context'][0]['args']
+        assert args=={'period':'range','date_from':'2026-09-30','date_to':'2026-10-29','metric':'posts','document_type':'post'}
+        assert response['visualization']['type']=='table'
+        config={'configurable':{'thread_id':core.session_key(native.binding,'native-session')}}
+        diagnostics=(await agent.graph.aget_state(config)).values['planning_diagnostics']
+        assert len(diagnostics)==1
+        assert diagnostics[0]['code']=='unsupported_platform'
+    asyncio.run(check())
+
+
+def test_twice_rejected_coverage_plan_never_queries_or_answers_from_data(native):
+    async def check():
+        question='¿Qué redes tienen publicaciones Gold disponibles en los últimos 30 días? Indica cobertura.'
+        invalid={'tool':'summary','args':{'platform':'all'},'presentation':'table','continue_query':False}
+        native.plan_results=[invalid,invalid]
+        agent=native.agent()
+        response=await native.invoke(agent,question)
+        plans=[payload for role,payload in native.model_calls if role=='plan']
+        assert len(plans)==2
+        assert plans[0]['question']==question
+        repair=plans[1]['validation_error']
+        assert repair['stage']=='plan_validation'
+        assert repair['code']=='unsupported_platform'
+        assert set(repair)=={'stage','code','instruction'}
+        assert 'platform' in repair['instruction']
+        assert 'all' not in json.dumps(repair)
+        data=[sql for sql in native.sql_calls if '.ai_social_registry ' not in sql and '.ai_social_publication ' not in sql]
+        assert data==[]
+        assert response['query_context']==[]
+        assert response['visualization'] is None
+        assert response['answer']=='No pude completar esta consulta. Inténtalo de nuevo o reformula la pregunta.'
+        assert not [payload for role,payload in native.model_calls if role=='answer']
+        config={'configurable':{'thread_id':core.session_key(native.binding,'native-session')}}
+        diagnostics=(await agent.graph.aget_state(config)).values['planning_diagnostics']
+        assert len(diagnostics)==2
+        assert all(item['code']=='unsupported_platform' for item in diagnostics)
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize('repair_valid',[True,False])
+def test_new_turn_clears_repaired_or_terminal_planning_diagnostics(native,repair_valid):
+    async def check():
+        invalid={'tool':'summary','args':{'platform':'all'},'presentation':'table','continue_query':False}
+        valid={'tool':'summary','args':{},'presentation':'table','continue_query':False}
+        native.plan_results=[invalid,valid if repair_valid else invalid]
+        agent=native.agent()
+        await native.invoke(agent,'¿Qué redes tienen publicaciones Gold disponibles en los últimos 30 días? Indica cobertura.')
+        config={'configurable':{'thread_id':core.session_key(native.binding,'native-session')}}
+        diagnostics=(await agent.graph.aget_state(config)).values['planning_diagnostics']
+        assert len(diagnostics)==(1 if repair_valid else 2)
+        assert all(item['code']=='unsupported_platform' for item in diagnostics)
+        await native.invoke(agent,'cuantos post hay en yotube')
+        assert (await agent.graph.aget_state(config)).values['planning_diagnostics']==[]
+        assert (await agent.graph.aget_state(config)).values['plan_repairs']==0
+    asyncio.run(check())
+
+
+def test_dependent_queries_share_one_repair_budget_per_turn(native):
+    async def check():
+        invalid={'tool':'search','args':{'platform':'all'},'presentation':'table','continue_query':False}
+        search={'tool':'search','args':{'text':'Oracle'},'presentation':'table','continue_query':True}
+        missing_reference={'tool':'details','args':{},'presentation':'table','continue_query':False}
+        native.plan_results=[invalid,search,missing_reference]
+        agent=native.agent()
+        response=await native.invoke(agent,'Busca una publicación de Oracle y después consulta sus detalles.')
+        plans=[payload for role,payload in native.model_calls if role=='plan']
+        assert len(plans)==3
+        assert plans[1]['validation_error']['code']=='unsupported_platform'
+        assert len(plans[2]['queries'])==1
+        assert 'validation_error' not in plans[2]
+        data=[sql for sql in native.sql_calls if '.ai_social_registry ' not in sql and '.ai_social_publication ' not in sql]
+        assert len(data)==1
+        assert response['answer']=='No pude completar esta consulta. Inténtalo de nuevo o reformula la pregunta.'
+        config={'configurable':{'thread_id':core.session_key(native.binding,'native-session')}}
+        state=(await agent.graph.aget_state(config)).values
+        assert state['plan']['tool']=='clarify'
+        assert state['plan_repairs']==1
+        assert [item['code'] for item in state['planning_diagnostics']]==['unsupported_platform','missing_post_reference']
+        native.plan_results=[invalid,{**search,'continue_query':False}]
+        await native.invoke(agent,'Busca otra publicación disponible de Oracle.')
+        assert len([role for role,_ in native.model_calls if role=='plan'])==5
+        state=(await agent.graph.aget_state(config)).values
+        assert state['plan']['tool']=='search'
+        assert state['plan_repairs']==1
+        assert [item['code'] for item in state['planning_diagnostics']]==['unsupported_platform']
+    asyncio.run(check())
+
+
+def test_repair_budget_does_not_reduce_four_valid_dependent_queries(native):
+    async def check():
+        native.plan_results=[{'tool':'search','args':{'text':word},'presentation':'table','continue_query':True}
+            for word in ('Oracle','cloud','database','lakehouse')]
+        agent=native.agent()
+        response=await native.invoke(agent,'Busca las publicaciones necesarias para explicar los temas disponibles.')
+        assert len(response['query_context'])==4
+        assert len([role for role,_ in native.model_calls if role=='plan'])==4
+        data=[sql for sql in native.sql_calls if '.ai_social_registry ' not in sql and '.ai_social_publication ' not in sql]
+        assert len(data)==4
+        config={'configurable':{'thread_id':core.session_key(native.binding,'native-session')}}
+        state=(await agent.graph.aget_state(config)).values
+        assert state['plan_repairs']==0 and state['planning_diagnostics']==[]
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize('repair_started',[False,True])
+def test_model_service_failure_propagates_without_an_automatic_planning_retry(native,repair_started):
+    async def check():
+        invalid={'tool':'search','args':{'platform':'all'},'presentation':'table','continue_query':False}
+        valid={'tool':'search','args':{},'presentation':'table','continue_query':False}
+        native.plan_results=([invalid] if repair_started else [])+[TimeoutError('Synthetic model-service timeout'),valid]
+        with pytest.raises(TimeoutError,match='model-service timeout'):
+            await native.invoke(native.agent(),'Busca publicaciones disponibles sobre Oracle.')
+        assert len([role for role,_ in native.model_calls if role=='plan'])==(2 if repair_started else 1)
+        assert native.plan_results==[valid]
+        data=[sql for sql in native.sql_calls if '.ai_social_registry ' not in sql and '.ai_social_publication ' not in sql]
+        assert data==[]
+        assert not [role for role,_ in native.model_calls if role=='answer']
     asyncio.run(check())
 
 
