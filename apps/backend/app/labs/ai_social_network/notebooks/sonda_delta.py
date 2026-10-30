@@ -16,6 +16,7 @@ import json
 import re
 from datetime import date, datetime, timezone
 from uuid import UUID, uuid5
+from app.labs.ai_social_network.notebooks.sonda_tools import tool_catalog_definition, tool_catalog_rows
 
 CONTRACT_SHA256 = '6e2613ac0c28e863fdf2fc02d69f92b92dd56003edcc242c6b41bbe218924483'
 SCOPE = 'registry_id STRING NOT NULL, generation_id STRING NOT NULL, '
@@ -38,6 +39,8 @@ TABLE_PURPOSES = {
     'registry':'Approved configuration revisions and their immutable source messages',
     'sources':'Versioned approved connector and source references',
     'queries':'Versioned operator queries, capture limits and approval decisions',
+    'tool_catalog':'Reviewed Huginn query tools and static invocation ceilings; execution remains broker controlled',
+    'source_limits':'Immutable source policy snapshots bound to applied Huginn configuration revisions',
     'criteria':'Versioned relevance rules, thresholds and labelled examples',
     'budget_rounds':'Current confirmed capture budget from the Huginn ledger',
     'budget_round_revisions':'Immutable budget revisions for execution verification',
@@ -129,6 +132,8 @@ def definitions(binding):
         'registry': ('config_revision BIGINT NOT NULL, payload_sha256 STRING NOT NULL, payload_json STRING NOT NULL, message_json STRING NOT NULL', (), 'gold'),
         'sources': (SNAPSHOT, (), 'gold'),
         'queries': (SNAPSHOT, (), 'gold'),
+        'tool_catalog': (tool_catalog_definition()['columns'], (), 'gold'),
+        'source_limits': ('catalog_revision BIGINT NOT NULL, config_revision BIGINT NOT NULL, snapshot_sha256 STRING NOT NULL, configuration_payload_sha256 STRING NOT NULL, payload_json STRING NOT NULL, core_configuration_message_id STRING NOT NULL, core_configuration_source_sequence BIGINT NOT NULL, core_configuration_raw_sha256 STRING NOT NULL', (), 'gold'),
         'criteria': (SNAPSHOT, (), 'gold'),
         'budget_rounds': (BUDGET, (), 'gold'),
         'budget_round_revisions': (BUDGET, (), 'control'),
@@ -360,7 +365,7 @@ def _prepare_configuration(spark, binding, message):
         if prior and prior[0]['decision_json'] and prior[0]['decision_json'] != canonical(decision):
             raise ValueError('Proposal already has a different terminal decision')
     _check_managed_history(spark, binding, p)
-    return {}
+    return {'tool_catalog': tool_catalog_rows(p, validated=True)}
 
 
 def _prepare_budget_round(spark, binding, message):
@@ -462,6 +467,7 @@ def _effect(spark, binding, message, plan):
     kind, p = message['kind'], message['payload']
     if kind == 'configuration':
         _rows(spark, binding, 'registry', [{'config_revision': p['revision'], 'payload_sha256': fingerprint(p), 'payload_json': canonical(p), 'message_json': canonical(message)}], ('config_revision',))
+        _rows(spark, binding, 'tool_catalog', plan['tool_catalog'], ('snapshot_key',))
         for domain, key in (('sources', 'source_id'), ('queries', 'query_id'), ('criteria', 'criterion_id')):
             rows = [{'snapshot_key': fingerprint([p['revision'], r[key]]), 'config_revision': p['revision'], 'record_id': r[key],
                      'record_revision': r['revision'], 'status': r['status'], 'approval_status': r['approval']['status'],
@@ -563,7 +569,35 @@ def _publish_study_outputs(spark, binding, studies, table):
         _rows(spark, binding, table, [study], ('result_id',), update=True)
 
 
-def publish(spark, binding):
+def sync_tool_catalog(spark, binding):
+    """Recover the current derived snapshot without resetting configuration/history.
+
+    Called under the writer lease after interrupted inbound effects are repaired.
+    Earlier snapshots remain immutable; partial inserts replay the same keys.
+    """
+    revision = _latest_revision(spark, binding)
+    if not revision:
+        return False
+    expected = {row['snapshot_key']: row for row in
+        tool_catalog_rows(_configuration(spark, binding, revision), validated=True)}
+    existing = _find(spark, binding, 'tool_catalog', config_revision=revision)
+    for row in existing:
+        actual = {key: value for key, value in row.items() if key not in _scope(binding)}
+        if actual != expected.get(row['snapshot_key']):
+            raise ValueError('Conflicting immutable tool catalog snapshot')
+    present = {row['snapshot_key'] for row in existing}
+    missing = [row for key, row in expected.items() if key not in present]
+    _rows(spark, binding, 'tool_catalog', missing, ('snapshot_key',))
+    return bool(missing)
+
+
+def _reusable_publication(existing, pending, study_pending, case_pending, catalog_changed):
+    """A migration must publish the new metadata table even with no new messages."""
+    return (bool(existing) and not (pending or study_pending or case_pending or catalog_changed)
+        and {'ai_social_tool_catalog', 'ai_social_source_limits'} <= set(json.loads(existing[0]['versions_json'])))
+
+
+def publish(spark, binding, *, metadata_changed=False):
     """Publish committed versions, then terminal receipts. Never writes stream ack."""
     from pyspark.sql import functions as F
     checked_binding(binding)
@@ -576,8 +610,6 @@ def publish(spark, binding):
     study_pending = [r for r in studies if r['state'] == 'READY']
     case_pending = [r for r in case_studies if r['state'] == 'READY']
     existing = _find(spark, binding, 'publication')
-    if not pending and not study_pending and not case_pending and existing:
-        return json_mode(existing[0])
     # Recheck the references used by all pending operations before serving them.
     for receipt in pending:
         if receipt['code'] == 'applied':
@@ -586,6 +618,9 @@ def publish(spark, binding):
         _prepare_study(spark, binding, json.loads(study['result_json']))
     for study in case_pending:
         _prepare_case_result(spark, binding, json.loads(study['result_json']), study['predecessor_revision'], replay=study, batch_size=study['batch_size'])
+    catalog_changed = sync_tool_catalog(spark, binding)
+    if _reusable_publication(existing, pending, study_pending, case_pending, catalog_changed or metadata_changed):
+        return json_mode(existing[0])
     dates = {date for row in pending for date in json.loads(row['dirty_dates_json'])}
     _refresh_daily(spark, binding, sorted(dates, key=lambda d: d or ''))
     versions = {}
@@ -603,6 +638,61 @@ def publish(spark, binding):
     _publish_study_outputs(spark, binding, study_pending, 'study_results')
     _publish_study_outputs(spark, binding, case_pending, 'case_study_results')
     return json_mode({**_scope(binding), **row})
+
+
+def _source_limits_core_receipt(spark, binding, snapshot, message_id):
+    configuration = _configuration(spark, binding, snapshot['config_revision'])
+    if fingerprint(configuration) != snapshot['configuration_payload_sha256']:
+        raise ValueError('Source limits require their exact historical configuration')
+    registry = _find(spark, binding, 'registry', config_revision=snapshot['config_revision'])[0]
+    if json.loads(registry['message_json'])['message_id'] != message_id:
+        raise ValueError('Source limits configuration message identity mismatch')
+    receipts = _find(spark, binding, 'receipts', message_id=message_id)
+    if len(receipts) != 1 or receipts[0]['state'] != 'APPLIED' or receipts[0]['code'] != 'applied':
+        raise ValueError('Source limits require an APPLIED core configuration')
+    receipt = receipts[0]
+    if receipt.get('source_sequence') is None or receipt.get('raw_sha256') is None:
+        raise ValueError('Applied configuration lacks protected transport identity')
+    return receipt
+
+
+def _source_limits_successor(spark, binding, snapshot, row):
+    from pyspark.sql import functions as F
+    existing = _find(spark, binding, 'source_limits', catalog_revision=row['catalog_revision'])
+    if existing:
+        if len(existing) != 1 or {key: existing[0][key] for key in row} != row:
+            raise ValueError('Conflicting immutable source limits snapshot')
+        return False
+    revision = int(spark.table(_table(binding, 'source_limits')).agg(F.max('catalog_revision')).first()[0] or 0)
+    previous = _find(spark, binding, 'source_limits', catalog_revision=revision)[0] if revision else None
+    digest = previous['snapshot_sha256'] if previous else None
+    if snapshot['catalog_revision'] != revision + 1 or snapshot['previous_catalog_sha256'] != digest:
+        raise ValueError('Source limits must extend their applied predecessor')
+    return True
+
+
+def apply_source_limits(spark, binding, snapshot, *, snapshot_sha256, core_message_id):
+    """Commit an already-validated sidecar under the generation writer lease.
+
+    The protected transport adapter validates policies and all raw proofs first.
+    This function enforces historical core application and immutable Delta replay;
+    it neither creates a storage ACK nor grants broker execution.
+    """
+    checked_binding(binding)
+    if any(snapshot.get(key) != value for key, value in _scope(binding).items()):
+        raise ValueError('Source limits snapshot scope mismatch')
+    if fingerprint(snapshot) != snapshot_sha256:
+        raise ValueError('Source limits snapshot fingerprint mismatch')
+    receipt = _source_limits_core_receipt(spark, binding, snapshot, core_message_id)
+    row = {key: snapshot[key] for key in ('catalog_revision', 'config_revision', 'configuration_payload_sha256')}
+    row.update(snapshot_sha256=snapshot_sha256, payload_json=canonical(snapshot),
+        core_configuration_message_id=core_message_id,
+        core_configuration_source_sequence=receipt['source_sequence'], core_configuration_raw_sha256=receipt['raw_sha256'])
+    changed = _source_limits_successor(spark, binding, snapshot, row)
+    if changed:
+        _rows(spark, binding, 'source_limits', [row], ('catalog_revision',))
+    publication = publish(spark, binding, metadata_changed=True)
+    return {'publication': publication, 'snapshot_row': {**_scope(binding), **row}}
 
 
 def _check_inbound_message(binding, message, source_sequences, source_hashes):
@@ -1426,6 +1516,17 @@ def _load_case_report(read, work, case_observations):
         work['limitations'].append('Las cifras cubren el caso completo; las citas y evaluaciones son una selección de hasta 100.')
 
 
+def _load_case_source_limits(read, current_revision):
+    """Research must use policies from the same published configuration."""
+    from pyspark.sql import functions as F
+    rows = read('source_limits').orderBy(F.desc('catalog_revision')).limit(1).collect()
+    if not rows:
+        return None
+    if rows[0]['config_revision'] != current_revision:
+        raise ValueError('Published source limits are not current for case research')
+    return json.loads(rows[0]['payload_json'])
+
+
 def load_case_work(spark, binding, investigation_id, *, batch_size=10, model_identity=None):
     """Hydrate one bounded case with full-population SQL facts and fixed queries.
 
@@ -1464,6 +1565,7 @@ def load_case_work(spark, binding, investigation_id, *, batch_size=10, model_ide
         'evaluations': [], 'evidence': [], 'facts': None, 'indicators': [], 'query_ids': [], 'requests': [],
         'requests_complete': True, 'budget_round': None, 'report_revision': 0,
         'approved_query_ids': [], 'limitations': []}
+    work['source_limits'] = _load_case_source_limits(read, current['revision'])
     case_observations = (jobs.select('observation_key', 'observation_month').distinct()
         .join(read('observations'), ['observation_key', 'observation_month'], 'inner'))
     discovery = read('discoveries')

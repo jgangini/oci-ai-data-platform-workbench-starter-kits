@@ -111,8 +111,28 @@ def prepare(path):
     case_evaluation['evaluation_key'] = c.evaluation_fingerprint(case_evaluation)
     case_evaluation = c.Evaluation.model_validate(case_evaluation).model_dump(mode='json')
     from check_sonda_chat_sql import prepare_chat_sql_checks
+    from app.sonda_source_limits import SourceLimitsSnapshot, check_source_limits, source_limits_digest
+    limits = json.loads((ROOT/'contracts/sonda-source-limits/v1/fixtures/01-initial.json').read_bytes())
+    limits = check_source_limits(limits, config['payload'], registry_id=UUID(int=1),
+        generation_id=UUID(int=2)).model_dump(mode='json')
+    successors=[]
+    previous=SourceLimitsSnapshot.model_validate(limits)
+    for key in ('rejected','approved'):
+        configuration=values[key]['payload']
+        old={str(policy.source_id):policy.model_dump(mode='json') for policy in previous.policies}
+        policies=[]
+        for source in sorted(configuration['sources'],key=lambda row:row['source_id']):
+            policy=copy.deepcopy(old[source['source_id']])
+            if policy['source_revision']!=source['revision']:
+                policy.update(source_revision=source['revision'],policy_revision=policy['policy_revision']+1)
+            policies.append(policy)
+        candidate={**previous.model_dump(mode='json'),'catalog_revision':previous.catalog_revision+1,
+            'previous_catalog_sha256':source_limits_digest(previous),'config_revision':configuration['revision'],
+            'configuration_payload_sha256':c.sha256(c.encoded(configuration)),'policies':policies}
+        previous=check_source_limits(candidate,configuration,registry_id=UUID(int=1),generation_id=UUID(int=2),previous=previous)
+        successors.append({'configuration_key':key,'snapshot':previous.model_dump(mode='json')})
     output = {'messages': values, 'studies': studies, 'case_evaluation': case_evaluation,
-              'chat_sql': prepare_chat_sql_checks(values)}
+              'chat_sql': prepare_chat_sql_checks(values), 'source_limits': limits,'source_limits_successors':successors}
     target = Path(path)
     if not target.parent.is_dir():
         target.parent.mkdir(parents=True)
@@ -125,6 +145,8 @@ def canonical(value):
 
 
 def main(path):
+    import sys
+    sys.path.insert(0, str(ROOT / 'apps/backend'))
     from pyspark.sql import SparkSession
     spec = importlib.util.spec_from_file_location('sonda_delta', ROOT / 'apps/backend/app/labs/ai_social_network/notebooks/sonda_delta.py')
     m = importlib.util.module_from_spec(spec)
@@ -162,10 +184,49 @@ def main(path):
         return spark.table(table(suffix)).count()
     try:
         m.ensure_tables(spark, binding)
-        assert len(metadata_reads)==len(m.definitions(binding))==26
+        assert len(metadata_reads)==len(m.definitions(binding))==28
         assert all(count(suffix) == 0 for suffix in ('document_current', 'observations', 'reports', 'outbox'))
-        first = m.apply_messages(spark, binding, [messages[k] for k in ('configuration', 'opened', 'observations')])
+        config_message = messages['configuration']
+        first = m.apply_messages(spark, binding, [messages[k] for k in ('configuration', 'opened', 'observations')],
+            source_sequences={config_message['message_id']: 1},
+            source_hashes={config_message['message_id']: m.fingerprint(config_message)})
         assert {r['state'] for r in first['receipts']} == {'APPLIED'}
+        expected_tools = m.tool_catalog_rows(messages['configuration']['payload'], validated=True)
+        assert count('tool_catalog') == len(expected_tools)
+        assert 'ai_social_tool_catalog' in json.loads(first['publication']['versions_json'])
+        # Simulate upgrading an existing 26-table installation. The same writer
+        # repairs the derived snapshot and republishes without new inbound data.
+        spark.sql('DELETE FROM ' + table('tool_catalog'))
+        old_publication = spark.table(table('publication')).first().asDict()
+        old_versions = json.loads(old_publication['versions_json'])
+        old_versions.pop('ai_social_tool_catalog')
+        old_publication['versions_json'] = m.canonical(old_versions)
+        m._rows(spark, binding, 'publication', [old_publication], (), update=True)
+        repaired = m.apply_messages(spark, binding, [])
+        assert count('tool_catalog') == len(expected_tools)
+        assert 'ai_social_tool_catalog' in json.loads(repaired['publication']['versions_json'])
+        replay = m.apply_messages(spark, binding, [])
+        assert replay['publication']['publication_id'] == repaired['publication']['publication_id']
+        # A sidecar Delta commit without its publication must replay the same row.
+        limits = inputs['source_limits']
+        real_publish = m.publish
+        def interrupted_publication(*args, **kwargs):
+            raise RuntimeError('Synthetic sidecar interruption after Delta commit')
+        m.publish = interrupted_publication
+        try:
+            m.apply_source_limits(spark, binding, limits, snapshot_sha256=m.fingerprint(limits),
+                core_message_id=config_message['message_id'])
+            raise AssertionError('Expected synthetic interruption')
+        except RuntimeError as exc:
+            assert str(exc) == 'Synthetic sidecar interruption after Delta commit'
+        finally:
+            m.publish = real_publish
+        assert count('source_limits') == 1
+        applied = m.apply_source_limits(spark, binding, limits, snapshot_sha256=m.fingerprint(limits),
+            core_message_id=config_message['message_id'])
+        assert count('source_limits') == 1
+        assert len(json.loads(applied['publication']['versions_json'])) == 23
+        assert applied['snapshot_row']['snapshot_sha256'] == m.fingerprint(limits)
         assert count('document_current') == count('observations') == count('discoveries') == 2
         assert count('evaluations') == 2 and count('investigations') == 1
         assert spark.table(table('document_current')).where('comments IS NOT NULL').count() == 0
@@ -177,7 +238,8 @@ def main(path):
         assert count('evaluation_results') == 2 and count('evidence') == 2 and count('reports') == 1
         assert count('requests') == 1 and count('proposals') == 1
         assert spark.table(table('evaluations')).where("state='completed'").count() == 2
-        assert spark.table(table('outbox')).where("status='ready'").count() == 3
+        ready_kinds = [row.kind for row in spark.table(table('outbox')).where("status='ready'").select('kind').collect()]
+        assert sorted(ready_kinds) == ['investigation_request', 'processing_receipt', 'proposal', 'report']
         assert m.apply_study_results(spark, binding, studies['first'], result_id='synthetic-study-1')['publication']['publication_id'] == study_first['publication']['publication_id']
         # A new model revision appends final identities; interrupted report/state
         # writes remain invisible to publication and replay without duplicates.
@@ -238,7 +300,13 @@ def main(path):
         # Multi-query duplicate, late unchanged capture, rejected and approved
         # proposals, unknown budget, and stale budget after a terminal close.
         final = m.apply_messages(spark, binding, [messages[k] for k in ('multi', 'rejected', 'approved', 'late',
-            'closed', 'stale_budget', 'unknown_budget', 'execution_refusal', 'missing_reference')])
+            'closed', 'stale_budget', 'unknown_budget', 'execution_refusal', 'missing_reference')],
+            source_sequences={messages[key]['message_id']:1001+i for i,key in enumerate(('rejected','approved'))},
+            source_hashes={messages[key]['message_id']:m.fingerprint(messages[key]) for key in ('rejected','approved')})
+        for successor in inputs['source_limits_successors']:
+            snapshot=successor['snapshot']
+            m.apply_source_limits(spark,binding,snapshot,snapshot_sha256=m.fingerprint(snapshot),
+                core_message_id=messages[successor['configuration_key']]['message_id'])
         assert final['receipts'][-1]['state'] == 'REJECTED'
         assert count('document_current') == 2 and count('observations') == 3 and count('discoveries') == 6
         assert count('evaluations') == 3 and count('investigations') == 1
@@ -362,7 +430,7 @@ def main(path):
         assert 'Northstar' not in m.canonical(isolated['state'])
         from check_sonda_chat_sql import run_chat_sql_checks
         run_chat_sql_checks(spark,m,binding,inputs['chat_sql'])
-        assert len(metadata_reads)==26, 'Writes must reuse the initially validated bound paths'
+        assert len(metadata_reads)==28, 'Writes must reuse the initially validated bound paths'
         print('PASS: real Spark/Delta Sonda input/study replay, exact versions, production per-case CAS/state, bounded 1000-other-case isolation, full SQL facts and safe transport rejection')
     finally:
         spark.stop()

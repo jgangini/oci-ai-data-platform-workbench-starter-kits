@@ -71,7 +71,7 @@ def validate(value):
 
 def test_dedicated_locations_and_low_cardinality_partitions():
     definitions = delta.definitions(binding())
-    assert len(definitions) == 26
+    assert len(definitions) == 28
     for name, definition in definitions.items():
         assert '/registries/' + str(UUID(int=1)) + '/generations/' + str(UUID(int=2)) + '/' in definition['location']
         assert definition['location'].endswith('/' + definition['layer'] + '/' + name)
@@ -79,6 +79,88 @@ def test_dedicated_locations_and_low_cardinality_partitions():
         assert definition['columns'].startswith(delta.SCOPE)
     assert definitions['ai_social_registry']['partitions'] == ()
     assert definitions['ai_social_document_current']['partitions'] == ('document_type', 'platform')
+
+
+def test_tool_catalog_backfill_replays_only_missing_current_rows(monkeypatch):
+    config = fixture('01-configuration.json')['payload']
+    expected = delta.tool_catalog_rows(config, validated=True)
+    stored = [{**delta._scope(binding()), **expected[0]}]
+    monkeypatch.setattr(delta, '_latest_revision', lambda *args: config['revision'])
+    monkeypatch.setattr(delta, '_configuration', lambda *args: config)
+    monkeypatch.setattr(delta, '_find', lambda *args, **kwargs: copy.deepcopy(stored))
+    writes = []
+    def write(spark, bound, suffix, rows, keys):
+        assert suffix == 'tool_catalog' and keys == ('snapshot_key',)
+        writes.extend(copy.deepcopy(rows))
+        stored.extend({**delta._scope(bound), **row} for row in rows)
+    monkeypatch.setattr(delta, '_rows', write)
+    assert delta.sync_tool_catalog(object(), binding()) is True
+    assert writes == expected[1:]
+    assert delta.sync_tool_catalog(object(), binding()) is False
+    assert writes == expected[1:]
+    stored[0]['max_items'] += 1
+    with pytest.raises(ValueError, match='immutable tool catalog'):
+        delta.sync_tool_catalog(object(), binding())
+
+
+def test_tool_catalog_empty_install_does_not_invent_configuration(monkeypatch):
+    monkeypatch.setattr(delta, '_latest_revision', lambda *args: 0)
+    monkeypatch.setattr(delta, '_rows', lambda *args: pytest.fail('No configuration means no tools'))
+    assert delta.sync_tool_catalog(object(), binding()) is False
+
+
+def test_empty_tool_catalog_upgrade_publishes_once_without_new_messages(monkeypatch):
+    config = fixture('01-configuration.json')['payload']
+    config.update(queries=[], criteria=[])
+    versions = {name: 0 for name in delta.definitions(binding()) if name != 'ai_social_tool_catalog'}
+    publication = {'publication_id': 'legacy', 'versions_json': delta.canonical(versions)}
+    monkeypatch.setitem(sys.modules, 'pyspark.sql', SimpleNamespace(functions=SimpleNamespace()))
+    monkeypatch.setattr(delta, '_pending', lambda *args: [])
+    monkeypatch.setattr(delta, '_study_pending', lambda *args: [])
+    monkeypatch.setattr(delta, '_case_study_pending', lambda *args: [])
+    monkeypatch.setattr(delta, '_latest_revision', lambda *args: config['revision'])
+    monkeypatch.setattr(delta, '_configuration', lambda *args: config)
+    monkeypatch.setattr(delta, '_find', lambda s, b, suffix, **kwargs: [publication] if suffix == 'publication' else [])
+    monkeypatch.setattr(delta, '_refresh_daily', lambda *args: None)
+    writes = []
+    def write(spark, bound, suffix, rows, keys, **kwargs):
+        if rows:
+            assert suffix == 'publication'
+            publication.update(rows[0])
+            writes.append(suffix)
+    monkeypatch.setattr(delta, '_rows', write)
+    spark = SimpleNamespace(sql=lambda query: SimpleNamespace(first=lambda: {'version': 0}))
+    first = delta.publish(spark, binding())
+    assert first['publication_id'] != 'legacy'
+    assert json.loads(first['versions_json'])['ai_social_tool_catalog'] == 0
+    second = delta.publish(spark, binding())
+    assert second['publication_id'] == first['publication_id']
+    assert writes == ['publication']
+
+
+def test_source_limits_need_applied_core_transport_before_delta_write(monkeypatch):
+    snapshot = json.loads((ROOT/'contracts/sonda-source-limits/v1/fixtures/01-initial.json').read_bytes())
+    message = fixture('01-configuration.json')
+    monkeypatch.setattr(delta, '_configuration', lambda *args: message['payload'])
+    def find(spark, bound, suffix, **where):
+        if suffix == 'registry':
+            return [{'message_json': delta.canonical(message)}]
+        return [{'state': 'APPLYING', 'code': 'applied'}]
+    monkeypatch.setattr(delta, '_find', find)
+    monkeypatch.setattr(delta, '_rows', lambda *args: pytest.fail('Uncommitted core cannot apply limits'))
+    with pytest.raises(ValueError, match='APPLIED core'):
+        delta.apply_source_limits(object(), binding(), snapshot,
+            snapshot_sha256=delta.fingerprint(snapshot), core_message_id=message['message_id'])
+
+
+def test_source_limits_scope_and_hash_fail_before_spark_access():
+    snapshot = json.loads((ROOT/'contracts/sonda-source-limits/v1/fixtures/01-initial.json').read_bytes())
+    with pytest.raises(ValueError, match='fingerprint'):
+        delta.apply_source_limits(object(), binding(), snapshot, snapshot_sha256='a'*64, core_message_id=str(UUID(int=99)))
+    snapshot['generation_id'] = str(UUID(int=999))
+    with pytest.raises(ValueError, match='scope'):
+        delta.apply_source_limits(object(), binding(), snapshot,
+            snapshot_sha256=delta.fingerprint(snapshot), core_message_id=str(UUID(int=99)))
 
 
 def test_document_statistics_cover_query_dates_and_metrics_without_indexing_long_text():

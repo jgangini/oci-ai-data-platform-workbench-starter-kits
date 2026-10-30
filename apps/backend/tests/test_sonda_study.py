@@ -101,6 +101,32 @@ def run_case(work=None, *, model=None, state=None, results=None, config=None, no
         results or [], model=model or Model(), now=now))
 
 
+def test_published_source_limits_bound_all_queries_in_the_same_plan():
+    work=case_work()
+    limits=json.loads((ROOT/'contracts/sonda-source-limits/v1/fixtures/01-initial.json').read_bytes())
+    limits['policies'][0].update(max_items_per_execution=1,max_cost_per_round_microusd=None,max_starts_per_round=1)
+    work['source_limits']=limits
+    class TwoQueries(Model):
+        async def __call__(self,role,payload):
+            if role=='plan':
+                queries=fixture('01-configuration.json')['payload']['queries'][:2]
+                return {'requests':[{'step':'query-'+str(i),'query_id':query['query_id'],
+                    'purpose':'Corroborar evidencia','max_items':5} for i,query in enumerate(queries)],'propose':False}
+            return await super().__call__(role,payload)
+    result=run_case(work,model=TwoQueries())
+    assert len(result['investigation_requests'])==1
+    assert result['investigation_requests'][0]['max_items']==1
+
+
+def test_legacy_worded_step_cannot_repeat_a_completed_query_target():
+    first=run_case(model=Model(research=True))['investigation_requests'][0]
+    first['request_id']=str(UUID(int=8989))
+    work=case_work()
+    work['requests']=[{'request':first,'status':'completed','observations_committed':True}]
+    result=run_case(work,model=Model(research=True))
+    assert result['investigation_requests']==[]
+
+
 def test_case_evaluation_commits_before_reporting_and_gold_keys_prevent_new_inference():
     model, work = Model(), case_work('evaluate')
     result = run_case(work, model=model)

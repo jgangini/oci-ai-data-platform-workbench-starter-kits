@@ -17,6 +17,7 @@ from app.labs.ai_social_network.notebooks.sonda_io import (
 from app.labs.ai_social_network.notebooks.sonda_delta import (
     _rows, _scope, _table, apply_messages, apply_case_study_results, checked_binding,
     definitions, ensure_tables, json_mode, list_pending_cases, load_case_work, publish, reject_transport_message)
+from app.labs.ai_social_network.notebooks.sonda_limits_io import consume_source_limits
 
 RUNNER_BINDING = {}
 
@@ -254,11 +255,22 @@ def run_sonda(binding,*,validation=False):
     processed=(timed_call('consume',consume_batch,spark,binding,inbound,configuration_only=True)
         if bootstrap and not validating else timed_call('consume',consume_batch,spark,binding,inbound))
     published=timed_call('outbox',flush_outbox,spark,binding,objects,outbound)
+    limits=timed_call('source_limits',consume_source_limits,spark,binding,objects,inbound)
+    if limits['state']=='pending':
+        return record_runtime(spark,binding,objects,{'status':'deferred','processed_messages':processed,
+            'processed_case_phases':0,'published_messages':published,'source_limits_state':'pending'})
     if bootstrap and not validating:
         return record_runtime(spark,binding,objects,{'status':'prepared','processed_messages':processed,
             'processed_case_phases':0,'published_messages':published})
-    cases=0
-    deferred=0
+    batch=_run_sonda_case_batch(spark,binding,storage,objects,outbound,signer,identity)
+    return record_runtime(spark,binding,objects,{'status':'success','processed_messages':processed,
+        'processed_case_phases':batch['processed'],'deferred_case_phases':batch['deferred'],
+        'published_messages':published+batch['published']})
+
+
+def _run_sonda_case_batch(spark,binding,storage,objects,outbound,signer,identity):
+    """Run the bounded case phase after configuration and policy synchronization."""
+    cases=deferred=published=0
     pending_cases=timed_call('case_selection',list_pending_cases,spark,binding,limit=5)
     for item in pending_cases['cases']:
         if not generation_inference(storage,binding):
@@ -273,5 +285,4 @@ def run_sonda(binding,*,validation=False):
             continue
         cases+=1
         published+=timed_call('outbox',flush_outbox,spark,binding,objects,outbound)
-    return record_runtime(spark,binding,objects,{'status':'success','processed_messages':processed,
-        'processed_case_phases':cases,'deferred_case_phases':deferred,'published_messages':published})
+    return {'processed':cases,'deferred':deferred,'published':published}

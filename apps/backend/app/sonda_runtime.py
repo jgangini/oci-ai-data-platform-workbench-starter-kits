@@ -53,18 +53,23 @@ def readable_source(paths,*,excluded=None):
 
 
 def investigator_source():
-    return readable_source(('sonda_contract.py',
+    return readable_source(('sonda_contract.py','sonda_source_limits.py',
         'labs/ai_social_network/notebooks/sonda_io.py',
+        'labs/ai_social_network/notebooks/sonda_tools.py',
         'labs/ai_social_network/notebooks/agent/sonda_study.py',
+        'labs/ai_social_network/notebooks/agent/sonda_research_tools.py',
         'labs/ai_social_network/notebooks/agent/sonda_model.py',
         'labs/ai_social_network/notebooks/agent/sonda_memory.py',
         'labs/ai_social_network/notebooks/agent/sonda_worker.py'))
 
 
 def ingestion_source():
-    return readable_source(('sonda_contract.py','sonda_exchange.py',
+    return readable_source(('sonda_contract.py','sonda_source_limits.py',
+        'sonda_source_limits_transport.py','sonda_exchange.py',
         'labs/ai_social_network/notebooks/sonda_io.py',
+        'labs/ai_social_network/notebooks/sonda_tools.py',
         'labs/ai_social_network/notebooks/sonda_delta.py',
+        'labs/ai_social_network/notebooks/sonda_limits_io.py',
         'labs/ai_social_network/notebooks/sonda_runner.py'))
 
 

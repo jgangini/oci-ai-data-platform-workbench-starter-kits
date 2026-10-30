@@ -137,7 +137,8 @@ def test_work_identity_is_stable_and_result_must_confirm_exact_input():
 
 
 @pytest.mark.parametrize('uncertain',[False,True])
-def test_production_loop_resumes_uncertainty_before_consuming_and_keeps_noop_predecessor(monkeypatch,uncertain):
+@pytest.mark.parametrize('limits_pending',[False,True])
+def test_production_loop_resumes_uncertainty_before_consuming_and_keeps_noop_predecessor(monkeypatch,uncertain,limits_pending):
     binding={'registry_id':str(UUID(int=1)),'generation_id':str(UUID(int=2)),
         'contract_sha256':'a'*64,'source_prefix':'aidp-social/','namespace':'test',
         'source_bucket':'source','artifacts_bucket':'artifacts',
@@ -155,6 +156,7 @@ def test_production_loop_resumes_uncertainty_before_consuming_and_keeps_noop_pre
     monkeypatch.setattr(runner,'apply_messages',lambda *args:None)
     monkeypatch.setattr(runner,'consume_batch',lambda *args:0)
     monkeypatch.setattr(runner,'flush_outbox',lambda *args:0)
+    monkeypatch.setattr(runner,'consume_source_limits',lambda *args:{'state':'pending' if limits_pending else 'applied'})
     monkeypatch.setattr(runner,'record_runtime',lambda spark,binding,objects,result:result)
     monkeypatch.setattr(runner,'list_pending_cases',lambda *args,**kwargs:{'cases':[{'investigation_id':'b'*64}]})
     def load(*args,**kwargs):
@@ -175,7 +177,12 @@ def test_production_loop_resumes_uncertainty_before_consuming_and_keeps_noop_pre
         assert runner.run_sonda(binding)['status']=='deferred'
         assert not committed
         return
-    assert runner.run_sonda(binding)['processed_case_phases']==1
+    result=runner.run_sonda(binding)
+    if limits_pending:
+        assert result['status']=='deferred' and result['processed_case_phases']==0
+        assert result['source_limits_state']=='pending' and not committed
+        return
+    assert result['processed_case_phases']==1
     assert committed[0]['predecessor_revision']==4
 
 

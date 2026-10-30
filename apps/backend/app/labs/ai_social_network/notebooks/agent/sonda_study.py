@@ -22,6 +22,7 @@ from app.sonda_contract import (BudgetMessage, ConfigMessage, Count, Criterion, 
     Evidence, ExecutionMessage, Hash, Indicator, InvestigationRequest, Name, Observation, Proposal,
     Record, Report, Revision, Score, StrictBool, canonical_url, canonical_utc,
     encoded, evaluation_fingerprint, reject_secrets, sha256)
+from app.sonda_source_limits import SourceLimitsSnapshot
 
 
 class Identity(Record):
@@ -177,6 +178,7 @@ class CaseWork(Record):
     requests: Annotated[list[CaseRequest], Field(max_length=20)] = Field(default_factory=list)
     requests_complete: Literal[True]
     budget_round: BudgetMessage | None = None
+    source_limits: SourceLimitsSnapshot | None = None
     report_revision: Count = 0
     approved_query_ids: Annotated[list[UUID], Field(max_length=20)] = Field(default_factory=list)
     limitations: Annotated[list[Annotated[str, Field(strict=True, min_length=1, max_length=1000)]], Field(max_length=20)] = Field(default_factory=list)
@@ -297,11 +299,26 @@ def case_projection(configuration, work, previous, execution_results):
     _case_study_execution_history(execution_results, requests, binding)
     if work['budget_round'] and scope(work['budget_round']) != binding:
         raise ValueError('Budget belongs to another generation')
+    _case_study_source_limits(current['payload'], work, binding)
     if work['phase'] == 'evaluate':
         _case_study_evaluate_projection(work, current_revision)
     else:
         _case_study_report_projection(work)
     return current['payload'], work, previous
+
+
+def _case_study_source_limits(configuration, work, binding):
+    limits = work['source_limits']
+    if limits is None:
+        return
+    if any(limits[key] != binding[key] for key in ('registry_id', 'generation_id')):
+        raise ValueError('Source limits belong to another generation')
+    if (limits['config_revision'] != configuration['revision']
+            or limits['configuration_payload_sha256'] != digest(configuration)):
+        raise ValueError('Source limits do not match the current configuration')
+    if {row['source_id']: row['source_revision'] for row in limits['policies']} != {
+            row['source_id']: row['revision'] for row in configuration['sources']}:
+        raise ValueError('Source limits do not cover the exact source revisions')
 
 
 def rule_context(criterion):
@@ -322,7 +339,11 @@ def context_rows(rows, byte_limit):
 
 async def case_infer(model, role, payload):
     # A row-count cap alone does not bound long posts, examples or mapped values.
-    if len(encoded(payload)) > 98304:
+    context = payload.get('_tool_context') if role == 'plan' else None
+    if context is not None and len(encoded(context)) > 4194304:
+        raise ValueError('Trusted research tool configuration exceeds its byte budget')
+    visible = {key: value for key, value in payload.items() if key != '_tool_context'} if context is not None else payload
+    if len(encoded(visible)) > 98304:
         raise ValueError('Case inference context exceeds its byte budget')
     return await model(role, copy.deepcopy(payload))
 
@@ -376,6 +397,7 @@ def case_research(current, work, plan, timestamp):
                  if row['query_id'] in work['approved_query_ids']}
     budget = _case_study_open_budget(work, current['revision'], timestamp)
     cost_used = items_used = 0
+    source_used = {}
     refs = [row['evidence_id'] for row in work['evidence']]
     for step in plan['requests']:
         query = permitted.get(step['query_id'])
@@ -387,12 +409,17 @@ def case_research(current, work, plan, timestamp):
             limits.append('El destino propuesto no pertenece al alcance aprobado.')
             continue
         connector, target, request_id = target_info
-        if request_id in existing:
+        if request_id in existing or _case_study_target_requested(work, query, target):
             continue
         if len(existing) >= current['policy']['max_research_requests_per_case']:
             limits.append('Se alcanzó el máximo de solicitudes de este caso.')
             break
         capacity, refusal = _case_study_request_capacity(current, work, budget, query, connector, step, (cost_used, items_used))
+        if capacity is None:
+            limits.append(refusal)
+            continue
+        items, cost = capacity
+        capacity, refusal = _case_study_source_capacity(work, query, connector, items, cost, source_used)
         if capacity is None:
             limits.append(refusal)
             continue
@@ -406,7 +433,44 @@ def case_research(current, work, plan, timestamp):
         existing.add(request_id)
         cost_used += request['max_cost_microusd']
         items_used += items
+        spent, starts = source_used.get(query['source_id'], (0, 0))
+        source_used[query['source_id']] = (spent + cost, starts + 1)
     return requests, limits
+
+
+def _case_study_target_requested(work, query, target):
+    """Preserve semantic dedup when upgrading earlier model-worded step IDs."""
+    for row in work['requests']:
+        request = row['request']
+        if (request['query_id'], request['query_revision']) != (query['query_id'], query['revision']):
+            continue
+        previous = request['target_override'] or query['target']
+        if query['mode'] in ('pages', 'indicators'):
+            previous = canonical_url(previous)
+        if previous == target:
+            return True
+    return False
+
+
+def _case_study_source_capacity(work, query, connector, items, cost, source_used):
+    """Static per-source bounds for this plan; Huginn owns live reservations."""
+    snapshot = work.get('source_limits')
+    if snapshot is None:
+        return (items, cost), None
+    policy = next((row for row in snapshot['policies'] if row['source_id'] == query['source_id']), None)
+    if policy is None:
+        return None, 'No está disponible la política de la fuente.'
+    spent, starts = source_used.get(query['source_id'], (0, 0))
+    if policy['max_starts_per_round'] is not None and starts >= policy['max_starts_per_round']:
+        return None, 'Se alcanzó el límite de solicitudes de la fuente en este plan.'
+    if policy['max_items_per_execution'] is not None:
+        items = min(items, policy['max_items_per_execution'])
+    price = connector['max_cost_microusd_per_item']
+    if policy['max_cost_per_round_microusd'] is not None and price:
+        items = min(items, max(0, policy['max_cost_per_round_microusd'] - spent) // price)
+    if not items:
+        return None, 'Los límites de la fuente no permiten esta solicitud.'
+    return (items, items * price), None
 
 
 _STUDY_PROPOSAL_MANAGED_FIELDS = ('revision', 'origin', 'author_id', 'proposal_id', 'approval', 'status')
@@ -525,7 +589,9 @@ async def _case_study_plan_report(current, work, model, timestamp, context, outp
         try:
             plan = dto(Plan, await case_infer(model, 'plan', {'investigation_id':work['investigation_id'],
                 'criterion':rule_context(work['criterion']), 'facts':work['facts'], 'evaluations':context['verdicts'],
-                'evidence':context['quotes'], 'approved_queries':context['allowed'], 'limitations':limits}))
+                'evidence':context['quotes'], 'approved_queries':context['allowed'], 'limitations':limits,
+                '_tool_context':{'configuration':current, 'scope':work['scope'],
+                    'approved_query_ids':work['approved_query_ids'], 'source_limits':work['source_limits']}}))
             output['investigation_requests'], reasons = case_research(current, work, plan, timestamp)
             limits.extend(reasons)
             return plan['propose']

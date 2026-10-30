@@ -8,3 +8,7 @@ apps/gods-eye-view/public/brand-icons/** text eol=lf
 # Synthetic media is immutable binary data; preserve manifest SHA-256 values.
 apps/backend/app/labs/gods_eye_view/source/**/*.png -text
 apps/backend/app/labs/gods_eye_view/source/**/*.webp -text
+
+contracts/sonda-chat-actions/** text eol=lf
+contracts/sonda-source-limits/** text eol=lf
+contracts/sonda-source-limits-transport/** text eol=lf

@@ -279,7 +279,7 @@ def prepared_receipt(binding, revision=2):
     scope = {key: binding[key] for key in ('registry_id', 'generation_id')}
     publication = {**scope, 'config_revision': revision, 'versions_json': json.dumps(versions),
         'publication_id': install.fingerprint([scope, revision, versions])}
-    return {**scope, 'contract_sha256': install.CONTRACT_SHA256, 'table_count': 26, 'status': 'prepared',
+    return {**scope, 'contract_sha256': install.CONTRACT_SHA256, 'table_count': 28, 'status': 'prepared',
         'completed_at': '2026-10-29T18:01:00Z', 'publication': publication}
 
 
@@ -334,7 +334,7 @@ def test_missing_receipt_or_unsuccessful_job_stays_pending(client, binding):
         client._sync_social('workspace', manifest(binding), 'install')
 
 
-def test_all_26_catalog_descriptions_use_authoritative_definitions(client, binding):
+def test_all_catalog_descriptions_use_authoritative_definitions(client, binding):
     definitions = install.definitions(binding)
     client._catalog = Mock(return_value={'key': 'catalog'})
     client._list = Mock(return_value=[{'key': 'gold', 'displayName': 'oci_gold'}, {'key': 'control', 'displayName': 'oci_artifacts'}])
@@ -342,7 +342,7 @@ def test_all_26_catalog_descriptions_use_authoritative_definitions(client, bindi
         for name, value in definitions.items() if value['layer'] == ('gold' if schema == 'gold' else 'control')])
     client._describe_catalog_table = Mock(return_value=True)
     client._catalog_descriptions()
-    assert client._describe_catalog_table.call_count == 26
+    assert client._describe_catalog_table.call_count == 28
     for call in client._describe_catalog_table.call_args_list:
         assert call.args[-1] == definitions[call.args[2]]['description']
 

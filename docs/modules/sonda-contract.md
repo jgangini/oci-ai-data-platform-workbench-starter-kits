@@ -277,7 +277,7 @@ not delete data or silently claim acceptance of an unverified generation.
 
 ## Installer preparation and release boundary
 
-`SondaAidpClient` is the application installer for component 1.2.0. It resolves the
+`SondaAidpClient` is the application installer for candidate component 1.3.0. It resolves the
 selected OCI model by its exact server-configured ID and actual active catalog
 revision. An unversioned alias, another identity or inconsistent storage binding
 stops preparation before capture. Spark uses its injected secret API; AI compute
@@ -293,7 +293,7 @@ operation. Initial discovery is bounded to 20,000 operational objects; an existi
 generation reads its exact binding key rather than scanning accumulated work.
 
 Preparation keeps the five-minute job paused, runs configuration-only bootstrap,
-then verifies a fresh runtime receipt: all 26 tables, the required configuration
+then verifies a fresh runtime receipt: all 28 tables, the required configuration
 revision and a hash-bound map of committed Delta serving versions. A successful
 job without that receipt is insufficient. Table descriptions explain each grain
 and purpose. SQL namespaces use strict plain identifiers compatible with the
@@ -312,3 +312,271 @@ component pack. `render_sonda_runtime.py --check` verifies the committed package
 the compositor rechecks the bytes it actually reads. Deployment readiness,
 integrated acceptance, immutable release publication and the portal update are
 separate checks. This branch remains a candidate until those checks pass.
+
+
+## Proposed chat extraction capability — not implemented
+
+The current v2 chat reads published Gold only. The investigator can request
+additional approved captures for an existing evidence-backed case; this does not
+provide extraction from an arbitrary chat question. Public-web/news/economic
+sources already have contract types, but each still requires a reviewed connector,
+an approved source/domain list and an approved query.
+
+The proposed **Sonda Chat Actions 1.0.0** is a separately pinned capability used
+only by explicitly negotiated chat v3 clients. The Sonda exchange contract 1.0.2,
+its published reference bytes, existing stream hashes, generation and existing tables
+remain intact. This section is a design for agreement, not a supported endpoint
+or permission to activate a source. Its canonical implementation, generated schema
+and synthetic fixtures must be reviewed and exported together before use.
+
+The two implementers accepted implementation pin
+`4c6e3794e90d02c6d87e7bee548a99731fd90461252ddf39a15cecc14b56fc21`
+on 2026-10-30. The portable manifest/reference bytes are frozen. This agreement
+does not activate the proposed writer/reader or establish end-to-end acceptance.
+
+A chat may propose at most one `CaptureIntent` per turn. Its fields are:
+
+| Field | Rule |
+| --- | --- |
+| `intent_id` | Deterministic UUID5 derived by trusted code from registry/generation/turn only; the model cannot select it. Repeating that ID with a different payload fingerprint is an immutable conflict, never a second operation. |
+| `turn_id` | UUID persisted by the authenticated Huginn proxy before the model call, with immutable created/expiry times (maximum fifteen minutes); the same interrupted request retains them. A later intentional refresh is a new turn. |
+| `registry_id`, `generation_id`, `config_revision` | Exact authenticated installation and approved configuration used for planning. |
+| `capture_option_id` | Exact hash of one option in the trusted server turn; an empty catalog denies every intent. |
+| `source_id`, `source_revision`, `query_id`, `query_revision` | Existing approved source/query pair in that same scope; a source cannot be replaced by a browser/model Actor ID. |
+| `target_override` | Optional canonical public URL only for an approved pages/indicators query that permits target overrides; exact allowed domain and broker DNS/redirect validation apply. Social account/search targets retain their reviewed input semantics. |
+| `purpose` | Nonempty plain text, at most 500 characters. It is untrusted content, not instructions to the broker. |
+| `max_items`, `max_cost_microusd` | Positive item bound (at most 100 per chat intent) and nonnegative integer monetary ceiling, no larger than the approved query/connector policy. They are requested limits, not a price quote or reserved balance. |
+| `expires_at` | Absolute UTC expiry set by trusted code; expiry cannot be extended by polling/retry. |
+
+The v3 `chat_input` includes the capability/core pins, server turn identity and
+expiry, existing read `search_context`, current `capture_config_revision` and an
+explicit complete list of up to 20 `CaptureOption` records. Each option fingerprints
+its registry/generation/turn, capture revision, approved source/query revisions,
+mode, target/override/domain rules and item/cost limits. `capture_options_total`
+must equal the supplied list length; overflow requires narrowing the selection,
+never silent truncation. Empty options grant no capture permission even when empty
+read filters mean all historical Gold. The model selects an `option_id`; trusted
+code resolves its revisions and limits rather than asking the model to invent them.
+A changed option invalidates its fingerprint and outstanding quote.
+
+The exact v3 `chat_response` contains pins, registry/generation, turn identity,
+`capture_config_revision`, one plain-language `answer`, optional typed `gold`, an
+explicit `gold_unavailable_reason` when Gold is absent and `actions` (zero or one
+intent). `gold` carries publication, read context, query context, sources and
+visualization without duplicating the answer. Its read configuration may differ
+from the current capture revision. The response may propose an action before any
+Gold exists; missing/unavailable Gold is never reported as a verified empty result. Returning an action neither
+starts capture nor claims that extraction succeeded. No Actor, credential,
+provider endpoint, arbitrary SQL, fabricated criterion/case or model-generated
+approval belongs in the intent.
+
+Huginn owns the durable operation, authorization, quote/confirmation and execution.
+Before reserving or starting, it revalidates the currently approved revisions,
+source/query pairing, public target, reviewed connector/build/schema, known cost,
+remaining budget, producer coordinator and operation expiry. An operator decision
+uses the normal authenticated, CSRF-protected product flow. The existing broker
+and conditional/idempotent capture ledger remain the sole capture owner. A chat
+start selects only its reviewed query; the legacy start-all-active-queries operation
+cannot be reused without an exact selection. Model input, status polling and a
+boolean global enable flag cannot substitute for that scope.
+
+The asynchronous lifecycle is `proposed → awaiting_confirmation → starting →
+running → captured → awaiting_gold → ready`. Rejected, expired, cancelled, failed
+and uncertain outcomes remain explicit. A pending/uncertain start cannot be
+replaced with another start. Read-only status polling invokes neither a model nor
+a provider and cannot reactivate an operation. Authoritative state revisions
+prevent stale approvals or late completions from overwriting newer state.
+
+An operator-confirmed chat capture publishes ordinary 1.0.2 observations and
+execution results through the existing producer. With no investigation case,
+`ExecutionResult.request_id` remains NULL; the operation retains its separate
+intent-to-execution link. Observation provenance still records the real source,
+query, capture revision, execution and provider run. Actor success alone leaves
+`awaiting_gold`: `ready` requires the matching execution/observation receipts in a
+committed serving publication. A genuine zero-result capture stays zero without
+invented observations. A refresh uses that Gold publication; status polling does
+not silently submit another paid model question.
+
+Acceptance must exercise strict schemas and pins, duplicate-same versus
+conflicting intent identities, cross-user/generation/source isolation, stale
+configuration and approvals, disallowed/private/redirected targets, unknown costs,
+closed/exhausted budgets, uncertain starts, zero results, capture success before
+Gold commit, interrupted recovery and v2 compatibility. Neither this design nor
+local fixtures establish live provider or browser acceptance.
+
+
+Draft files are `app/sonda_chat_actions.py` (under `apps/backend`),
+`scripts/export_sonda_chat_actions.py` and `contracts/sonda-chat-actions/v1/`.
+The v3 `chat_input` includes immutable server-issued `created_at`/`expires_at`;
+The `chat_response` is a complete separately negotiated envelope, including
+typed optional Gold rather than adding fields to the legacy v2 response. `check_capture_intent` links the proposal to that exact turn,
+selected references and live expiry. Schema validation is not authorization.
+
+The proposed immutable Gold receipt location is derived only from validated IDs:
+
+```text
+ai_social_network/registries/{registry_id}/generations/{generation_id}/control/
+    chat_actions/v1/capture_receipts/{execution_id}.json
+```
+
+Only the native writer may emit it after publication. It binds the exact execution,
+observation messages, applied processing receipts, execution stream entry hash and
+its actual predecessor entry hash, and the publication scope/revision/version-map
+hash. Capture configuration revision and publication configuration revision are
+separate: an older approved capture may legitimately be committed after a newer
+configuration arrives. Core publications are not a hash-linked chain; the draft
+does not invent a predecessor publication. The stream predecessor uses the real
+1.0.2 transport entry. The writer-side `check_capture_publication` compares against
+authenticated native/core evidence before emitting; accepting a DTO from a model
+or browser never proves these facts.
+
+The final publication must include the execution-completion message. Observation
+messages may have been applied in earlier batches: a split at source sequences
+25/26 must not require both batches to share `message_ids_json`. Each observation
+still requires its exact protected bytes, applied processing receipt and content
+version in the final serving snapshot. The checker compares the writer's factual
+snapshot at those Delta versions, not merely model-supplied membership claims.
+
+Huginn needs a dedicated read action for this one derived object. It must not
+broaden core transport to arbitrary keys or accept a URL/bucket/key from a caller.
+A missing object means awaiting Gold. Invalid scope, pin, execution, schema or hash
+is an error. The first protected read records its digest; a different payload at
+the same execution identity is a conflict. The writer uses create-only storage,
+retains unresolved work across failures and reconciles it before advancing inbound
+work, so a crash cannot turn a missing receipt into an unrelated later publication.
+These writer/reader operations are proposed; they are not implemented by the DTOs.
+
+## Derived source tool catalog — candidate 1.3.0
+
+Huginn remains the sole configuration and credential owner. The additive Gold
+table `ai_social_tool_catalog` projects one row per configured query from the
+validated core configuration: source/query/connector revisions, reviewed operation,
+target, approval states, static ceilings and a closed invocation schema. It does
+not copy provider credentials or arbitrary query parameters. `configured_eligible`
+describes configuration approval, not live permission, funds or an executed call.
+The broker must recheck current permissions, target resolution, price and budget.
+
+Rows are immutable by generation/configuration/tool snapshot. The existing writer
+adds them in the configuration journal, repairs a missing current projection on
+upgrade and publishes its exact Delta version before readers can use it. An
+existing conflicting snapshot fails rather than being overwritten. Historical
+source records and observation tables are preserved. This small metadata table is
+unpartitioned; partitioning by source/query would create small files without a
+measured query benefit. No production scale benchmark is claimed.
+
+The projection is implemented and covered locally; native installation and
+functional agent-tool invocation are pending. Source-specific policy replication
+is a separately negotiated capability: the core 1.0.2 reference stays immutable.
+An absent expected policy must never become an unlimited grant. Huginn will own
+source/round aggregate spending and start reservations under its broker lock;
+changing policy revision cannot reset prior usage.
+
+The additional `ai_social_source_limits` Gold table retains immutable full policy
+snapshots by catalog revision. Its writer validates the exact historical core
+configuration and APPLIED processing receipt, including source sequence/raw hash,
+before inserting. A crash between its Delta insert and publication replays the
+same snapshot identity. It is not a second source editor or a capture ledger.
+
+## Source Limits 1.0.0 — implementation contract, not activated
+
+The separately exported [Source Limits reference](../../contracts/sonda-source-limits/v1/manifest.json)
+has implementation pin
+`1806d6ae7de6c975123106b477728591c594f97f604a27ac5b1d00c526a16528`.
+Its immutable full snapshot binds registry/generation, catalog predecessor hash,
+catalog revision and the exact core configuration revision/payload hash. All
+configured sources appear in canonical order with their source/policy revisions
+and explicit nullable limits: `max_items_per_execution`,
+`max_cost_per_round_microusd`, `max_starts_per_round`. Null removes an additional
+source cap. A source disappears only with its removal from the matching core
+configuration; saving a changed policy advances the global configuration revision.
+
+Items mean normalized observations per execution. Provider adapters must also cap
+raw items/pages conservatively and cannot collect extra pages to refill after
+deduplication. Spend and starts aggregate all queries, capture and research for
+`(registry_id, generation_id, round_id, source_id)`; policy revision is not part of
+this identity. Existing commitments survive source removal and cap reductions.
+
+The broker reserves both a start and its maximum charge under its existing lock
+before each real provider POST. Confirmed spending plus outstanding reservations
+consumes the cap; an uncertain response retains its start and reservation until
+the same execution is reconciled. Lowered limits block new work that no longer
+fits but never prevent settlement. Zero starts blocks every POST; zero source
+spend permits only a verified-free tool. All global/query limits remain mandatory.
+The exported helper computes an admission decision; it does not implement a
+distributed lock, settlement, retries or an invocation grant.
+
+Legacy absence applies only when no sidecar expectation has ever been persisted.
+An expected policy that is missing, invalid, pending or mismatched blocks new
+starts. Matching core APPLIED and a protected sidecar application acknowledgement
+are required before operability. An uploaded snapshot or saved form cannot
+substitute for application.
+
+### Source Limits transport — implementation contract, not activated
+
+The [separate transport reference](../../contracts/sonda-source-limits-transport/v1/manifest.json)
+has implementation pin
+`5811fa57e3aa81caca1606db00871458a1f7fac10bd177964bc88527d82836dd`.
+It preserves both frozen core and policy reference bytes. The installation's bound
+artifacts bucket owns this fixed prefix:
+
+```text
+ai_social_network/registries/{registry_id}/generations/{generation_id}/control/source_limits/v1/
+```
+
+Huginn persists its expected reference before publishing a create-only
+`snapshots/{catalog_revision}-{snapshot_sha256}.json`, followed by a conditional
+`head.json`. An uncertain write reads back the same key: equal bytes are the same
+operation; different bytes are a conflict. The native generation writer alone
+publishes create-only `acks/{catalog_revision}-{snapshot_sha256}.json` after the
+sidecar Delta commit and coherent publication. These are logical writer ownership
+rules; sharing the existing OCI credential does not create separate IAM identities.
+
+The ACK binds sidecar/core pins and scope, exact historical configuration ID,
+source sequence, raw/payload hashes, its protected APPLIED receipt, the actual
+publication ID/revision/version map and the sidecar row at the published Delta
+version. It cannot be built from a model/browser claim or a status string.
+Sidecars 6/7 can catch up while core is already at 8: each uses its own historical
+configuration and APPLIED receipt. Huginn permits new starts only after its current
+expected reference, core APPLIED and sidecar ACK match; an older ACK cannot cover
+a newer expectation. Polling, reloads and failure recovery never start a provider.
+
+The local consumer uses the existing generation writer lease and stops new case
+work while required policy/receipt publication is pending. Its protected private
+prepared-proof journal retains the actual SQL publication/witness used before
+ACK creation; recovery reuses those exact ACK bytes instead of scanning an aging
+publication history on every five-minute run. Snapshot ancestry and initial
+historical-proof recovery have bounded reads; a larger gap fails closed and needs
+a reviewed paged history path. Transport, persistence and broker acceptance still
+require coordinated native/UI validation before activation.
+
+### Research tools in the code-first agent — candidate 1.3.0
+
+The investigator's plan role now builds case-local `StructuredTool` closures from
+the approved current configuration and published source policies. This uses the
+same deterministic metadata projection as `ai_social_tool_catalog`; there is no
+second connector form, credential copy, global tool registry or provider client.
+Only purpose, bounded item count and a reviewed public target override are model
+arguments. Source/query identity, revisions and static cost ceilings stay bound
+in trusted code. Provider parameters are removed before constructing the model
+message. Trusted tool configuration and visible evidence have separate byte bounds.
+
+One durable inference task binds the tools and accepts at most twenty tool calls.
+Their callbacks only prepare typed specifications: they do not capture, reserve,
+enqueue or claim new evidence. Existing `case_research` validates the combined
+plan, including static source item/cost/start ceilings, and the existing Gold
+writer commits accepted requests/outbox entries. Huginn remains the sole provider
+caller and financial reservation authority. Live remaining source balances are
+not inferred from those static ceilings.
+
+Stable server-generated steps bind query identity and canonical target. Legacy
+requests with earlier model-worded steps are also deduplicated by query/revision/
+target, so a rephrased retry cannot cause another capture. A separate pure review
+tool preserves the existing proposal stage; it is not a data source and never
+approves a configuration change. New information becomes report evidence only
+after confirmed observations are published in Gold.
+
+A temporary isolated check on the actual AI compute confirmed native
+`GenAIChatInvoker.bind_tools` with a real `StructuredTool` (LangChain Core 1.4.6,
+LangGraph 1.2.4, Pydantic 2.14.1). It made zero model, provider, SQL or memory calls;
+its agent and files were removed. This establishes SDK binding compatibility,
+not model behavior or end-to-end provider acceptance of candidate 1.3.0.
