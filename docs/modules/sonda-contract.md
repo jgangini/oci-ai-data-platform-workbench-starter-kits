@@ -173,6 +173,14 @@ external subgraph routes are rejected. Both native entry points use this boundar
 An explicitly selected network uses an ungrouped aggregate so an empty population
 returns a verified count of zero; missing engagement metrics remain NULL.
 
+Chat retries identify the canonical v2 input. An interrupted identical turn resumes
+its pending node and pinned data snapshot after rechecking the generation fence
+and approved configuration revision. A different question retires the incomplete
+read-only turn and its temporary rows before starting afresh. Structured planner
+format errors use at most two attempts; infrastructure failures remain failures.
+These boundaries follow LangGraph's [checkpointer guidance](https://docs.langchain.com/oss/python/langgraph/checkpointers)
+and [error classification](https://docs.langchain.com/oss/python/langgraph/thinking-in-langgraph).
+
 The runner records a conditional per-case pending-work pointer before inference.
 An unknown HTTP outcome resumes that exact immutable work even if new evidence
 for the same case arrives meanwhile. Its result is applied idempotently before

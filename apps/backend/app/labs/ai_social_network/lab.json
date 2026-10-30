@@ -53,7 +53,7 @@
     },
     {
       "file": "notebooks/agent/sonda_chat_entry.py",
-      "sha256": "554b105e80c7fdee39b09895f68daca1b5069d6d1b83418ff78faeec8bf320c2",
+      "sha256": "e17d0afe8d4b4ef67fd9874e732acade53217a08b39e4ebafae56ee6d7284cf5",
       "workspace_path": "agent/sonda_chat_entry.py"
     },
     {
@@ -87,7 +87,7 @@
       "workspace_path": "agent/social_agent.py"
     }
   ],
-  "pack_sha256": "71f92e0d09228af45a898d6b97593c94e57bd43c3b5a372269c58ac9e6fd7b8f",
+  "pack_sha256": "52a44023056bf17b8646248f5ad3b5e7add54d7837ce53df852a5fdf6bb11f10",
   "shared_runtime_files": [
     {
       "file": "sonda_contract.py",

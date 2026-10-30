@@ -47,6 +47,8 @@ class NativeFixture:
             'model_id':'fixture-model','compartment_id':'fixture-compartment','gold_query_compute_id':'fixture-compute'}
         self.sql_calls,self.model_calls,self.flow_calls=[],[],[]
         self.paused,self.sql_error,self.bad_plan,self.bad_ref=False,False,False,False
+        self.answer_error=False
+        self.plan_parse_errors=0
         self.unsafe_value=False
         self.memory=AuthenticatedSaver()
         for name in ('aidputils','aidputils.agents','aidputils.agents.toolkit'):
@@ -65,12 +67,17 @@ class NativeFixture:
                         role='plan' if schema['title']=='SondaQuery' else 'answer'
                         owner.model_calls.append((role,payload))
                         if role=='plan':
+                            if owner.plan_parse_errors:
+                                owner.plan_parse_errors-=1
+                                raise ValueError('Synthetic structured-output parsing failure')
                             if owner.bad_plan:
                                 return {'tool':'summary','args':{'sql':'DROP TABLE anything'},'presentation':'none','continue_query':False}
                             question=payload['question'].lower()
                             if 'línea' in question or 'linea' in question:
                                 return {'tool':'trend','args':{'platforms':['instagram','facebook'],'limit':50},'presentation':'line','continue_query':False}
                             return {'tool':'search','args':{},'presentation':'table','continue_query':False}
+                        if owner.answer_error:
+                            raise TimeoutError('Synthetic answer interruption after verified SQL')
                         queries=payload['queries']
                         last=queries[-1]
                         rows=last['rows']
@@ -256,4 +263,91 @@ def test_native_plan_repair_is_bounded_and_chart_failure_preserves_plain_answer(
         native.unsafe_value=True
         response=await native.invoke(agent,'en que red social hay mas comentarios de oracle')
         assert response['answer'] and response['visualization'] is None and response['visualization_error']
+    asyncio.run(check())
+
+
+def test_retry_after_answer_failure_resumes_without_repeating_gold_data_query_or_user_message(native):
+    async def check():
+        agent=native.agent()
+        native.answer_error=True
+        question='cuantos post hay en yotube'
+        with pytest.raises(TimeoutError):
+            await native.invoke(agent,question)
+        data_queries=[s for s in native.sql_calls if '.ai_social_document_current ' in s]
+        assert len(data_queries)==1
+        native.answer_error=False
+        response=await native.invoke(native.agent(),question)
+        assert response['answer']=='YouTube tiene 1 publicación disponible.'
+        assert len([s for s in native.sql_calls if '.ai_social_document_current ' in s])==1
+        config={'configurable':{'thread_id':core.session_key(native.binding,'native-session')}}
+        state=(await agent.graph.aget_state(config)).values
+        assert [m.content for m in state['messages'] if m.type=='human']==[question]
+    asyncio.run(check())
+
+
+def test_new_question_discards_interrupted_readonly_turn_instead_of_reusing_its_rows(native):
+    async def check():
+        agent=native.agent()
+        native.answer_error=True
+        with pytest.raises(TimeoutError):
+            await native.invoke(agent,'cuantos post hay en yotube')
+        native.answer_error=False
+        response=await native.invoke(agent,'realiza un ranking de los post mas comentados')
+        assert response['query_context'][0]['tool']=='ranking'
+        config={'configurable':{'thread_id':core.session_key(native.binding,'native-session')}}
+        state=(await agent.graph.aget_state(config)).values
+        assert [m.content for m in state['messages'] if m.type=='human']==['realiza un ranking de los post mas comentados']
+    asyncio.run(check())
+
+
+def test_structured_plan_parser_errors_use_only_two_repair_attempts(native):
+    async def check():
+        native.plan_parse_errors=2
+        response=await native.invoke(native.agent(),'Busca documentos sobre un producto')
+        assert response['query_context']==[] and response['visualization'] is None
+        assert len([role for role,_ in native.model_calls if role=='plan'])==2
+    asyncio.run(check())
+
+
+def test_resume_rechecks_pause_and_rejects_changed_approved_configuration(native):
+    async def check():
+        agent=native.agent()
+        question='cuantos post hay en yotube'
+        native.answer_error=True
+        with pytest.raises(TimeoutError):
+            await native.invoke(agent,question)
+        native.answer_error=False
+        native.paused=True
+        calls=len(native.model_calls)
+        with pytest.raises(RuntimeError,match='paused'):
+            await native.invoke(agent,question)
+        assert len(native.model_calls)==calls
+        native.paused=False
+        original=native.module.query
+        def changed(binding,statement):
+            rows=original(binding,statement)
+            if '.ai_social_publication ' in statement:
+                rows[0]['config_revision']=2
+                scope={key:binding[key] for key in ('registry_id','generation_id')}
+                rows[0]['publication_id']=native.module.sha256(native.module.encoded([
+                    scope,2,json.loads(rows[0]['versions_json'])]))
+            return rows
+        native.module.query=changed
+        with pytest.raises(RuntimeError,match='configuration changed'):
+            await native.invoke(agent,question)
+        assert len(native.model_calls)==calls
+    asyncio.run(check())
+
+
+def test_prepare_query_failure_can_resume_before_a_snapshot_exists(native):
+    async def check():
+        agent=native.agent()
+        original=native.module.query
+        def unavailable(binding,statement):
+            raise RuntimeError('Synthetic snapshot query unavailable')
+        native.module.query=unavailable
+        with pytest.raises(RuntimeError):
+            await native.invoke(agent,'cuantos post hay en yotube')
+        native.module.query=original
+        assert (await native.invoke(agent,'cuantos post hay en yotube'))['answer']
     asyncio.run(check())

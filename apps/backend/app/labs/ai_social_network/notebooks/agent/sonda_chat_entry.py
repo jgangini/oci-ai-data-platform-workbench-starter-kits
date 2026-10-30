@@ -3,6 +3,7 @@ import asyncio
 from dataclasses import asdict
 import json
 from typing import TypedDict
+from app.sonda_contract import ChatInput, encoded, no_duplicate_keys, sha256
 
 from app.labs.ai_social_network.notebooks.sonda_io import generation_inference, runtime_storage
 from app.labs.ai_social_network.notebooks.agent.sonda_memory import native_memory, root_graph_config
@@ -23,6 +24,7 @@ class ChatStateV2(TypedDict):
     plan: dict
     queries: list
     response: dict
+    request_sha256: str
 
 
 class SondaChatAgent:
@@ -69,10 +71,10 @@ class SondaChatAgent:
                 'publication':state['snapshot'],'queries':state['queries'],'search_context':bound.search_context()}
             candidate=None if state['queries'] else verified_plan(bound.question,previous_query(state['messages']))
             for attempt in range(2):
-                if candidate is None:
-                    candidate=await planner.ainvoke([SystemMessage(content=SONDA_PROMPT),
-                        HumanMessage(content=json.dumps(payload,ensure_ascii=False))])
                 try:
+                    if candidate is None:
+                        candidate=await planner.ainvoke([SystemMessage(content=SONDA_PROMPT),
+                            HumanMessage(content=json.dumps(payload,ensure_ascii=False))])
                     if not state['queries']:
                         candidate=plan_for_question(state['snapshot'],candidate,bound.question)
                     candidate=checked_plan_v2(candidate,state['queries'],state['snapshot'])
@@ -125,6 +127,10 @@ class SondaChatAgent:
     async def invoke(self,user_query,**kwargs):
         from aidputils.agents.toolkit.agent_helper import flow_setup
         from langchain_core.messages import AIMessage
+        request=ChatInput.model_validate(json.loads(user_query,object_pairs_hook=no_duplicate_keys))
+        digest=sha256(encoded(request.model_dump(mode='json')))
+        if not await asyncio.to_thread(generation_inference,self.storage,self.binding):
+            raise RuntimeError('Sonda is paused or its generation is not ready')
         with flow_setup(**kwargs) as native_config:
             config=root_graph_config(native_config)
             native=(config.get('configurable') or {}).get('thread_id')
@@ -132,5 +138,19 @@ class SondaChatAgent:
             config['recursion_limit']=18
             history=await self.graph.aget_state(config)
             previous=history.values or {}
-            result=await self.graph.ainvoke({'raw_input':user_query,'messages':previous.get('messages',[])},config=config)
+            if history.next and previous.get('request_sha256')==digest:
+                if 'prepare' not in history.next:
+                    rows=await asyncio.to_thread(query,self.binding,snapshot_sql(self.binding))
+                    if len(rows)!=1 or snapshot_from_row(self.binding,rows[0])['config_revision']!=previous.get('snapshot',{}).get('config_revision'):
+                        raise RuntimeError('Approved configuration changed during this interrupted turn; start a new question')
+                result=await self.graph.ainvoke(None,config=config)
+            else:
+                messages=previous.get('messages',[])
+                if history.next:
+                    if messages and messages[-1].type=='human':
+                        messages=messages[:-1]
+                    await self.graph.aupdate_state(config,{'queries':[],'raw_input':'','response':{},
+                        'messages':messages},as_node='answer')
+                result=await self.graph.ainvoke({'raw_input':user_query,'request_sha256':digest,
+                    'messages':messages},config=config)
             return {'messages':[AIMessage(content=json.dumps(result['response'],ensure_ascii=False))]}
