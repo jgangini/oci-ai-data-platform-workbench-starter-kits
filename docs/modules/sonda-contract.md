@@ -170,6 +170,11 @@ Oracle's incoming `checkpoint_ns=default` is normalized to LangGraph's root
 namespace before reading graph state. The authenticated session and agent context
 are retained; only checkpoint storage receives the generation prefix. Other
 external subgraph routes are rejected. Both native entry points use this boundary.
+At checkpoint reads, message channels and pending message writes are restored
+through LangChain's `convert_to_messages`; Oracle JSON dictionaries become typed
+messages before graph nodes, follow-up context or interrupted-turn recovery read
+them. This leaves checkpoint identities, versions and generation isolation intact;
+invalid message shapes propagate as errors rather than clearing conversation history.
 An explicitly selected network uses an ungrouped aggregate so an empty population
 returns a verified count of zero; missing engagement metrics remain NULL.
 

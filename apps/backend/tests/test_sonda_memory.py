@@ -61,3 +61,39 @@ def test_cross_generation_checkpoint_metadata_cannot_be_recast_as_current():
     memory=GenerationMemory(InMemorySaver(),UUID(int=1))
     with pytest.raises(RuntimeError,match='another generation'):
         memory.namespaced({'configurable':{'checkpoint_ns':'sonda/'+str(UUID(int=2))+'/'}},reverse=True)
+
+
+def test_json_message_restore_preserves_checkpoint_metadata_versions_and_pending_writes():
+    from langgraph.checkpoint.base import CheckpointTuple
+    memory=GenerationMemory(InMemorySaver(),UUID(int=1))
+    config=memory.namespaced({'configurable':{'thread_id':'authenticated-session'}})
+    human={'type':'human','content':'Question','id':'human-1'}
+    ai={'type':'ai','content':'Answer','id':'ai-1'}
+    checkpoint={'id':'checkpoint-1','channel_values':{'messages':[human],'other':{'kept':True}},
+        'channel_versions':{'messages':'v1'},'versions_seen':{'prepare':{'messages':'v1'}}}
+    original=CheckpointTuple(config,checkpoint,{'step':1},config,[('task-1','messages',[ai]),('task-2','other',42)])
+    restored=memory.restored_tuple(original)
+    assert restored.checkpoint['channel_values']['messages'][0].id=='human-1'
+    assert restored.checkpoint['channel_values']['messages'][0].content=='Question'
+    assert restored.pending_writes[0][2][0].type=='ai'
+    assert restored.pending_writes[0][2][0].id=='ai-1'
+    assert restored.pending_writes[1]==('task-2','other',42)
+    assert restored.metadata==original.metadata
+    assert restored.checkpoint['channel_versions']==checkpoint['channel_versions']
+    assert restored.checkpoint['versions_seen']==checkpoint['versions_seen']
+    assert restored.checkpoint['id']==checkpoint['id']
+    assert restored.config['configurable']['thread_id']=='authenticated-session'
+    assert restored.config['configurable']['checkpoint_ns']==''
+    assert original.checkpoint['channel_values']['messages']==[human]
+    assert original.pending_writes[0][2]==[ai]
+    assert original.config['configurable']['checkpoint_ns']==memory.prefix
+
+
+def test_malformed_json_history_is_rejected_instead_of_cleared():
+    from langgraph.checkpoint.base import CheckpointTuple
+    memory=GenerationMemory(InMemorySaver(),UUID(int=1))
+    config=memory.namespaced({'configurable':{'thread_id':'authenticated-session'}})
+    original=CheckpointTuple(config,{'channel_values':{'messages':[{'type':'ai'}]}},{},None,[])
+    with pytest.raises(ValueError):
+        memory.restored_tuple(original)
+    assert original.checkpoint['channel_values']['messages']==[{'type':'ai'}]

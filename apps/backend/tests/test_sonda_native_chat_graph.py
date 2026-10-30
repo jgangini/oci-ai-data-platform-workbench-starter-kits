@@ -39,6 +39,23 @@ class AuthenticatedSaver(InMemorySaver):
         return await super().aput_writes(self.forced(config),writes,task_id,task_path=task_path)
 
 
+class JsonMessageSaver(AuthenticatedSaver):
+    """Oracle's checkpoint JSON transport restores message models as dictionaries."""
+    async def aget_tuple(self, config):
+        value = await super().aget_tuple(config)
+        if value is None:
+            return None
+        def wire(messages):
+            return [message.model_dump(mode='json') if hasattr(message, 'model_dump') else message
+                    for message in messages]
+        channels = dict(value.checkpoint['channel_values'])
+        if 'messages' in channels:
+            channels['messages'] = wire(channels['messages'])
+        writes = [(task, channel, wire(data) if channel == 'messages' else data)
+                  for task, channel, data in (value.pending_writes or [])]
+        return value._replace(checkpoint={**value.checkpoint, 'channel_values': channels}, pending_writes=writes)
+
+
 class FakeGenAI:
     """Injected provider with the structured-output interface used by native agents."""
     def __init__(self,owner,**kwargs):
@@ -219,6 +236,37 @@ def test_generated_native_graph_answers_three_reported_failures_and_echoes_exact
         assert not [role for role,_ in native.model_calls if role=='plan']
         data=[sql for sql in native.sql_calls if '.ai_social_registry ' not in sql and '.ai_social_publication ' not in sql]
         assert len(data)==3 and all('EXISTS (SELECT 1 FROM' in sql for sql in data)
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize('interrupted', [None, 'same_question', 'new_question'])
+def test_native_json_memory_restores_history_after_refresh_and_interruption(native, interrupted):
+    async def check():
+        native.memory = JsonMessageSaver()
+        agent = native.agent()
+        question = 'en que red social hay mas comentarios de oracle'
+        if interrupted:
+            native.answer_error = True
+            with pytest.raises(TimeoutError):
+                await native.invoke(agent, question)
+            native.answer_error = False
+        else:
+            await native.invoke(agent, question)
+        refreshed = native.agent()
+        next_question = question if interrupted == 'same_question' else 'cuantos post hay en yotube'
+        response = await native.invoke(refreshed, next_question)
+        assert response['answer']
+        if interrupted != 'same_question':
+            assert response['answer'] == 'YouTube tiene 1 publicación disponible.'
+            assert response['query_context'][0]['args']['period'] == 'all'
+        pie = await native.invoke(native.agent(), 'en pastel')
+        assert pie['visualization']['type'] == 'pie'
+        assert pie['query_context'][0]['args'] == response['query_context'][0]['args']
+        config = {'configurable': {'thread_id': core.session_key(native.binding, 'native-session')}}
+        state = await refreshed.graph.aget_state(config)
+        assert not state.next
+        assert all(message.type in ('human', 'ai') for message in state.values['messages'])
+        assert len(state.values['messages']) <= 8
     asyncio.run(check())
 
 

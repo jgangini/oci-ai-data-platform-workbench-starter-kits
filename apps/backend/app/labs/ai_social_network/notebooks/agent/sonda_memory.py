@@ -7,6 +7,7 @@ LangGraph sees its original namespace; only public checkpoint IO is adapted.
 import os
 from uuid import UUID
 
+from langchain_core.messages import convert_to_messages
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 
 
@@ -50,8 +51,14 @@ class GenerationMemory(BaseCheckpointSaver):
             return None
         if not isinstance(value,CheckpointTuple):
             raise RuntimeError('Invalid native memory checkpoint response')
+        channels=dict(value.checkpoint['channel_values'])
+        if 'messages' in channels:
+            channels['messages']=convert_to_messages(channels['messages'])
+        writes=[(task,channel,convert_to_messages(data) if channel=='messages' else data)
+            for task,channel,data in (value.pending_writes or [])]
         return value._replace(config=self.namespaced(value.config,reverse=True),
-            parent_config=self.namespaced(value.parent_config,reverse=True) if value.parent_config else None)
+            parent_config=self.namespaced(value.parent_config,reverse=True) if value.parent_config else None,
+            checkpoint={**value.checkpoint,'channel_values':channels},pending_writes=writes)
 
     def get_next_version(self,current,channel):
         return self.delegate.get_next_version(current,channel)

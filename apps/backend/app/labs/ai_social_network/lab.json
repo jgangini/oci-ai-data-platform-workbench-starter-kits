@@ -58,7 +58,7 @@
     },
     {
       "file": "notebooks/agent/sonda_memory.py",
-      "sha256": "158efe410c6febad3130ef65968ef5b3414d0efd0566138fb2d8638d22a1eabd",
+      "sha256": "46fad3fd9dbaf0fd76639e4957ef846f09c388aa1906998d7abd4096f36b1fcf",
       "workspace_path": "agent/sonda_memory.py"
     },
     {
@@ -87,7 +87,7 @@
       "workspace_path": "agent/social_agent.py"
     }
   ],
-  "pack_sha256": "73097c3c4b73e07affb899d45eab218e0a0ed5871b94189db4a46176134b739e",
+  "pack_sha256": "0fb14962992446f784cff23800104a2265c2412b42f5133d18dfc7a2d547a1fe",
   "shared_runtime_files": [
     {
       "file": "sonda_contract.py",
