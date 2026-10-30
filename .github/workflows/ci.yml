@@ -78,7 +78,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - run: pip install pyspark==3.5.1 delta-spark==3.2.0 langgraph==0.6.7 oci==2.189.0
+      - run: pip install pyspark==3.5.1 delta-spark==3.2.0 langgraph==0.6.7 pydantic==2.13.4 oci==2.189.0
       - run: python scripts/check_social_graph.py
+      - run: python scripts/export_sonda_contract.py --check
+      - run: python scripts/render_sonda_runtime.py --check
+      - run: python scripts/check_sonda_study_graph.py
+      - run: python scripts/check_sonda_delta.py --prepare .tmp/sonda-delta-input.json
+      - run: spark-submit --packages io.delta:delta-spark_2.12:3.2.0 scripts/check_sonda_delta.py --input .tmp/sonda-delta-input.json
       - run: spark-submit --packages io.delta:delta-spark_2.12:3.2.0 scripts/check_social_delta.py
       - run: spark-submit --packages io.delta:delta-spark_2.12:3.2.0 scripts/check_social_comments.py

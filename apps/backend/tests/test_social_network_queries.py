@@ -21,6 +21,44 @@ SNAPSHOT = {'publication_id': 'fixture-receipt', 'published_at': '2026-10-29T10:
 POST_KEY = 'a' * 64
 
 
+def test_planner_output_schema_advertises_valid_filters_for_both_agents():
+    legacy=agent.planning_schema('SocialQuery')
+    native=agent.planning_schema('SondaQuery',('post','comment','page','indicator'))
+    args=legacy['properties']['args']['properties']
+    assert args['period']['enum']==['all','range']
+    assert args['entity_scope']['enum']==['any','author','mentions']
+    assert args['metric']['enum']==['posts','comments','likes','shares','views']
+    assert args['platform']['enum']==['instagram','facebook','tiktok','x','linkedin','youtube']
+    assert args['limit']=={'type':'integer','minimum':1,'maximum':50}
+    assert 'document_type' not in args
+    assert native['properties']['args']['properties']['document_type']['enum']==['post','comment','page','indicator']
+    for period in args['period']['enum']:
+        for metric in args['metric']['enum']:
+            agent.resolved_args(SNAPSHOT,'summary',{'period':period,'metric':metric})
+    for field,value in [('period','last_30_days'),('metric','count'),('entity_scope','official'),('platform','all')]:
+        with pytest.raises(ValueError):agent.resolved_args(SNAPSHOT,'summary',{field:value})
+
+
+@pytest.mark.parametrize('stage',['structured_output','request_normalization','plan_validation','query_validation'])
+def test_planner_diagnostics_never_echo_untrusted_error_content(stage):
+    private="credential=fixture-secret; SELECT private FROM anywhere; https://example.invalid/private"
+    diagnostic=agent.planning_error(stage,ValueError(private))
+    assert set(diagnostic)=={'stage','code','instruction'} and diagnostic['stage']==stage
+    assert diagnostic['code']==('invalid_structured_output' if stage=='structured_output' else 'invalid_plan_constraints')
+    assert not any(value in json.dumps(diagnostic) for value in ('fixture-secret','SELECT','example.invalid'))
+
+
+def test_coverage_question_has_a_valid_grouped_count_plan_without_a_question_specific_fastpath():
+    question='¿Qué redes tienen publicaciones Gold disponibles en los últimos 30 días? Indica cobertura.'
+    assert agent.verified_plan(question) is None
+    raw={'tool':'summary','args':{},'presentation':'table','continue_query':False}
+    plan=agent.plan_for_question(SNAPSHOT,raw,question)
+    agent.checked_plan(plan,[],SNAPSHOT)
+    args=agent.resolved_args(SNAPSHOT,plan['tool'],plan['args'])
+    assert args=={'period':'range','date_from':'2026-09-30','date_to':'2026-10-29','metric':'posts'}
+    assert 'platform' not in args
+
+
 def evidence(name, args, rows):
     return agent.query_evidence(SNAPSHOT, name, args, rows)
 

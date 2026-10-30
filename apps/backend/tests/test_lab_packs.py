@@ -202,7 +202,10 @@ def test_canonical_assets_are_identical_for_every_participant() -> None:
 def test_global_runtime_sources_are_declared_and_not_participant_kits():
     modules = module_catalog()
     assert {pack.lab_id for pack in modules} == {"ai_data_governance", "gods_eye_view", "ai_social_network"}
-    assert {len(pack.runtime_files) for pack in modules} == {2, 3}
+    assert {pack.lab_id:len(pack.runtime_files) for pack in modules} == {
+        'ai_data_governance':2,'gods_eye_view':3,'ai_social_network':15}
+    social = next(pack for pack in modules if pack.lab_id == 'ai_social_network')
+    assert any(asset.name == 'notebooks/agent/sonda_x_research.py' for asset in social.runtime_files)
     for pack in modules:
         assert pack.lab_id not in lab_packs.available_lab_ids()
         for asset in pack.runtime_files:
@@ -234,7 +237,12 @@ def test_module_assets_reject_unsafe_paths(tmp_path, filename):
 def test_social_package_has_only_native_gold_runtime_and_memory_agent():
     pack = load_lab_pack("ai_social_network")
     assert pack.scope == "global" and pack.kind == "global_module"
-    assert pack.pack_version == "1.1.1"
+    assert pack.pack_version == "1.4.0"
+    assert {asset.name for asset in pack.shared_runtime_files} == {
+        'sonda_contract.py','sonda_exchange.py','sonda_runtime.py',
+        'sonda_source_limits.py','sonda_source_limits_transport.py','sonda_activity_runtime.py',
+        'sonda_activity.py','sonda_activity_entry.py','sonda_activity_admission.py'}
+    assert pack.agent['investigator_name']=='ai_social_network_investigator'
     assert not pack.datasets and not pack.notebooks
     assert pack.agent["memory"] == "AI_LAKEHOUSE" and pack.agent["read_layer"] == "gold"
     assert set(pack.agent["tools"]) == {"summary", "ranking", "trend", "search", "history", "details", "comments"}

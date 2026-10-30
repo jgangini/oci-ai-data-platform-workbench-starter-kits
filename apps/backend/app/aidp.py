@@ -825,9 +825,14 @@ class AidpClient:
         *,
         repair_drift: bool,
         expected_key: str = "",
+        entry_filename: str | None = None,
+        description: str | None = None,
     ) -> tuple[str, bool]:
         session_config = {"variables": {}}
-        entry_path = f"{root}/{self._agent_entry_filename}"
+        filename=entry_filename or self._agent_entry_filename
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*\.py',filename):
+            raise AidpProvisionError('Invalid managed Agent entry filename')
+        entry_path = f"{root}/{filename}"
         dependencies_path = f"{root}/requirements.txt"
         descriptor_path = f"{root}/agent-manifest.json"
         changed = self._upload_file(
@@ -857,7 +862,7 @@ class AidpClient:
                 f"/workspaces/{workspace_key}/agents",
                 payload={
                     "displayName": name,
-                    "description": self._agent_description,
+                    "description": description or self._agent_description,
                     "pathInfo": root,
                     "type": "CODE",
                     "entryFilePath": entry_path,
@@ -888,7 +893,7 @@ class AidpClient:
                 f"/workspaces/{workspace_key}/agents/{agent_key}",
                 payload={
                     "displayName": name,
-                    "description": self._agent_description,
+                    "description": description or self._agent_description,
                     "entryFilePath": entry_path,
                     "dependenciesFilePath": dependencies_path,
                     "computeKey": compute_key,
@@ -3507,6 +3512,8 @@ class AidpClient:
         agent_key: str,
         manifest: dict[str, Any],
         source_hash: str,
+        *,
+        agent_name: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         resources = manifest.setdefault("resources", {})
         redeploy_revision = self._governance_redeploy_revision(manifest, source_hash)
@@ -3519,7 +3526,7 @@ class AidpClient:
             workspace_key,
             agent_key,
             compute_key,
-            self._agent_name,
+            agent_name or self._agent_name,
             redeploy_revision=trigger_revision,
         )
         self._record_governance_redeploy(

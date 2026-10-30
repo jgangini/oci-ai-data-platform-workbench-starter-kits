@@ -6,6 +6,8 @@ AI Social Network is an optional shared module, independent of AI Data Governanc
 
 [Interactive workflow](../diagrams/ai-social-network.html) · [Editable diagram source](../diagrams/ai-social-network.json)
 
+The [proposed Sonda exchange](sonda-contract.md) defines the coordinated next-generation contract. It is separate from the released runtime described below and requires integrated acceptance and an explicit scoped reset before activation.
+
 ## Deploy and connect
 
 Open **Settings → Application → AI Social Network**, select an AI Data Platform administrator and review the compute costs. Choose the source bucket and JSON prefix; an empty bucket field uses the selected Landing bucket. The Gold and artifacts buckets reuse the existing deployment selections and must be distinct from the source. Deployment creates one protected module folder, a native ingestion workflow and a dedicated agent AI Compute; it reuses the shared Spark compute and existing OCI runtime credential. No additional VM, OCI identity or database credential is created.

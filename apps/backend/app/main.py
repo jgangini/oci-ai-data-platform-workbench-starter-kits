@@ -24,7 +24,7 @@ from .aidp import (
     participant_owner_key,
 )
 from .config import Settings, SettingsStore
-from .social_network import SocialAidpClient
+from .sonda_install import SondaAidpClient as SocialAidpClient
 from .social_network_api import LocalSocialClient, mount_social_network
 from .viewer_identity import mount_identity
 from .viewer_auth import _application as viewer_application, mount_viewer_login

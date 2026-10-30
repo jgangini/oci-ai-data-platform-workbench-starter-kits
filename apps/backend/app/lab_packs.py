@@ -32,7 +32,10 @@ class LabAsset:
     depends_on: tuple[str, ...] = ()
 
     def read_bytes(self) -> bytes:
-        return self.path.read_bytes()
+        content=self.path.read_bytes()
+        if hashlib.sha256(content).hexdigest()!=self.sha256:
+            raise LabPackError(f'SHA-256 changed while reading {self.name}')
+        return content
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,7 @@ class LabPack:
     agent: dict[str, Any]
     runtime_files: tuple[LabAsset, ...] = ()
     source_manifests: tuple[LabAsset, ...] = ()
+    shared_runtime_files: tuple[LabAsset, ...] = ()
 
     @property
     def available(self) -> bool:
@@ -225,6 +229,29 @@ def _module_assets(root: Path, entries: Any, folder: str) -> tuple[LabAsset, ...
     return tuple(assets)
 
 
+def _shared_module_assets(lab_id,entries):
+    # Shared source has a fixed allowlist; never expand the laboratory file root.
+    allowed={'sonda_contract.py','sonda_exchange.py','sonda_runtime.py',
+        'sonda_source_limits.py','sonda_source_limits_transport.py','sonda_activity_runtime.py',
+        'sonda_activity.py','sonda_activity_entry.py','sonda_activity_admission.py'} if lab_id=='ai_social_network' else set()
+    if not isinstance(entries,list):
+        raise LabPackError('Shared module assets must be a list')
+    assets=[]
+    for raw in entries:
+        if not isinstance(raw,dict) or raw.get('file') not in allowed:
+            raise LabPackError('Invalid shared module asset')
+        name=raw['file']
+        digest=raw.get('sha256')
+        if not isinstance(digest,str) or not re.fullmatch(r'[0-9a-f]{64}',digest):
+            raise LabPackError('Invalid shared module hash')
+        asset=LabAsset(name,Path(__file__).resolve().parent/name,digest)
+        asset.read_bytes()
+        assets.append(asset)
+    if len({asset.name for asset in assets})!=len(assets):
+        raise LabPackError('Duplicate shared module asset')
+    return tuple(assets)
+
+
 def _pack_tables(
     metadata: dict[str, Any], status: str, kind: str, lab_id: str
 ) -> dict[str, tuple[str, ...]]:
@@ -361,6 +388,7 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
         agent=dict(agent) if isinstance(agent, dict) else {},
         runtime_files=_module_assets(root, metadata.get("runtime_files", []), "notebooks"),
         source_manifests=_module_assets(root, metadata.get("source_manifests", []), "source"),
+        shared_runtime_files=_shared_module_assets(lab_id,metadata.get('shared_runtime_files',[])),
     )
 
 
@@ -378,6 +406,13 @@ def module_runtime_source(lab_id: str, name: str) -> bytes:
         if asset.name == name:
             return asset.read_bytes()
     raise LabPackError(f"Undeclared runtime file: {lab_id}/{name}")
+
+
+def shared_runtime_source(lab_id,name):
+    for asset in load_lab_pack(lab_id).shared_runtime_files:
+        if asset.name==name:
+            return asset.read_bytes()
+    raise LabPackError(f'Undeclared shared runtime file: {lab_id}/{name}')
 
 
 def _catalog_manifest() -> tuple[tuple[str, ...], dict[str, str]]:

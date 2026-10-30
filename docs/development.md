@@ -65,6 +65,12 @@ python -m pytest apps/backend/tests terraform/tests --basetemp=.tmp/pytest-new-r
 
 Choose a **new, nonexistent** `--basetemp` directory for each run; pytest clears an existing one. The [package loader](../apps/backend/app/lab_packs.py) validates manifests, declared asset hashes, CSV counts and notebook dependencies. These checks do not replace a native workflow run; see the [layout acceptance gap](getting-started.md#current-implementation-limits).
 
+When continuing work against an existing architecture baseline, run
+`./scripts/arch-preflight.ps1 -PreserveBaseline`. It compares the current tree
+without replacing that baseline and fails if the existing gate is degraded.
+Record that starting failure before correcting it. The default mode also
+preserves an existing baseline; it initializes one only when none exists.
+
 ```powershell
 Push-Location apps/frontend
 npm ci

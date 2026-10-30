@@ -2,7 +2,7 @@
   "schema_version": 1,
   "lab_id": "ai_social_network",
   "display_name": "AI Social Network",
-  "pack_version": "1.1.1",
+  "pack_version": "1.4.0",
   "status": "available",
   "kind": "global_module",
   "scope": "global",
@@ -26,19 +26,124 @@
       "comments"
     ],
     "memory": "AI_LAKEHOUSE",
-    "read_layer": "gold"
+    "read_layer": "gold",
+    "investigator_name": "ai_social_network_investigator",
+    "contract_version": "1.0.2"
   },
   "runtime_files": [
     {
+      "file": "notebooks/sonda_delta.py",
+      "sha256": "1fe6a9d5e386e9d3734afb7a546f72f7ab13b076136315f5ae088e31531302d3",
+      "workspace_path": "sonda_delta.py"
+    },
+    {
+      "file": "notebooks/sonda_io.py",
+      "sha256": "d86a2a6f677de878b3a96b6956316eb930bf381774de9d27279dda8c1109fd2a",
+      "workspace_path": "sonda_io.py"
+    },
+    {
+      "file": "notebooks/sonda_limits_io.py",
+      "sha256": "f886478b835b7b643dcbac26b04ada155149094782cbf4af05630e5e6a07ff04",
+      "workspace_path": "sonda_limits_io.py"
+    },
+    {
+      "file": "notebooks/sonda_runner.py",
+      "sha256": "c21078983b65a5ed8f55d8807f4e7ad9cdc6a80878c7563f2a97d4b4140f648e",
+      "workspace_path": "sonda_runner.py"
+    },
+    {
+      "file": "notebooks/sonda_tools.py",
+      "sha256": "5f4efcdda940d96592890de5c7a9ec1e92330783759cf44440fa3c5dfdad7af6",
+      "workspace_path": "sonda_tools.py"
+    },
+    {
+      "file": "notebooks/agent/sonda_chat.py",
+      "sha256": "4f5b4e789577b6202905c18258e5f42a791fc453ec822933836aa90c35586bac",
+      "workspace_path": "agent/sonda_chat.py"
+    },
+    {
+      "file": "notebooks/agent/sonda_chat_entry.py",
+      "sha256": "d0d145ffe559fd1626f19e50d2b6e3caa2cb518e7db0435ee7dc762819571312",
+      "workspace_path": "agent/sonda_chat_entry.py"
+    },
+    {
+      "file": "notebooks/agent/sonda_memory.py",
+      "sha256": "46fad3fd9dbaf0fd76639e4957ef846f09c388aa1906998d7abd4096f36b1fcf",
+      "workspace_path": "agent/sonda_memory.py"
+    },
+    {
+      "file": "notebooks/agent/sonda_model.py",
+      "sha256": "68a0356ffcdce16ee2d6052c387311187212ec7fe694e78dfc39ade8a8009a93",
+      "workspace_path": "agent/sonda_model.py"
+    },
+    {
+      "file": "notebooks/agent/sonda_research_tools.py",
+      "sha256": "b4378a2e0a90d7785a3ad2303d9c515c3919210ef55fd36152efe96e2759096c",
+      "workspace_path": "agent/sonda_research_tools.py"
+    },
+    {
+      "file": "notebooks/agent/sonda_study.py",
+      "sha256": "ee98997ced85255aaf4bf2c57ef9384c62b5903e1db361553dc409eb8f4263d6",
+      "workspace_path": "agent/sonda_study.py"
+    },
+    {
+      "file": "notebooks/agent/sonda_worker.py",
+      "sha256": "20b2ab03e9a465e09f465c9f2a710a58ac25192783f735226d19f4fed56ed4ff",
+      "workspace_path": "agent/sonda_worker.py"
+    },
+    {
+      "file": "notebooks/agent/sonda_x_research.py",
+      "sha256": "b0834e9e266d9dc920147f411e9d0a9b9a6746a27cce69775ea10cb0a91b170c",
+      "workspace_path": "agent/sonda_x_research.py"
+    },
+    {
       "file": "notebooks/social_ingest.py",
-      "workspace_path": "social_ingest.py",
-      "sha256": "5aedd8f6e3aa4c0a4153b32cbaeebe798b22e64a4c39ca77a41b59193d4b2a70"
+      "sha256": "5aedd8f6e3aa4c0a4153b32cbaeebe798b22e64a4c39ca77a41b59193d4b2a70",
+      "workspace_path": "social_ingest.py"
     },
     {
       "file": "notebooks/agent/social_agent.py",
-      "workspace_path": "agent/social_agent.py",
-      "sha256": "913465d5a5d40706619d7ef4006568f9287541e22de33e12b77dafba1e8b96dc"
+      "sha256": "3fbccf919d7f7f86d32c44d1c20d6d1661b16278206302c55c170ca21da5ed1d",
+      "workspace_path": "agent/social_agent.py"
     }
   ],
-  "pack_sha256": "5a8b3553af25a5a275477211c1f392471de08341d464a67654ae7ccfe3545bf1"
+  "pack_sha256": "927532cfda087513186714cb7fb652743e8f37bfc521821125301e6bf45d07d9",
+  "shared_runtime_files": [
+    {
+      "file": "sonda_contract.py",
+      "sha256": "eef091976373f7a1226db4747c46b262776e5b2efb22cacead9728a8acd1c2c9"
+    },
+    {
+      "file": "sonda_exchange.py",
+      "sha256": "5b97304a66441bcef7f59d4d857e050f591c0290291eeea3f5fbea24d7cf63c0"
+    },
+    {
+      "file": "sonda_runtime.py",
+      "sha256": "87c8c83bb0eea72b82d7f5110234eac3ce8755292f7d2d5a3048a849a99e8e8b"
+    },
+    {
+      "file": "sonda_source_limits.py",
+      "sha256": "2538b06c2f790ddff7f0716dd238cc563840acdb6ec533aeaffc041784afa989"
+    },
+    {
+      "file": "sonda_source_limits_transport.py",
+      "sha256": "09060c7905fccdd7fc497eada787f908ac36c6e4f2c44acdf793397458a7e858"
+    },
+    {
+      "file": "sonda_activity_runtime.py",
+      "sha256": "1e7bb6238789da6b9e60cbfc90cbc26d1d2cffee04c880221d4eaaffbf740b52"
+    },
+    {
+      "file": "sonda_activity.py",
+      "sha256": "652c8f5240509a2bce40c8b30a3e3624d2cd9da4c07a8a99d2e83382edb7519b"
+    },
+    {
+      "file": "sonda_activity_entry.py",
+      "sha256": "f3a84defab01c7ef001af5cd428748ed26fe67557e975e97816f58cfa653e9e6"
+    },
+    {
+      "file": "sonda_activity_admission.py",
+      "sha256": "d98ba333ac6bfbaa268ce10d301b94321608da7c54191732db78fb342c01bb30"
+    }
+  ]
 }
