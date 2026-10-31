@@ -203,12 +203,12 @@ def test_global_runtime_sources_are_declared_and_not_participant_kits():
     modules = module_catalog()
     assert {pack.lab_id for pack in modules} == {"ai_data_governance", "gods_eye_view", "ai_market_intelligence"}
     assert {pack.lab_id: len(pack.runtime_files) for pack in modules} == {
-        'ai_data_governance': 2, 'gods_eye_view': 3, 'ai_market_intelligence': 20,
+        'ai_data_governance': 2, 'gods_eye_view': 3, 'ai_market_intelligence': 22,
     }
     for pack in modules:
         assert pack.lab_id not in lab_packs.available_lab_ids()
         for asset in pack.runtime_files:
-            assert lab_packs.module_runtime_source(pack.lab_id, asset.name) == asset.read_bytes()
+            assert lab_packs.module_runtime_source(pack.lab_id, asset.name, require_available=pack.available) == asset.read_bytes()
 
 
 def test_deploy_bundle_needs_runtime_only_and_rejects_source_drift(tmp_path, monkeypatch):
@@ -233,10 +233,6 @@ def test_module_assets_reject_unsafe_paths(tmp_path, filename):
         lab_packs._module_assets(tmp_path, [{"file": filename, "sha256": "0" * 64}], "notebooks")
 
 
-def test_social_package_has_only_native_gold_runtime_and_memory_agent():
-    pack = load_lab_pack("ai_social_network")
-    assert pack.scope == "global" and pack.kind == "global_module"
-    assert pack.pack_version == "1.1.1"
-    assert not pack.datasets and not pack.notebooks
-    assert pack.agent["memory"] == "AI_LAKEHOUSE" and pack.agent["read_layer"] == "gold"
-    assert set(pack.agent["tools"]) == {"summary", "ranking", "trend", "search", "history", "details", "comments"}
+def test_retired_social_package_is_not_a_loadable_installation():
+    with pytest.raises(lab_packs.LabPackError):
+        load_lab_pack("ai_social_network")

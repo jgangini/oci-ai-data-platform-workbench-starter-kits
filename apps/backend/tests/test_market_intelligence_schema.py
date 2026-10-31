@@ -3,7 +3,19 @@ import copy
 
 import pytest
 
-from app.labs.ai_market_intelligence import schema
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence import schema
+
+
+def test_installer_storage_is_dedicated_to_the_selected_artifacts_bucket():
+    root = 'oci://selected-artifacts@namespace/ai_market_intelligence/delta'
+    statements = schema.create_statements('oci_medallion', 'oci_artifacts', storage_root=root)
+    assert len(statements) == 14
+    for table, statement in zip(schema.definition()['tables'], statements):
+        assert "LOCATION '" + root + '/' + table['name'] + "'" in statement
+        assert '`oci_medallion`.`oci_artifacts`.' in statement
+    for invalid in ('oci://bucket@ns/shared', root + "';DROP TABLE x", 'https://example.test/'):
+        with pytest.raises(ValueError, match='dedicated artifacts'):
+            schema.create_statements('oci_medallion', 'oci_artifacts', storage_root=invalid)
 
 
 def test_approved_tables_belong_to_the_agent_framework_and_keep_all_column_comments():
@@ -54,7 +66,7 @@ def test_missing_column_documentation_is_rejected(monkeypatch, tmp_path):
 
 
 def test_native_model_job_has_no_schedule_or_automatic_retries():
-    from app.labs.ai_market_intelligence.model_install import model_job
+    from app.market_installation.model_install import model_job
     job = model_job('verified-compute')
     assert job['schedule'] is None and job['continuous'] is None
     assert job['maxConcurrentRuns'] == 1 and not job['queue']['isEnabled']
@@ -63,7 +75,7 @@ def test_native_model_job_has_no_schedule_or_automatic_retries():
 
 
 def test_native_notebook_checks_existing_ownership_and_all_column_comments():
-    from app.labs.ai_market_intelligence.model_install import model_notebook
+    from app.market_installation.model_install import model_notebook
     notebook = model_notebook('oci_medallion', 'oci_artifacts')
     source = ''.join(notebook['cells'][0]['source'])
     compile(source, 'native_model.py', 'exec')
@@ -83,7 +95,7 @@ def test_dictionary_contains_actual_reference_targets():
 @pytest.mark.parametrize('fault', ['foreign_owner', 'changed_comment', 'changed_type', 'changed_nullability',
                                  'changed_version', 'changed_provider', 'changed_table_comment', 'existing_rows'])
 def test_native_resume_rejects_existing_table_drift(fault):
-    from app.labs.ai_market_intelligence.model_install import model_notebook
+    from app.market_installation.model_install import model_notebook
 
     spark = ModelSpark(fault=fault, missing_first=True)
     original = copy.deepcopy(spark.rows)
@@ -160,7 +172,7 @@ class ModelSpark:
 @pytest.mark.parametrize('fresh', [True, False])
 def test_native_empty_install_and_resume_verify_complete_model(fresh, capsys):
     import json
-    from app.labs.ai_market_intelligence.model_install import model_notebook
+    from app.market_installation.model_install import model_notebook
     spark = ModelSpark(fresh=fresh)
     source = ''.join(model_notebook('oci_medallion', 'oci_artifacts')['cells'][0]['source'])
     exec(compile(source, 'native_model.py', 'exec'), {'spark': spark})
@@ -172,7 +184,7 @@ def test_native_empty_install_and_resume_verify_complete_model(fresh, capsys):
 
 
 def test_native_partial_model_creation_resumes_without_replacing_tables():
-    from app.labs.ai_market_intelligence.model_install import model_notebook
+    from app.market_installation.model_install import model_notebook
     spark = ModelSpark(missing_first=True)
     source = ''.join(model_notebook('oci_medallion', 'oci_artifacts')['cells'][0]['source'])
     exec(compile(source, 'native_model.py', 'exec'), {'spark': spark})
@@ -181,6 +193,6 @@ def test_native_partial_model_creation_resumes_without_replacing_tables():
 
 @pytest.mark.parametrize('catalog,framework', [('bad;catalog', 'oci_artifacts'), ('oci_medallion', 'bad.schema')])
 def test_model_notebook_rejects_unvalidated_delta_detail_names(catalog, framework):
-    from app.labs.ai_market_intelligence.model_install import model_notebook
+    from app.market_installation.model_install import model_notebook
     with pytest.raises(ValueError, match='plain SQL identifier'):
         model_notebook(catalog, framework)

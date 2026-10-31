@@ -178,6 +178,20 @@ Keep application persistent state, module operation manifests, installed release
 The current repository does not provide a general cross-store disaster-recovery guarantee. Validate restoration in an isolated environment before relying on a backup procedure for production.
 
 
-## AI Social Network lifecycle
+## Retired AI Social Network
 
-The [legacy Social module guide](modules/ai-social-network.md) defines its retained compatibility API, Gold/control model, native five-minute schedule, immutable source identity, retry receipts and acceptance. It is no longer a public installation choice in Settings. Its legacy installer pauses/drains its writer before changing source and enables scheduling only after its first batch and Agent permissions pass. The source, historical Gold data and shared credential are retained; no destructive Social deletion action is exposed. The [Market Intelligence candidate](modules/ai-market-intelligence.md) has a different empty-installation contract and cannot use this ingestion lifecycle.
+The [retirement boundary](modules/ai-social-network.md) returns authenticated HTTP
+410 responses. Its source installer and exclusive checks are removed. A portal
+image update neither cleans up existing cloud resources nor migrates legacy data.
+God's Eye View retains its independent social pipeline.
+
+## AI Market Intelligence installation
+
+Use the dedicated [empty-installation workflow](modules/ai-market-intelligence.md#empty-installation-and-recovery)
+from Settings → Application. GET status never starts installation; explicit Deploy
+or Resume advances the durable operation. Its temporary bootstrap must verify all
+fourteen empty framework tables in the selected artifacts bucket before cleanup.
+TEST verifies the current paused revision and MCP connectivity before the native
+production endpoint is published. Agent Hub is a separate navigation link and is
+not activated or registered by this operation. Failed or uncertain writes retain
+resources and the same operation; do not clear its receipt to force a new start.

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.labs.ai_market_intelligence.repository import (
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import (
     Conflict, Journal, ObjectSnapshot, Records, Scope, projection_statements)
 
 

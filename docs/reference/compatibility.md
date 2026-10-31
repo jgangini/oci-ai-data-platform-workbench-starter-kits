@@ -11,12 +11,11 @@ Renaming source files does not migrate cloud data or retire resources.
 
 AI Market Intelligence uses `ai_market_intelligence` in the public catalog and
 `apps/backend/app/labs/ai_market_intelligence` for its candidate runtime. The
-previous `ai_social_network` package remains at
-`apps/backend/app/legacy_labs/ai_social_network`, with its released 1.1.1 bytes,
-authenticated routes and installed resource identities preserved. It is omitted
-from the public package list. These are different workflows: legacy five-minute
-ingestion must never be used as a renamed Market Intelligence installer. The
-new package is planned; moving its source does not deploy it or migrate data.
+retired `ai_social_network` package and ingestion installer have been removed.
+Its authenticated status, endpoint and install/redeploy routes return HTTP 410;
+they do not start or delete cloud resources and do not alias Market Intelligence.
+Existing cloud artifacts require an explicit reviewed retirement outside an image
+update. God's Eye View retains its independent social runtime.
 
 ## Deployment capability
 
