@@ -2,21 +2,22 @@
 from __future__ import annotations
 
 from app.notebooks import WORKSPACE_ROOT
-from .schema import create_statements, definition, identifier, schema_sha256
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.schema import create_statements, definition, identifier, schema_sha256
 
 MODULE_ROOT = WORKSPACE_ROOT + '/.control/modules/ai_market_intelligence'
 NOTEBOOK_PATH = MODULE_ROOT + '/create_model.ipynb'
 JOB_NAME = 'wf_ai_market_intelligence_model'
 
 
-def model_notebook(catalog: str, framework_schema: str) -> dict:
+def model_notebook(catalog: str, framework_schema: str, *, storage_root: str = '') -> dict:
     model = definition()
-    statements = create_statements(catalog, framework_schema)
+    statements = create_statements(catalog, framework_schema, storage_root=storage_root)
     expected = []
     for table in model['tables']:
         parts = (catalog, framework_schema, table['name'])
         expected.append({**table, 'qualified': '.'.join(identifier(name) for name in parts),
-                         'detail_name': '.'.join(parts)})
+                         'detail_name': '.'.join(parts),
+                         'location': storage_root + '/' + table['name'] if storage_root else None})
     source = (
         'import json\n'
         + 'EXPECTED = ' + repr(expected) + '\n'
@@ -34,6 +35,8 @@ def model_notebook(catalog: str, framework_schema: str) -> dict:
     detail = spark.sql('DESCRIBE DETAIL ' + table['detail_name']).first()
     if detail['format'] != 'delta' or detail['description'] != table['description']:
         raise RuntimeError('Native provider or table description mismatch: ' + table['name'])
+    if table['location'] and str(detail['location']).rstrip('/') != table['location']:
+        raise RuntimeError('Native artifacts location mismatch: ' + table['name'])
     actual = spark.table(name).schema
     if [field.name for field in actual] != [column['name'] for column in table['columns']]:
         raise RuntimeError('Native column order differs from the approved model: ' + table['name'])

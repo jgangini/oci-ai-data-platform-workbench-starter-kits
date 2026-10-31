@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from app.labs.ai_market_intelligence.catalog import Catalog
-from app.labs.ai_market_intelligence.repository import digest
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.catalog import Catalog
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import digest
 from test_market_intelligence_repository import SCOPE
 from test_market_intelligence_research import running, observation
 

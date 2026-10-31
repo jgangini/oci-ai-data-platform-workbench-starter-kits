@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from app.labs.ai_market_intelligence.research import Research
-from app.labs.ai_market_intelligence.execution import PaidOperations
-from app.labs.ai_market_intelligence.repository import Journal, json_text
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.research import Research
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.execution import PaidOperations
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import Journal, json_text
 from test_market_intelligence_repository import MemorySnapshot, SCOPE
 
 

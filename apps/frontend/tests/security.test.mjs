@@ -216,7 +216,8 @@ test("administrators manage one shared governance module from Settings outside p
   assert.match(source, /is_aidp_admin: boolean/);
   assert.match(source, /operation_type\?: ModuleOperationKind \| null/);
   assert.equal((source.match(/<GovernanceModuleManager\b/g) ?? []).length, 2);
-  assert.match(source, /<GovernanceModuleManager moduleId="ai_social_network"/);
+  assert.match(source, /<GovernanceModuleManager moduleId="ai_market_intelligence"/);
+  assert.doesNotMatch(source, /<GovernanceModuleManager moduleId="ai_social_network"/);
   assert.doesNotMatch(source, /function GovernanceModuleModal|window\.location\.assign\("\/admin\/users\?module=/);
   assert.match(manager, /users\.filter\(user => user\.is_aidp_admin === true\)/);
   assert.match(manager, /const disabled = moduleOperating \|\| !usersLoaded \|\| !moduleManagerUser \|\| !governanceModule/);
@@ -228,7 +229,10 @@ test("administrators manage one shared governance module from Settings outside p
   assert.match(manager, /governanceModule\.operation_id/);
   assert.match(manager, /moduleOperationsRef\.current\.set/);
   assert.match(manager, /shared OCI credentials are retained/);
-  assert.doesNotMatch(manager, /type="checkbox"|<ConfirmModal|dedicated AI Compute, credential, notebook/);
+  const marketStart = manager.indexOf('{market && <div className="module-connection-fields">');
+  const marketForm = manager.slice(marketStart, manager.indexOf('</div>}', marketStart) + 7);
+  assert.match(marketForm, /type="checkbox"/);
+  assert.doesNotMatch(manager.replace(marketForm, ''), /type="checkbox"|<ConfirmModal|dedicated AI Compute, credential, notebook/);
   assert.doesNotMatch(source, /production && user\.is_aidp_admin|lab_id: "agent"/);
   assert.match(source, /function participantLabCatalog/);
   assert.match(source, /\["agent", "ai_data_governance"\]\.includes\(lab_id\)/);

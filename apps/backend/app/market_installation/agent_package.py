@@ -20,27 +20,18 @@ def agent_package(config):
     if not 0 <= config['step_cap_microusd'] <= config['run_cap_microusd'] <= config['budget_microusd'] <= 5000000:
         raise ValueError('Configured limits exceed the approved Apify envelope')
     pack = load_lab_pack('ai_market_intelligence', require_available=False)
-    if {asset.name for asset in pack.runtime_files} != set(FILES):
+    declared = {'notebooks/agent/ai_market_intelligence/' + name for name in FILES}
+    declared.update({'notebooks/agent/market_intelligence.py', 'notebooks/agent/requirements.txt'})
+    if {asset.name for asset in pack.runtime_files} != declared:
         raise LabPackError('Market package must declare every reviewed runtime file')
-    assets = {'ai_market_intelligence/' + asset.name: asset.read_bytes() for asset in pack.runtime_files}
+    assets = {asset.name.removeprefix('notebooks/agent/'): asset.read_bytes() for asset in pack.runtime_files}
+    source = assets.pop('market_intelligence.py')
     assets['ai_market_intelligence/runtime.json'] = json.dumps(config, ensure_ascii=False, sort_keys=True).encode()
     # Workbench GET decodes JSON objects; canonical bytes preserve semantic/hash verification.
     for name, value in list(assets.items()):
         if name.endswith('.json'):
             assets[name] = json.dumps(json.loads(value), sort_keys=True, separators=(',', ':')).encode()
-    source = b'''from ai_market_intelligence.native import AgentRuntime
-
-class MarketIntelligenceAgent:
-    def __init__(self):
-        self.runtime = AgentRuntime()
-
-    def setup(self):
-        self.runtime.setup()
-
-    async def invoke(self, user_query, **kwargs):
-        return await self.runtime.invoke(user_query, **kwargs)
-'''
-    assets['requirements.txt'] = b'# AIDP provides aidputils, LangGraph and OCI runtime libraries.\n'
+    compile(source, 'market_intelligence.py', 'exec')
     for name, content in assets.items():
         if name.endswith('.py'):
             compile(content, name, 'exec')

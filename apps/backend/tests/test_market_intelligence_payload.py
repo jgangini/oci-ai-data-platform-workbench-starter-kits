@@ -1,6 +1,6 @@
 """The real provider retains protocol regressions after retiring the prototype."""
-from app.labs.ai_market_intelligence.mcp_payload import dataset_id, unpack
-from app.labs.ai_market_intelligence.provider import _items
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.mcp_payload import dataset_id, unpack
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.provider import _items
 
 
 def test_native_mcp_text_envelope_preserves_content_as_data():

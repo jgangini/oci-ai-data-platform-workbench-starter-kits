@@ -8,11 +8,11 @@ import pytest
 pytest.importorskip('langgraph', reason='Graph execution is checked in the pinned runtime CI job')
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.labs.ai_market_intelligence.contracts import ReportDraft
-from app.labs.ai_market_intelligence.native import run_turn
-from app.labs.ai_market_intelligence.repository import Journal, digest, json_text
-from app.labs.ai_market_intelligence.workflow import MarketWorkflow
-from app.labs.ai_market_intelligence.workflow_actions import validate_report_links
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.contracts import ReportDraft
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.native import run_turn
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import Journal, digest, json_text
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.workflow import MarketWorkflow
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.workflow_actions import validate_report_links
 from test_market_intelligence_repository import MemorySnapshot, SCOPE
 
 
@@ -35,7 +35,7 @@ class ScenarioModel:
                     'topic': TOPIC, 'window_spec': 'last_7_days', 'missing_fields': [], 'user_question': None}
         if name == 'plan_research':
             self.steps += 1
-            from app.labs.ai_market_intelligence.connectors import PROFILES
+            from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.connectors import PROFILES
             used = {row['provenance']['source'] for row in payload['evidence']}
             item = next((row for row in payload['catalog'] if PROFILES[row['profile_id']]['actor'] not in used), payload['catalog'][0])
             web = item['profile_id'] == 'website'
@@ -168,7 +168,7 @@ def test_t18_exact_completed_retry_does_not_repeat_models_or_capture():
 
 
 def test_research_documents_evidence_and_reports_project_into_the_framework_schema():
-    from app.labs.ai_market_intelligence.repository import projection_statements, projection_checks
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import projection_statements, projection_checks
     flow, _, _, graph = configured()
     turn(graph, 'framework-projection')
     statements = list(projection_statements(flow.records(), 'oci_medallion', 'oci_artifacts'))
@@ -202,7 +202,7 @@ def test_evidence_can_use_one_owned_snapshot_without_rereading_the_remote_journa
 
 def test_evidence_rejects_a_foreign_snapshot_before_reading_its_rows():
     from dataclasses import replace
-    from app.labs.ai_market_intelligence.repository import Records
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import Records
     flow, _, _, _ = configured()
     foreign = Records(replace(SCOPE, owner_id='other-owner'))
     with pytest.raises(ValueError, match='another authenticated scope'):
@@ -212,7 +212,7 @@ def test_evidence_rejects_a_foreign_snapshot_before_reading_its_rows():
 @pytest.mark.parametrize('phase', ['reserve', 'start'])
 @pytest.mark.parametrize('revocation', ['discovery', 'urls', 'connector'])
 def test_paid_admission_binds_the_approved_scope_before_reservation_and_start(phase, revocation):
-    from app.labs.ai_market_intelligence.execution import execute_selected
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.execution import execute_selected
     flow, _, _, graph = configured()
     prepared = turn(graph, 'seed-research')
     question, _ = flow.research.record_question('scope-change', 'Actualizar D1', TOPIC)
@@ -244,7 +244,7 @@ def test_paid_admission_binds_the_approved_scope_before_reservation_and_start(ph
 
 
 def test_unknown_confirmation_kind_cannot_fall_through_to_a_source_approval():
-    from app.labs.ai_market_intelligence.workflow_actions import ConversationActions
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.workflow_actions import ConversationActions
     flow, _, _, _ = configured()
     with pytest.raises(ValueError, match='Unknown pending proposal'):
         asyncio.run(ConversationActions(flow).handle_confirmation({'intake': {'intent': 'source_decision'},
@@ -252,7 +252,7 @@ def test_unknown_confirmation_kind_cannot_fall_through_to_a_source_approval():
 
 
 def test_malformed_mcp_content_cannot_be_treated_as_a_text_block():
-    from app.labs.ai_market_intelligence.mcp_payload import unpack
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.mcp_payload import unpack
     with pytest.raises(ValueError, match='Invalid MCP content'):
         unpack({'content': 'not a protocol block array'})
 
@@ -395,24 +395,24 @@ def test_first_turn_page_registration_uses_admin_topic_and_waits_for_real_user_a
 @pytest.mark.parametrize('response', [{}, {'tool_name': 'ai_mi_projection', 'arguments': {}},
     {'rows': []}, {'rows': [{'total_rows': 1, 'distinct_keys': 1, 'matched_rows': 0}]}, {'rows': [{'total_rows': 2, 'distinct_keys': 1, 'matched_rows': 1}]}])
 def test_projection_requires_readback_including_no_duplicate_primary_rows(response):
-    from app.labs.ai_market_intelligence.native import verify_projection
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.native import verify_projection
     with pytest.raises(RuntimeError):
         verify_projection(response, 1)
 
 
 def test_projection_accepts_only_exact_verified_counts():
-    from app.labs.ai_market_intelligence.native import verify_projection
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.native import verify_projection
     verify_projection({'rows': [{'total_rows': 1, 'distinct_keys': 1, 'matched_rows': 1}]}, 1)
 
 
 def test_projection_rejects_duplicate_a_when_b_is_missing_even_if_both_match_a():
-    from app.labs.ai_market_intelligence.native import verify_projection
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.native import verify_projection
     with pytest.raises(RuntimeError):
         verify_projection({'rows': [{'total_rows': 2, 'distinct_keys': 1, 'matched_rows': 2}]}, 2)
 
 
 def test_orphan_projection_recovery_requires_stopped_writer_and_exact_revision():
-    from app.labs.ai_market_intelligence.repository import Conflict
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import Conflict
     flow, _, _, _ = configured()
     flow.journal.transact(lambda records, state: state.update(projection_lease='owned-lease'))
     value, _ = flow.journal.read()
@@ -430,26 +430,26 @@ def test_orphan_projection_recovery_requires_stopped_writer_and_exact_revision()
     {'structuredContent': {'items': [{'url': 'https://example.org/', 'text': 'fixture'}]}, 'content': []},
 ])
 def test_text_only_and_structured_mcp_results_are_supported(encoded):
-    from app.labs.ai_market_intelligence.mcp_payload import unpack
-    from app.labs.ai_market_intelligence.provider import _items
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.mcp_payload import unpack
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.provider import _items
     rows = _items(unpack(encoded))
     assert rows == [{'url': 'https://example.org/', 'text': 'fixture'}]
 
 
 def test_mcp_error_cannot_become_observations():
-    from app.labs.ai_market_intelligence.mcp_payload import unpack
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.mcp_payload import unpack
     with pytest.raises(RuntimeError):
         unpack({'isError': True, 'content': [{'type': 'text', 'text': 'failure'}]})
 
 
 def test_json_looking_document_content_is_preserved_verbatim():
-    from app.labs.ai_market_intelligence.mcp_payload import unpack
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.mcp_payload import unpack
     row = {'url': 'https://example.org/', 'text': '{"value":1}', 'markdown': '[1,2]'}
     assert unpack({'structuredContent': {'items': [row]}})['items'][0] == row
 
 
 def test_pausing_schedule_between_reserve_and_claim_prevents_a_paid_start():
-    from app.labs.ai_market_intelligence.execution import PaidOperations
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.execution import PaidOperations
     flow, _, _, graph = configured()
     result = turn(graph, 'initial')
     proposal = flow.proposals.propose_schedule(result['topic_id'], direct=True)
@@ -468,7 +468,7 @@ def test_pausing_schedule_between_reserve_and_claim_prevents_a_paid_start():
 
 
 def test_package_is_readable_unseeded_and_uses_the_existing_dependency_contract():
-    from app.labs.ai_market_intelligence.agent_package import agent_package
+    from app.market_installation.agent_package import agent_package
     config = {'credential_name': 'AidpRuntime', 'identity_sha256': '0' * 64, 'region': 'us-chicago-1',
               'model_endpoint': 'https://inference.generativeai.us-chicago-1.oci.oraclecloud.com',
               'model_id': 'fixture-model', 'compartment_id': 'fixture-compartment', 'guardrails_config': {'policies': []},
@@ -490,7 +490,7 @@ def test_package_is_readable_unseeded_and_uses_the_existing_dependency_contract(
 
 
 def test_provider_cannot_mix_an_actor_id_with_an_unrelated_status():
-    from app.labs.ai_market_intelligence.provider import ApifyProvider
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.provider import ApifyProvider
     with pytest.raises(ValueError):
         ApifyProvider.receipt({'actor': {'id': 'actor-1'}, 'status': 'SUCCEEDED'})
     receipt = ApifyProvider.receipt({'run': {'id': 'run-1', 'status': 'SUCCEEDED', 'usageTotalUsd': '0.0000001'}})

@@ -71,10 +71,12 @@ def schema_sha256() -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def create_statements(catalog: str, framework_schema: str) -> list[str]:
+def create_statements(catalog: str, framework_schema: str, *, storage_root: str = '') -> list[str]:
     for name in (catalog, framework_schema):
         identifier(name)
     digest = schema_sha256()
+    if storage_root and not re.fullmatch(r'oci://[A-Za-z0-9_.-]{1,128}@[A-Za-z0-9_-]{1,128}/ai_market_intelligence/delta', storage_root):
+        raise ValueError('Invalid dedicated artifacts location')
     statements = []
     for table in definition()['tables']:
         qualified = '.'.join(identifier(name) for name in (catalog, framework_schema, table['name']))
@@ -83,7 +85,8 @@ def create_statements(catalog: str, framework_schema: str) -> list[str]:
             + ('' if column['nullable'] else ' NOT NULL')
             + ' COMMENT ' + literal(column['description']) for column in table['columns'])
         statements.append(
-            'CREATE TABLE ' + qualified + ' (\n  ' + columns + '\n) USING DELTA\nCOMMENT '
+            'CREATE TABLE ' + qualified + ' (\n  ' + columns + '\n) USING DELTA'
+            + ('\nLOCATION ' + literal(storage_root + '/' + table['name']) if storage_root else '') + '\nCOMMENT '
             + literal(table['description']) + "\nTBLPROPERTIES ('ai_mi.module_id'='ai_market_intelligence', "
             + "'ai_mi.schema_version'='2', 'ai_mi.schema_sha256'=" + literal(digest) + ')')
     return statements

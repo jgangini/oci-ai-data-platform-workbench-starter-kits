@@ -1,0 +1,267 @@
+"""Empty-installer boundaries; native side effects are recorded, never executed."""
+import asyncio
+import copy
+import json
+from types import SimpleNamespace
+from pydantic import SecretStr
+
+import pytest
+
+from app.aidp import AidpProvisionConflict, AidpProvisionError, AidpProvisionPending
+from app import market_intelligence as installer
+from test_api import make_client, login
+
+
+OP = '00000000-0000-4000-8000-000000000001'
+ENDPOINT = 'https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agent'
+
+
+def state(phase='verify', **resources):
+    return {'installer_version': 1, 'module_id': installer.MODULE_ID, 'workspace': 'workspace',
+            'operation_id': OP, 'owner': 'owner', 'reuse_existing': True, 'phase': phase,
+            'status': 'installing', 'resources': resources,
+            'pack_sha256': installer.load_lab_pack(installer.MODULE_ID, require_available=False).pack_sha256}
+
+
+def client():
+    value = installer.MarketAidpClient.__new__(installer.MarketAidpClient)
+    value.settings = SimpleNamespace(aidp_region='us-chicago-1', artifacts_bucket_name='artifacts',
+                                     objectstorage_namespace='namespace')
+    value._save = lambda item: None
+    return value
+
+
+def output_receipt():
+    receipt = {'schema_sha256': installer.schema_sha256(), 'documented_columns': 145,
+               'tables': [{'table': table['name'], 'rows': 0, 'provider': 'delta', 'columns': len(table['columns'])}
+                          for table in installer.definition()['tables']]}
+    notebook = {'cells': [{'outputs': [{'text': ['AI_MARKET_MODEL_READY:' + json.dumps(receipt)]}]}]}
+    return {'data': [{'value': json.dumps(notebook)}]}
+
+
+def test_model_requires_an_exact_empty_receipt_before_cleanup():
+    assert len(installer.model_receipt(output_receipt())['tables']) == 14
+    for invalid in ({'data': []}, {'data': output_receipt()['data'] * 2}):
+        with pytest.raises(AidpProvisionPending):
+            installer.model_receipt(invalid)
+    invalid = output_receipt()
+    notebook = json.loads(invalid['data'][0]['value'])
+    notebook['cells'][0]['outputs'][0]['text'][0] = notebook['cells'][0]['outputs'][0]['text'][0].replace('"rows": 0', '"rows": 1', 1)
+    invalid['data'][0]['value'] = json.dumps(notebook)
+    with pytest.raises(AidpProvisionError, match='approved model'):
+        installer.model_receipt(invalid)
+
+
+@pytest.mark.parametrize('flag', ['errorTrace', 'isTruncated'])
+def test_incomplete_native_output_never_releases_bootstrap(flag):
+    invalid = {**output_receipt(), flag: True}
+    with pytest.raises(AidpProvisionError, match='incomplete'):
+        installer.model_receipt(invalid)
+
+
+def test_resume_freezes_owner_operation_settings_and_pack_before_mutations():
+    api = client()
+    saved = state()
+    api._workspace = lambda: {'key': 'workspace'}
+    api._read_installation = lambda workspace: copy.deepcopy(saved)
+    api._step = lambda *args: pytest.fail('A mismatched operation must not mutate AIDP')
+    for owner, operation, reuse in [('other', OP, True), ('owner', str(OP).replace('001', '002'), True), ('owner', OP, False)]:
+        with pytest.raises(AidpProvisionConflict):
+            api._advance(owner, operation, reuse, None, None)
+
+
+def test_failed_phase_preserves_resources_and_hides_provider_secret():
+    api = client()
+    saved = state('credentials', existing='keep-this-resource')
+    api._workspace = lambda: {'key': 'workspace'}
+    api._read_installation = lambda workspace: saved
+    def fail(*args):
+        raise RuntimeError('synthetic-sensitive-provider-message')
+    api._step = fail
+    result = api._advance('owner', OP, True, None, None)
+    assert result['status'] == 'error' and result['phase'] == 'credentials'
+    assert saved['resources'] == {'existing': 'keep-this-resource'}
+    assert 'synthetic-sensitive' not in json.dumps(result)
+
+
+def test_uncertain_secret_creation_never_repeats_a_write(monkeypatch):
+    api = client()
+    api._shared_oci_credential = lambda: {'key': 'shared-oci'}
+    monkeypatch.setattr(installer, '_project_credential', lambda api: None)
+    writes = []
+    def create(*a, **k):
+        writes.append(True)
+        raise TimeoutError('Unknown create outcome')
+    monkeypatch.setattr(installer, 'ensure_apify_credential', create)
+    saved = state('credentials')
+    with pytest.raises(TimeoutError):
+        api._step(saved, SecretStr('synthetic-test-secret'), None)
+    with pytest.raises(AidpProvisionConflict, match='another secret will not'):
+        api._step(saved, SecretStr('synthetic-test-secret'), None)
+    assert writes == [True]
+
+
+def test_uncertain_bootstrap_start_is_not_repeated():
+    api = client()
+    saved = state('model_run', model_job_key='job')
+    starts = []
+    api._list = lambda *a, **k: []
+    def request(method, path, **kwargs):
+        if method == 'POST':
+            starts.append(path)
+            raise TimeoutError('Unknown native outcome')
+        return {'name': 'wf_ai_mi_setup_' + OP.replace('-', ''), 'path': installer.ROOT + '/.setup_' + OP.replace('-', '')}
+    api._request = request
+    with pytest.raises(TimeoutError):
+        api._model_step(saved)
+    with pytest.raises(AidpProvisionPending, match='another run will not'):
+        api._model_step(saved)
+    assert len(starts) == 1
+
+
+def test_model_job_binding_is_verified_before_overwriting_definition():
+    api = client()
+    api._ensure_folder = api._upload_notebook = lambda *a, **k: None
+    api._request = lambda *a, **k: {'name': 'foreign-job', 'path': '/Workspace/shared'}
+    api._publish_job = lambda *a: pytest.fail('Foreign job must not be overwritten')
+    with pytest.raises(AidpProvisionConflict, match='ownership'):
+        api._model_step(state('model_prepare', model_job_key='foreign', spark_key='spark'))
+
+
+def test_cleanup_after_job_deletion_is_resumable_and_exactly_scoped():
+    api = client()
+    api._request = lambda *a, **k: None
+    removed = []
+    api._delete_workspace_path = lambda workspace, path, message: removed.append((workspace, path))
+    api._model_step(state('cleanup', model_job_key='job', model_verified={'verified': True}))
+    assert removed == [('workspace', installer.ROOT + '/.setup_' + OP.replace('-', ''))]
+    with pytest.raises(AidpProvisionError, match='verified'):
+        api._model_step(state('cleanup', model_job_key='job'))
+
+
+def test_status_refresh_reads_current_test_sessions_without_saving(monkeypatch):
+    api = client()
+    api._workspace = lambda: {'key': 'workspace'}
+    api._read_installation = lambda workspace: state('test', agent_key='agent')
+    api._save = lambda *a: pytest.fail('GET status must not write')
+    monkeypatch.setattr(installer, '_project_credential', lambda api: None)
+    monkeypatch.setattr(installer, 'MarketPlaygroundClient', lambda settings: SimpleNamespace(
+        _list=lambda *a, **k: [{'key': OP, 'displayName': 'New TEST session'}], session=SimpleNamespace(close=lambda: None)))
+    observed = asyncio.run(api.status())
+    assert observed['test_sessions'] == [{'value': OP, 'label': 'New TEST session'}]
+    assert not observed['installed']
+
+
+def test_uncertain_test_submission_never_redeploys_automatically(monkeypatch):
+    api = client()
+    api._runtime_config = lambda saved: {}
+    monkeypatch.setattr(installer, 'agent_package', lambda config: (b'source', {'runtime': b'candidate'}))
+    submissions = []
+    def refresh(*a, on_submit, **k):
+        on_submit({'package_sha256': 'candidate'})
+        submissions.append('TEST')
+        raise TimeoutError('No acknowledgement')
+    fake = SimpleNamespace(refresh=refresh, test_deployments=lambda *a: [], session=SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(installer, 'MarketPlaygroundClient', lambda settings: fake)
+    saved = state('test', agent_key='agent', agent_compute_key='compute')
+    with pytest.raises(TimeoutError):
+        api._test_step(saved, None)
+    with pytest.raises(AidpProvisionConflict, match='not be submitted automatically'):
+        api._test_step(saved, None)
+    assert submissions == ['TEST']
+
+
+def test_failed_test_prevalidation_can_be_retried_without_persisted_submission(monkeypatch):
+    api = client()
+    api._runtime_config = lambda saved: {}
+    monkeypatch.setattr(installer, 'agent_package', lambda config: (b'source', {'runtime': b'candidate'}))
+    def refresh(*a, **k):
+        raise ValueError('Saved package mismatch before on_submit')
+    monkeypatch.setattr(installer, 'MarketPlaygroundClient', lambda settings: SimpleNamespace(
+        refresh=refresh, session=SimpleNamespace(close=lambda: None)))
+    saved = state('test', agent_key='agent', agent_compute_key='compute')
+    for _ in range(2):
+        with pytest.raises(ValueError):
+            api._test_step(saved, None)
+    assert 'test_intent' not in saved['resources']
+
+
+def event(text, status='IN_PROGRESS'):
+    return b'data: ' + json.dumps({'response': {'output': [{'status': status,
+        'content': [{'type': 'output_text', 'text': text}]}]}}).encode()
+
+
+def test_result(**updates):
+    return json.dumps({'mode': 'configured_paused', 'generation_id': OP, 'mcp_verified': True,
+                      'research_enabled': False, 'apify_starts': 0, 'model_calls': 0,
+                      'streaming': 'graph_milestones', **updates})
+test_result.__test__ = False
+
+
+@pytest.mark.parametrize('fault', ['', 'error_after_result', 'wrong_revision', 'no_mcp', 'not_completed', 'progress_completed', 'failed_response'])
+def test_sse_accepts_only_completed_current_revision_with_live_mcp(fault):
+    api = client()
+    api.signer = object()
+    updates = {'generation_id': 'old'} if fault == 'wrong_revision' else {'mcp_verified': False} if fault == 'no_mcp' else {}
+    lines = [event('Revisando la solicitud.', 'COMPLETED' if fault == 'progress_completed' else 'IN_PROGRESS'),
+             event(test_result(**updates), 'IN_PROGRESS' if fault in {'not_completed', 'progress_completed'} else 'COMPLETED')]
+    if fault == 'error_after_result':
+        lines.append(b'data: {"type": "error", "error": "failed"}')
+    if fault == 'failed_response':
+        lines.append(b'data: {"response": {"status": "FAILED"}}')
+    closed, requests = [], []
+    response = SimpleNamespace(raise_for_status=lambda: None, headers={'Content-Type': 'text/event-stream'},
+        iter_lines=lambda: iter(lines), close=lambda: closed.append(True))
+    def post(*args, **kwargs):
+        requests.append(kwargs)
+        return response
+    api.session = SimpleNamespace(post=post)
+    if fault:
+        with pytest.raises(AidpProvisionError):
+            api._probe_test(ENDPOINT, OP, OP)
+    else:
+        assert api._probe_test(ENDPOINT, OP, OP)['streaming_verified'] is True
+    assert closed == [True]
+    assert requests[0]['headers']['x-deployment-type'] == 'TEST'
+    assert requests[0]['allow_redirects'] is False
+
+
+@pytest.mark.parametrize('endpoint', ['http://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agent', ENDPOINT + '?token=x', ENDPOINT.replace('.com/', '.com:443/'), 'https://outside.test/agent'])
+def test_test_endpoint_cannot_redirect_signed_requests(endpoint):
+    api = client()
+    api.session = SimpleNamespace(post=lambda *a, **k: pytest.fail('Invalid destination must not receive a request'))
+    with pytest.raises(AidpProvisionError, match='Unexpected'):
+        api._probe_test(endpoint, OP, OP)
+
+
+def test_admin_routes_are_observation_only_until_explicit_install(tmp_path):
+    portal = make_client(tmp_path)
+    calls = []
+    class Market:
+        async def status(self):
+            return installer.public_status()
+        async def operate(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            return installer.public_status(state())
+    portal.app.state.market_factory = Market
+    assert portal.get('/api/admin/modules/ai_market_intelligence').status_code == 401
+    login(portal)
+    assert portal.get('/api/admin/modules/ai_market_intelligence').status_code == 200
+    assert calls == []
+    path = '/api/admin/users/user-id/modules/ai_market_intelligence'
+    invalid = portal.post(path, json={'operation_id': OP, 'apify_token': {'secret': 'must-not-echo'}})
+    assert invalid.status_code == 400 and 'must-not-echo' not in invalid.text
+    assert portal.post(path, json={'operation_id': OP, 'agent_hub_url': 'https://outside.test'}).status_code == 400
+    assert portal.post(path, json={'operation_id': OP, 'reuse_existing': True}).status_code == 202
+    assert calls[0][0] == ('ocid1.user.oc1..ada', OP)
+    assert calls[0][1]['reuse_existing'] is True
+    unauthorized = make_client(tmp_path / 'other', mode='not-admin')
+    unauthorized.app.state.market_factory = Market
+    login(unauthorized)
+    assert unauthorized.post(path, json={'operation_id': OP}).status_code == 403
+    assert len(calls) == 1
+
+
+def test_registry_is_not_an_installation_phase():
+    assert 'registry' not in installer.PHASES
+    assert installer.PHASES[-2:] == ('production', 'ready')

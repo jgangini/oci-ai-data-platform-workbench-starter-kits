@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.labs.ai_market_intelligence.catalog import public_url
-from app.labs.ai_market_intelligence.connectors import compile_call, resolve_window
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.catalog import public_url
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.connectors import compile_call, resolve_window
 
 
 CLOCK = datetime(2026, 10, 30, 14, 30, tzinfo=timezone.utc)

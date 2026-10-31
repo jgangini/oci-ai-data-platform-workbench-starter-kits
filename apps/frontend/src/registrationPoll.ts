@@ -58,7 +58,7 @@ export function moduleOperationKind(
   if (status === "redeploying") return "redeploy";
   if (status === "deleting") return "delete";
   if (
-    status === "error" &&
+    ["error", "awaiting_action"].includes(status) &&
     operationType &&
     ["install", "redeploy", "delete"].includes(operationType)
   )

@@ -1201,6 +1201,73 @@ test('Agent URL copy fetches the verified native URL and exposes a manual fallba
 
 const flattenElements = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? flattenElements(child) : [])];
 const marketPackage = { package_id: 'ai_market_intelligence', display_name: 'AI Market Intelligence', scope: 'global', bundled_version: '1.0.0', status: 'planned' };
+const marketModule = { module_id: marketPackage.package_id, display_name: marketPackage.display_name,
+  installed: false, status: 'not_installed', phase: 'not_installed', enabled: false, completed_phases: [] };
+const marketHarness = (t, module = marketModule, initial = {}) => managerHarness(t, module,
+  { moduleId: marketModule.module_id, initialUserId: 'operator' },
+  { '/api/admin/modules/ai_market_intelligence': module, ...initial });
+
+test('Agent Hub opens separately with only public tenant context and no installation request', async t => {
+  const h = await harness(t, release, '/admin/settings', { '/api/admin/settings': { ...settings,
+    aidp_url: 'https://fixture.datalake.oci.oraclecloud.com/?pageid=homePage#?tenant=fixture&domain=Default&id_token=discard&security_token=discard' } });
+  const link = h.find('a', props => props['aria-label'] === 'Open Agent Hub');
+  assert.equal(link.props.href, 'https://fixtureagenthub.datalake.oci.oraclecloud.com/static/ah/#?tenant=fixture&domain=Default');
+  assert.equal(link.props.target, '_blank');
+  assert.equal(link.props.rel, 'noopener noreferrer');
+  assert.equal(h.mutations().length, 0);
+});
+
+for (const url of ['https://outside.test/workbench', 'http://fixture.datalake.oci.oraclecloud.com', 'https://fixture.datalake.oci.oraclecloud.com:8443/', 'https://user:pass@fixture.datalake.oci.oraclecloud.com/']) {
+  test(`Agent Hub navigation refuses an untrusted Workbench origin: ${url}`, async t => {
+    const h = await harness(t, release, '/admin/settings', { '/api/admin/settings': { ...settings, aidp_url: url } });
+    assert.equal(h.nodes().some(node => node?.props?.['aria-label'] === 'Open Agent Hub'), false);
+  });
+}
+
+test('Market setup is explicit, sends a secret only to its own API and updates real phase checks', async t => {
+  const h = await marketHarness(t);
+  assert.equal(h.mutations().length, 0);
+  assert.match(text(h.find('ul', props => props['aria-label'] === 'Services')), /TablesCredential StoreAgent/);
+  assert.ok(!text(h.nodes()[0]).includes('Agent Hub'));
+  h.act(() => h.find('input', props => props.type === 'password').props.onChange({ target: { value: 'synthetic-test-secret' } }));
+  const start = action(h, 'Deploy').props.onClick;
+  h.act(() => { start(); start(); });
+  assert.equal(h.mutations().length, 1);
+  const request = h.mutations()[0];
+  const body = JSON.parse(request.options.body);
+  assert.equal(request.path, '/api/admin/users/operator/modules/ai_market_intelligence');
+  assert.equal(body.apify_token, 'synthetic-test-secret');
+  assert.equal(body.reuse_existing, true);
+  assert.equal(JSON.stringify([...h.sessionState]).includes('synthetic-test-secret'), false);
+  request.resolve({ ...marketModule, operation_id: body.operation_id, status: 'installing', phase: 'model_prepare', completed_phases: ['verify', 'credentials'] }, 202);
+  await h.settle();
+  const steps = text(h.find('ol', props => props['aria-label'] === 'Installation steps'));
+  assert.match(steps, /Complete: Verify the selected environmentComplete: Connect credentialsCurrent: Prepare fourteen empty tables/);
+  const next = h.mutations()[1];
+  assert.equal(JSON.parse(next.options.body).operation_id, body.operation_id);
+  assert.equal('apify_token' in JSON.parse(next.options.body), false);
+  next.resolve({ ...marketModule, operation_id: body.operation_id, status: 'awaiting_action', phase: 'test', message: 'Create TEST session.' });
+  await h.settle();
+  h.requests.at(-1).resolve({ ...marketModule, operation_id: body.operation_id, status: 'awaiting_action', phase: 'test', message: 'Create TEST session.' });
+  await h.settle();
+  assert.equal(h.nodes().some(node => node?.type === 'input' && node.props.type === 'password'), false);
+});
+
+test('Market resume uses the server operation and selected TEST session, without Registry configuration', async t => {
+  const operation = '00000000-0000-4000-8000-000000000001';
+  const module = { ...marketModule, status: 'awaiting_action', phase: 'test', reuse_existing: true,
+    operation_id: operation, operation_type: 'install', test_sessions: [{ value: operation, label: 'TEST session' }] };
+  const h = await marketHarness(t, module);
+  h.act(() => h.find('SearchableCombobox', props => props.label === 'Workbench TEST session').props.onChange(operation));
+  h.act(() => action(h, 'Resume installation').props.onClick());
+  assert.deepEqual(JSON.parse(h.mutations()[0].options.body), { operation_id: operation, reuse_existing: true, test_session_id: operation });
+  h.mutations()[0].resolve({ ...module, status: 'active', installed: true, phase: 'ready' });
+  await h.settle();
+  h.requests.at(-1).resolve({ ...module, status: 'active', installed: true, phase: 'ready' });
+  await h.settle();
+  assert.ok(!h.nodes().some(node => node?.type === 'button' && text(node).includes('Redeploy')));
+  assert.equal(h.changed(), 1);
+});
 const fixtureHubUrl = 'https://fixtureagenthub.datalake.oci.oraclecloud.com/chat/fixture';
 function mockClipboard(t, writeText) {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -1209,35 +1276,35 @@ function mockClipboard(t, writeText) {
 }
 
 for (const url of [undefined, 'https://outside.test/chat/fixture', 'javascript:alert(1)', fixtureHubUrl + '#id_token=hidden', fixtureHubUrl + '?token=hidden', fixtureHubUrl.replace('https:', 'http:')]) {
-  test(`Agent Hub controls reject absent or untrusted links: ${url || 'absent'}`, async t => {
+  test(`Application offers setup and no Agent Hub action, ignoring external link metadata: ${url || 'absent'}`, async t => {
     const h = await harness(t, { ...release, packages: [{ ...marketPackage, agent_hub_url: url }] });
     const card = h.find('ApplicationReleaseSettings');
     const nodes = flattenElements(card.type(card.props));
-    const controls = nodes.find(node => node?.type?.name === 'AgentHubLinks');
-    const links = flattenElements(controls.type(controls.props));
-    assert.equal(links.some(node => node?.type === 'a'), false);
-    assert.equal(links.filter(node => node?.type === 'button' && node.props.disabled).length, 2);
-    assert.match(text(nodes.find(node => node?.props?.className === 'module-installation-pending')), /Installation pending/);
+    assert.equal(nodes.some(node => /Agent Hub/.test(node?.props?.['aria-label'] || '')), false);
+    const install = nodes.find(node => node?.props?.['aria-label'] === 'Install AI Market Intelligence');
+    assert.ok(install && !install.props.disabled);
+    assert.match(text(nodes.find(node => node?.props?.className === 'module-installation-pending')), /Not installed/);
+    h.act(() => install.props.onClick());
+    assert.equal(h.find('GovernanceModuleManager', props => props.moduleId === 'ai_market_intelligence').props.visible, true);
     assert.equal(h.mutations().length, 0);
   });
 }
 
-test('Agent Hub has separate open and copy actions and confirms a successful clipboard write', async t => {
+test('the verified native agent endpoint has a copy confirmation, independently of installation', async t => {
   const writes = [];
   mockClipboard(t, async value => writes.push(value));
-  const h = await harness(t, { ...release, packages: [{ ...marketPackage, agent_hub_url: fixtureHubUrl }] });
+  const h = await harness(t, { ...release, packages: [marketPackage] });
+  h.act(() => h.find('GovernanceModuleManager', props => props.moduleId === 'ai_market_intelligence').props.onStatusChange({ module: { ...marketPackage, installed: true, status: 'active' }, busy: false, unverified: false }));
   const links = () => {
     const card = h.find('ApplicationReleaseSettings');
-    const component = flattenElements(card.type(card.props)).find(node => node?.type?.name === 'AgentHubLinks');
-    return flattenElements(component.type(component.props));
+    return flattenElements(card.type(card.props));
   };
-  const open = links().find(node => node?.type === 'a');
-  assert.equal(open.props.href, fixtureHubUrl);
-  assert.equal(open.props.target, '_blank');
-  assert.equal(open.props.rel, 'noopener noreferrer');
-  links().find(node => node?.props?.['aria-label'] === 'Copy AI Market Intelligence Agent Hub URL').props.onClick();
+  links().find(node => node?.props?.['aria-label'] === 'Copy AI Market Intelligence agent URL').props.onClick();
+  const request = h.requests.find(item => item.path === '/api/admin/modules/ai_market_intelligence/agent-endpoint');
+  const fixtureEndpoint = 'https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/fixture/chat';
+  request.resolve({ url: fixtureEndpoint });
   await h.settle();
-  assert.deepEqual(writes, [fixtureHubUrl]);
+  assert.deepEqual(writes, [fixtureEndpoint]);
   assert.equal(text(links().find(node => node?.props?.role === 'status')), 'Copied');
   const [id, timer] = [...h.timers].find(([, timer]) => timer.delay === 3000);
   h.act(() => { h.timers.delete(id); timer.callback(); });
@@ -1245,54 +1312,21 @@ test('Agent Hub has separate open and copy actions and confirms a successful cli
   assert.equal(h.mutations().length, 0);
 });
 
-test('failed Hub clipboard write offers the URL without claiming it was copied', async t => {
+test('failed native endpoint clipboard write offers the URL without claiming it was copied', async t => {
   mockClipboard(t, async () => { throw new Error('Clipboard denied'); });
   const h = await harness(t);
-  h.find('ApplicationReleaseSettings').props.onCopyHub('ai_market_intelligence', fixtureHubUrl);
+  h.find('ApplicationReleaseSettings').props.onCopyAgent('ai_market_intelligence');
+  const request = h.requests.find(item => item.path === '/api/admin/modules/ai_market_intelligence/agent-endpoint');
+  request.resolve({ url: 'https://example.test/native-endpoint' });
   await h.settle();
   const card = h.find('ApplicationReleaseSettings');
   assert.equal(card.props.copiedAgentModule, '');
-  assert.equal(card.props.agentLink, fixtureHubUrl);
+  assert.equal(card.props.agentLink, 'https://example.test/native-endpoint');
   assert.match(card.props.error, /Clipboard is unavailable/);
 });
-const social = { module_id: 'ai_social_network', display_name: 'AI Social Network', installed: false, status: 'not_installed', enabled: false, bundled_version: '1.0.0', source_bucket: '', source_prefix: 'aidp-social/' };
-const socialHarness = (t, module = social, props = {}) => harness(t, release, '/admin/settings', { '/api/admin/users': { users: administrators }, '/api/admin/modules/ai_social_network': module }, { moduleId: 'ai_social_network', initialUserId: 'operator', ...props });
 
-test('Social is independent, supports a configurable source and does not deploy on open', async t => {
-  const h = await socialHarness(t);
-  assert.equal(h.find('h2').props.children, 'AI Social Network');
-  assert.equal(h.find('input', props => props.placeholder === 'Use the configured Landing bucket').props.value, '');
-  assert.equal(h.mutations().length, 0);
-  assert.equal(h.requests.some(request => request.path === '/api/admin/modules'), false);
-  h.act(() => h.find('input', props => props.placeholder === 'Use the configured Landing bucket').props.onChange({ target: { value: 'selected-landing' } }));
-  h.act(() => h.find('input', props => props.required && props.maxLength === 512).props.onChange({ target: { value: 'selected-social/' } }));
-  const pending = action(h, 'Deploy').props.onClick();
-  await h.settle();
-  const request = h.mutations()[0];
-  assert.equal(request.path, '/api/admin/users/operator/modules/ai_social_network');
-  const payload = JSON.parse(request.options.body);
-  assert.equal(payload.source_bucket, 'selected-landing'); assert.equal(payload.source_prefix, 'selected-social/'); assert.ok(payload.operation_id);
-  request.resolve({ status: 'active', operation_id: payload.operation_id, phase: 'active' });
-  await h.settle();
-  h.requests.filter(request => request.path === '/api/admin/modules/ai_social_network').at(-1).resolve({ ...social, installed: true, status: 'active', source_bucket: 'selected-landing', source_prefix: 'selected-social/' });
-  await h.settle();
-});
-
-test('Social installed source is immutable and deletion is not exposed by its manager', async t => {
-  const h = await socialHarness(t, { ...social, installed: true, status: 'active', source_bucket: 'selected-landing' });
-  assert.equal(h.find('input', props => props.placeholder === 'Use the configured Landing bucket').props.disabled, true);
-  assert.equal(h.find('input', props => props.placeholder === 'Use the configured Landing bucket').props.value, 'selected-landing');
-  assert.equal(h.nodes().some(node => node?.type === 'button' && text(node.props.children) === 'Delete'), false);
-  assert.ok(action(h, 'Redeploy')); assert.equal(h.mutations().length, 0);
-});
-
-test('Social endpoint button requires its own active state and precedes its deploy action', async t => {
-  const h = await harness(t, { ...release, packages: [{ package_id: social.module_id, display_name: social.display_name, scope: 'global', bundled_version: '1.0.0' }] });
-  const manager = h.find('GovernanceModuleManager', props => props.moduleId === 'ai_social_network');
-  h.act(() => manager.props.onStatusChange({ module: { ...social, installed: true, status: 'active' }, busy: false, unverified: false }));
-  const card = h.find('ApplicationReleaseSettings'), tree = card.type(card.props);
-  const nodes = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? nodes(child) : [])];
-  const list = nodes(tree), copy = list.find(node => node?.props?.['aria-label'] === 'Copy AI Social Network agent URL'), deploy = list.find(node => node?.props?.['aria-label'] === 'Deploy or redeploy AI Social Network');
-  assert.equal(copy.props.disabled, false); assert.ok(list.indexOf(copy) < list.indexOf(deploy));
-  assert.equal(h.mutations().length, 0);
+test('Application no longer mounts or queries the retired Social module', async t => {
+  const h = await harness(t);
+  assert.equal(h.nodes().some(node => node?.props?.moduleId === 'ai_social_network'), false);
+  assert.equal(h.requests.some(request => request.path.includes('ai_social_network')), false);
 });

@@ -8,12 +8,29 @@ import pytest
 
 pytest.importorskip('langgraph', reason='Graph execution is checked in the pinned runtime CI job')
 
-from app.labs.ai_market_intelligence.native import AgentRuntime
-from app.labs.ai_market_intelligence.streaming import stream_turn
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.native import AgentRuntime
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.streaming import stream_turn
 from test_market_intelligence_workflow import configured, THREAD, turn
 
 
 REQUEST = {'request_id': 'stream-1', 'question': 'Novedades de D1 en Colombia'}
+
+
+def test_paused_installer_verifies_live_tools_without_running_an_actor():
+    from types import SimpleNamespace
+    calls = []
+    async def get_tools(**kwargs):
+        calls.append(kwargs)
+        return [SimpleNamespace(name=name) for name in ('call-actor', 'get-actor-run', 'get-dataset-items')]
+    runtime = AgentRuntime()
+    runtime.mcp_client = SimpleNamespace(get_tools=get_tools)
+    assert asyncio.run(runtime.verify_mcp()) is True
+    assert calls == [{'server_name': 'AiMarketIntelligenceApify', 'use_cached': False}]
+    async def incomplete(**kwargs):
+        return [SimpleNamespace(name='call-actor')]
+    runtime.mcp_client.get_tools = incomplete
+    with pytest.raises(RuntimeError, match='reviewed research tools'):
+        asyncio.run(runtime.verify_mcp())
 
 
 def test_graph_emits_a_milestone_before_model_or_capture_and_only_one_validated_result():

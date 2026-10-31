@@ -2,9 +2,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.labs.ai_market_intelligence.proposals import Proposals, next_occurrence
-from app.labs.ai_market_intelligence.repository import Journal
-from app.labs.ai_market_intelligence.research import Research
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.proposals import Proposals, next_occurrence
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import Journal
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.research import Research
 from test_market_intelligence_repository import MemorySnapshot, SCOPE
 from test_market_intelligence_research import TOPIC
 

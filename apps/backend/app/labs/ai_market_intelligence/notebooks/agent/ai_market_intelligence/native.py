@@ -37,6 +37,7 @@ class AgentRuntime:
         import oci
         from aidputils.agents.toolkit.agent_helper import GenAIChatInvoker, GenerativeAiInferenceV2Client
         from aidputils.agents.toolkit.tool_helper import build_structured_tools_from_allowed_mcp_tools
+        from aidputils.agents.tools.mcp.mcp_service import get_mcp_client
         self.config = json.loads(Path(__file__).with_name('runtime.json').read_text(encoding='utf-8'))
         config = self.config
         identity = {key: aidputils.secrets.get(name=config['credential_name'], key=key)
@@ -56,11 +57,19 @@ class AgentRuntime:
             server_name='AiMarketIntelligenceApify', endpoint=contract['endpoint'], transport='streamable_http',
             auth={'authType': 'BEARER_TOKEN', 'token': token}, headers={})
         self.provider = ApifyProvider({tool.name: tool for tool in tools})
+        self.mcp_client = get_mcp_client(server_name='AiMarketIntelligenceApify', server_url=contract['endpoint'],
+            auth={'authType': 'BEARER_TOKEN', 'token': token}, transport='streamable_http')
         self.model = DecisionModel(GenAIChatInvoker(provider='generic', auth_type='API_KEY',
             client=GenerativeAiInferenceV2Client(endpoint=config['model_endpoint'], signer=signer),
             is_stream=False, compartment_id=config['compartment_id'], service_endpoint=config['model_endpoint'],
             model_id=config['model_id'], model_kwargs={'temperature': 0, 'max_tokens': 3000},
             guardrails_config=config['guardrails_config']))
+
+    async def verify_mcp(self):
+        tools = await self.mcp_client.get_tools(server_name='AiMarketIntelligenceApify', use_cached=False)
+        if not {'call-actor', 'get-actor-run', 'get-dataset-items'}.issubset({tool.name for tool in tools}):
+            raise RuntimeError('MCP did not expose the reviewed research tools')
+        return True
 
     async def project(self, journal):
         from aidputils.agents.toolkit.configs import AIDPToolConf
@@ -137,7 +146,10 @@ class AgentRuntime:
             usage_cost_verified=self.config['usage_cost_verified'], project=lambda records: self.project(journal))
         graph = flow.build(checkpointer=native_memory(scope.generation_id, 'ai_market_intelligence'))
         if not self.config['research_enabled']:
+            mcp_verified = await self.verify_mcp()
             yield {'event': 'result', 'response': {'mode': 'configured_paused', 'streaming': 'graph_milestones',
+                'generation_id': self.config['generation_id'],
+                'mcp_verified': mcp_verified,
                 'node_names': sorted(graph.get_graph().nodes), 'research_enabled': False, 'apify_starts': 0, 'model_calls': 0}}
             return
         request = json.loads(user_query)

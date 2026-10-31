@@ -2,9 +2,9 @@ import asyncio
 
 import pytest
 
-from app.labs.ai_market_intelligence.execution import PaidOperations, execute_selected
-from app.labs.ai_market_intelligence.repository import Journal, utc_now
-from app.labs.ai_market_intelligence.research import json_text
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.execution import PaidOperations, execute_selected
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import Journal, utc_now
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.research import json_text
 from test_market_intelligence_repository import MemorySnapshot, SCOPE
 
 
