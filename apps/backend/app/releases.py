@@ -16,6 +16,7 @@ import httpx
 
 from .config import Settings
 from .lab_packs import lab_catalog
+from .package_versions import package_version_dates
 
 
 REPOSITORY = "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
@@ -195,6 +196,8 @@ class ApplicationReleaseManager:
             check_error = "Unable to verify the latest immutable GitHub release."
         current = semantic_version(self.settings.application_release)
         latest_version = semantic_version(str(latest["tag"])) if latest else None
+        packs = lab_catalog()
+        version_dates = package_version_dates(self.settings.application_commit_sha, packs)
         return {
             "repository": REPOSITORY,
             "current_release": self.settings.application_release,
@@ -212,11 +215,12 @@ class ApplicationReleaseManager:
                     "package_id": pack.lab_id,
                     "display_name": pack.display_name,
                     "bundled_version": pack.pack_version,
+                    "updated_at": version_dates.get(pack.lab_id),
                     "kind": pack.kind,
                     "scope": pack.scope,
                     "status": pack.status,
                 }
-                for pack in lab_catalog()
+                for pack in packs
             ],
         }
 

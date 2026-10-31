@@ -1,0 +1,13 @@
+{
+  "reference_commit": "7ac5126017a37d2f00111d133d4abf5f196d8a92",
+  "tool_version": "sentrux 0.5.7",
+  "tool_sha256": "40dd2e47804bf9f006015eb742abfe178a824f42d4a19eb00478a7d705697cac",
+  "source_scope": "Git tracked plus non-ignored new files; see scripts/sentrux_scope.py",
+  "historical_baseline": "history/2026-10-02.baseline.json",
+  "historical_sha256": "fbe660457aeba92091012d404454c361e9136a2bfb0e4a2b2a51527e8f164ec3",
+  "reference_sha256": "c681fc4b0104948d11e5c482c1c0b78a06b07e58993af8d61ad423fb042e63be",
+  "reason": "Operator-approved calibration against pre-task source, preserving historical debt; rules and vendor thresholds unchanged.",
+  "historical_complex_functions": 3,
+  "pre_task_complex_functions": 117,
+  "historical_debt_resolved": false
+}

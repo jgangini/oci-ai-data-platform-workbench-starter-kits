@@ -194,7 +194,7 @@ test("application settings report releases and request only the fixed VM update 
   assert.match(source, /JSON\.stringify\(\{ operation_id: operationId \}\)/);
   assert.match(source, /Update from GitHub/);
   assert.match(source, /Installed release/);
-  assert.match(source, /Bundled version/);
+  assert.match(source, /<th scope="col">Scope<\/th>\s*<th scope="col">Version<\/th>\s*<th scope="col">Updated<\/th>/);
   assert.match(source, /Existing participant installations remain unchanged/);
   assert.match(source, /governanceModule\.update_available \? "Update" : "Redeploy"/);
   assert.match(source, /aria-live="polite"/);
