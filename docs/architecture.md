@@ -5,7 +5,11 @@
 The portal provisions participant labs and administers three shared modules. AIDP
 executes the data pipelines and agents; Master Catalog governs their tables and
 access. Participant labs, Governance metadata synchronization and God's Eye View
-capture/query processing have separate lifecycles. AI Social Network adds an independent JSON-to-Gold workflow and memory-backed Agent; its [data model and publication protocol](modules/ai-social-network.md) keep the Agent off the Landing source.
+capture/query processing have separate lifecycles. [AI Market Intelligence](modules/ai-market-intelligence.md)
+adds an independent, on-demand research graph and a resumable empty installation;
+its framework tables belong in the selected artifacts schema/bucket. The retired
+[AI Social Network](modules/ai-social-network.md) installer is removed; its historical
+API routes report HTTP 410 without changing existing cloud resources.
 
 ## Deployment boundaries
 
