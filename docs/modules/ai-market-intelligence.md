@@ -67,6 +67,15 @@ nonempty tables or storage/schema drift require a separate reviewed migration;
 this installer never drops them. An uncertain TEST submission remains actionable
 and blocked until the native operation is reconciled.
 
+When AIDP rejects an installation request, the operation receipt retains only its
+HTTP method, endpoint without query, phase, status and Oracle request ID. The
+progress dialog reports the HTTP status; request/response bodies, authorization
+headers and provider exception text are not copied into the receipt. Unexpected
+exceptions keep the generic public error; their private diagnostic contains only
+the exception class and the last five function names/line numbers, without paths
+or local variables. Reconcile the failed native step before
+resuming the same operation; an error does not prove that a write never occurred.
+
 **Open Agent Hub** is a separate navigation link. It derives the Oracle Agent Hub
 origin from the verified Workbench hostname and opens `/static/ah/` in a new tab,
 retaining only public `tenant`/`domain` context when configured. It does not pass

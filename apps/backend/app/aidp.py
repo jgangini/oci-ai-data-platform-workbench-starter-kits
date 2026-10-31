@@ -77,6 +77,19 @@ class AidpProvisionError(Exception):
     pass
 
 
+class AidpRequestError(AidpProvisionError):
+    """Transport metadata without request bodies, response bodies or credentials."""
+
+    def __init__(self, message: str, *, method: str, path: str, phase: str,
+                 status_code: int, request_id: str) -> None:
+        super().__init__(message)
+        self.diagnostic = {
+            "method": method.upper(), "phase": phase, "status_code": status_code,
+            "endpoint": re.sub(r"(/workspaces/)[^/]+", r"\1{workspace}", path.split("?", 1)[0])[:240],
+            "request_id": request_id if re.fullmatch(r"[A-Za-z0-9:/_.=-]{1,256}", request_id) else "",
+        }
+
+
 class AidpProvisionConflict(Exception):
     pass
 
@@ -498,10 +511,12 @@ class AidpClient:
         if response.status_code == 404 and allow_not_found:
             return (None, response.headers) if include_headers else None
         if response.status_code >= 400:
-            raise AidpProvisionError(
+            raise AidpRequestError(
                 self._request_error_message(
                     method, path, phase, request_headers, response
-                )
+                ), method=method, path=path, phase=phase,
+                status_code=response.status_code,
+                request_id=str(response.headers.get("opc-request-id") or ""),
             )
         result = self._response_body(response)
         return (result, response.headers) if include_headers else result

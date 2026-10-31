@@ -10,6 +10,7 @@ import pytest
 from app.aidp import AidpProvisionConflict, AidpProvisionError, AidpProvisionPending
 from app import market_intelligence as installer
 from test_api import make_client, login
+from test_aidp import bare_client, FakeResponse
 
 
 OP = '00000000-0000-4000-8000-000000000001'
@@ -112,6 +113,38 @@ def test_failed_phase_preserves_resources_and_hides_provider_secret():
     assert result['status'] == 'error' and result['phase'] == 'credentials'
     assert saved['resources'] == {'existing': 'keep-this-resource'}
     assert 'synthetic-sensitive' not in json.dumps(result)
+    assert 'synthetic-sensitive' not in json.dumps(saved)
+    assert saved['native_error']['exception_type'] == 'RuntimeError'
+    assert saved['native_error']['frames'][-1]['function'] == 'fail'
+    assert isinstance(saved['native_error']['frames'][-1]['line'], int)
+    assert 'native_error' not in result
+
+
+def test_native_request_failure_records_transport_metadata_without_provider_content():
+    transport = bare_client()
+    transport.session = SimpleNamespace(request=lambda *a, **k: FakeResponse(
+        {'code': 'BadRequest', 'message': 'synthetic-sensitive-provider-message'},
+        status_code=400, headers={'opc-request-id': 'request/ref-1'}))
+    api = client()
+    saved = state('model_prepare', existing='keep-this-resource')
+    api._workspace = lambda: {'key': 'workspace'}
+    api._read_installation = lambda workspace: saved
+    api._step = lambda *a: transport._request(
+        'POST', '/workspaces/workspace/notebook/api/contents/parent?token=synthetic-sensitive-query',
+        payload={'type': 'notebook', 'token': 'synthetic-sensitive-request'})
+    result = api._advance('owner', OP, True, None, None)
+    assert result['status'] == 'error' and result['phase'] == 'model_prepare'
+    assert 'HTTP 400' in result['message']
+    assert saved['resources'] == {'existing': 'keep-this-resource'}
+    assert saved['native_error'] == {
+        'method': 'POST', 'phase': 'content', 'status_code': 400,
+        'endpoint': '/workspaces/{workspace}/notebook/api/contents/parent',
+        'request_id': 'request/ref-1'}
+    assert 'synthetic-sensitive' not in json.dumps(saved)
+    assert 'native_error' not in result
+    api._step = lambda *a: None
+    assert api._advance('owner', OP, True, None, None)['phase'] == 'model_run'
+    assert 'native_error' not in saved
 
 
 def test_uncertain_secret_creation_never_repeats_a_write(monkeypatch):

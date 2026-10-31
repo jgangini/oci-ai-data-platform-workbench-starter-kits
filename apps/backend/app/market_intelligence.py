@@ -5,11 +5,12 @@ import asyncio
 import hashlib
 import json
 import time
+import traceback
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from .aidp import AidpClient, AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, CATALOG_NAME
+from .aidp import AidpClient, AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, AidpRequestError, CATALOG_NAME
 from .lab_packs import load_lab_pack
 from .market_installation.agent_package import agent_package
 from .market_installation.compute import prepare_compute
@@ -137,6 +138,7 @@ class MarketAidpClient(AidpClient):
             return public_status(state)
         state['status'] = 'installing'
         state['message'] = ''
+        state.pop('native_error', None)
         self._save(state)
         try:
             next_phase = self._step(state, token, session)
@@ -152,8 +154,16 @@ class MarketAidpClient(AidpClient):
         except AidpProvisionConflict as exc:
             state.update(status='awaiting_action', message=str(exc))
             self._save(state)
-        except Exception:
-            state.update(status='error', message='This step failed. Its resources were preserved; resume the same operation after reviewing the native service.')
+        except AidpRequestError as exc:
+            state.update(status='error', native_error=exc.diagnostic,
+                         message=f"A native AIDP request failed (HTTP {exc.diagnostic['status_code']}). Resources were preserved; review the installation receipt before resuming.")
+            self._save(state)
+        except Exception as exc:
+            state.update(status='error', native_error={
+                'exception_type': type(exc).__name__,
+                'frames': [{'function': frame.name, 'line': frame.lineno}
+                           for frame in traceback.extract_tb(exc.__traceback__)[-5:]]},
+                message='This step failed. Its resources were preserved; resume the same operation after reviewing the native service.')
             self._save(state)
         return public_status(state)
 
