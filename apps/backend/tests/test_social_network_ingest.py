@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.labs.ai_social_network.notebooks import social_ingest as ingest
+from app.legacy_labs.ai_social_network.notebooks import social_ingest as ingest
 
 
 def config(**changes):

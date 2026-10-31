@@ -1,14 +1,14 @@
-# AI Social Network
+# Legacy AI Social Network
 
 [Documentation](../README.md) · [Architecture](../architecture.md) · [Operations](../operations.md)
 
-AI Social Network is an optional shared module, independent of AI Data Governance and God's Eye View. Its [package contract](../../apps/backend/app/labs/ai_social_network/lab.json), [installer](../../apps/backend/app/social_network.py), [ingestion](../../apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py) and [agent](../../apps/backend/app/labs/ai_social_network/notebooks/agent/social_agent.py) are the authoritative sources.
+AI Social Network is retained for existing installations, independently of AI Data Governance and God's Eye View. It has been replaced in the public package list by the [AI Market Intelligence candidate](ai-market-intelligence.md). Its [package contract](../../apps/backend/app/legacy_labs/ai_social_network/lab.json), [compatibility installer](../../apps/backend/app/social_network.py), [ingestion](../../apps/backend/app/legacy_labs/ai_social_network/notebooks/social_ingest.py) and [agent](../../apps/backend/app/legacy_labs/ai_social_network/notebooks/agent/social_agent.py) remain the authoritative legacy sources.
 
 [Interactive workflow](../diagrams/ai-social-network.html) · [Editable diagram source](../diagrams/ai-social-network.json)
 
 ## Deploy and connect
 
-Open **Settings → Application → AI Social Network**, select an AI Data Platform administrator and review the compute costs. Choose the source bucket and JSON prefix; an empty bucket field uses the selected Landing bucket. The Gold and artifacts buckets reuse the existing deployment selections and must be distinct from the source. Deployment creates one protected module folder, a native ingestion workflow and a dedicated agent AI Compute; it reuses the shared Spark compute and existing OCI runtime credential. No additional VM, OCI identity or database credential is created.
+The retained authenticated Social lifecycle API supports existing operation/resource identities; it is no longer a public Settings installation choice. The following describes that legacy workflow, not the Market Intelligence candidate. Its source bucket and JSON prefix are bound to the installed module; an empty bucket selection used the selected Landing bucket. The Gold and artifacts buckets reuse the existing deployment selections and must be distinct from the source. Legacy deployment creates one protected module folder, a native ingestion workflow and a dedicated agent AI Compute; it reuses the shared Spark compute and existing OCI runtime credential. No additional VM, OCI identity or database credential is created.
 
 The installer pauses the managed writer before changing its notebook, waits for active runs, publishes the complete task graph and starts an initial ingestion. It enables the native UTC `0 0/5 * * * ?` schedule only after that run, agent deployment and exact permissions succeed. Concurrency is one and queueing is disabled. A five-minute trigger is not a guaranteed five-minute end-to-end SLA: long runs skip overlapping triggers and the durable ledger preserves pending work.
 

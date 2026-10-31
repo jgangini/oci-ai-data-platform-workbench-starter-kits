@@ -15,7 +15,7 @@ from unittest.mock import patch
 from langgraph.checkpoint.memory import InMemorySaver
 
 root = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('social_agent', root/'apps/backend/app/labs/ai_social_network/notebooks/agent/social_agent.py')
+spec = importlib.util.spec_from_file_location('social_agent', root/'apps/backend/app/legacy_labs/ai_social_network/notebooks/agent/social_agent.py')
 agent = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(agent)
 receipt = {'publication_id':'receipt-1','published_at':'2026-10-29T10:00:00Z','current_version':1,'history_version':2,'daily_version':3,

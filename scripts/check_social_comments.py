@@ -9,10 +9,10 @@ import tempfile
 from pyspark.sql import SparkSession
 
 root = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('social_comments_ingest', root/'apps/backend/app/labs/ai_social_network/notebooks/social_ingest.py')
+spec = importlib.util.spec_from_file_location('social_comments_ingest', root/'apps/backend/app/legacy_labs/ai_social_network/notebooks/social_ingest.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
-agent_spec = importlib.util.spec_from_file_location('social_comments_agent', root/'apps/backend/app/labs/ai_social_network/notebooks/agent/social_agent.py')
+agent_spec = importlib.util.spec_from_file_location('social_comments_agent', root/'apps/backend/app/legacy_labs/ai_social_network/notebooks/agent/social_agent.py')
 agent = importlib.util.module_from_spec(agent_spec)
 agent_spec.loader.exec_module(agent)
 

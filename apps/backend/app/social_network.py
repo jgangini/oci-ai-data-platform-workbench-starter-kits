@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from .aidp import (AidpClient, AidpProvisionConflict, AidpProvisionError, AidpProvisionPending,
                    CATALOG_NAME, MODULE_CONTROL_ROOT)
 from .lab_packs import load_lab_pack, module_runtime_source
-from .labs.ai_social_network.notebooks.social_ingest import GOLD_TABLES, TABLE_DESCRIPTIONS, location, validate_config
+from .legacy_labs.ai_social_network.notebooks.social_ingest import GOLD_TABLES, TABLE_DESCRIPTIONS, location, validate_config
 
 MODULE_ID = 'ai_social_network'
 DISPLAY_NAME = 'AI Social Network'

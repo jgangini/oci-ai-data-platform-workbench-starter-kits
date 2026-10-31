@@ -120,6 +120,7 @@ type ApplicationReleasePackage = {
   display_name: string;
   bundled_version: string;
   updated_at?: string | null;
+  agent_hub_url?: string | null;
   kind: string;
   scope: "participant" | "global";
   status: string;
@@ -2698,8 +2699,37 @@ const applicationUpdateStates = new Set([
 function packageVersionDate(value: string | null | undefined, timeZone: string) {
   if (!value) return "Not available";
   try {
-    return new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "short", day: "2-digit", timeZone }).format(new Date(value));
+    const parts = new Intl.DateTimeFormat("en", { year: "numeric", month: "2-digit", day: "2-digit", timeZone }).formatToParts(new Date(value));
+    return ["year", "month", "day"].map(type => parts.find(part => part.type === type)?.value).join("-");
   } catch { return "Not available"; }
+}
+
+function packageVersionTimestamp(value: string | null | undefined) {
+  const timestamp = Date.parse(value || "");
+  return Number.isFinite(timestamp) ? timestamp : -Infinity;
+}
+
+const settingsUpdatePositionKey = "aidp-settings-update-position";
+
+function verifiedHubLink(value?: string | null) {
+  try {
+    const url = new URL(value || "");
+    if (url.protocol !== "https:" || !/^[a-z0-9-]+agenthub\.datalake\.oci\.oraclecloud\.com$/.test(url.hostname) || url.username || url.password || url.hash || url.port) return "";
+    if ([...url.searchParams.keys()].some(key => /token|secret|password|authorization/i.test(key))) return "";
+    return url.href;
+  } catch { return ""; }
+}
+
+function AgentHubLinks({ url, name, copied, onCopy }: { url?: string | null; name: string; copied: boolean; onCopy: (url: string) => void }) {
+  const href = verifiedHubLink(url);
+  const label = `Open ${name} in Agent Hub`;
+  const icon = <img src="/icons/agent-link/lucide-bot-message-square.svg" alt="" />;
+  return <>
+    {href ? <a className="module-configure module-agent-link" href={href} target="_blank" rel="noopener noreferrer" aria-label={label} title={label}>{icon}</a> :
+      <button type="button" className="module-configure module-agent-link" disabled aria-label={label} title="Available after installation and Agent Hub registration">{icon}</button>}
+    <button type="button" className="module-configure module-agent-link" disabled={!href} onClick={() => onCopy(href)} aria-label={`Copy ${name} Agent Hub URL`} title="Copy Agent Hub URL"><CopyIcon /></button>
+    {copied && <span className="module-copy-notice" role="status">Copied</span>}
+  </>;
 }
 
 function ApplicationReleaseSettings({
@@ -2722,6 +2752,8 @@ function ApplicationReleaseSettings({
   agentLink,
   showOperationMessage = true,
   displayTimeZone = "UTC",
+  copiedAgentModule = "",
+  onCopyHub = () => {},
 }: {
   release: AdminApplicationRelease | null;
   busy: boolean;
@@ -2742,6 +2774,8 @@ function ApplicationReleaseSettings({
   agentLink: string;
   showOperationMessage?: boolean;
   displayTimeZone?: string;
+  copiedAgentModule?: string;
+  onCopyHub?: (moduleId: string, url: string) => void;
 }) {
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
@@ -2753,8 +2787,11 @@ function ApplicationReleaseSettings({
       : release?.update_available
         ? "Update available"
         : release?.latest_release
-          ? "Updated to the latest version"
+          ? null
           : "Check unavailable";
+  const packages = [...(release?.packages || [])].sort((a, b) =>
+    packageVersionTimestamp(b.updated_at) - packageVersionTimestamp(a.updated_at) ||
+    a.display_name.localeCompare(b.display_name, "en") || a.package_id.localeCompare(b.package_id, "en"));
   return (
     <section className="application-release application-version" aria-busy={busy}>
       <header className="application-release-heading">
@@ -2763,9 +2800,9 @@ function ApplicationReleaseSettings({
           <h2>Application version</h2>
           <p>Update the VM in place from the latest immutable release without reinstalling it.</p>
         </div>
-        <span className={`gods-eye-view-mode release-state ${release?.update_available || operationRunning ? "update" : "current real"}`}>
+        {statusLabel && <span className={`gods-eye-view-mode release-state ${release?.update_available || operationRunning ? "update" : "current real"}`}>
           {statusLabel}
-        </span>
+        </span>}
       </header>
       {release ? (
         <>
@@ -2823,9 +2860,9 @@ function ApplicationReleaseSettings({
                 </tr>
               </thead>
               <tbody>
-                {release.packages.map((item) => (
+                {packages.map((item) => (
                   <tr key={item.package_id}>
-                    <td><strong>{item.display_name}</strong></td>
+                    <td><strong>{item.display_name}</strong>{item.status === "planned" && <small className="module-installation-pending">Installation pending</small>}</td>
                     <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
                     <td>{item.bundled_version}</td>
                     <td>{item.updated_at ? <time dateTime={item.updated_at} title={`Last change to this package version · ${displayTimeZone}`}>{packageVersionDate(item.updated_at, displayTimeZone)}</time> : "Not available"}</td>
@@ -2835,13 +2872,18 @@ function ApplicationReleaseSettings({
                         <button type="button" className="module-configure module-agent-link" disabled={!governanceReady || agentLinkBusy}
                           onClick={() => onCopyAgent(item.package_id)} aria-label="Copy AI Data Governance agent URL"
                           title={governanceReady ? "Copy AI Data Governance agent URL" : "Agent URL is available after deployment"}>
-                          <img src="/icons/agent-link/lucide-bot-message-square.svg" alt="" />
+                          <CopyIcon />
                         </button>
+                        {copiedAgentModule === item.package_id && <span className="module-copy-notice" role="status">Copied</span>}
                         <button type="button" className="module-configure module-deploy" onClick={onConfigureGovernance} aria-label={governanceAction} title={governanceAction} aria-haspopup="dialog">
                           {governanceInstalling ? <LoadingIndicator inline label="Governance operation in progress" /> : <InstallIcon />}
                         </button>
                         </>
                       )}
+                      {item.package_id === "ai_market_intelligence" && <>
+                        <AgentHubLinks url={item.agent_hub_url} name={item.display_name} copied={copiedAgentModule === item.package_id} onCopy={url => onCopyHub(item.package_id, url)} />
+                        <button type="button" className="module-configure module-deploy" disabled aria-label="Install AI Market Intelligence" title="Installer integration is pending"><InstallIcon /></button>
+                      </>}
                       {item.package_id === "ai_social_network" && <>
                         <button type="button" className="module-configure module-agent-link" disabled={!socialReady || agentLinkBusy}
                           onClick={() => onCopyAgent(item.package_id)} aria-label="Copy AI Social Network agent URL"
@@ -2884,6 +2926,16 @@ function AdminSettings() {
   const configuringModule = window.location.pathname === "/admin/gods-eye-view";
   type SettingsTab = "workbench" | "application";
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>(configuringModule || window.location.hash === "#application" ? "application" : "workbench");
+  useEffect(() => {
+    const syncTab = () => setActiveSettingsTab(configuringModule || window.location.hash === "#application" ? "application" : "workbench");
+    window.addEventListener("hashchange", syncTab);
+    return () => window.removeEventListener("hashchange", syncTab);
+  }, [configuringModule]);
+  const [updatePosition] = useState(() => {
+    try { return JSON.parse(window.sessionStorage.getItem(settingsUpdatePositionKey) || "null"); }
+    catch { return null; }
+  });
+  const updatePositionRestored = useRef(false);
   const [aidpServiceEndpoint, setAidpServiceEndpoint] = useState("");
   const [aidpUrl, setAidpUrl] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -2919,6 +2971,12 @@ function AdminSettings() {
   const [governanceState, setGovernanceState] = useState<{ module: AdminModule | null; busy: boolean; unverified: boolean }>({ module: null, busy: false, unverified: false });
   const [agentLink, setAgentLink] = useState("");
   const [agentLinkBusy, setAgentLinkBusy] = useState(false);
+  const [copiedAgentModule, setCopiedAgentModule] = useState("");
+  useEffect(() => {
+    if (!copiedAgentModule) return;
+    const timer = window.setTimeout(() => setCopiedAgentModule(""), 3000);
+    return () => window.clearTimeout(timer);
+  }, [copiedAgentModule]);
   const governanceReady = !governanceState.unverified && !governanceState.busy && governanceState.module?.status === "active";
   const [confirmGodsEye, setConfirmGodsEye] = useState(false);
   const [godsEyeModule, setGodsEyeModule] = useState<ModuleStatus | null>(null);
@@ -2972,6 +3030,22 @@ function AdminSettings() {
       return null;
     }
   }
+  useEffect(() => {
+    if (settingsLoading || !applicationRelease || activeSettingsTab !== "application" || !updatePosition || updatePositionRestored.current) return;
+    try {
+      if (updatePosition.release !== applicationRelease.current_release || !Number.isFinite(updatePosition.y) || updatePosition.y < 0) {
+        updatePositionRestored.current = true;
+        window.sessionStorage.removeItem(settingsUpdatePositionKey);
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        window.scrollTo(0, updatePosition.y);
+        updatePositionRestored.current = true;
+        try { window.sessionStorage.removeItem(settingsUpdatePositionKey); } catch { /* Optional browser storage. */ }
+      }, 0);
+      return () => window.clearTimeout(timer);
+    } catch { /* Browser storage is optional; the URL still restores the selected tab. */ }
+  }, [settingsLoading, applicationRelease?.current_release, activeSettingsTab, updatePosition]);
   async function loadGodsEyeModule() {
     if (moduleAbortRef.current) return;
     const controller = new AbortController(); moduleAbortRef.current = controller;
@@ -3018,8 +3092,12 @@ function AdminSettings() {
       : event.key === "End"
         ? tabs[tabs.length - 1]
         : tabs[(currentIndex + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
-    setActiveSettingsTab(nextTab);
+    selectSettingsTab(nextTab);
     (nextTab === "workbench" ? workbenchTabRef : applicationTabRef).current?.focus();
+  }
+  function selectSettingsTab(tab: SettingsTab) {
+    window.location.hash = tab;
+    setActiveSettingsTab(tab);
   }
   async function logout() {
     await api("/api/admin/logout", { method: "POST" });
@@ -3035,6 +3113,7 @@ function AdminSettings() {
       setAgentLink(result.url);
       try {
         await navigator.clipboard.writeText(result.url);
+        setCopiedAgentModule(moduleId);
         setToast("Agent URL copied.");
       } catch {
         setReleaseError("Clipboard is unavailable. Select and copy the Agent URL below.");
@@ -3043,6 +3122,18 @@ function AdminSettings() {
       setReleaseError(reason instanceof Error ? reason.message : "Unable to verify the Agent URL.");
     } finally {
       setAgentLinkBusy(false);
+    }
+  }
+  async function copyModuleHub(moduleId: string, value: string) {
+    const url = verifiedHubLink(value);
+    if (!url) return;
+    setReleaseError("");
+    setAgentLink(url);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedAgentModule(moduleId);
+    } catch {
+      setReleaseError("Clipboard is unavailable. Select and copy the Agent URL below.");
     }
   }
   async function copyAidpValue(
@@ -3136,6 +3227,10 @@ function AdminSettings() {
       });
       const refreshed = await loadApplicationRelease();
       if (refreshed && previousRelease && refreshed.current_release !== previousRelease) {
+        window.location.hash = "application";
+        try {
+          window.sessionStorage.setItem(settingsUpdatePositionKey, JSON.stringify({ release: refreshed.current_release, y: window.scrollY }));
+        } catch { /* Keep navigation working when browser storage is unavailable. */ }
         window.location.reload();
         return;
       }
@@ -3171,7 +3266,7 @@ function AdminSettings() {
               aria-selected={activeSettingsTab === "workbench"}
               aria-controls="settings-panel-workbench"
               tabIndex={activeSettingsTab === "workbench" ? 0 : -1}
-              onClick={() => setActiveSettingsTab("workbench")}
+              onClick={() => selectSettingsTab("workbench")}
               onKeyDown={handleSettingsTabKeyDown}
             >
               AI Data Platform Workbench
@@ -3185,7 +3280,7 @@ function AdminSettings() {
               aria-selected={activeSettingsTab === "application"}
               aria-controls="settings-panel-application"
               tabIndex={activeSettingsTab === "application" ? 0 : -1}
-              onClick={() => setActiveSettingsTab("application")}
+              onClick={() => selectSettingsTab("application")}
               onKeyDown={handleSettingsTabKeyDown}
             >
               Application
@@ -3331,6 +3426,8 @@ function AdminSettings() {
               release={applicationRelease}
               showOperationMessage={!successfulReleaseOperationId || expiredReleaseOperationId !== successfulReleaseOperationId}
               displayTimeZone={savedTimeZone || "UTC"}
+              copiedAgentModule={copiedAgentModule}
+              onCopyHub={copyModuleHub}
               busy={releaseBusy}
               error={releaseError}
               onConfigureGovernance={() => { window.location.hash = "application"; setConfirmGovernance(true); }}

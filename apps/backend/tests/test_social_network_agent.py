@@ -3,7 +3,7 @@ import importlib.util
 from pathlib import Path
 import pytest
 
-path = Path(__file__).parents[1] / 'app/labs/ai_social_network/notebooks/agent/social_agent.py'
+path = Path(__file__).parents[1] / 'app/legacy_labs/ai_social_network/notebooks/agent/social_agent.py'
 spec = importlib.util.spec_from_file_location('social_agent', path)
 agent = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(agent)

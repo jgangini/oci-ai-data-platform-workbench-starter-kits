@@ -19,7 +19,7 @@ ACTIVE_LABS = ("banking", "telecommunications", "telco_lineage", "retail", "heal
 def test_catalog_separates_five_participant_labs_from_global_modules() -> None:
     packs = lab_catalog()
     public = public_lab_catalog()
-    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "ai_data_governance", "gods_eye_view", "ai_social_network")
+    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "ai_data_governance", "gods_eye_view", "ai_market_intelligence")
     assert tuple(item["lab_id"] for item in public) == ACTIVE_LABS
     assert all(pack.available for pack in packs[:5])
     assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == dict.fromkeys(
@@ -201,8 +201,10 @@ def test_canonical_assets_are_identical_for_every_participant() -> None:
 
 def test_global_runtime_sources_are_declared_and_not_participant_kits():
     modules = module_catalog()
-    assert {pack.lab_id for pack in modules} == {"ai_data_governance", "gods_eye_view", "ai_social_network"}
-    assert {len(pack.runtime_files) for pack in modules} == {2, 3}
+    assert {pack.lab_id for pack in modules} == {"ai_data_governance", "gods_eye_view", "ai_market_intelligence"}
+    assert {pack.lab_id: len(pack.runtime_files) for pack in modules} == {
+        'ai_data_governance': 2, 'gods_eye_view': 3, 'ai_market_intelligence': 20,
+    }
     for pack in modules:
         assert pack.lab_id not in lab_packs.available_lab_ids()
         for asset in pack.runtime_files:

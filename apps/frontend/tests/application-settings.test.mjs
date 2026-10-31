@@ -13,7 +13,7 @@ const settings = { aidp_service_endpoint: 'https://example.test/api', aidp_url: 
 const release = { current_release: 'v2.3.9', current_commit_sha: 'abc123', latest_release: 'v2.4.0', update_available: true, updater_available: true, operation: null, packages: [] };
 async function harness(t, currentRelease = release, route = '/admin/settings', initial = {}, managerProps = null, sessionState = new Map(), loginProps = null) {
   let cursor = 0, dirty = true, effects = [], tree, closed = 0, changed = 0;
-  const slots = [], requests = [], navigations = [], previous = { window: globalThis.window, document: globalThis.document, HTMLElement: globalThis.HTMLElement };
+  const slots = [], requests = [], navigations = [], scrolls = [], previous = { window: globalThis.window, document: globalThis.document, HTMLElement: globalThis.HTMLElement };
   const listeners = new Map(), storage = new Map(), timers = new Map(), intervals = new Map(), appRoot = { inert: false };
   let nextTimer = 0;
   let focusable = [];
@@ -25,7 +25,9 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
   const location = new URL(route, 'https://example.test');
   globalThis.window = { location: { pathname: location.pathname, hostname: location.hostname, search: location.search, hash: '#application', origin: location.origin, assign(path) { navigations.push(path); }, reload() { assert.fail('Unexpected reload'); } },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
-    sessionStorage: { getItem: key => sessionState.get(key) ?? null, setItem: (key, value) => sessionState.set(key, value) },
+    sessionStorage: { getItem: key => sessionState.get(key) ?? null, setItem: (key, value) => sessionState.set(key, value), removeItem: key => sessionState.delete(key) },
+    scrollY: 0, scrollTo: (x, y) => scrolls.push([x, y]),
+    addEventListener: (type, callback) => listeners.set(`window:${type}`, callback), removeEventListener: type => listeners.delete(`window:${type}`),
     setInterval: callback => { const id = intervals.size + 1; intervals.set(id, callback); return id; }, clearInterval: id => intervals.delete(id),
     setTimeout: (callback, delay) => { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; }, clearTimeout: id => timers.delete(id) };
   t.mock.method(globalThis, 'fetch', (path, options) => new Promise((resolve, reject) => {
@@ -58,7 +60,7 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
   for (const request of requests) if (initial[request.path] !== null) request.resolve(initial[request.path] ?? (request.path === '/api/admin/settings' ? settings : request.path === '/api/admin/application' ? currentRelease : { username: 'admin' }));
   await settle();
   return { requests, navigations, find, act, settle, nodes: () => nodes(tree), mutations: () => requests.filter(request => ['PUT', 'POST', 'DELETE'].includes(request.options.method)),
-    closed: () => closed, changed: () => changed, listeners, appRoot, origin, intervals, timers, sessionState, cleanup: () => slots.forEach(slot => slot?.cleanup?.()), focusable: () => focusable,
+    closed: () => closed, changed: () => changed, listeners, appRoot, origin, intervals, timers, sessionState, scrolls, cleanup: () => slots.forEach(slot => slot?.cleanup?.()), focusable: () => focusable,
     pollModule: () => act(() => { assert.equal(intervals.size, 1); [...intervals.values()][0](); }),
     dialog: () => find('ConfirmModal', props => props.title === 'Update application?'),
     update: () => act(() => { const button = find('button', props => props.className === 'settings-save application-update'); assert.ok(!button.props.disabled); button.props.onClick(); }) };
@@ -1022,11 +1024,11 @@ test('package columns present scope, version and verified date in the saved disp
   assert.match(text(nodes.find(node => node?.props?.id === region.props['aria-describedby'])), /Scroll horizontally/);
   const date = nodes.find(node => node?.type === 'time');
   assert.equal(date.props.dateTime, updatedAt);
-  assert.equal(text(date), '30 Oct 2026');
+  assert.equal(text(date), '2026-10-30');
   assert.match(date.props.title, /America\/Bogota/);
   assert.ok(text(tree).includes('Not available'));
   const changed = card.type({ ...card.props, displayTimeZone: 'UTC' });
-  assert.equal(text(flatten(changed).find(node => node?.type === 'time')), '31 Oct 2026');
+  assert.equal(text(flatten(changed).find(node => node?.type === 'time')), '2026-10-31');
   const invalid = card.type({ ...card.props, release: { ...release, packages: [{ package_id: 'retail', display_name: 'Retail', bundled_version: '2.0.0', updated_at: 'invalid' }] } });
   assert.equal(text(flatten(invalid).find(node => node?.type === 'time')), 'Not available');
 });
@@ -1063,6 +1065,92 @@ test('display time zone follows release details and keeps its independent save a
   h.act(confirm); assert.equal(h.mutations().length, 1);
 });
 
+test('package rows sort newest first with stable ties and unknown dates last without mutating the API result', async t => {
+  const packages = [
+    { package_id: 'old', display_name: 'Old', updated_at: '2026-08-18T12:00:00Z' },
+    { package_id: 'unknown', display_name: 'Unknown', updated_at: null },
+    { package_id: 'z', display_name: 'Zebra', updated_at: '2026-10-31T12:00:00Z' },
+    { package_id: 'invalid', display_name: 'Invalid', updated_at: 'invalid' },
+    { package_id: 'a', display_name: 'Alpha', updated_at: '2026-10-31T12:00:00Z' },
+  ].map(item => ({ ...item, bundled_version: '1.0.0', scope: 'global' }));
+  const original = JSON.stringify(packages);
+  const h = await harness(t, { ...release, packages });
+  const card = h.find('ApplicationReleaseSettings');
+  const flatten = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? flatten(child) : [])];
+  const body = flatten(card.type(card.props)).find(node => node?.type === 'tbody');
+  assert.deepEqual(body.props.children.map(row => row.key), ['a', 'z', 'old', 'invalid', 'unknown']);
+  assert.equal(JSON.stringify(packages), original);
+});
+
+for (const [state, expected] of [
+  [{ latest_release: 'v2.8.2', current_release: 'v2.8.2', update_available: false }, null],
+  [{ latest_release: '', update_available: false }, 'Check unavailable'],
+  [{ update_available: true }, 'Update available'],
+  [{ operation: { status: 'failed' } }, 'Update failed'],
+  [{ operation: { status: 'building' } }, 'Updating'],
+]) test(`release badge only shows actionable state: ${expected || 'none'}`, async t => {
+  const h = await harness(t, { ...release, ...state });
+  const card = h.find('ApplicationReleaseSettings');
+  const flatten = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? flatten(child) : [])];
+  const badge = flatten(card.type(card.props)).find(node => node?.props?.className?.includes('release-state'));
+  assert.equal(badge ? text(badge) : null, expected);
+});
+
+test('application update keeps the tab and reading position when the new version reloads', async t => {
+  const h = await harness(t);
+  const reloaded = [];
+  window.location.hash = '';
+  window.scrollY = 540;
+  window.location.reload = () => reloaded.push(window.location.hash);
+  h.update(); h.act(() => h.dialog().props.onConfirm());
+  h.mutations()[0].resolve({ status: 'active', phase: 'complete' }); await h.settle();
+  h.requests.filter(request => request.path === '/api/admin/application').at(-1).resolve({ ...release, current_release: 'v2.4.0' });
+  await h.settle();
+  assert.deepEqual(reloaded, ['application']);
+  assert.deepEqual(JSON.parse(h.sessionState.get('aidp-settings-update-position')), { release: 'v2.4.0', y: 540 });
+});
+
+test('after an update, Application restores the position once after settings and release data load', async t => {
+  const state = new Map([['aidp-settings-update-position', JSON.stringify({ release: 'v2.4.0', y: 540 })]]);
+  const h = await harness(t, { ...release, current_release: 'v2.4.0' }, '/admin/settings', {}, null, state);
+  const [id, timer] = [...h.timers].find(([, timer]) => timer.delay === 0);
+  h.act(() => { h.timers.delete(id); timer.callback(); });
+  assert.deepEqual(h.scrolls, [[0, 540]]);
+  assert.ok(!state.has('aidp-settings-update-position'));
+  assert.equal(h.find('section', props => props.id === 'settings-panel-application').props.hidden, false);
+  h.act(() => h.find('button', props => props.id === 'settings-tab-workbench').props.onClick());
+  assert.equal(window.location.hash, 'workbench');
+  h.act(() => h.find('button', props => props.id === 'settings-tab-application').props.onClick());
+  assert.equal(window.location.hash, 'application');
+  assert.deepEqual(h.scrolls, [[0, 540]]);
+});
+
+test('Settings follows hash navigation for browser Back and Forward without moving focus', async t => {
+  const h = await harness(t);
+  const origin = document.activeElement;
+  for (const tab of ['workbench', 'application']) {
+    window.location.hash = '#' + tab;
+    h.act(() => h.listeners.get('window:hashchange')());
+    assert.equal(h.find('button', props => props.id === 'settings-tab-' + tab).props['aria-selected'], true);
+    assert.equal(h.find('section', props => props.id === 'settings-panel-' + tab).props.hidden, false);
+    assert.equal(document.activeElement, origin);
+  }
+});
+
+test('a cancelled position timer can resume when Application becomes visible again', async t => {
+  const state = new Map([['aidp-settings-update-position', JSON.stringify({ release: release.current_release, y: 320 })]]);
+  const h = await harness(t, release, '/admin/settings', {}, null, state);
+  const initialTimer = [...h.timers].find(([, timer]) => timer.delay === 0)[0];
+  h.act(() => h.find('button', props => props.id === 'settings-tab-workbench').props.onClick());
+  assert.equal(h.timers.has(initialTimer), false);
+  assert.ok(state.has('aidp-settings-update-position'));
+  h.act(() => h.find('button', props => props.id === 'settings-tab-application').props.onClick());
+  const [id, timer] = [...h.timers].find(([, timer]) => timer.delay === 0);
+  h.act(() => { h.timers.delete(id); timer.callback(); });
+  assert.deepEqual(h.scrolls, [[0, 320]]);
+  assert.equal(state.has('aidp-settings-update-position'), false);
+});
+
 test('failed time-zone save preserves the selection and requires confirmation for retry', async t => {
   const h = await harness(t);
   const picker = () => h.find('SearchableCombobox', props => props.label === 'Display time zone');
@@ -1093,7 +1181,7 @@ for (const status of ['not_installed', 'installing', 'redeploying', 'error', 'ac
     const deploy = nodes.find(node => node?.props?.className === 'module-configure module-deploy');
     assert.ok(nodes.indexOf(button) < nodes.indexOf(deploy));
     assert.equal(button.props.disabled, status !== 'active');
-    assert.equal(button.props.children.props.alt, '');
+    assert.equal(button.props.children.type.name, 'CopyIcon');
     assert.equal(h.mutations().length, 0);
   });
 }
@@ -1109,6 +1197,63 @@ test('Agent URL copy fetches the verified native URL and exposes a manual fallba
   assert.equal(h.find('ApplicationReleaseSettings').props.agentLink, url);
   assert.equal(h.find('ApplicationReleaseSettings').props.agentLinkBusy, false);
   assert.equal(h.mutations().length, 0);
+});
+
+const flattenElements = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? flattenElements(child) : [])];
+const marketPackage = { package_id: 'ai_market_intelligence', display_name: 'AI Market Intelligence', scope: 'global', bundled_version: '1.0.0', status: 'planned' };
+const fixtureHubUrl = 'https://fixtureagenthub.datalake.oci.oraclecloud.com/chat/fixture';
+function mockClipboard(t, writeText) {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText } } });
+  t.after(() => { if (original) Object.defineProperty(globalThis, 'navigator', original); else delete globalThis.navigator; });
+}
+
+for (const url of [undefined, 'https://outside.test/chat/fixture', 'javascript:alert(1)', fixtureHubUrl + '#id_token=hidden', fixtureHubUrl + '?token=hidden', fixtureHubUrl.replace('https:', 'http:')]) {
+  test(`Agent Hub controls reject absent or untrusted links: ${url || 'absent'}`, async t => {
+    const h = await harness(t, { ...release, packages: [{ ...marketPackage, agent_hub_url: url }] });
+    const card = h.find('ApplicationReleaseSettings');
+    const nodes = flattenElements(card.type(card.props));
+    const controls = nodes.find(node => node?.type?.name === 'AgentHubLinks');
+    const links = flattenElements(controls.type(controls.props));
+    assert.equal(links.some(node => node?.type === 'a'), false);
+    assert.equal(links.filter(node => node?.type === 'button' && node.props.disabled).length, 2);
+    assert.match(text(nodes.find(node => node?.props?.className === 'module-installation-pending')), /Installation pending/);
+    assert.equal(h.mutations().length, 0);
+  });
+}
+
+test('Agent Hub has separate open and copy actions and confirms a successful clipboard write', async t => {
+  const writes = [];
+  mockClipboard(t, async value => writes.push(value));
+  const h = await harness(t, { ...release, packages: [{ ...marketPackage, agent_hub_url: fixtureHubUrl }] });
+  const links = () => {
+    const card = h.find('ApplicationReleaseSettings');
+    const component = flattenElements(card.type(card.props)).find(node => node?.type?.name === 'AgentHubLinks');
+    return flattenElements(component.type(component.props));
+  };
+  const open = links().find(node => node?.type === 'a');
+  assert.equal(open.props.href, fixtureHubUrl);
+  assert.equal(open.props.target, '_blank');
+  assert.equal(open.props.rel, 'noopener noreferrer');
+  links().find(node => node?.props?.['aria-label'] === 'Copy AI Market Intelligence Agent Hub URL').props.onClick();
+  await h.settle();
+  assert.deepEqual(writes, [fixtureHubUrl]);
+  assert.equal(text(links().find(node => node?.props?.role === 'status')), 'Copied');
+  const [id, timer] = [...h.timers].find(([, timer]) => timer.delay === 3000);
+  h.act(() => { h.timers.delete(id); timer.callback(); });
+  assert.equal(links().some(node => node?.props?.role === 'status'), false);
+  assert.equal(h.mutations().length, 0);
+});
+
+test('failed Hub clipboard write offers the URL without claiming it was copied', async t => {
+  mockClipboard(t, async () => { throw new Error('Clipboard denied'); });
+  const h = await harness(t);
+  h.find('ApplicationReleaseSettings').props.onCopyHub('ai_market_intelligence', fixtureHubUrl);
+  await h.settle();
+  const card = h.find('ApplicationReleaseSettings');
+  assert.equal(card.props.copiedAgentModule, '');
+  assert.equal(card.props.agentLink, fixtureHubUrl);
+  assert.match(card.props.error, /Clipboard is unavailable/);
 });
 const social = { module_id: 'ai_social_network', display_name: 'AI Social Network', installed: false, status: 'not_installed', enabled: false, bundled_version: '1.0.0', source_bucket: '', source_prefix: 'aidp-social/' };
 const socialHarness = (t, module = social, props = {}) => harness(t, release, '/admin/settings', { '/api/admin/users': { users: administrators }, '/api/admin/modules/ai_social_network': module }, { moduleId: 'ai_social_network', initialUserId: 'operator', ...props });

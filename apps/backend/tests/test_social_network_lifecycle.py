@@ -88,7 +88,7 @@ def test_catalog_description_requires_exact_identity_location_and_preserves_user
 
 
 def test_catalog_metadata_publishes_all_scoped_descriptions_before_waiting_for_visibility(client):
-    from app.labs.ai_social_network.notebooks.social_ingest import GOLD_TABLES, TABLE_DESCRIPTIONS
+    from app.legacy_labs.ai_social_network.notebooks.social_ingest import GOLD_TABLES, TABLE_DESCRIPTIONS
     client._catalog = Mock(return_value={"key":"catalog-key"})
     client._list = Mock(return_value=[{"key":"gold-key","displayName":"oci_gold"},{"key":"control-key","displayName":"oci_artifacts"}])
     client._schema_tables = Mock(side_effect=lambda catalog,schema:[{"key":name,"displayName":name} for name in TABLE_DESCRIPTIONS if (name in GOLD_TABLES)==(schema=="gold-key")])
