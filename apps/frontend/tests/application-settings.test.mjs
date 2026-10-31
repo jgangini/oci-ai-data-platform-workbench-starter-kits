@@ -15,6 +15,7 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
   let cursor = 0, dirty = true, effects = [], tree, closed = 0, changed = 0;
   const slots = [], requests = [], navigations = [], previous = { window: globalThis.window, document: globalThis.document, HTMLElement: globalThis.HTMLElement };
   const listeners = new Map(), storage = new Map(), timers = new Map(), intervals = new Map(), appRoot = { inert: false };
+  let nextTimer = 0;
   let focusable = [];
   class Element { focus() { document.activeElement = this; } querySelectorAll() { return focusable; } scrollIntoView() {} }
   const origin = new Element();
@@ -26,7 +27,7 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     sessionStorage: { getItem: key => sessionState.get(key) ?? null, setItem: (key, value) => sessionState.set(key, value) },
     setInterval: callback => { const id = intervals.size + 1; intervals.set(id, callback); return id; }, clearInterval: id => intervals.delete(id),
-    setTimeout: callback => { const id = timers.size + 1; timers.set(id, callback); return id; }, clearTimeout: id => timers.delete(id) };
+    setTimeout: (callback, delay) => { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; }, clearTimeout: id => timers.delete(id) };
   t.mock.method(globalThis, 'fetch', (path, options) => new Promise((resolve, reject) => {
     options.signal?.addEventListener('abort', () => reject(options.signal.reason), { once: true });
     requests.push({ path, options, reject, resolve: (body, status = 200) => resolve({ ok: status < 400, status, headers: new Headers(), json: async () => body }) });
@@ -57,7 +58,7 @@ async function harness(t, currentRelease = release, route = '/admin/settings', i
   for (const request of requests) if (initial[request.path] !== null) request.resolve(initial[request.path] ?? (request.path === '/api/admin/settings' ? settings : request.path === '/api/admin/application' ? currentRelease : { username: 'admin' }));
   await settle();
   return { requests, navigations, find, act, settle, nodes: () => nodes(tree), mutations: () => requests.filter(request => ['PUT', 'POST', 'DELETE'].includes(request.options.method)),
-    closed: () => closed, changed: () => changed, listeners, appRoot, origin, intervals, sessionState, cleanup: () => slots.forEach(slot => slot?.cleanup?.()), focusable: () => focusable,
+    closed: () => closed, changed: () => changed, listeners, appRoot, origin, intervals, timers, sessionState, cleanup: () => slots.forEach(slot => slot?.cleanup?.()), focusable: () => focusable,
     pollModule: () => act(() => { assert.equal(intervals.size, 1); [...intervals.values()][0](); }),
     dialog: () => find('ConfirmModal', props => props.title === 'Update application?'),
     update: () => act(() => { const button = find('button', props => props.className === 'settings-save application-update'); assert.ok(!button.props.disabled); button.props.onClick(); }) };
@@ -976,6 +977,58 @@ test('resuming a running application operation still asks and reuses its operati
   h.act(() => h.dialog().props.onConfirm());
   assert.equal(h.mutations().length, 1); assert.equal(h.dialog().props.open, false);
   assert.deepEqual(JSON.parse(h.mutations()[0].options.body), { operation_id: 'existing-operation' });
+});
+
+for (const status of ['succeeded', 'up_to_date']) test(`release ${status} notice expires without changing operation state or focus`, async t => {
+  const operation = { operation_id: 'completed-update', status, message: 'Application updated to v2.4.0.' };
+  const h = await harness(t, { ...release, operation });
+  const card = () => h.find('ApplicationReleaseSettings');
+  assert.ok(text(card().type(card().props)).includes(operation.message));
+  const [id, timer] = [...h.timers].find(([, timer]) => timer.delay === 8000);
+  // Unrelated re-renders must not restart the dismissal countdown.
+  h.act(() => h.find('SearchableCombobox', props => props.label === 'Display time zone').props.onChange('UTC'));
+  assert.equal(h.timers.get(id), timer);
+  h.act(() => { h.timers.delete(id); timer.callback(); });
+  assert.ok(!text(card().type(card().props)).includes(operation.message));
+  assert.deepEqual(card().props.release.operation, operation);
+  assert.equal(document.activeElement, h.origin);
+  assert.equal(h.mutations().length, 0);
+  h.cleanup(); assert.equal(h.timers.size, 0);
+});
+
+for (const status of ['failed', 'building']) test(`release ${status} notice remains visible`, async t => {
+  const operation = { operation_id: 'current-update', status, message: 'Update status requires attention.' };
+  const h = await harness(t, { ...release, operation });
+  assert.ok(![...h.timers.values()].some(timer => timer.delay === 8000));
+  const card = h.find('ApplicationReleaseSettings');
+  assert.ok(text(card.type(card.props)).includes(operation.message));
+  assert.equal(h.mutations().length, 0);
+});
+
+test('package columns present scope, version and verified date in the saved display time zone', async t => {
+  const updatedAt = '2026-10-31T01:00:00+00:00';
+  const h = await harness(t, { ...release, packages: [
+    { package_id: 'retail', display_name: 'Retail', bundled_version: '2.0.0', scope: 'participant', updated_at: updatedAt },
+    { package_id: 'banking', display_name: 'Banking', bundled_version: '2.0.0', scope: 'participant', updated_at: null },
+  ] });
+  const card = h.find('ApplicationReleaseSettings');
+  const tree = card.type(card.props);
+  const flatten = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? flatten(child) : [])];
+  const nodes = flatten(tree);
+  assert.deepEqual(nodes.filter(node => node?.type === 'th').map(text), ['Starter kit', 'Scope', 'Version', 'Updated', 'Configuration']);
+  const region = nodes.find(node => node?.props?.className === 'release-packages-wrap');
+  assert.equal(region.props.role, 'region'); assert.equal(region.props.tabIndex, 0);
+  assert.equal(region.props['aria-label'], 'Starter kit versions');
+  assert.match(text(nodes.find(node => node?.props?.id === region.props['aria-describedby'])), /Scroll horizontally/);
+  const date = nodes.find(node => node?.type === 'time');
+  assert.equal(date.props.dateTime, updatedAt);
+  assert.equal(text(date), '30 Oct 2026');
+  assert.match(date.props.title, /America\/Bogota/);
+  assert.ok(text(tree).includes('Not available'));
+  const changed = card.type({ ...card.props, displayTimeZone: 'UTC' });
+  assert.equal(text(flatten(changed).find(node => node?.type === 'time')), '31 Oct 2026');
+  const invalid = card.type({ ...card.props, release: { ...release, packages: [{ package_id: 'retail', display_name: 'Retail', bundled_version: '2.0.0', updated_at: 'invalid' }] } });
+  assert.equal(text(flatten(invalid).find(node => node?.type === 'time')), 'Not available');
 });
 
 test('display time zone follows release details and keeps its independent save action', async t => {

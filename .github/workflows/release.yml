@@ -176,6 +176,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$RELEASE_DIST"
           image_tag="aidp-lab:$RELEASE_COMMIT_SHA"
+          python scripts/write_package_versions.py
           docker build --platform linux/amd64 \
             --build-arg APP_RELEASE_TAG="$GITHUB_REF_NAME" \
             --build-arg APP_RELEASE_SHA="$RELEASE_COMMIT_SHA" \

@@ -119,6 +119,7 @@ type ApplicationReleasePackage = {
   package_id: string;
   display_name: string;
   bundled_version: string;
+  updated_at?: string | null;
   kind: string;
   scope: "participant" | "global";
   status: string;
@@ -2694,6 +2695,13 @@ const applicationUpdateStates = new Set([
   "activating",
 ]);
 
+function packageVersionDate(value: string | null | undefined, timeZone: string) {
+  if (!value) return "Not available";
+  try {
+    return new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "short", day: "2-digit", timeZone }).format(new Date(value));
+  } catch { return "Not available"; }
+}
+
 function ApplicationReleaseSettings({
   release,
   busy,
@@ -2712,6 +2720,8 @@ function ApplicationReleaseSettings({
   onCopyAgent,
   agentLinkBusy,
   agentLink,
+  showOperationMessage = true,
+  displayTimeZone = "UTC",
 }: {
   release: AdminApplicationRelease | null;
   busy: boolean;
@@ -2730,6 +2740,8 @@ function ApplicationReleaseSettings({
   onCopyAgent: (moduleId: string) => void;
   agentLinkBusy: boolean;
   agentLink: string;
+  showOperationMessage?: boolean;
+  displayTimeZone?: string;
 }) {
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
@@ -2784,7 +2796,7 @@ function ApplicationReleaseSettings({
           {release.update_check_error && (
             <p className="release-warning" role="status">{release.update_check_error}</p>
           )}
-          {release.operation?.message && (
+          {showOperationMessage && release.operation?.message && (
             <p
               className={`release-operation ${release.operation.status === "failed" ? "error" : ""}`}
               role={release.operation.status === "failed" ? "alert" : "status"}
@@ -2798,13 +2810,15 @@ function ApplicationReleaseSettings({
             <p className="settings-help">In-place updates are enabled only on the deployed application VM.</p>
           )}
           {agentLink && <label className="settings-field">Agent URL<input aria-label="Agent URL" value={agentLink} readOnly spellCheck={false} /></label>}
-          <div className="release-packages-wrap">
+          <p className="settings-help release-table-hint" id="release-table-hint">Scroll horizontally to view all columns.</p>
+          <div className="release-packages-wrap" role="region" aria-label="Starter kit versions" aria-describedby="release-table-hint" tabIndex={0}>
             <table className="release-packages">
               <thead>
                 <tr>
                   <th scope="col">Starter kit</th>
-                  <th scope="col">Bundled version</th>
                   <th scope="col">Scope</th>
+                  <th scope="col">Version</th>
+                  <th scope="col">Updated</th>
                   <th scope="col" className="release-package-actions">Configuration</th>
                 </tr>
               </thead>
@@ -2812,8 +2826,9 @@ function ApplicationReleaseSettings({
                 {release.packages.map((item) => (
                   <tr key={item.package_id}>
                     <td><strong>{item.display_name}</strong></td>
-                    <td>{item.bundled_version}</td>
                     <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
+                    <td>{item.bundled_version}</td>
+                    <td>{item.updated_at ? <time dateTime={item.updated_at} title={`Last change to this package version · ${displayTimeZone}`}>{packageVersionDate(item.updated_at, displayTimeZone)}</time> : "Not available"}</td>
                     <td className="release-package-actions">
                       {item.package_id === "ai_data_governance" && (
                         <>
@@ -2887,6 +2902,13 @@ function AdminSettings() {
   const timeZoneToSave = useRef<{ value: string; label: string } | null>(null);
   const selectedTimeZone = timeZones.find(zone => zone.value === timeZone);
   const [applicationRelease, setApplicationRelease] = useState<AdminApplicationRelease | null>(null);
+  const [expiredReleaseOperationId, setExpiredReleaseOperationId] = useState("");
+  const successfulReleaseOperationId = applicationRelease?.operation && ["succeeded", "up_to_date"].includes(applicationRelease.operation.status) ? applicationRelease.operation.operation_id : "";
+  useEffect(() => {
+    if (!successfulReleaseOperationId) return;
+    const timeout = window.setTimeout(() => setExpiredReleaseOperationId(successfulReleaseOperationId), 8_000);
+    return () => window.clearTimeout(timeout);
+  }, [successfulReleaseOperationId]);
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [confirmReleaseUpdate, setConfirmReleaseUpdate] = useState(false);
   const [confirmGovernance, setConfirmGovernance] = useState(false);
@@ -3307,6 +3329,8 @@ function AdminSettings() {
               </label>
             } /> : <><ApplicationReleaseSettings
               release={applicationRelease}
+              showOperationMessage={!successfulReleaseOperationId || expiredReleaseOperationId !== successfulReleaseOperationId}
+              displayTimeZone={savedTimeZone || "UTC"}
               busy={releaseBusy}
               error={releaseError}
               onConfigureGovernance={() => { window.location.hash = "application"; setConfirmGovernance(true); }}

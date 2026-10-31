@@ -55,6 +55,8 @@ Localhost uses the same native installation controls as production when configur
 
 ## Validate a change
 
+Architecture wrappers preserve existing Sentrux references. Use `scripts/arch-preflight.ps1 -PreserveBaseline -Python <python-exe>` and the matching postflight; `scripts/sentrux_scope.py` scans tracked and non-ignored new source without changing Git's index, excluding private/generated/nested repositories. Missing tools and degraded results fail the workflow. The operator-approved reference is commit `7ac5126` under CLI 0.5.7 (117 complex functions); the original reference remains byte-preserved in `.sentrux/history/2026-10-02.baseline.json`. `.sentrux/reference.json` records both hashes and provenance. This accepts prior debt, not its resolution; do not recalibrate from a changed candidate.
+
 Read repository instructions before editing. For code/infrastructure changes, run the project's architecture preflight before the change and postflight afterward. Use the smallest relevant checks during development and the release/CI matrix before publishing a release.
 
 ```powershell

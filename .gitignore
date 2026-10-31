@@ -14,6 +14,7 @@
 .venv/
 __pycache__/
 .pytest_cache/
+apps/backend/pytest-cache-files-*/
 node_modules/
 dist/
 *.tsbuildinfo
@@ -23,3 +24,5 @@ coverage/
 .codex/AGENTS.md
 openwiki/
 graphify-out/
+# Generated from the exact release commit before building its image.
+apps/backend/app/labs/package-releases.json

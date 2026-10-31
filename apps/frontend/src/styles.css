@@ -68,6 +68,10 @@ button { min-height: 48px; border: 0; border-radius: 10px; color: white; backgro
 .application-version { padding: 0; background: transparent; border: 0; border-radius: 0; }
 .application-update { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .release-packages .release-package-actions { width: 1%; text-align: right; white-space: nowrap; }
+.release-packages time { white-space: nowrap; }
+.release-packages-wrap:focus-visible { outline: 2px solid #c74634; outline-offset: 3px; }
+.release-table-hint { display: none; }
+@media (max-width: 700px) { .release-table-hint { display: block; margin: 0; } }
 .module-configure { display: inline-grid; width: 40px; height: 40px; min-height: 40px; padding: 0; place-items: center; color: #665c56; background: transparent; border: 1px solid #ded5cb; border-radius: 8px; }
 .module-configure svg { width: 22px; height: 22px; }
 .module-agent-link img { width: 22px; height: 22px; }
