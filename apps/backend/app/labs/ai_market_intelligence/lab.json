@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "lab_id": "ai_market_intelligence",
+  "display_name": "AI Market Intelligence",
+  "pack_version": "1.0.0",
+  "status": "planned",
+  "kind": "global_module",
+  "scope": "global",
+  "installation_modes": [
+    "laboratory",
+    "production"
+  ],
+  "datasets": [],
+  "notebooks": [],
+  "tables": {
+    "framework": [
+      "ai_mi_sources",
+      "ai_mi_topics",
+      "ai_mi_questions",
+      "ai_mi_schedule_proposals",
+      "ai_mi_schedules",
+      "ai_mi_notifications",
+      "ai_mi_research_runs",
+      "ai_mi_tool_runs",
+      "ai_mi_reports",
+      "ai_mi_documents",
+      "ai_mi_run_evidence",
+      "ai_mi_source_targets",
+      "ai_mi_topic_sources",
+      "ai_mi_source_candidates"
+    ]
+  },
+  "formats": {
+    "framework": "DELTA"
+  },
+  "expected_results": {
+    "installation": {
+      "rows_per_table": 0,
+      "documented_columns": 145,
+      "research_enabled": false,
+      "scheduled": false
+    }
+  },
+  "agent": {
+    "name": "ai_market_intelligence",
+    "memory": "AI_LAKEHOUSE",
+    "streaming": "graph_milestones",
+    "graphs": "optional"
+  },
+  "runtime_files": [
+    {
+      "file": "__init__.py",
+      "sha256": "2995e39ecee9060a2d4000c26b4e164bb3adc116298e48f0dc74e980ca2142c8"
+    },
+    {
+      "file": "workflow.py",
+      "sha256": "4e4722beb563abb86339a6cbdda63b9d9aa18c1ef56ad9778e642a38fbe9da45"
+    },
+    {
+      "file": "workflow_actions.py",
+      "sha256": "5864fee0e789ab8b23f25c3f4aced4c8cda343da544b0dc568e2dcf1a9d340eb"
+    },
+    {
+      "file": "model.py",
+      "sha256": "b25d96cc17a42d080d4c3f12a387aa7eeb38edccd51742777b5d48a5b033522f"
+    },
+    {
+      "file": "native.py",
+      "sha256": "a5f98d0b538f31056c0a00e9a1cfaee72369bf1da1a24bf4c8f2994242e93262"
+    },
+    {
+      "file": "streaming.py",
+      "sha256": "e00cb79bfe73179db192f6450a1a83f9717a4a4360d8302571df2e7eb416121f"
+    },
+    {
+      "file": "provider.py",
+      "sha256": "8c937ce2d8cb656ce760dcaedb7ab9b715e784e41ec00718f4bae51c7f247749"
+    },
+    {
+      "file": "repository.py",
+      "sha256": "388685cd14b524b885d36fde1feb9a2fb37e27e7cc91c5754884219d9b8174b0"
+    },
+    {
+      "file": "research.py",
+      "sha256": "6f92c87e0f3ac542535bac973456b201baabdf0c244922a6d11e4bcd6d021a58"
+    },
+    {
+      "file": "execution.py",
+      "sha256": "f049d08a4bb1e3de8dcaf6db0e3718e32a0e1ccbcef52442a6486ec88f7bd3f4"
+    },
+    {
+      "file": "catalog.py",
+      "sha256": "614c034add9128fb46f26bc05e1a57db234ce00691b7455afc1aa5ee2d2e4d83"
+    },
+    {
+      "file": "proposals.py",
+      "sha256": "41a0b6974bdf5b08b5c12cb0bd540aa67bfc3e2cbb5316458e77fda40c88a3f8"
+    },
+    {
+      "file": "contracts.py",
+      "sha256": "45df665b22d09386151584450508ecb71a781ff3df52b329e5ddcca80ba06ecf"
+    },
+    {
+      "file": "connectors.py",
+      "sha256": "c648fc0ab0e4e186e162ee8b499a72ea1802cc67b013d6bb493de3088a213b02"
+    },
+    {
+      "file": "schema.py",
+      "sha256": "f5dc910265f9693b893e7aa6cfe8e90e8e83dbac5eca6072d791173c7a0feb2c"
+    },
+    {
+      "file": "schema.json",
+      "sha256": "c89f59c2a5334a300f18c0631b27c7519d71a76078e4ea3e69d58e6560dd8b73"
+    },
+    {
+      "file": "mcp_tools.json",
+      "sha256": "2359ef2deca0b86d1a48ef9a98d60a86846a0c05e29a4b87e3ed919a828af426"
+    },
+    {
+      "file": "prompts.json",
+      "sha256": "745b54828d496c0fd89d3781f273ccd3b430ac536af643b19a68e0dde589a902"
+    },
+    {
+      "file": "mcp_payload.py",
+      "sha256": "7146758dc9e1823aabfcdb5851bc9f5744a8a6669d1aba9fb5656c6a6775078a"
+    },
+    {
+      "file": "memory.py",
+      "sha256": "46fad3fd9dbaf0fd76639e4957ef846f09c388aa1906998d7abd4096f36b1fcf"
+    }
+  ],
+  "pack_sha256": "61a2f226e9be8321c580a294665b7b2a7307158f7321c39f96c00d33101f50d0"
+}

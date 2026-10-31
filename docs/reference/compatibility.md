@@ -9,6 +9,15 @@ uses `ai_data_governance` in its package, catalog and module identity. Old names
 below identify existing installation contracts, not active source packages.
 Renaming source files does not migrate cloud data or retire resources.
 
+AI Market Intelligence uses `ai_market_intelligence` in the public catalog and
+`apps/backend/app/labs/ai_market_intelligence` for its candidate runtime. The
+previous `ai_social_network` package remains at
+`apps/backend/app/legacy_labs/ai_social_network`, with its released 1.1.1 bytes,
+authenticated routes and installed resource identities preserved. It is omitted
+from the public package list. These are different workflows: legacy five-minute
+ingestion must never be used as a renamed Market Intelligence installer. The
+new package is planned; moving its source does not deploy it or migrate data.
+
 ## Deployment capability
 
 Fresh bases set `portal_managed_modules=true`, reserve module networking and record the immutable Resource Manager source in the selected artifacts bucket. The portal can then enable `gods_eye_view` through `enabled_vm_modules` without changing VM1. This is not a migration switch for an arbitrary existing stack.

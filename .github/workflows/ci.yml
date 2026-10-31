@@ -78,7 +78,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - run: pip install pyspark==3.5.1 delta-spark==3.2.0 langgraph==0.6.7 oci==2.189.0
+      - run: pip install pyspark==3.5.1 delta-spark==3.2.0 langgraph==0.6.7 oci==2.189.0 pytest==8.4.1
       - run: python scripts/check_social_graph.py
+      - run: python -m pytest apps/backend/tests/test_market_intelligence_*.py apps/backend/tests/test_market_package.py
       - run: spark-submit --packages io.delta:delta-spark_2.12:3.2.0 scripts/check_social_delta.py
       - run: spark-submit --packages io.delta:delta-spark_2.12:3.2.0 scripts/check_social_comments.py

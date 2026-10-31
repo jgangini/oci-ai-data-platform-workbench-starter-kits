@@ -71,6 +71,8 @@ button { min-height: 48px; border: 0; border-radius: 10px; color: white; backgro
 .release-packages time { white-space: nowrap; }
 .release-packages-wrap:focus-visible { outline: 2px solid #c74634; outline-offset: 3px; }
 .release-table-hint { display: none; }
+.module-copy-notice { display: inline-block; padding: 3px 6px; color: #245e4b; background: #e7f5ed; border-radius: 4px; font-size: .75rem; vertical-align: middle; }
+.module-installation-pending { display: block; margin-top: 4px; color: #6f655e; font-size: .75rem; }
 @media (max-width: 700px) { .release-table-hint { display: block; margin: 0; } }
 .module-configure { display: inline-grid; width: 40px; height: 40px; min-height: 40px; padding: 0; place-items: center; color: #665c56; background: transparent; border: 1px solid #ded5cb; border-radius: 8px; }
 .module-configure svg { width: 22px; height: 22px; }

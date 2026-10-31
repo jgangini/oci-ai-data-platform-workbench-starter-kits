@@ -1,0 +1,1033 @@
+{
+  "schema_version": 2,
+  "module_id": "ai_market_intelligence",
+  "scope_columns": [
+    "tenant_id",
+    "owner_id"
+  ],
+  "physical_key_constraints": false,
+  "tables": [
+    {
+      "name": "ai_mi_sources",
+      "layer": "framework",
+      "description": "Catálogo revisado de orígenes y conectores; configuración, no credenciales.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "source_key",
+          "nullable": false,
+          "description": "Identificador estable del origen y conector revisado del catálogo."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "name": "name",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Nombre legible del origen del catálogo que se muestra al usuario."
+        },
+        {
+          "name": "connector_revision",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Revisión inmutable del conector y de sus capacidades/parámetros permitidos."
+        },
+        {
+          "name": "allowed_scope_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Objeto JSON versionado con operaciones, URLs, dominios y límites que el controlador permite para este origen o destino."
+        },
+        {
+          "name": "status",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Estado del origen: activo o deshabilitado según la política del catálogo; no es el estado de un Actor en ejecución."
+        },
+        {
+          "type": "STRING",
+          "name": "description",
+          "nullable": true,
+          "description": "Descripción del origen o destino y de su utilidad para la investigación; no contiene credenciales."
+        },
+        {
+          "type": "STRING",
+          "name": "platform",
+          "nullable": true,
+          "description": "Plataforma u origen de datos; por ejemplo web, X, YouTube o proveedor de indicadores."
+        },
+        {
+          "type": "TIMESTAMP",
+          "name": "verified_at",
+          "nullable": true,
+          "description": "Instante UTC de la última revisión efectiva del origen; nulo si aún no se verificó."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_topics",
+      "layer": "framework",
+      "description": "Ámbitos temáticos normalizados por entidad, mercado y objetivo.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "topic_id",
+          "nullable": false,
+          "description": "Identificador del tema normalizado que vincula entidad, mercado y objetivo de investigación."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "name": "canonical_scope_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Objeto JSON versionado con entidad, país, objetivo y demás dimensiones que definen un tema sin mezclar intenciones distintas."
+        },
+        {
+          "name": "similarity_revision",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Revisión de la política o modelo que decide equivalencia temática; no representa una similitud calibrada por sí misma."
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "description": "Instante UTC en que se creó el registro mediante una operación admitida."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_questions",
+      "layer": "framework",
+      "description": "Preguntas persistidas y clasificadas para continuidad y recurrencia explicable.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "question_id",
+          "nullable": false,
+          "description": "Identificador obligatorio y estable de esta pregunta; su relación con investigaciones se almacena en research_runs."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_topics.topic_id",
+          "name": "topic_id",
+          "nullable": true,
+          "description": "Identificador del tema normalizado que vincula entidad, mercado y objetivo de investigación."
+        },
+        {
+          "name": "client_request_id",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Identidad de solicitud deduplicada dentro del tenant y propietario; repetirla no crea otra pregunta."
+        },
+        {
+          "name": "question_text",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Texto autorizado de la pregunta del usuario, sujeto a minimización y retención; no almacena secretos."
+        },
+        {
+          "name": "question_kind",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Clasificación de la pregunta: conversation_research, followup, retry o scheduled; solo la primera participa en recurrencia."
+        },
+        {
+          "name": "asked_at",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "description": "Instante UTC de recepción de la pregunta; base temporal del conteo de recurrencia."
+        },
+        {
+          "name": "match_reason_revision",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Motivo verificable y revisión de la asignación al tema, serializados de forma versionada."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_schedule_proposals",
+      "layer": "framework",
+      "description": "Propuestas conversacionales de programación y su decisión, sin ejecución automática.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "proposal_id",
+          "nullable": false,
+          "description": "Identificador obligatorio de esta propuesta conversacional y de su historial de decisión."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_topics.topic_id",
+          "name": "topic_id",
+          "nullable": true,
+          "description": "Identificador del tema normalizado que vincula entidad, mercado y objetivo de investigación."
+        },
+        {
+          "name": "state",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Estado de propuesta: pendiente, aceptada, rechazada o sustituida; nunca activa un horario por sí mismo."
+        },
+        {
+          "name": "trigger_question_ids_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Lista JSON de question_id distintos que justifican la sugerencia; excluye aclaraciones, reintentos y ejecuciones programadas."
+        },
+        {
+          "name": "proposed_plan_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Plan propuesto versionado con tema, fuentes, ventana, horario y límites; no equivale a aprobación."
+        },
+        {
+          "name": "decision_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Decisión versionada del propietario con acto, revisión y evidencia de aceptación o rechazo; nulo mientras esté pendiente."
+        },
+        {
+          "name": "suppress_until",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "description": "Instante UTC hasta el que se suprimen sugerencias equivalentes tras un rechazo; nulo si no hay supresión."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_schedules",
+      "layer": "framework",
+      "description": "Programaciones confirmadas y sus revisiones de alcance, horario y presupuesto.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "schedule_id",
+          "nullable": false,
+          "description": "Identificador obligatorio de esta programación; sus revisiones conservan el alcance aprobado."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_topics.topic_id",
+          "name": "topic_id",
+          "nullable": true,
+          "description": "Identificador del tema normalizado que vincula entidad, mercado y objetivo de investigación."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_schedule_proposals.proposal_id",
+          "name": "proposal_id",
+          "nullable": true,
+          "description": "Identificador de la propuesta de programación; puede ser nulo en una programación solicitada directamente."
+        },
+        {
+          "name": "revision",
+          "type": "BIGINT",
+          "nullable": true,
+          "description": "Número entero positivo de la revisión del registro; las revisiones publicadas o aprobadas no se alteran silenciosamente."
+        },
+        {
+          "name": "status",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Estado de programación: draft, pending_confirmation, active, paused o cancelled."
+        },
+        {
+          "name": "recurrence_timezone_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Regla de recurrencia y zona IANA versionadas; define el horario local y su resolución de cambios de hora."
+        },
+        {
+          "name": "approved_plan_budget_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Plan y límites de gasto por ejecución y periodo aceptados en la revisión; importes enteros en microusd."
+        },
+        {
+          "name": "approval_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Recibo versionado del acto de aprobación humana para el alcance exacto; no puede ser generado por contenido de una fuente."
+        },
+        {
+          "name": "next_due_at",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "description": "Próximo vencimiento UTC derivado del horario aprobado; no constituye un claim exclusivo ni una autorización de gasto."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_notifications",
+      "layer": "framework",
+      "description": "Avisos por destinatario e informe con estado de lectura idempotente.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "notification_id",
+          "nullable": false,
+          "description": "Identificador estable del aviso destinado al propietario del informe."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_reports.report_id",
+          "name": "report_id",
+          "nullable": true,
+          "description": "Identificador inmutable del informe publicado al que se vincula el resultado o aviso."
+        },
+        {
+          "name": "delivery_key",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Identidad de entrega por destinatario, informe y revisión; evita avisos duplicados al repetir publicación o lectura."
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "description": "Instante UTC en que se creó el registro mediante una operación admitida."
+        },
+        {
+          "name": "read_at",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "description": "Instante UTC de lectura confirmada por el destinatario; nulo significa que no hay una lectura confirmada."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_research_runs",
+      "layer": "framework",
+      "description": "Proyección de investigaciones, planes, criterios de cierre y decisiones del journal operacional.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "run_id",
+          "nullable": false,
+          "description": "Identificador estable de la investigación, compartido por sus pasos, evidencias e informes."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_topics.topic_id",
+          "name": "topic_id",
+          "nullable": true,
+          "description": "Identificador del tema normalizado que vincula entidad, mercado y objetivo de investigación."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_schedules.schedule_id",
+          "name": "schedule_id",
+          "nullable": true,
+          "description": "Identificador de la programación aprobada; nulo en una consulta a demanda."
+        },
+        {
+          "name": "occurrence_key",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Identidad de programación, revisión y vencimiento UTC; nula en demanda, única lógicamente en el controlador operacional."
+        },
+        {
+          "name": "state",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Estado de ejecución de la investigación, distinto del grado de sustento de sus hallazgos."
+        },
+        {
+          "name": "plan_window_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Ventana efectiva UTC, zona y parámetros de búsqueda de esta investigación; conserva la interpretación exacta del periodo solicitado."
+        },
+        {
+          "name": "reserved_microusd",
+          "type": "BIGINT",
+          "nullable": true,
+          "description": "Reserva monetaria entera en millonésimas de dólar estadounidense; nulo significa desconocida, nunca gasto cero."
+        },
+        {
+          "name": "observed_costs_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Costes observados por proveedor, modelos y compute con moneda, unidad y valores desconocidos explícitos."
+        },
+        {
+          "name": "started_finished_at_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Instantes UTC de inicio y finalización de la investigación; el final es nulo mientras continúe."
+        },
+        {
+          "name": "question_id",
+          "key": "fk",
+          "references": "ai_mi_questions.question_id",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Identificador de una pregunta persistida; nulo cuando la investigación nace solo de una programación."
+        },
+        {
+          "name": "brief_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Encuadre versionado: objetivo de negocio, preguntas, entidad, mercado, hipótesis pertinentes y definiciones de medidas."
+        },
+        {
+          "name": "completion_policy_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Política admitida de suficiencia, pasos, tiempo, coste, cobertura y escalamiento que gobierna la investigación."
+        },
+        {
+          "name": "decision_log_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Proyección ordenada del journal de decisiones resumidas, con pasos, brechas, acción y referencias; no almacena razonamiento interno libre."
+        },
+        {
+          "name": "termination_reason",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Motivo controlado de cierre, por suficiencia, falta de evidencia, límites, fallo, inicio incierto o cancelación; nulo mientras no termine."
+        },
+        {
+          "name": "comparison_context_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Referencias y revisiones exactas de la base temporal con pruebas de comparabilidad; declara baseline ausente o incompatible."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_tool_runs",
+      "layer": "framework",
+      "description": "Proyección de intentos externos y recibos del ledger de efectos pagados.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "tool_run_id",
+          "nullable": false,
+          "description": "Identificador obligatorio del intento de ejecución externa y su conciliación."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_research_runs.run_id",
+          "name": "run_id",
+          "nullable": true,
+          "description": "Identificador estable de la investigación, compartido por sus pasos, evidencias e informes."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_sources.source_key",
+          "name": "source_key",
+          "nullable": true,
+          "description": "Identificador estable del origen y conector revisado del catálogo."
+        },
+        {
+          "name": "provider_run_id",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Identificador devuelto por el proveedor para recuperar la misma operación; nulo antes de conocer si el inicio ocurrió."
+        },
+        {
+          "name": "state",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Estado del efecto externo: prepared, start_uncertain, running, completed o failed; exige conciliación antes de repetir un inicio."
+        },
+        {
+          "name": "request_hash",
+          "type": "STRING",
+          "nullable": true,
+          "description": "SHA-256 de los argumentos canónicos y la operación admitida; excluye secretos y vincula reintentos con su intención original."
+        },
+        {
+          "name": "reserved_microusd",
+          "type": "BIGINT",
+          "nullable": true,
+          "description": "Reserva monetaria entera en millonésimas de dólar estadounidense; nulo significa desconocida, nunca gasto cero."
+        },
+        {
+          "name": "spent_microusd",
+          "type": "BIGINT",
+          "nullable": true,
+          "description": "Gasto externo confirmado por recibo, entero en millonésimas de USD; nulo significa que aún no se conoce."
+        },
+        {
+          "name": "provider_receipt_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Recibo versionado del proveedor con estado, referencia de operación, tiempos, coste y evidencia de conciliación; sin credenciales."
+        },
+        {
+          "key": "fk",
+          "type": "STRING",
+          "name": "target_id",
+          "references": "ai_mi_source_targets.target_id",
+          "nullable": true,
+          "description": "Identificador del destino concreto del catálogo; nulo solo en una búsqueda o URL puntual permitida aún no registrada."
+        },
+        {
+          "name": "step_purpose_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Pregunta o hipótesis que cubre el paso, brecha y aporte esperado; justifica por qué se llama a esa herramienta."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_reports",
+      "layer": "framework",
+      "description": "Informes versionados en Markdown, hallazgos, referencias, límites y gráficos opcionales.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "report_id",
+          "nullable": false,
+          "description": "Identificador inmutable del informe publicado al que se vincula el resultado o aviso."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_research_runs.run_id",
+          "name": "run_id",
+          "nullable": true,
+          "description": "Identificador estable de la investigación, compartido por sus pasos, evidencias e informes."
+        },
+        {
+          "name": "revision",
+          "type": "BIGINT",
+          "nullable": true,
+          "description": "Número entero positivo de la revisión del registro; las revisiones publicadas o aprobadas no se alteran silenciosamente."
+        },
+        {
+          "name": "status",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Estado del informe: ready, partial o failed; una salida parcial puede contener hallazgos útiles y límites explícitos."
+        },
+        {
+          "name": "markdown",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Cuerpo del informe en Markdown; la aplicación debe sanitizarlo y no ejecutar HTML o código embebido."
+        },
+        {
+          "name": "chart_spec_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Especificación gráfica determinista y validada; nulo si no corresponde un gráfico o faltan datos representables."
+        },
+        {
+          "name": "coverage_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Cobertura observada de fuentes, periodos, filtros, resultados vacíos y fallos; no implica representatividad del mercado."
+        },
+        {
+          "name": "published_at",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "description": "Instante UTC de publicación del documento original o del informe, según la tabla; nulo en un documento sin fecha verificable."
+        },
+        {
+          "type": "STRING",
+          "name": "cited_evidence_ids_json",
+          "nullable": true,
+          "description": "Lista JSON de evidence_key realmente citadas y accesibles en la revisión del informe."
+        },
+        {
+          "name": "findings_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Hallazgos versionados con clase, estado, evidencia favorable/contraria y confianza cualitativa motivada."
+        },
+        {
+          "name": "limitations_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Limitaciones metodológicas, sesgos, datos faltantes y preguntas no resueltas que restringen la interpretación."
+        },
+        {
+          "name": "chart_decision_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Decisión motivada de incluir u omitir gráfico, con referencias de medidas y controles de compatibilidad."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_documents",
+      "layer": "framework",
+      "description": "Versiones de documentos y publicaciones con fechas, contenido y procedencia verificables.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "observation_key",
+          "nullable": false,
+          "description": "Identificador de una versión observada de contenido y medidas; los reintentos no generan otra versión idéntica."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "name": "document_key",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Identificador lógico estable del documento o publicación, independiente de su versión de contenido."
+        },
+        {
+          "name": "content_hash",
+          "type": "STRING",
+          "nullable": true,
+          "description": "SHA-256 del contenido canónico de esta versión; una variación no equivale por sí sola a una tendencia del mercado."
+        },
+        {
+          "name": "source_url",
+          "type": "STRING",
+          "nullable": true,
+          "description": "URL pública canónica que identifica la fuente original observada y permite fundamentar referencias."
+        },
+        {
+          "name": "published_at",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "description": "Instante UTC de publicación del documento original o del informe, según la tabla; nulo en un documento sin fecha verificable."
+        },
+        {
+          "name": "observed_at",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "description": "Instante UTC en que se obtuvo la observación; no sustituye a la fecha de publicación o periodo del indicador."
+        },
+        {
+          "name": "content_ref",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Referencia protegida al contenido persistido de esta versión; no es una URL arbitraria que autorice acceso."
+        },
+        {
+          "name": "metrics_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Medidas verificadas con unidades, periodo y valores desconocidos explícitos; no son cifras inventadas por el modelo."
+        },
+        {
+          "name": "provenance_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Procedencia de la observación: editor, origen identificado, familia de contenido dependiente y límites de verificación."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_run_evidence",
+      "layer": "framework",
+      "description": "Vínculos de observaciones y pasajes que sustentan o contradicen una investigación.",
+      "columns": [
+        {
+          "type": "STRING",
+          "key": "pk",
+          "name": "evidence_key",
+          "nullable": false,
+          "description": "Identificador del vínculo de evidencia entre investigación, observación y ejecución externa cuando exista."
+        },
+        {
+          "name": "tenant_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "name": "owner_id",
+          "type": "STRING",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_research_runs.run_id",
+          "name": "run_id",
+          "nullable": true,
+          "description": "Identificador estable de la investigación, compartido por sus pasos, evidencias e informes."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_tool_runs.tool_run_id",
+          "name": "tool_run_id",
+          "nullable": true,
+          "description": "Identificador del intento externo controlado; nulo en evidencia reutilizada sin nueva ejecución externa."
+        },
+        {
+          "type": "STRING",
+          "key": "fk",
+          "references": "ai_mi_documents.observation_key",
+          "name": "observation_key",
+          "nullable": true,
+          "description": "Identificador de una versión observada de contenido y medidas; los reintentos no generan otra versión idéntica."
+        },
+        {
+          "name": "quoted_span_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Pasaje o rango exacto de la observación utilizado como evidencia, con referencia a su versión."
+        },
+        {
+          "name": "relevance_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Evaluación versionada de pertinencia para la pregunta; conserva modelo, política y motivo cuando interviene IA."
+        },
+        {
+          "name": "assessment_json",
+          "type": "STRING",
+          "nullable": true,
+          "description": "Contraste versionado de relevancia, postura, independencia, entidad, fecha y limitaciones de la evidencia."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_source_targets",
+      "layer": "framework",
+      "description": "Destinos concretos de páginas, cuentas y canales asociados a un origen.",
+      "columns": [
+        {
+          "key": "pk",
+          "type": "STRING",
+          "name": "target_id",
+          "nullable": false,
+          "description": "Identificador obligatorio y estable de este destino concreto del catálogo."
+        },
+        {
+          "type": "STRING",
+          "name": "tenant_id",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "type": "STRING",
+          "name": "owner_id",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "key": "fk",
+          "type": "STRING",
+          "name": "source_key",
+          "references": "ai_mi_sources.source_key",
+          "nullable": true,
+          "description": "Identificador estable del origen y conector revisado del catálogo."
+        },
+        {
+          "type": "STRING",
+          "name": "kind",
+          "nullable": true,
+          "description": "Tipo de destino: página, sección, cuenta, canal u otro tipo permitido por el conector revisado."
+        },
+        {
+          "type": "STRING",
+          "name": "canonical_url_or_id",
+          "nullable": true,
+          "description": "URL o identificador nativo normalizado del destino, conservando distinciones semánticas entre secciones."
+        },
+        {
+          "type": "STRING",
+          "name": "description",
+          "nullable": true,
+          "description": "Descripción del origen o destino y de su utilidad para la investigación; no contiene credenciales."
+        },
+        {
+          "type": "STRING",
+          "name": "allowed_scope_json",
+          "nullable": true,
+          "description": "Objeto JSON versionado con operaciones, URLs, dominios y límites que el controlador permite para este origen o destino."
+        },
+        {
+          "type": "BIGINT",
+          "name": "approval_revision",
+          "nullable": true,
+          "description": "Revisión positiva de la aprobación del destino y sus límites; no amplía permisos de una credencial."
+        },
+        {
+          "type": "STRING",
+          "name": "status",
+          "nullable": true,
+          "description": "Estado de disponibilidad del destino aprobado; deshabilitado bloquea nuevos usos de base."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_topic_sources",
+      "layer": "framework",
+      "description": "Base aprobada de destinos por tema o empresa, con papel y prioridad contextual.",
+      "columns": [
+        {
+          "key": "pk",
+          "type": "STRING",
+          "name": "topic_source_id",
+          "nullable": false,
+          "description": "Identificador del vínculo aprobado entre un tema y un destino del catálogo."
+        },
+        {
+          "type": "STRING",
+          "name": "tenant_id",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "type": "STRING",
+          "name": "owner_id",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "key": "fk",
+          "type": "STRING",
+          "name": "topic_id",
+          "references": "ai_mi_topics.topic_id",
+          "nullable": true,
+          "description": "Identificador del tema normalizado que vincula entidad, mercado y objetivo de investigación."
+        },
+        {
+          "key": "fk",
+          "type": "STRING",
+          "name": "target_id",
+          "references": "ai_mi_source_targets.target_id",
+          "nullable": true,
+          "description": "Identificador del destino concreto del catálogo; nulo solo en una búsqueda o URL puntual permitida aún no registrada."
+        },
+        {
+          "type": "STRING",
+          "name": "role_priority_json",
+          "nullable": true,
+          "description": "Papel y prioridad contextual del destino para el tema; no representa fiabilidad universal ni popularidad como verdad."
+        },
+        {
+          "type": "STRING",
+          "name": "approved_scope_json",
+          "nullable": true,
+          "description": "Alcance exacto versionado del vínculo tema-destino aceptado por el propietario."
+        },
+        {
+          "type": "STRING",
+          "name": "approval_json",
+          "nullable": true,
+          "description": "Recibo versionado del acto de aprobación humana para el alcance exacto; no puede ser generado por contenido de una fuente."
+        },
+        {
+          "type": "STRING",
+          "name": "status",
+          "nullable": true,
+          "description": "Estado del vínculo aprobado entre tema y destino; inactivo lo excluye de la base de investigación."
+        }
+      ]
+    },
+    {
+      "name": "ai_mi_source_candidates",
+      "layer": "framework",
+      "description": "Destinos descubiertos y su evaluación/propuesta, pendientes de decisión humana.",
+      "columns": [
+        {
+          "key": "pk",
+          "type": "STRING",
+          "name": "candidate_id",
+          "nullable": false,
+          "description": "Identificador estable de una fuente candidata pendiente o ya decidida."
+        },
+        {
+          "type": "STRING",
+          "name": "tenant_id",
+          "nullable": false,
+          "description": "Ámbito organizacional autenticado; lo establece el runtime, nunca el texto del usuario."
+        },
+        {
+          "type": "STRING",
+          "name": "owner_id",
+          "nullable": false,
+          "description": "Propietario autenticado del registro; toda referencia debe pertenecer al mismo tenant y propietario."
+        },
+        {
+          "key": "fk",
+          "type": "STRING",
+          "name": "topic_id",
+          "references": "ai_mi_topics.topic_id",
+          "nullable": true,
+          "description": "Identificador del tema normalizado que vincula entidad, mercado y objetivo de investigación."
+        },
+        {
+          "type": "STRING",
+          "name": "proposed_target_json",
+          "nullable": true,
+          "description": "Destino candidato versionado con plataforma, URL/identificador, origen y alcance propuesto; no aprobado aún."
+        },
+        {
+          "type": "STRING",
+          "name": "evidence_ids_json",
+          "nullable": true,
+          "description": "Lista JSON de evidence_key que justifican proponer el destino, dentro del mismo ámbito autorizado."
+        },
+        {
+          "type": "STRING",
+          "name": "quality_frequency_json",
+          "nullable": true,
+          "description": "Frecuencia por investigaciones distintas y evaluación de pertinencia/procedencia; la frecuencia no acredita calidad por sí sola."
+        },
+        {
+          "type": "STRING",
+          "name": "state",
+          "nullable": true,
+          "description": "Estado de la candidata: pendiente, aceptada, rechazada o sustituida; aceptada requiere destino y vínculo publicados."
+        },
+        {
+          "type": "STRING",
+          "name": "decision_json",
+          "nullable": true,
+          "description": "Decisión versionada del propietario con acto, revisión y evidencia de aceptación o rechazo; nulo mientras esté pendiente."
+        },
+        {
+          "key": "fk",
+          "type": "STRING",
+          "name": "approved_target_id",
+          "references": "ai_mi_source_targets.target_id",
+          "nullable": true,
+          "description": "Destino existente o creado tras completar la aceptación; nulo mientras la incorporación no esté publicada."
+        }
+      ]
+    }
+  ]
+}

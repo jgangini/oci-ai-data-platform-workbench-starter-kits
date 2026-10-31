@@ -13,6 +13,7 @@ from typing import Any
 
 
 LABS_ROOT = Path(__file__).with_name("labs")
+LEGACY_LABS_ROOT = Path(__file__).with_name("legacy_labs")
 LAB_ID_PATTERN = re.compile(r"[a-z][a-z0-9_-]{1,31}")
 PACK_VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+")
 MEDALLION_LAYERS = frozenset({"landing", "bronze", "silver", "gold"})
@@ -32,7 +33,10 @@ class LabAsset:
     depends_on: tuple[str, ...] = ()
 
     def read_bytes(self) -> bytes:
-        return self.path.read_bytes()
+        content = self.path.read_bytes()
+        if _sha256(content) != self.sha256:
+            raise LabPackError(f"SHA-256 changed while reading {self.name}")
+        return content
 
 
 @dataclass(frozen=True)
@@ -196,7 +200,7 @@ def _pack_assets(
     return datasets, notebooks
 
 
-def _module_assets(root: Path, entries: Any, folder: str) -> tuple[LabAsset, ...]:
+def _module_assets(root: Path, entries: Any, folder: str | None) -> tuple[LabAsset, ...]:
     """Verify the exact files published by a global module, including nested paths."""
     if not isinstance(entries, list):
         raise LabPackError("Global module assets must be a list")
@@ -206,7 +210,8 @@ def _module_assets(root: Path, entries: Any, folder: str) -> tuple[LabAsset, ...
             raise LabPackError("Invalid global module asset")
         name = str(raw.get("file") or "")
         relative = PurePosixPath(name)
-        if (not name.startswith(folder + "/") or re.fullmatch(r"[A-Za-z0-9_./-]+", name) is None or ".." in relative.parts
+        prefix, pattern = ("", r"[A-Za-z0-9_][A-Za-z0-9_.-]*") if folder is None else (folder + "/", r"[A-Za-z0-9_./-]+")
+        if (not name.startswith(prefix) or re.fullmatch(pattern, name) is None or ".." in relative.parts
                 or relative.as_posix() != name):
             raise LabPackError("Invalid global module asset path")
         path = (root / name).resolve()
@@ -325,7 +330,7 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
         lab_id = "ai_data_governance"
     if LAB_ID_PATTERN.fullmatch(lab_id) is None:
         raise LabPackError("Invalid lab_id")
-    root = LABS_ROOT / lab_id
+    root = (LEGACY_LABS_ROOT if lab_id == "ai_social_network" else LABS_ROOT) / lab_id
     metadata = _object(root / "lab.json")
     status, kind, pack_version, digest = _pack_contract(
         metadata, lab_id, require_available
@@ -359,7 +364,7 @@ def load_lab_pack(lab_id: str, *, require_available: bool = True) -> LabPack:
         formats=_pack_formats(metadata, status, kind, lab_id),
         expected_results=_pack_expected_results(metadata, status, kind, lab_id),
         agent=dict(agent) if isinstance(agent, dict) else {},
-        runtime_files=_module_assets(root, metadata.get("runtime_files", []), "notebooks"),
+        runtime_files=_module_assets(root, metadata.get("runtime_files", []), None if lab_id == "ai_market_intelligence" else "notebooks"),
         source_manifests=_module_assets(root, metadata.get("source_manifests", []), "source"),
     )
 
@@ -368,12 +373,12 @@ def module_runtime_source(lab_id: str, name: str) -> bytes:
     """Read a declared, hash-verified runtime file; deployment only fills its config."""
     if LAB_ID_PATTERN.fullmatch(lab_id) is None:
         raise LabPackError("Invalid lab_id")
-    root = LABS_ROOT / lab_id
+    root = (LEGACY_LABS_ROOT if lab_id == "ai_social_network" else LABS_ROOT) / lab_id
     metadata = _object(root / "lab.json")
-    _pack_contract(metadata, lab_id, True)
+    _pack_contract(metadata, lab_id, lab_id != "ai_market_intelligence")
     if metadata.get("scope") != "global":
         raise LabPackError("Runtime assets belong to a global module")
-    assets = _module_assets(root, metadata.get("runtime_files", []), "notebooks")
+    assets = _module_assets(root, metadata.get("runtime_files", []), None if lab_id == "ai_market_intelligence" else "notebooks")
     for asset in assets:
         if asset.name == name:
             return asset.read_bytes()

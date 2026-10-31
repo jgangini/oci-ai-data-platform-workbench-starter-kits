@@ -11,7 +11,10 @@ const viteConfig = await readFile(new URL("../vite.config.ts", import.meta.url),
 const labCatalog = JSON.parse(await readFile(new URL("../../backend/app/labs/catalog.json", import.meta.url), "utf8"));
 
 test("browser storage is limited to non-secret operation keys", () => {
-  assert.doesNotMatch(source, /(?:localStorage|sessionStorage)\.setItem/);
+  const positionWrite = 'window.sessionStorage.setItem(settingsUpdatePositionKey, JSON.stringify({ release: refreshed.current_release, y: window.scrollY }));';
+  assert.equal(source.split(positionWrite).length - 1, 1);
+  assert.match(source, /const settingsUpdatePositionKey = "aidp-settings-update-position"/);
+  assert.doesNotMatch(source.replace(positionWrite, ''), /(?:localStorage|sessionStorage)\.setItem/);
   assert.doesNotMatch(source, /onPreviewStep|previewStep|Restart preview|Next step/);
   assert.match(pollingSource, /aidp-lab\.operation\.\$\{kind\}\.\$\{userId\}\.\$\{labId\}/);
   assert.match(pollingSource, /aidp-module\.operation\.\$\{kind\}\.\$\{moduleId\}/);

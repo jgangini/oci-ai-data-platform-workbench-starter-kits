@@ -1,4 +1,6 @@
 *.sh text eol=lf
+apps/backend/app/labs/ai_market_intelligence/** text eol=lf
+apps/backend/app/legacy_labs/** text eol=lf
 .sentrux/**/*.json text eol=lf
 .sentrux/history/*.json -text whitespace=cr-at-eol
 apps/backend/app/labs/** text eol=lf

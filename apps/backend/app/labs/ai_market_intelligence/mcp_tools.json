@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "endpoint": "https://mcp.apify.com?tools=call-actor,get-actor-run,get-dataset-items",
+  "tools": [
+    {
+      "name": "call-actor",
+      "description": "Execute one controller-approved Apify Actor request.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "actor": {
+            "type": "string",
+            "description": "The Actor to call: its ID, or its name in the \"username/name\" form (e.g., \"apify/rag-web-browser\")."
+          },
+          "input": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "The input JSON to pass to the Actor. Required."
+          },
+          "waitSecs": {
+            "description": "Seconds to wait for completion (0–45, default 30). Returns with current run status if not terminal within waitSecs.",
+            "default": 30,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 45
+          },
+          "callOptions": {
+            "description": "Optional run config: memory (MB), timeout (s), build, maxItems (pay-per-result cap), maxTotalChargeUsd (pay-per-event cap).",
+            "type": "object",
+            "properties": {
+              "memory": {
+                "description": "Memory per run in MB. Power of 2 from 128 to 32768.\nApify also caps total memory across all your concurrent runs (account plan limit); a run that would exceed that quota is rejected.",
+                "type": "number",
+                "minimum": 128,
+                "maximum": 32768
+              },
+              "timeout": {
+                "description": "Maximum runtime for the Actor in seconds. After this time elapses, the Actor will be automatically terminated.\nUse 0 for infinite timeout (no time limit).",
+                "type": "number",
+                "minimum": 0
+              },
+              "build": {
+                "description": "Tag or number of the Actor build to run (e.g., \"latest\", \"beta\", \"1.2.345\"). If omitted, the Actor's default build is used.",
+                "type": "string"
+              },
+              "maxItems": {
+                "description": "Pay-per-result Actors only — ignored otherwise.\nCaps billed dataset items; does NOT limit production. Prefer the Actor's own input fields (e.g. maxResults) to bound work.",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "maxTotalChargeUsd": {
+                "description": "Pay-per-event Actors only — ignored otherwise.\nCaps total USD billed; does NOT limit work. Prefer the Actor's own input fields to bound work.",
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "actor",
+          "input"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get-actor-run",
+      "description": "Reconcile an already recorded provider run.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The ID of the Actor run."
+          },
+          "waitSecs": {
+            "default": 30,
+            "description": "Maximum seconds to wait for the run to reach a terminal state (SUCCEEDED, FAILED, ABORTED, TIMED-OUT).\n0 returns immediately with the current status. Cap: 45. Default: 30.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 45
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get-dataset-items",
+      "description": "Read a bounded page from the recorded run dataset.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "datasetId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Dataset ID, name (resolved against your own datasets), or full name as username~name."
+          },
+          "clean": {
+            "description": "If true, returns only non-empty items and skips hidden fields (starting with #). Shortcut for skipHidden=true and skipEmpty=true.",
+            "type": "boolean"
+          },
+          "offset": {
+            "description": "Number of items to skip at the start. Default is 0.",
+            "type": "number"
+          },
+          "limit": {
+            "description": "Maximum number of items to return. Default is 20.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "fields": {
+            "description": "Comma-separated list of fields to include in results. Fields in output are sorted as specified. Use dot notation for nested objects (e.g. \"metadata.url\"); the server auto-flattens parent prefixes.",
+            "type": "string"
+          },
+          "omit": {
+            "description": "Comma-separated list of fields to exclude from results.",
+            "type": "string"
+          },
+          "desc": {
+            "description": "If true, results are returned in reverse order (newest to oldest).",
+            "type": "boolean"
+          },
+          "flatten": {
+            "description": "Comma-separated list of fields to flatten (e.g. flatten=\"metadata\" turns {\"metadata\":{\"url\":\"x\"}} into {\"metadata.url\":\"x\"}). Normally derived automatically from dot-notation in `fields`; specify only as a diagnostic override.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "datasetId"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
