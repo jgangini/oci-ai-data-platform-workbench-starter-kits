@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from .aidp import AidpClient, AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, CATALOG_NAME
+from .aidp import AidpClient, AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, AidpRequestError, CATALOG_NAME
 from .lab_packs import load_lab_pack
 from .market_installation.agent_package import agent_package
 from .market_installation.compute import prepare_compute
@@ -137,6 +137,7 @@ class MarketAidpClient(AidpClient):
             return public_status(state)
         state['status'] = 'installing'
         state['message'] = ''
+        state.pop('native_error', None)
         self._save(state)
         try:
             next_phase = self._step(state, token, session)
@@ -151,6 +152,10 @@ class MarketAidpClient(AidpClient):
             self._save(state)
         except AidpProvisionConflict as exc:
             state.update(status='awaiting_action', message=str(exc))
+            self._save(state)
+        except AidpRequestError as exc:
+            state.update(status='error', native_error=exc.diagnostic,
+                         message=f"A native AIDP request failed (HTTP {exc.diagnostic['status_code']}). Resources were preserved; review the installation receipt before resuming.")
             self._save(state)
         except Exception:
             state.update(status='error', message='This step failed. Its resources were preserved; resume the same operation after reviewing the native service.')
