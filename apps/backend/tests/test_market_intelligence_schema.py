@@ -183,6 +183,20 @@ def test_native_empty_install_and_resume_verify_complete_model(fresh, capsys):
     assert all(table['provider'] == 'delta' and table['rows'] == 0 for table in receipt['tables'])
 
 
+def test_python_bootstrap_initializes_spark_and_executes_the_same_empty_model(monkeypatch, capsys):
+    import json
+    import sys
+    from types import SimpleNamespace
+    from app.market_installation.model_install import model_script
+    spark = ModelSpark(fresh=True)
+    monkeypatch.setitem(sys.modules, 'pyspark.sql', SimpleNamespace(
+        SparkSession=SimpleNamespace(builder=SimpleNamespace(getOrCreate=lambda: spark))))
+    exec(compile(model_script('oci_medallion', 'oci_artifacts'), 'model.py', 'exec'), {})
+    receipt = json.loads(capsys.readouterr().out.split('AI_MARKET_MODEL_READY:')[1])
+    assert len(spark.created) == 14 and receipt['documented_columns'] == 145
+    assert all(table['rows'] == 0 for table in receipt['tables'])
+
+
 def test_native_partial_model_creation_resumes_without_replacing_tables():
     from app.market_installation.model_install import model_notebook
     spark = ModelSpark(missing_first=True)

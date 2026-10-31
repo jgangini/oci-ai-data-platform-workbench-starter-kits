@@ -15,7 +15,7 @@ from .lab_packs import load_lab_pack
 from .market_installation.agent_package import agent_package
 from .market_installation.compute import prepare_compute
 from .market_installation.credentials import ensure_apify_credential, _project_credential, _credential_reference
-from .market_installation.model_install import model_notebook, model_job
+from .market_installation.model_install import model_script, model_job
 from .market_installation.playground import MarketPlaygroundClient
 from .labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.schema import definition, schema_sha256
 
@@ -44,6 +44,9 @@ def model_receipt(output):
     if output.get('errorTrace') or output.get('isTruncated') or any(
             item.get('errorTrace') or item.get('isTruncated') for item in output.get('data', []) if isinstance(item, dict)):
         raise AidpProvisionError('The native model output is incomplete or contains an execution error.')
+    if any(item.get('isBase64') or item.get('compression') not in (None, '', 'NONE')
+           for item in output.get('data', []) if isinstance(item, dict)):
+        raise AidpProvisionError('Encoded native model output requires explicit decoding before verification.')
     values = [item.get('value') for item in output.get('data', []) if isinstance(item, dict)]
     receipts = []
     for value in values:
@@ -52,16 +55,18 @@ def model_receipt(output):
         try:
             notebook = json.loads(value)
         except ValueError:
-            continue
-        for cell in notebook.get('cells', []):
+            notebook = {}
+        texts = [] if isinstance(notebook, dict) and 'cells' in notebook else [value]
+        for cell in notebook.get('cells', []) if isinstance(notebook, dict) else []:
             for entry in cell.get('outputs', []):
                 if entry.get('output_type') == 'error':
                     raise AidpProvisionError('The model notebook contains an execution error.')
                 text = entry.get('text', '')
-                text = ''.join(text) if isinstance(text, list) else text
-                for line in str(text).splitlines():
-                    if line.startswith('AI_MARKET_MODEL_READY:'):
-                        receipts.append(json.loads(line.split(':', 1)[1]))
+                texts.append(''.join(text) if isinstance(text, list) else text)
+        for text in texts:
+            for line in str(text).splitlines():
+                if line.startswith('AI_MARKET_MODEL_READY:'):
+                    receipts.append(json.loads(line.split(':', 1)[1]))
     if len(receipts) != 1:
         raise AidpProvisionPending('The model run has no unambiguous verification receipt yet.', 'model_verify')
     receipt = receipts[0]
@@ -274,22 +279,21 @@ class MarketAidpClient(AidpClient):
         workspace, resources, phase = state['workspace'], state['resources'], state['phase']
         temp = ROOT + '/.setup_' + UUID(state['operation_id']).hex
         name = 'wf_ai_mi_setup_' + UUID(state['operation_id']).hex
-        notebook_path = temp + '/model.ipynb'
+        script_path = temp + '/model.py'
         jobs_path = f'/workspaces/{workspace}/jobs'
         if phase == 'model_prepare':
             self._ensure_folder(workspace, temp)
             location = f'oci://{self.settings.artifacts_bucket_name}@{self.settings.objectstorage_namespace}/ai_market_intelligence/delta'
-            self._upload_notebook(workspace, notebook_path, model_notebook(CATALOG_NAME, 'oci_artifacts', storage_root=location))
-            payload = model_job(resources['spark_key'])
+            self._upload_file(workspace, script_path, model_script(CATALOG_NAME, 'oci_artifacts', storage_root=location))
+            payload = model_job(resources['spark_key'], script_path=script_path)
             payload.update(name=name, path=temp)
-            payload['tasks'][0]['notebookPath'] = notebook_path
             key = resources.get('model_job_key') or self._job_key(workspace, name)
             if not key:
                 key = self._create_job(workspace, payload)
             else:
                 previous = self._request('GET', jobs_path + '/' + key, allow_not_found=True)
                 if (not previous or previous.get('name') != name or previous.get('path') != temp
-                        or any(task.get('notebookPath') != notebook_path for task in previous.get('tasks', []))
+                        or any(task.get('type') != 'PYTHON_TASK' or task.get('filePath') != script_path or task.get('source') != 'WORKSPACE' for task in previous.get('tasks', []))
                         or any(cluster.get('clusterKey') != resources['spark_key'] for cluster in previous.get('jobClusters', []))):
                     raise AidpProvisionConflict('The existing bootstrap job changed ownership or binding; no definition was overwritten.')
             resources['model_job_key'] = key
@@ -337,7 +341,13 @@ class MarketAidpClient(AidpClient):
             task = (run.get('taskToTaskRunMap') or {}).get('create_market_model')
             if not isinstance(task, str):
                 raise AidpProvisionPending('Waiting for the bootstrap task identifier.', phase)
-            output = self._request('POST', f'/workspaces/{workspace}/taskRuns/{task}/actions/fetchOutput', payload={'outputKey': ''}, retry_scope='market-output:' + task)
+            task_path = f'/workspaces/{workspace}/taskRuns/{task}'
+            task_run = self._request('GET', task_path)
+            if task_run.get('jobRunKey') not in (None, resources['model_run_key']):
+                raise AidpProvisionError('Bootstrap task run ownership changed.')
+            if not task_run.get('outputKey'):
+                raise AidpProvisionPending('Waiting for the native bootstrap output key.', phase)
+            output = self._request('POST', task_path + '/actions/fetchOutput', payload={'outputKey': task_run['outputKey']}, retry_scope='market-output:' + task)
             resources['model_verified'] = model_receipt(output)
         elif phase == 'cleanup':
             if not resources.get('model_verified'):
