@@ -113,6 +113,11 @@ def test_failed_phase_preserves_resources_and_hides_provider_secret():
     assert result['status'] == 'error' and result['phase'] == 'credentials'
     assert saved['resources'] == {'existing': 'keep-this-resource'}
     assert 'synthetic-sensitive' not in json.dumps(result)
+    assert 'synthetic-sensitive' not in json.dumps(saved)
+    assert saved['native_error']['exception_type'] == 'RuntimeError'
+    assert saved['native_error']['frames'][-1]['function'] == 'fail'
+    assert isinstance(saved['native_error']['frames'][-1]['line'], int)
+    assert 'native_error' not in result
 
 
 def test_native_request_failure_records_transport_metadata_without_provider_content():

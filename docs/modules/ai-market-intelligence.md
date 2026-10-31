@@ -71,7 +71,9 @@ When AIDP rejects an installation request, the operation receipt retains only it
 HTTP method, endpoint without query, phase, status and Oracle request ID. The
 progress dialog reports the HTTP status; request/response bodies, authorization
 headers and provider exception text are not copied into the receipt. Unexpected
-exceptions keep the generic error. Reconcile the failed native step before
+exceptions keep the generic public error; their private diagnostic contains only
+the exception class and the last five function names/line numbers, without paths
+or local variables. Reconcile the failed native step before
 resuming the same operation; an error does not prove that a write never occurred.
 
 **Open Agent Hub** is a separate navigation link. It derives the Oracle Agent Hub

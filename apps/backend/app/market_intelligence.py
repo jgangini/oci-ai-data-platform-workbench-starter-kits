@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import time
+import traceback
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -157,8 +158,12 @@ class MarketAidpClient(AidpClient):
             state.update(status='error', native_error=exc.diagnostic,
                          message=f"A native AIDP request failed (HTTP {exc.diagnostic['status_code']}). Resources were preserved; review the installation receipt before resuming.")
             self._save(state)
-        except Exception:
-            state.update(status='error', message='This step failed. Its resources were preserved; resume the same operation after reviewing the native service.')
+        except Exception as exc:
+            state.update(status='error', native_error={
+                'exception_type': type(exc).__name__,
+                'frames': [{'function': frame.name, 'line': frame.lineno}
+                           for frame in traceback.extract_tb(exc.__traceback__)[-5:]]},
+                message='This step failed. Its resources were preserved; resume the same operation after reviewing the native service.')
             self._save(state)
         return public_status(state)
 
