@@ -87,7 +87,7 @@ class MarketAidpClient(AidpClient):
 
     def _save(self, state):
         state['updated_at'] = datetime.now(timezone.utc).isoformat()
-        self._upload_file(state['workspace'], ROOT + '/installer.json', json.dumps(state, sort_keys=True).encode())
+        self._upload_file(state['workspace'], ROOT + '/installer.json', json.dumps(state, sort_keys=True, separators=(',', ':')).encode())
 
     async def status(self):
         def observe():
@@ -210,7 +210,7 @@ class MarketAidpClient(AidpClient):
         elif phase == 'agent':
             source, assets = agent_package(self._runtime_config(state))
             key, _ = self._ensure_agent(workspace, resources['agent_compute_key'], MODULE_ID, ROOT + '/agent', source,
-                json.dumps({'module_id': MODULE_ID, 'pack_sha256': state['pack_sha256']}).encode(),
+                json.dumps({'module_id': MODULE_ID, 'pack_sha256': state['pack_sha256']}, sort_keys=True, separators=(',', ':')).encode(),
                 repair_drift=True, expected_key=resources.get('agent_key', ''))
             resources['agent_key'] = key
         elif phase == 'permissions':

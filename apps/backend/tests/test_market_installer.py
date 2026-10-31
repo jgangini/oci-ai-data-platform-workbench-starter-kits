@@ -31,6 +31,36 @@ def client():
     return value
 
 
+def test_receipt_survives_native_json_readback_and_resume_without_format_drift():
+    api = client()
+    stored, writes = {}, []
+    api._workspace_object = lambda *a, **k: (stored.get('body'), {'type': 'FILE'} if stored else {})
+    def request(method, path, **kwargs):
+        assert method == 'POST' and path == '/workspaces/workspace/objects'
+        assert kwargs['headers']['path'] == installer.ROOT + '/installer.json'
+        writes.append(kwargs['data'])
+        stored['body'] = json.loads(kwargs['data'])
+    api._request = request
+    saved = state()
+    for _ in range(2):
+        installer.MarketAidpClient._save(api, saved)
+        assert api._read_installation('workspace') == saved
+    assert writes and all(api._content_matches(json.loads(body), body) for body in writes)
+
+
+def test_agent_descriptor_uses_the_same_native_json_byte_contract(monkeypatch):
+    api = client()
+    api._runtime_config = lambda saved: {}
+    monkeypatch.setattr(installer, 'agent_package', lambda config: (b'source', {}))
+    def ensure(workspace, compute, module, root, source, descriptor, **kwargs):
+        assert api._content_matches(json.loads(descriptor), descriptor)
+        return 'agent', False
+    api._ensure_agent = ensure
+    saved = state('agent', agent_compute_key='compute')
+    api._step(saved, None, None)
+    assert saved['resources']['agent_key'] == 'agent'
+
+
 def output_receipt():
     receipt = {'schema_sha256': installer.schema_sha256(), 'documented_columns': 145,
                'tables': [{'table': table['name'], 'rows': 0, 'provider': 'delta', 'columns': len(table['columns'])}

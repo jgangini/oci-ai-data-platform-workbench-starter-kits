@@ -48,7 +48,9 @@ binding blocks reconciliation rather than being replaced. Governance is retained
 The durable `installer.json` receipt lives under
 `/Workspace/.control/modules/ai_market_intelligence/`. Every POST advances or
 reconciles one phase, retaining its operation identity, resource keys and package
-hash. GET observes without provisioning. Browser storage holds no secret; tokens
+hash. GET observes without provisioning. Installation and agent-descriptor JSON use the
+same compact, sorted representation as native workspace readback, so an AIDP
+JSON response can be verified without a false content-drift retry. Browser storage holds no secret; tokens
 are sent only to the authenticated installation API and are cleared from the form
 after the credential phase. Failed writes with unknown outcomes require native
 reconciliation, not automatic duplicate creation.
