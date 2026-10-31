@@ -83,6 +83,19 @@ def test_model_requires_an_exact_empty_receipt_before_cleanup():
         installer.model_receipt(invalid)
 
 
+def test_python_stdout_requires_the_same_unique_empty_model_receipt():
+    marker = json.loads(output_receipt()['data'][0]['value'])['cells'][0]['outputs'][0]['text'][0]
+    output = {'data': [{'value': 'Spark task output\n' + marker + '\n'}]}
+    assert len(installer.model_receipt(output)['tables']) == 14
+    with pytest.raises(AidpProvisionPending, match='unambiguous'):
+        installer.model_receipt({'data': [{'value': marker + '\n' + marker}]})
+    with pytest.raises(AidpProvisionError, match='incomplete'):
+        installer.model_receipt({**output, 'isTruncated': True})
+    for flag in ({'isBase64': True}, {'compression': 'GZIP'}):
+        with pytest.raises(AidpProvisionError, match='explicit decoding'):
+            installer.model_receipt({'data': [{**output['data'][0], **flag}]})
+
+
 @pytest.mark.parametrize('flag', ['errorTrace', 'isTruncated'])
 def test_incomplete_native_output_never_releases_bootstrap(flag):
     invalid = {**output_receipt(), flag: True}
@@ -184,11 +197,33 @@ def test_uncertain_bootstrap_start_is_not_repeated():
 
 def test_model_job_binding_is_verified_before_overwriting_definition():
     api = client()
-    api._ensure_folder = api._upload_notebook = lambda *a, **k: None
+    api._ensure_folder = api._upload_file = lambda *a, **k: None
     api._request = lambda *a, **k: {'name': 'foreign-job', 'path': '/Workspace/shared'}
     api._publish_job = lambda *a: pytest.fail('Foreign job must not be overwritten')
     with pytest.raises(AidpProvisionConflict, match='ownership'):
         api._model_step(state('model_prepare', model_job_key='foreign', spark_key='spark'))
+
+
+def test_model_preparation_uses_workspace_python_without_notebook_api():
+    api = client()
+    writes, published = [], []
+    api._ensure_folder = lambda *a: None
+    api._upload_notebook = lambda *a, **k: pytest.fail('The rejected notebook route must not be used')
+    api._upload_file = lambda workspace, path, content: writes.append((workspace, path, content))
+    api._job_key = lambda *a: None
+    api._create_job = lambda workspace, payload: 'model-job'
+    api._publish_job = lambda workspace, key, payload, compute: published.append(payload)
+    saved = state('model_prepare', spark_key='spark')
+    api._model_step(saved)
+    path = installer.ROOT + '/.setup_' + OP.replace('-', '') + '/model.py'
+    assert writes[0][:2] == ('workspace', path)
+    assert b'SparkSession.builder.getOrCreate()' in writes[0][2]
+    assert b'DROP TABLE' not in writes[0][2] and b'INSERT ' not in writes[0][2]
+    task = published[0]['tasks'][0]
+    assert task['type'] == 'PYTHON_TASK' and task['source'] == 'WORKSPACE'
+    assert task['filePath'] == path and json.loads(task['commandLineArguments']) == [path]
+    assert 'notebookPath' not in task and task['maxRetries'] == 0
+    assert saved['resources']['model_job_key'] == 'model-job'
 
 
 def test_cleanup_after_job_deletion_is_resumable_and_exactly_scoped():
@@ -200,6 +235,37 @@ def test_cleanup_after_job_deletion_is_resumable_and_exactly_scoped():
     assert removed == [('workspace', installer.ROOT + '/.setup_' + OP.replace('-', ''))]
     with pytest.raises(AidpProvisionError, match='verified'):
         api._model_step(state('cleanup', model_job_key='job'))
+
+
+@pytest.mark.parametrize('output_key,task_owner', [('native-output', 'run'), ('', 'run'), ('native-output', 'foreign')])
+def test_model_verification_fetches_only_the_owned_task_output(output_key, task_owner):
+    api = client()
+    posted = []
+    def request(method, path, **kwargs):
+        if method == 'POST':
+            posted.append(kwargs['payload'])
+            return output_receipt()
+        if path.endswith('/jobs/job'):
+            return {'name': 'wf_ai_mi_setup_' + OP.replace('-', ''),
+                    'path': installer.ROOT + '/.setup_' + OP.replace('-', '')}
+        if path.endswith('/jobRuns/run'):
+            return {'jobKey': 'job', 'state': 'SUCCESS', 'taskToTaskRunMap': {'create_market_model': 'task'}}
+        assert path.endswith('/taskRuns/task')
+        return {'outputKey': output_key, 'jobRunKey': task_owner}
+    api._request = request
+    saved = state('model_verify', model_job_key='job', model_run_key='run')
+    if task_owner != 'run':
+        with pytest.raises(AidpProvisionError, match='ownership'):
+            api._model_step(saved)
+    elif not output_key:
+        with pytest.raises(AidpProvisionPending, match='output key'):
+            api._model_step(saved)
+    else:
+        api._model_step(saved)
+        assert posted == [{'outputKey': 'native-output'}]
+        assert saved['resources']['model_verified']['documented_columns'] == 145
+    if not output_key or task_owner != 'run':
+        assert not posted and 'model_verified' not in saved['resources']
 
 
 def test_status_refresh_reads_current_test_sessions_without_saving(monkeypatch):

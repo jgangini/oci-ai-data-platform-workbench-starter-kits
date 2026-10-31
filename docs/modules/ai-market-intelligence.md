@@ -36,6 +36,14 @@ artifacts bucket. It creates or explicitly reuses only project-owned resources.
 An incompatible existing agent, credential, compute, table or active production
 binding blocks reconciliation rather than being replaced. Governance is retained.
 
+Model preparation uploads an operation-owned `model.py` through Workspace Objects
+and binds it to a `PYTHON_TASK` on the existing Spark compute. It initializes
+`SparkSession` and uses the same schema/ownership checks as the model generator.
+It does not create a Jupyter notebook. This follows Oracle's
+[workspace Python task workflow](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aidug/configure-tasks.html#create-a-python-task)
+and avoids the notebook-creation request rejected by the target service. Cleanup
+still requires the exact empty-model receipt from successful native task output.
+
 | Phase | Required evidence |
 | --- | --- |
 | Environment / credentials | Verified workspace, artifacts schema and shared OCI credential; separate `AiMarketIntelligenceApifyBearer` metadata |
@@ -130,6 +138,6 @@ This uses the same manifest, `notebooks/` runtime boundary and `source/` contrac
 as the other kits. Runtime assets declare hashes and workspace paths; there is
 no Market-specific exception in the asset loader. Banking has persistent
 medallion notebooks and CSV inputs because it is a data pipeline. This module
-has no seed data and generates only an operation-owned temporary model notebook,
+has no seed data and generates only an operation-owned temporary model script,
 which is removed after verified success. Host-side provisioning stays outside
 the package in `app/market_installation/`, and is not uploaded to AIDP.

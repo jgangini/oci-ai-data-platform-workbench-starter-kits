@@ -1,11 +1,13 @@
 """Prepare an empty-model bootstrap; this module never submits cloud operations."""
 from __future__ import annotations
 
+import json
+
 from app.notebooks import WORKSPACE_ROOT
 from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.schema import create_statements, definition, identifier, schema_sha256
 
 MODULE_ROOT = WORKSPACE_ROOT + '/.control/modules/ai_market_intelligence'
-NOTEBOOK_PATH = MODULE_ROOT + '/create_model.ipynb'
+SCRIPT_PATH = MODULE_ROOT + '/create_model.py'
 JOB_NAME = 'wf_ai_market_intelligence_model'
 
 
@@ -68,13 +70,21 @@ print('AI_MARKET_MODEL_READY:' + json.dumps({'schema_sha256': MODEL_HASH, 'table
                        'source': source.splitlines(keepends=True)}]}
 
 
-def model_job(compute_key: str) -> dict:
+def model_script(catalog: str, framework_schema: str, *, storage_root: str = '') -> bytes:
+    notebook = model_notebook(catalog, framework_schema, storage_root=storage_root)
+    return ('from pyspark.sql import SparkSession\n'
+            'spark = SparkSession.builder.getOrCreate()\n'
+            + ''.join(notebook['cells'][0]['source'])).encode('utf-8')
+
+
+def model_job(compute_key: str, *, script_path: str = SCRIPT_PATH) -> dict:
     if not isinstance(compute_key, str) or not compute_key or any(ord(c) < 32 for c in compute_key):
         raise ValueError('An existing verified compute key is required')
     return {'name': JOB_NAME, 'path': MODULE_ROOT,
             'description': 'Create and verify the documented AI Market Intelligence Delta model',
             'maxConcurrentRuns': 1, 'continuous': None, 'schedule': None, 'queue': {'isEnabled': False},
             'jobClusters': [{'clusterKey': compute_key}],
-            'tasks': [{'type': 'NOTEBOOK_TASK', 'taskKey': 'create_market_model', 'dependsOn': [],
+            'tasks': [{'type': 'PYTHON_TASK', 'taskKey': 'create_market_model', 'dependsOn': [],
                        'runIf': 'ALL_SUCCESS', 'maxRetries': 0, 'isRetryOnTimeout': False,
-                       'notebookPath': NOTEBOOK_PATH, 'cluster': {'clusterKey': compute_key}, 'parameters': []}]}
+                       'filePath': script_path, 'source': 'WORKSPACE', 'commandLineArguments': json.dumps([script_path]),
+                       'cluster': {'clusterKey': compute_key}}]}
