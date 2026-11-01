@@ -1,0 +1,5 @@
+# Native agent entries may contain their complete runtime and prompts.
+# File/function line counts are intentionally not acceptance limits.
+[constraints]
+max_cycles = 0
+no_god_files = true
