@@ -66,9 +66,6 @@ button { min-height: 48px; border: 0; border-radius: 10px; color: white; backgro
 .registration-result-ready { display: block; width: min(100%, 384px); padding: 0; overflow: hidden; border-radius: 16px; }.registration-result-ready .confirm-content { display: grid; justify-items: center; padding: 32px 24px 24px; text-align: center; }.registration-result-ready .confirm-icon { color: #16703d; background: #dcfce7; box-shadow: 0 0 0 8px #f0fdf4; }.registration-result-ready .confirm-content .eyebrow { margin: 0 0 2px; color: #16703d; }.registration-result-ready h2 { margin: 0; color: #342b27; font-family: inherit; font-size: 1.25rem; font-weight: 800; letter-spacing: 0; }.registration-result-ready .confirm-content > p:last-child { max-width: 300px; margin: 8px 0 0; color: #766c65; font-size: .92rem; line-height: 1.55; }.registration-result-ready footer { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #eee7df; }.registration-result-ready footer .secondary, .registration-result-ready footer .result-link { display: grid; min-height: 56px; padding: 0 16px; place-items: center; border-radius: 0; font-size: .9rem; }.registration-result-ready footer .secondary { color: #6f655e; background: #fff; }.registration-result-ready footer .secondary:hover { background: #faf8f5; }.registration-result-ready footer .result-link { border-left: 1px solid #eee7df; font-weight: 800; }.registration-result-ready footer .result-link:hover { background: #a93426; }
 
 .application-version { padding: 0; background: transparent; border: 0; border-radius: 0; }
-.agent-hub-home { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: #a73529; font-weight: 600; text-underline-offset: 3px; }
-.agent-hub-home svg { width: 18px; height: 18px; flex-shrink: 0; }
-.agent-hub-home:focus-visible { outline: 2px solid #a73529; outline-offset: 3px; }
 .application-update { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .release-packages .release-package-actions { width: 1%; text-align: right; white-space: nowrap; }
 .release-packages time { white-space: nowrap; }
@@ -76,8 +73,6 @@ button { min-height: 48px; border: 0; border-radius: 10px; color: white; backgro
 .release-table-hint { display: none; }
 .module-copy-notice { display: inline-block; padding: 3px 6px; color: #245e4b; background: #e7f5ed; border-radius: 4px; font-size: .75rem; vertical-align: middle; }
 .module-installation-pending { display: block; margin-top: 4px; color: #6f655e; font-size: .75rem; }
-.market-install-steps { margin: 12px 0 0; padding-left: 24px; font-size: .875rem; line-height: 1.7; }
-.market-install-steps [aria-current="step"] { font-weight: 700; color: #b33b2b; }
 @media (max-width: 700px) { .release-table-hint { display: block; margin: 0; } }
 .module-configure { display: inline-grid; width: 40px; height: 40px; min-height: 40px; padding: 0; place-items: center; color: #665c56; background: transparent; border: 1px solid #ded5cb; border-radius: 8px; }
 .module-configure svg { width: 22px; height: 22px; }
@@ -99,13 +94,17 @@ button { min-height: 48px; border: 0; border-radius: 10px; color: white; backgro
 
 .module-connection-fields { display: grid; gap: 16px; }
 .market-bearer-field { min-width: 0; }
+.market-bearer-field input { font-weight: 400; }
 .market-credential-help { color: #6f655e; font-size: .82rem; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; }
 .market-bearer-field input:disabled { color: #6f655e; background: #f5f2ee; opacity: 1; }
 .market-module-modal input::placeholder { color: #6f655e; opacity: 1; }
-.market-module-modal .market-reuse-option { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-top: 8px; line-height: 1.5; font-weight: 400; cursor: pointer; }
-.market-reuse-option input[type="checkbox"] { flex: 0 0 20px; width: 20px; height: 20px; min-height: 0; margin: 0; padding: 0; accent-color: #c74634; }
-.market-install-options summary, .market-install-details summary { min-height: 44px; align-content: center; color: #453a34; font-size: .86rem; font-weight: 700; cursor: pointer; }
-.market-install-options summary:focus-visible, .market-install-details summary:focus-visible { outline: 2px solid #c74634; outline-offset: 3px; border-radius: 4px; }
-.market-module-modal .market-refresh { justify-self: start; min-height: 44px; }
+.market-credential-help a { color: #a73529; text-underline-offset: 3px; }
+.market-credential-help a:focus-visible { outline: 2px solid #c74634; outline-offset: 3px; }
+.market-install-progress { display: grid; justify-items: stretch; gap: 10px; text-align: left; }
+.market-install-progress .market-progress-caption { margin: 0; color: #453a34; font-size: .86rem; font-weight: 700; }
+.market-install-progress .registration-progress-phase { margin: 0; }
+.market-install-progress .registration-progress-detail { margin: 0; }
+.market-install-progress [role="alert"] { color: #8b1e1e; font-size: .86rem; }
+.market-progress-paused > span { animation: none; transform: none; }
 .market-module-modal .governance-module-body { overscroll-behavior: contain; }
 @media (max-width: 520px) { .market-module-modal .governance-module-body { padding: 20px; } .market-module-modal { max-height: calc(100dvh - 24px); } }

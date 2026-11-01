@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 import traceback
 from datetime import datetime, timezone
@@ -27,6 +28,7 @@ PHASES = ('verify', 'credentials', 'model_prepare', 'model_run', 'model_verify',
 
 def public_status(manifest=None):
     state = manifest or {}
+    suffix = state.get('resources', {}).get('apify_token_suffix', '')
     return {'module_id': MODULE_ID, 'display_name': 'AI Market Intelligence',
             'status': state.get('status', 'not_installed'), 'installed': state.get('phase') == 'ready',
             'phase': state.get('phase', 'not_installed'), 'enabled': False,
@@ -35,6 +37,7 @@ def public_status(manifest=None):
             'reuse_existing': state.get('reuse_existing', True),
             'completed_phases': list(PHASES[:PHASES.index(state['phase'])]) if state.get('phase') in PHASES else [],
             **({'apify_credential_status': 'configured', 'apify_credential_owned_by_operation': True} if state.get('resources', {}).get('apify_credential_key') else {}),
+            **({'apify_token_suffix': suffix} if state.get('resources', {}).get('apify_credential_key') and isinstance(suffix, str) and re.fullmatch(r'[A-Za-z0-9]{4}', suffix) else {}),
             'test_sessions': state.get('test_sessions', [])}
 
 
@@ -100,6 +103,7 @@ class MarketAidpClient(AidpClient):
         def observe():
             state = self._read_installation(str(self._workspace()['key']))
             result = public_status(state)
+            result['administrator_ocid'] = (state or {}).get('owner')
             if state and state['phase'] == 'test' and state['resources'].get('agent_key'):
                 test = MarketPlaygroundClient(self.settings)
                 try:
@@ -122,6 +126,8 @@ class MarketAidpClient(AidpClient):
             except (AidpProvisionError, AidpProvisionPending):
                 result['apify_credential_status'] = 'unknown'
             result['apify_credential_available'] = result['apify_credential_status'] == 'configured'
+            if not result['apify_credential_available']:
+                result.pop('apify_token_suffix', None)
             return result
         return await asyncio.to_thread(observe)
 
@@ -206,11 +212,16 @@ class MarketAidpClient(AidpClient):
                     reference = existing_project_reference(existing, resources.get('apify_credential_key', ''))
                 except RuntimeError as exc:
                     raise AidpProvisionConflict(str(exc)) from None
+                if not created_by_operation(existing, state) and resources.get('apify_credential_key') != reference['credential_key']:
+                    resources.pop('apify_token_suffix', None)
             elif token:
                 if not existing:
                     if resources.get('apify_create_requested'):
                         raise AidpProvisionConflict('The credential creation was submitted but is not visible. Reconcile it before resuming; another secret will not be created automatically.')
                     resources['apify_create_requested'] = True
+                    value = token.get_secret_value()
+                    if value.startswith('apify_api_') and re.fullmatch(r'[A-Za-z0-9]{4}', value[-4:]):
+                        resources['apify_token_suffix'] = value[-4:]
                     self._save(state)
                 reference = ensure_apify_credential(self, token, state['operation_id'], expected_key=resources.get('apify_credential_key', ''))
             else:

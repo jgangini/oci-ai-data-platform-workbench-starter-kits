@@ -28,9 +28,12 @@ manager, using the same layout as Governance. Opening it performs only status
 and administrator reads. The **Apify Bearer token** field sits directly below the
 administrator. When missing, paste the API token without the `Bearer` prefix.
 When an active, project-owned credential matches the saved operation, the field
-shows a disabled placeholder and explains reuse; it never retrieves or displays
-the secret. A matching name alone does not establish availability. Conflicts or
-an unavailable metadata check block submission until reviewed or refreshed.
+shows a read-only abbreviated token, such as `apify_api_...7Q2k`, and explains
+reuse. New credentials retain only their final four characters as display metadata;
+older receipts show masked characters when that suffix is unknown. The form never
+retrieves or displays the complete saved secret. A matching name alone does not establish availability. Conflicts or
+an unavailable metadata check block submission. While the dialog is open, an
+unknown credential status is checked again automatically without starting work.
 Connection validity is checked separately in TEST. This form does not rotate
 an existing token, and it clears entered secrets after the credential phase.
 Review resource/cost effects and
@@ -38,8 +41,25 @@ submit **Deploy** to start. A recorded operation exposes **Resume installation**
 and its current phase; it is never reported installed merely because the portal
 image was updated.
 
-Installation options and the saved step list are expandable. One status message
-reports the current error or required action, without repeating it in the form.
+New operations verify and reuse project resources by default; saved operations
+retain their original choice without an installation-options control. The same
+progress panel shows the current phase while running and the saved step where
+installation paused, without an expandable step list or a separate refresh button.
+Once installation starts, this panel replaces the administrator, token and setup
+description at the top. The original administrator is recovered from the native
+receipt and resolved to a portal identity; the current administrator inventory
+and installation API still validate access. If that lookup is unavailable, the
+dialog requests the original administrator below the progress panel. The Bearer
+field appears below progress only for missing/conflicting/unverified credentials
+or a failed TEST connection check. A failed TEST does not by itself prove that
+the token is invalid, and the form does not rotate it.
+Resume keeps that phase visible until the server reports the next one, retaining
+the operation identity and resources. Completed-step counts describe phases, not
+elapsed-time percentages. One status message reports the current error or required
+action, without repeating it in the form.
+The five service badges match Governance: AIDP Workbench, Object Storage, Spark
+Compute, Master Catalog and AI Compute. The field links to Apify's
+[official token instructions](https://docs.apify.com/integrations/api#api-token).
 
 The administrator-only [installer](../../apps/backend/app/market_intelligence.py)
 uses the existing OCI runtime identity, shared Spark compute and configured
@@ -75,7 +95,8 @@ after the credential phase. Failed writes with unknown outcomes require native
 reconciliation, not automatic duplicate creation.
 
 When TEST needs a session, open the agent in Workbench Playground, create a TEST
-session, then refresh the installer and select it before resuming. No automatic
+session, then select it in the installer before resuming. The open dialog observes
+available sessions every two seconds; these GET requests do not advance installation. No automatic
 conversation or research run is created to manufacture test data. The SSE check
 lists MCP tools but starts no Actor and invokes no model.
 
@@ -95,7 +116,8 @@ the exception class and the last five function names/line numbers, without paths
 or local variables. Reconcile the failed native step before
 resuming the same operation; an error does not prove that a write never occurred.
 
-**Open Agent Hub** is a separate navigation link. It derives the Oracle Agent Hub
+**Open Agent Hub** is the chat-icon action immediately after Copy URL in the
+Market Intelligence row. It is independent of installation and derives the Oracle Agent Hub
 origin from the verified Workbench hostname and opens `/static/ah/` in a new tab,
 retaining only public `tenant`/`domain` context when configured. It does not pass
 session tokens, register tools, activate an agent or imply an agent-specific chat.
