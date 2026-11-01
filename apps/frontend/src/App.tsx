@@ -101,6 +101,8 @@ type AdminModule = {
   apify_token_suffix?: string;
   test_sessions?: { value: string; label: string }[];
   reuse_existing?: boolean;
+  mode?: 'install' | 'reinstall';
+  previous_operation_id?: string | null;
 };
 type AdminModuleOperationResponse = Partial<AdminModule> & {
   status: AdminModule["status"];
@@ -815,6 +817,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
   const [moduleOperating, setModuleOperating] = useState(false);
   const [moduleProgress, setModuleProgress] = useState<RegistrationResponse | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmReinstall, setConfirmReinstall] = useState(false);
   const [message, setMessage] = useState("");
   const moduleAbortRef = useRef<AbortController | null>(null);
   const loadAbortRef = useRef<AbortController | null>(null);
@@ -830,19 +833,24 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
   const governanceModule = modules.find(({ module_id }) => module_id === moduleId) ?? null;
   const moduleManagerUser = users.find(user => user.id === moduleManagerUserId && user.is_aidp_admin === true) ?? null;
   const marketSteps: Record<string, string> = { verify: 'Verify the selected environment', credentials: 'Connect credentials', model_prepare: 'Prepare fourteen empty tables', model_run: 'Run the model bootstrap', model_verify: 'Verify 145 column descriptions and zero rows', cleanup: 'Remove temporary bootstrap files', compute: 'Prepare dedicated AI Compute', files: 'Publish the reviewed runtime', agent: 'Configure the agent', permissions: 'Verify agent access', test: 'Check the paused agent in TEST', production: 'Publish the TEST-verified endpoint', ready: 'Installed and paused' };
-  const phaseLabel = market ? marketSteps[moduleProgress?.phase || governanceModule?.phase || ''] || 'Preparing installation…' : governancePhases[moduleProgress?.phase || ''] || 'Preparing module services…';
+  const removalSteps: Record<string, string> = { reinstall_inventory: 'Verify project resources before removal', reinstall_stop: 'Stop project workflows', reinstall_resources: 'Remove workflows, agent and dedicated AI Compute', reinstall_tables: 'Delete project tables and their contents', reinstall_storage: 'Remove project artifacts', reinstall_files: 'Remove previous runtime files', reinstall_credential: 'Delete the previous Apify credential' };
+  const reinstalling = governanceModule?.mode === 'reinstall';
+  const stepLabels = reinstalling || moduleProgress?.phase?.startsWith('reinstall_') ? { ...removalSteps, ...marketSteps } : marketSteps;
+  const phaseLabel = market ? stepLabels[moduleProgress?.phase || governanceModule?.phase || ''] || 'Preparing installation…' : governancePhases[moduleProgress?.phase || ''] || 'Preparing module services…';
   const recoverableKind = governanceModule && moduleOperationKind(governanceModule.status, governanceModule.operation_type);
   const transitioning = Boolean(governanceModule && ["installing", "redeploying", "deleting"].includes(governanceModule.status));
   const resumable = Boolean(recoverableKind && governanceModule?.operation_id);
   const credentialStatus = governanceModule?.apify_credential_status || 'unknown';
-  const credentialStage = !governanceModule?.installed && (!governanceModule?.phase || ['not_installed', 'verify', 'credentials'].includes(governanceModule.phase));
-  const tokenEditable = credentialStage && credentialStatus === 'missing';
+  const reinstallNeedsToken = confirmReinstall || reinstalling && !governanceModule?.completed_phases?.includes('credentials') && !governanceModule?.apify_credential_owned_by_operation;
+  const credentialStage = reinstallNeedsToken || !governanceModule?.installed && (!governanceModule?.phase || ['not_installed', 'verify', 'credentials'].includes(governanceModule.phase));
+  const tokenEditable = reinstallNeedsToken || credentialStage && credentialStatus === 'missing';
+  const showSavedToken = credentialStatus === 'configured' && !reinstallNeedsToken;
   const savedTokenLabel = 'apify_api_...' + (/^[A-Za-z0-9]{4}$/.test(governanceModule?.apify_token_suffix || '') ? governanceModule?.apify_token_suffix : '••••');
   const tokenValid = apifyToken.length >= 20 && apifyToken.length <= 512 && !/\s/.test(apifyToken);
-  const credentialBlocked = market && (credentialStatus === 'conflict' || credentialStatus === 'unknown'
+  const credentialBlocked = market && (reinstallNeedsToken ? !tokenValid : credentialStatus === 'conflict' || credentialStatus === 'unknown'
     || credentialStage && credentialStatus === 'configured' && !reuseExisting && !governanceModule?.apify_credential_owned_by_operation
     || credentialStatus === 'missing' && (!tokenEditable || !tokenValid));
-  const credentialHelp = credentialStatus === 'configured'
+  const credentialHelp = reinstallNeedsToken ? 'Reinstall deletes the previous project credential. Enter the Apify API token to save for the new installation; it is never stored in this browser.' : credentialStatus === 'configured'
     ? 'AiMarketIntelligenceApifyBearer is saved in AIDP Credential Store. Its connection is checked in TEST.'
     : credentialStatus === 'conflict' ? 'The existing credential needs review in AIDP Credential Store. It will not be replaced.'
     : credentialStatus === 'unknown' ? 'Checking the saved credential before continuing…'
@@ -852,8 +860,8 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
   const marketNeedsAttention = Boolean(moduleOperationError || ['error', 'awaiting_action'].includes(governanceModule?.status || ''));
   const marketStatusLabels: Record<string, string> = { not_installed: 'Not installed', installing: 'In progress',
     awaiting_action: 'Action required', error: 'Needs attention', active: 'Installed · Paused' };
-  const marketStatus = moduleOperating ? 'In progress' : marketStatusLabels[governanceModule?.status || ''] || 'Status unavailable';
-  const marketStepKeys = Object.keys(marketSteps).filter(key => key !== 'ready');
+  const marketStatus = moduleOperating || governanceModule?.status === 'redeploying' ? 'In progress' : marketStatusLabels[governanceModule?.status || ''] || 'Status unavailable';
+  const marketStepKeys = Object.keys(stepLabels).filter(key => key !== 'ready');
   const marketPhase = moduleProgress?.phase || governanceModule?.phase || '';
   const marketStepIndex = marketStepKeys.indexOf(marketPhase);
   const marketCompletedSteps = marketStepKeys.filter(key => governanceModule?.completed_phases?.includes(key)).length;
@@ -863,7 +871,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
   const observingMarket = Boolean(market && visible && governanceModule &&
     (credentialStatus === 'unknown' || governanceModule.phase === 'test' && governanceModule.status === 'awaiting_action'));
   const disabled = moduleOperating || !usersLoaded || !moduleManagerUser || !governanceModule || Boolean(moduleLoadError || usersError);
-  useEffect(() => { if (credentialStatus === 'configured') setApifyToken(''); }, [credentialStatus]);
+  useEffect(() => { if (credentialStatus === 'configured' && !reinstallNeedsToken) setApifyToken(''); }, [credentialStatus, reinstallNeedsToken]);
   useEffect(() => {
     if (market && governanceModule?.operation_id && governanceModule.administrator_id) setModuleManagerUserId(governanceModule.administrator_id);
   }, [market, governanceModule?.operation_id, governanceModule?.administrator_id]);
@@ -936,15 +944,17 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
     timeout = window.setTimeout(refresh, 2_000);
     return () => { cancelled = true; window.clearTimeout(timeout); };
   }, [transitioning, observingMarket, moduleOperating, governanceModule?.operation_id]);
-  async function runModuleAction(kind: ModuleOperationKind) {
+  async function runModuleAction(kind: ModuleOperationKind, fresh = false) {
     if (disabled || moduleAbortRef.current || !governanceModule || !moduleManagerUser) return;
     if (credentialBlocked) return;
-    const recoverableKind = moduleOperationKind(governanceModule.status, governanceModule.operation_type);
+    const recoverableKind = fresh ? undefined : moduleOperationKind(governanceModule.status, governanceModule.operation_type);
+    const reinstall = market && kind === 'redeploy';
+    const previousOperationId = recoverableKind === 'redeploy' ? governanceModule.previous_operation_id : governanceModule.operation_id;
     const operationKey = moduleOperationKey(governanceModule.module_id, kind);
     let operation;
     try {
       operation = getOrCreateModuleOperation(
-        moduleOperationsRef.current.get(operationKey) ??
+        fresh ? undefined : moduleOperationsRef.current.get(operationKey) ??
           readStoredModuleOperation(governanceModule.module_id, kind),
         governanceModule.module_id,
         kind,
@@ -965,7 +975,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
     setMessage("");
     setModuleProgress({
       status: "pending",
-      phase: market && governanceModule.operation_id ? governanceModule.phase || 'verify' : kind === "delete" ? "cleanup" : "verify",
+      phase: reinstall && recoverableKind !== 'redeploy' ? 'reinstall_inventory' : market && governanceModule.operation_id ? governanceModule.phase || 'verify' : kind === "delete" ? "cleanup" : "verify",
       message: `${kind === "install" ? "Installing" : kind === "redeploy" ? "Redeploying" : "Deleting"} ${governanceModule.display_name}.`,
     });
     let operationId = operation.operationId;
@@ -980,15 +990,17 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
                 method: "DELETE",
                 signal,
               })
-            : api<AdminModuleOperationResponse>(kind === "redeploy" ? `${moduleBase}/redeploy` : moduleBase, {
+            : api<AdminModuleOperationResponse>(kind === "redeploy" ? `${moduleBase}/${market ? 'reinstall' : 'redeploy'}` : moduleBase, {
                 method: "POST",
-                body: JSON.stringify({ operation_id: operationId, ...(market ? { reuse_existing: reuseExisting,
+                body: JSON.stringify({ operation_id: operationId, ...(market ? { reuse_existing: reinstall ? false : reuseExisting,
+                  ...(reinstall ? { previous_operation_id: previousOperationId, confirmation: 'ai_market_intelligence' } : {}),
                   ...(submittedToken ? { apify_token: submittedToken } : {}), ...(testSession ? { test_session_id: testSession } : {}) } : {}) }),
                 signal,
               }));
           signal.throwIfAborted();
           if (market) setModules(current => current.map(module => module.module_id === moduleId ? { ...module, ...response } : module));
-          if (market && response.phase && !["verify", "credentials"].includes(response.phase)) { submittedToken = ""; setApifyToken(""); }
+          if (reinstall && response.mode === 'reinstall' && response.operation_id === operationId && response.previous_operation_id === previousOperationId) setConfirmReinstall(false);
+          if (market && (reinstall ? response.completed_phases?.includes('credentials') : response.phase && !["verify", "credentials"].includes(response.phase))) { submittedToken = ""; setApifyToken(""); }
           if (response.operation_id && response.operation_id !== operationId) {
             operationId = response.operation_id;
             const serverOperation = {
@@ -1015,13 +1027,15 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
       moduleOperationsRef.current.delete(operationKey);
       writeStoredModuleOperation(governanceModule.module_id, kind);
       setConfirmDelete(false);
+      setConfirmReinstall(false);
       setMessage(result.message || `${governanceModule.display_name} ${kind === "delete" ? "deleted" : "ready"}.`);
       await loadModules();
       controller.signal.throwIfAborted();
       onChanged?.();
     } catch (reason) {
       if (controller.signal.aborted) return;
-      await loadModules();
+      const loaded = await loadModules();
+      if (reinstall && loaded?.some(module => module.mode === 'reinstall' && module.operation_id === operationId && module.previous_operation_id === previousOperationId)) setConfirmReinstall(false);
       if (controller.signal.aborted) return;
       setModuleOperationError(reason instanceof Error ? reason.message : "Unable to update the governance module.");
     } finally {
@@ -1077,11 +1091,11 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
               options={users.filter(user => user.is_aidp_admin === true).map(user => ({ value: user.id, label: user.email }))}
               onChange={value => { setModuleManagerUserId(value); setModuleOperationError(""); setMessage(""); }} />}
             {!usersError && !users.some(user => user.is_aidp_admin) && <p role="alert" className="lab-manager-error">No AI Data Platform administrator is available.</p>}
-            {market && (!marketShowProgress || marketCredentialIssue) && <label className="market-bearer-field">Apify Bearer token
-              <input type={credentialStatus === 'configured' ? 'text' : 'password'} aria-label="Apify Bearer token" value={credentialStatus === 'configured' ? savedTokenLabel : tokenEditable ? apifyToken : ''} autoComplete="off" spellCheck={false} maxLength={512}
-                readOnly={credentialStatus === 'configured'} disabled={!tokenEditable && credentialStatus !== 'configured'} required={tokenEditable} aria-required={tokenEditable}
+            {market && (!marketShowProgress || marketCredentialIssue || reinstallNeedsToken) && <label className="market-bearer-field">Apify Bearer token
+              <input type={showSavedToken ? 'text' : 'password'} aria-label="Apify Bearer token" value={showSavedToken ? savedTokenLabel : tokenEditable ? apifyToken : ''} autoComplete="off" spellCheck={false} maxLength={512}
+                readOnly={showSavedToken} disabled={!tokenEditable && !showSavedToken} required={tokenEditable} aria-required={tokenEditable}
                 aria-describedby={tokenHelpId} aria-invalid={tokenEditable && Boolean(apifyToken) && !tokenValid}
-                placeholder={credentialStatus === 'configured' ? 'Saved in AIDP Credential Store' : tokenEditable ? 'Paste your Apify API token' : 'Credential requires review'}
+                placeholder={showSavedToken ? 'Saved in AIDP Credential Store' : tokenEditable ? 'Paste your Apify API token' : 'Credential requires review'}
                 onChange={event => setApifyToken(event.target.value)} />
               <span className="market-credential-help" id={tokenHelpId}>{marketShowProgress && governanceModule?.phase === 'test' && governanceModule?.status === 'error'
                 ? 'TEST could not verify the connection. Review this credential in AIDP Credential Store; the saved token has not been changed.' : credentialHelp} <a href="https://docs.apify.com/integrations/api#api-token" target="_blank" rel="noopener noreferrer">How to get an Apify API token</a></span>
@@ -1104,15 +1118,18 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
             }}>Retry settings</button>
           </>}
           {confirmDelete && !moduleOperating && <p className="lab-manager-warning" role="alert"><strong>Delete global governance module?</strong> This permanently deletes its Agent deployment, dedicated AI Compute, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema, shared Spark compute and shared OCI credentials are retained.</p>}
+          {confirmReinstall && !moduleOperating && <p className="lab-manager-warning" role="alert"><strong>Delete and reinstall AI Market Intelligence?</strong> This permanently removes its workflows, agent, fourteen tables and their contents, runtime files, project artifacts, dedicated AI Compute and Apify credential. A new empty installation follows, with OCI compute costs. AI Data Governance, shared Spark, shared OCI credentials, buckets and schemas are retained.</p>}
           {!market && (moduleOperationError || (!moduleOperating && governanceModule?.status === "error")) && <p className="lab-manager-error" role="alert">{moduleOperationError || governanceModule?.message || "The module operation failed. Resume to retry."}</p>}
           {market && !marketShowProgress && marketNotice && <p className={marketNeedsAttention ? 'lab-manager-error' : 'governance-module-note'} role={marketNeedsAttention ? 'alert' : 'status'}>{marketNotice}</p>}
           {!market && message && <p role="status" className="governance-module-note">{message}</p>}
         </div>
         <footer>
-          <button ref={closeRef} className="secondary" type="button" onClick={() => confirmDelete && !moduleOperating ? setConfirmDelete(false) : onClose()}>
-            {confirmDelete && !moduleOperating ? "Back" : moduleOperating || message || market && resumable ? "Close" : "Cancel"}
+          <button ref={closeRef} className="secondary" type="button" onClick={() => confirmReinstall && !moduleOperating ? setConfirmReinstall(false) : confirmDelete && !moduleOperating ? setConfirmDelete(false) : onClose()}>
+            {(confirmDelete || confirmReinstall) && !moduleOperating ? "Back" : moduleOperating || message || market && resumable ? "Close" : "Cancel"}
           </button>
+          {market && governanceModule?.operation_id && !moduleOperating && !transitioning && !confirmReinstall && <button className="secondary destructive" type="button" disabled={disabled} onClick={() => { setApifyToken(''); setConfirmReinstall(true); closeRef.current?.focus(); }}>Reinstall</button>}
           {moduleOperating ? <button type="button" disabled>Deploying…</button>
+            : confirmReinstall ? <button type="button" disabled={disabled || credentialBlocked} onClick={() => void runModuleAction('redeploy', true)}>Delete and reinstall</button>
             : confirmDelete ? <button type="button" disabled={disabled} onClick={() => void runModuleAction("delete")}>Delete module</button>
             : resumable ? <button type="button" disabled={disabled || credentialBlocked} onClick={() => recoverableKind && void runModuleAction(recoverableKind)}>
               Resume {recoverableKind === "install" ? "installation" : recoverableKind === "redeploy" ? "redeployment" : "deletion"}

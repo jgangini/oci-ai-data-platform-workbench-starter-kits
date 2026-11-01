@@ -16,7 +16,8 @@ def test_refresh_uses_only_test_payload_and_verified_entry(monkeypatch):
     calls = []
     source = b'approved readable source'
     ga = SimpleNamespace(_workspace=lambda: {'key': 'workspace'}, _request=lambda *a: {'type': 'CODE', 'computeKey': 'compute',
-        'entryFilePath': '/Workspace/.control/modules/ai_market_intelligence/agent/market_intelligence.py'},
+        'entryFilePath': '/Workspace/.control/modules/ai_market_intelligence/agent/market_intelligence.py',
+        'dependenciesFilePath': '/Workspace/.control/modules/ai_market_intelligence/agent/requirements.txt'},
         _workspace_object=lambda workspace, path, **k: (b'dependency' if path.endswith('requirements.txt') else source, {}),
         _content_matches=lambda actual, expected: actual == expected,
         session=SimpleNamespace(close=lambda: None))

@@ -30,6 +30,18 @@ class MarketInstallRequest(BaseModel):
                 raise ValueError('Invalid secret')
 
 
+class MarketReinstallRequest(MarketInstallRequest):
+    previous_operation_id: str
+    confirmation: str
+
+    def validate_values(self):
+        super().validate_values()
+        if (self.confirmation != 'ai_market_intelligence' or self.reuse_existing is not False
+                or str(UUID(self.previous_operation_id)) != self.previous_operation_id
+                or self.operation_id == self.previous_operation_id):
+            raise ValueError('Invalid reinstall scope')
+
+
 def mount_market_intelligence(app, require_admin, selected_platform_admin):
     def ready():
         if not app.state.settings.aidp_ready():
@@ -82,6 +94,25 @@ def mount_market_intelligence(app, require_admin, selected_platform_admin):
         except (AidpProvisionError, AidpProvisionPending):
             raise HTTPException(503, 'Unable to verify the native agent endpoint.') from None
 
+    @app.post('/api/admin/users/{user_id}/modules/ai_market_intelligence/reinstall')
+    async def reinstall(user_id: str, request: Request, _admin=Depends(require_admin)):
+        user = await selected_platform_admin(user_id)
+        try:
+            if len(await request.body()) > 8192:
+                raise ValueError('Oversized settings')
+            values = MarketReinstallRequest.model_validate(await request.json())
+            values.validate_values()
+        except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
+            raise HTTPException(400, 'Confirm the project removal, previous operation and new token before reinstalling.') from None
+        try:
+            result = await ready().reinstall(str(user['ocid']), values.operation_id, values.previous_operation_id,
+                                            token=values.apify_token, test_session_id=values.test_session_id)
+            return JSONResponse(result, status_code=202 if result['status'] == 'redeploying' else 200)
+        except AidpProvisionConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+        except (AidpProvisionError, AidpProvisionPending):
+            raise HTTPException(503, 'Native reinstall is unavailable. Preserve this operation and retry its status.') from None
+
 
 class LocalMarketClient:
     async def close(self):
@@ -95,3 +126,6 @@ class LocalMarketClient:
 
     async def agent_endpoint(self):
         raise AidpProvisionConflict('A native installed agent is required.')
+
+    async def reinstall(self, *_args, **_kwargs):
+        raise AidpProvisionConflict('Native AIDP is required; the local fixture cannot reinstall a project.')
