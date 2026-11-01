@@ -5,11 +5,56 @@ from pathlib import Path
 import shutil
 import subprocess
 from types import SimpleNamespace
+import tomllib
 
 import pytest
 
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_rules_use_supported_constraints_without_line_limits():
+    rules = tomllib.loads((ROOT / '.sentrux/rules.toml').read_text(encoding='utf-8'))
+    # Sentrux 0.5.7 silently ignores unknown keys; detect a misspelled constraint.
+    assert set(rules) == {'constraints'}
+    assert set(rules['constraints']) == {'max_cycles', 'no_god_files'}
+    assert rules['constraints']['max_cycles'] == 0
+    assert rules['constraints']['no_god_files'] is True
+
+
+@pytest.mark.parametrize('case', ['large_agent', 'cycle', 'fan_out'])
+def test_native_rules_allow_long_agents_but_reject_dependency_regressions(tmp_path, case):
+    scanner = shutil.which('sentrux')
+    if scanner is None:
+        pytest.skip('Sentrux CLI is required for native architecture policy acceptance')
+    rules = ROOT / '.sentrux/rules.toml'
+    constraints = tomllib.loads(rules.read_text(encoding='utf-8'))['constraints']
+    assert 'max_file_lines' not in constraints
+    assert 'max_fn_lines' not in constraints
+    target = tmp_path / '.sentrux/rules.toml'
+    target.parent.mkdir()
+    shutil.copyfile(rules, target)
+    if case == 'large_agent':
+        (tmp_path / 'agent.py').write_text(
+            'PROMPT = """\n' + 'Research instructions.\n' * 10000 + '"""\n'
+            + 'def answer():\n    return PROMPT\n', encoding='utf-8')
+    elif case == 'cycle':
+        (tmp_path / 'first.py').write_text('import second\ndef first():\n    return second.second()\n', encoding='utf-8')
+        (tmp_path / 'second.py').write_text('import first\ndef second():\n    return first.first()\n', encoding='utf-8')
+    else:
+        (tmp_path / 'agent.py').write_text(
+            '\n'.join(f'import tool_{index}' for index in range(20)), encoding='utf-8')
+        for index in range(20):
+            (tmp_path / f'tool_{index}.py').write_text('def tool():\n    return 1\n', encoding='utf-8')
+    result = subprocess.run([scanner, 'check', str(tmp_path)], capture_output=True,
+                            text=True, encoding='utf-8', errors='replace', timeout=30)
+    output = result.stdout + result.stderr
+    assert '2 rules checked' in output, output
+    if case == 'large_agent':
+        assert result.returncode == 0, output
+    else:
+        assert result.returncode != 0, output
+        assert ('max_cycles' if case == 'cycle' else 'no_god_files') in output, output
 
 
 @pytest.fixture
@@ -90,7 +135,8 @@ def test_arch_wrappers_preserve_the_reference_and_do_not_hide_failed_gates(scrip
     baseline = ROOT / '.sentrux/baseline.json'
     before = hashlib.sha256(baseline.read_bytes()).hexdigest()
     path = str(ROOT / 'scripts' / script).replace("'", "''")
-    command = ("function global:sentrux { }; function global:python { $global:LASTEXITCODE = " + str(exit_code)
+    command = ("function global:sentrux { }; function global:graphify { $global:LASTEXITCODE = 0 }; "
+               + "function global:python { $global:LASTEXITCODE = " + str(exit_code)
                + "; Write-Output '" + output + "' }; & '" + path + "'")
     result = subprocess.run([shell, '-NoProfile', '-NonInteractive', '-Command', command],
                             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
@@ -101,3 +147,23 @@ def test_arch_wrappers_preserve_the_reference_and_do_not_hide_failed_gates(scrip
     else:
         phase = 'preflight' if script == 'arch-preflight.ps1' else 'postflight'
         assert 'Architecture ' + phase + ' complete.' in result.stdout
+
+
+@pytest.mark.parametrize('failure', ['update', 'export'])
+def test_postflight_stops_when_graph_refresh_or_wiki_export_fails(tmp_path, failure):
+    shell = shutil.which('pwsh')
+    if shell is None:
+        pytest.skip('PowerShell is required to exercise the native validation wrappers')
+    scripts = tmp_path / 'scripts'
+    scripts.mkdir()
+    shutil.copyfile(ROOT / 'scripts/arch-postflight.ps1', scripts / 'arch-postflight.ps1')
+    (tmp_path / 'graphify-out').mkdir()
+    command = ("function global:graphify { if ($args[0] -eq '" + failure
+               + "') { $global:LASTEXITCODE = 1 } else { $global:LASTEXITCODE = 0 } }; "
+               + "function global:sentrux { }; function global:python { throw 'Gate must not run after Graphify fails' }; & '"
+               + str(scripts / 'arch-postflight.ps1').replace("'", "''") + "'")
+    result = subprocess.run([shell, '-NoProfile', '-NonInteractive', '-Command', command],
+                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
+    assert result.returncode != 0
+    assert ('Graphify update failed.' if failure == 'update' else 'Graphify wiki export failed.') in result.stderr
+    assert 'Gate must not run' not in result.stderr

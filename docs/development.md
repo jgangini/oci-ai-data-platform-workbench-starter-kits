@@ -57,6 +57,31 @@ Localhost uses the same native installation controls as production when configur
 
 Architecture wrappers preserve existing Sentrux references. Use `scripts/arch-preflight.ps1 -PreserveBaseline -Python <python-exe>` and the matching postflight; `scripts/sentrux_scope.py` scans tracked and non-ignored new source without changing Git's index, excluding private/generated/nested repositories. Missing tools and degraded results fail the workflow. The operator-approved reference is commit `7ac5126` under CLI 0.5.7 (117 complex functions); the original reference remains byte-preserved in `.sentrux/history/2026-10-02.baseline.json`. `.sentrux/reference.json` records both hashes and provenance. This accepts prior debt, not its resolution; do not recalibrate from a changed candidate.
 
+### Agent size and architecture rules
+
+The checked-in [Sentrux policy](../.sentrux/rules.toml) permits long agent files, including self-contained native entries and prompts. It deliberately omits `max_file_lines` and `max_fn_lines`; splitting a cohesive runtime only to reduce its line count is not an acceptance requirement. File length does not exempt complex functions, excessive dependencies or unsafe behavior from review and tests.
+
+Two native rules apply to the full source scope: zero import cycles (`max_cycles = 0`) and no files with excessive outgoing dependencies (`no_god_files = true`). In Sentrux 0.5.7 the latter measures fan-out, not lines. The existing regression gate separately retains its quality, coupling and complex-function checks against the preserved reference. Its vendor tolerances remain unchanged: quality may fall by at most 0.02 and coupling rise by at most 0.05 in absolute units; any increase in cycles, god files or complex functions fails. No new absolute coupling threshold is imposed. See the pinned upstream [rule implementation](https://github.com/sentrux/sentrux/blob/f36da08a53e7f06c5b6aec33eb05816b371000ea/sentrux-core/src/metrics/rules/checks.rs) and [regression gate](https://github.com/sentrux/sentrux/blob/f36da08a53e7f06c5b6aec33eb05816b371000ea/sentrux-core/src/metrics/arch/mod.rs).
+
+Sentrux 0.5.7 can silently ignore unknown TOML keys. [Architecture regressions](../apps/backend/tests/test_arch_validation.py) check the supported policy keys and exercise the installed CLI with a 10,000-line agent, an import cycle and excessive fan-out. The CLI cases skip explicitly when the executable is absent; that skip does not complete the required preflight/postflight.
+
+### Graphify map for AI Market Intelligence
+
+[`.graphifyignore`](../.graphifyignore) defines a bounded, code-only map of the Market Intelligence runtime, installation adapters, API and associated tests. It excludes other modules, the frontend, shared platform helpers, documents, private state, nested repositories and generated/vendor trees. Sentrux still covers the full repository source scope; a clean module graph makes no claim about the excluded modules.
+
+Graphify 0.9.93 was used for this setup, with no added application dependency, external LLM request or Git hook. From this repository root, using an installed Graphify CLI:
+
+```powershell
+graphify extract . --code-only --max-workers 2
+graphify cluster-only . --no-label
+graphify export html
+graphify export wiki
+```
+
+For subsequent source edits, run the canonical postflight: it invokes `graphify update .`, then `graphify export wiki`, followed by the Sentrux rules and regression gate. Do not initialize or index the enclosing workspace. Generated `graphify-out/` remains ignored by Git; read `GRAPH_REPORT.md` and `wiki/index.md` for navigation, and open `graph.html` locally. The initial map contains 47 code files; later counts must come from the actual output.
+
+AST relationships aid navigation, not native execution acceptance. Inferred edges require source verification; external/builtin references may have no local source location, and recursive calls may produce self-loops. The graph does not prove dynamic LangGraph transitions, MCP authorization, streaming behavior or successful installation. Community labels and generated report text may change when the graph is rebuilt; this guide and `.graphifyignore` retain the intended scope.
+
 Read repository instructions before editing. For code/infrastructure changes, run the project's architecture preflight before the change and postflight afterward. Use the smallest relevant checks during development and the release/CI matrix before publishing a release.
 
 ```powershell
@@ -119,4 +144,4 @@ Keep the root README as an overview. Put shared setup in `getting-started.md`, r
 
 AI Market Intelligence declares its runtime under `notebooks/agent/` in `lab.json`; host-side installation adapters live under `app/market_installation/`. CI runs its pinned LangGraph fixtures independently of the retired Social package. Native model, MCP, memory and installation acceptance remain separate.
 
-For package 1.1.1, the local structural gate reported quality 6424 to 6424 and complex functions 107 to 118, with coupling unchanged and no cycles or god files; custom rules and Graphify are not configured in this checkout. This is a recorded gate degradation, not a passing check. The added branches enforce typed query/context/presentation boundaries, complete calendar series and an additive comment migration with retry-safe history; regression fixtures also contribute to this aggregate signal. The planner now also binds requested dates before SQL and permits one local plan repair with a terminal clarification on repeated invalid input. The agent remains one self-contained native CODE entry, avoiding a new deployment/import mechanism. Independent review found and corrected repeat-query scope, date-evidence, SQL field-name and presentation-failure defects. Retain those guards and the existing baseline; do not suppress the signal by splitting functions solely for the metric or resetting it. Functional SQL, migration, graph, lifecycle and native UI acceptance remain separate requirements.
+For package 1.1.1, the local structural gate reported quality 6424 to 6424 and complex functions 107 to 118, with coupling unchanged and no cycles or god files; custom rules and Graphify were not configured at that review. This is a recorded gate degradation, not a passing check. The added branches enforce typed query/context/presentation boundaries, complete calendar series and an additive comment migration with retry-safe history; regression fixtures also contribute to this aggregate signal. The planner now also binds requested dates before SQL and permits one local plan repair with a terminal clarification on repeated invalid input. The agent remains one self-contained native CODE entry, avoiding a new deployment/import mechanism. Independent review found and corrected repeat-query scope, date-evidence, SQL field-name and presentation-failure defects. Retain those guards and the existing baseline; do not suppress the signal by splitting functions solely for the metric or resetting it. Functional SQL, migration, graph, lifecycle and native UI acceptance remain separate requirements.
