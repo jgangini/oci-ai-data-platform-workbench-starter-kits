@@ -1,9 +1,12 @@
 """Model documentation and safe native DDL, without a cloud connection."""
 import copy
+import re
 
 import pytest
 
 from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence import schema
+
+STORAGE_ROOT = 'oci://selected-artifacts@namespace/ai_market_intelligence/delta'
 
 
 def test_installer_storage_is_dedicated_to_the_selected_artifacts_bucket():
@@ -93,14 +96,15 @@ def test_dictionary_contains_actual_reference_targets():
 
 
 @pytest.mark.parametrize('fault', ['foreign_owner', 'changed_comment', 'changed_type', 'changed_nullability',
-                                 'changed_version', 'changed_provider', 'changed_table_comment', 'existing_rows'])
+                                 'changed_version', 'changed_provider', 'changed_table_comment', 'existing_rows',
+                                 'wrong_location', 'missing_location'])
 def test_native_resume_rejects_existing_table_drift(fault):
     from app.market_installation.model_install import model_notebook
 
     spark = ModelSpark(fault=fault, missing_first=True)
     original = copy.deepcopy(spark.rows)
-    source = ''.join(model_notebook('oci_medallion', 'oci_artifacts')['cells'][0]['source'])
-    with pytest.raises(RuntimeError, match='Existing table|mismatch|existing data preserved'):
+    source = ''.join(model_notebook('oci_medallion', 'oci_artifacts', storage_root=STORAGE_ROOT)['cells'][0]['source'])
+    with pytest.raises((RuntimeError, KeyError), match='Existing table|mismatch|existing data preserved|location'):
         exec(compile(source, 'native_model.py', 'exec'), {'spark': spark})
     assert not spark.created
     assert spark.rows == original
@@ -119,6 +123,7 @@ class ModelSpark:
         self.fault_name = self.names[-1]
         self.fault = fault
         self.created = []
+        self.locations = {name: STORAGE_ROOT + '/' + self.tables[name]['name'] for name in self.present}
         self.rows = {name: ([{'retained': 'business-data'}] if
             fault == 'existing_rows' and name == self.fault_name else []) for name in self.names}
         self.catalog = SimpleNamespace(tableExists=lambda name: name in self.present)
@@ -130,6 +135,8 @@ class ModelSpark:
             assert name in self.tables and name not in self.present
             self.present.add(name)
             self.created.append(name)
+            location = re.search(r"\bLOCATION\s+'([^']+)'", statement)
+            self.locations[name] = location[1] if location else 'oci://managed-idl@namespace/catalog/' + self.tables[name]['name']
             return None
         if statement.startswith('SHOW TBLPROPERTIES '):
             name = statement[len('SHOW TBLPROPERTIES '):]
@@ -145,7 +152,11 @@ class ModelSpark:
         if '`' in plain:
             raise RuntimeError('AIDP Delta resolver cannot resolve quoted namespace characters')
         name = '.'.join('`' + part + '`' for part in plain.split('.'))
-        detail = {'format': 'delta', 'description': self.tables[name]['description']}
+        detail = {'format': 'delta', 'description': self.tables[name]['description'], 'location': self.locations[name]}
+        if name == self.fault_name and self.fault == 'wrong_location':
+            detail['location'] = 'oci://managed-idl@namespace/catalog/' + self.tables[name]['name']
+        if name == self.fault_name and self.fault == 'missing_location':
+            detail.pop('location')
         if name == self.fault_name and self.fault == 'changed_provider':
             detail['format'] = 'parquet'
         if name == self.fault_name and self.fault == 'changed_table_comment':
@@ -174,10 +185,11 @@ def test_native_empty_install_and_resume_verify_complete_model(fresh, capsys):
     import json
     from app.market_installation.model_install import model_notebook
     spark = ModelSpark(fresh=fresh)
-    source = ''.join(model_notebook('oci_medallion', 'oci_artifacts')['cells'][0]['source'])
+    source = ''.join(model_notebook('oci_medallion', 'oci_artifacts', storage_root=STORAGE_ROOT)['cells'][0]['source'])
     exec(compile(source, 'native_model.py', 'exec'), {'spark': spark})
     receipt = json.loads(capsys.readouterr().out.split('AI_MARKET_MODEL_READY:')[1])
     assert len(spark.created) == (14 if fresh else 0)
+    assert all(spark.locations[name] == STORAGE_ROOT + '/' + spark.tables[name]['name'] for name in spark.present)
     assert receipt['documented_columns'] == 145
     assert len(receipt['tables']) == 14
     assert all(table['provider'] == 'delta' and table['rows'] == 0 for table in receipt['tables'])
@@ -191,7 +203,7 @@ def test_python_bootstrap_initializes_spark_and_executes_the_same_empty_model(mo
     spark = ModelSpark(fresh=True)
     monkeypatch.setitem(sys.modules, 'pyspark.sql', SimpleNamespace(
         SparkSession=SimpleNamespace(builder=SimpleNamespace(getOrCreate=lambda: spark))))
-    exec(compile(model_script('oci_medallion', 'oci_artifacts'), 'model.py', 'exec'), {})
+    exec(compile(model_script('oci_medallion', 'oci_artifacts', storage_root=STORAGE_ROOT), 'model.py', 'exec'), {})
     receipt = json.loads(capsys.readouterr().out.split('AI_MARKET_MODEL_READY:')[1])
     assert len(spark.created) == 14 and receipt['documented_columns'] == 145
     assert all(table['rows'] == 0 for table in receipt['tables'])

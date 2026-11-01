@@ -57,6 +57,7 @@ def test_agent_descriptor_uses_the_same_native_json_byte_contract(monkeypatch):
         assert api._content_matches(json.loads(descriptor), descriptor)
         return 'agent', False
     api._ensure_agent = ensure
+    api._verify_agent_bindings = lambda *args: None
     saved = state('agent', agent_compute_key='compute')
     api._step(saved, None, None)
     assert saved['resources']['agent_key'] == 'agent'
@@ -68,6 +69,99 @@ def output_receipt():
                           for table in installer.definition()['tables']]}
     notebook = {'cells': [{'outputs': [{'text': ['AI_MARKET_MODEL_READY:' + json.dumps(receipt)]}]}]}
     return {'data': [{'value': json.dumps(notebook)}]}
+
+
+@pytest.mark.parametrize('drift', ['entryFilePath', 'dependenciesFilePath', 'computeKey', None])
+def test_native_agent_bindings_are_reconciled_without_replacing_identity(drift):
+    api = client()
+    api._agent_deployments = lambda *a: []
+    expected = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE',
+                'entryFilePath': installer.ROOT + '/agent/market_intelligence.py',
+                'dependenciesFilePath': installer.ROOT + '/agent/requirements.txt', 'computeKey': 'compute'}
+    current = {**expected, **({drift: 'old-binding'} if drift else {})}
+    calls = []
+    def request(method, path, **kwargs):
+        assert path == '/workspaces/workspace/agents/agent'
+        calls.append(method)
+        if method == 'PUT':
+            assert kwargs['headers'] == {'if-match': 'revision-1'}
+            assert set(kwargs['payload']) == {'entryFilePath', 'dependenciesFilePath', 'computeKey'}
+            current.update(kwargs['payload'])
+        else:
+            return (dict(current), {'ETag': 'revision-1'}) if kwargs.get('include_headers') else dict(current)
+    api._request = request
+    api._verify_agent_bindings('workspace', 'agent', 'compute')
+    assert current == expected
+    assert calls == (['GET', 'PUT', 'GET'] if drift else ['GET'])
+
+
+@pytest.mark.parametrize('fault', ['foreign_name', 'foreign_key', 'wrong_type', 'missing_etag', 'stale_readback'])
+def test_native_agent_binding_repair_fails_closed(fault):
+    api = client()
+    api._agent_deployments = lambda *a: []
+    current = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE',
+               'entryFilePath': installer.ROOT + '/agent/market_intelligence.py',
+               'dependenciesFilePath': '/old/requirements.txt', 'computeKey': 'compute'}
+    if fault == 'foreign_name':
+        current['displayName'] = 'ai_data_governance'
+    if fault == 'foreign_key':
+        current['key'] = 'other-agent'
+    if fault == 'wrong_type':
+        current['type'] = 'LOW_CODE'
+    writes = []
+    def request(method, path, **kwargs):
+        if method == 'PUT':
+            writes.append(kwargs['payload'])
+            return {}
+        return (current, {} if fault == 'missing_etag' else {'etag': 'revision-1'}) if kwargs.get('include_headers') else current
+    api._request = request
+    with pytest.raises(AidpProvisionConflict):
+        api._verify_agent_bindings('workspace', 'agent', 'compute')
+    assert len(writes) == (1 if fault == 'stale_readback' else 0)
+
+
+@pytest.mark.parametrize('etag_available', [True, False])
+def test_existing_agent_phase_uses_only_the_conditional_binding_writer(monkeypatch, etag_available):
+    api = client()
+    api._runtime_config = lambda saved: {}
+    monkeypatch.setattr(installer, 'agent_package', lambda config: (b'changed-source', {}))
+    api._ensure_agent = lambda *a, **k: pytest.fail('Existing identity must not enter the unconditional base updater')
+    api._agent_deployments = lambda *a: []
+    current = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE',
+               'entryFilePath': '/Workspace/ai_market_intelligence/agent/market_intelligence.py',
+               'dependenciesFilePath': '/Workspace/ai_market_intelligence/agent/requirements.txt', 'computeKey': 'old'}
+    writes, descriptors = [], []
+    api._upload_file = lambda *a: descriptors.append(a)
+    def request(method, path, **kwargs):
+        if method == 'PUT':
+            assert kwargs['headers'] == {'if-match': 'revision-1'}
+            writes.append(kwargs['payload'])
+            current.update(kwargs['payload'])
+            return {}
+        return (dict(current), {'etag': 'revision-1'} if etag_available else {}) if kwargs.get('include_headers') else dict(current)
+    api._request = request
+    saved = state('agent', agent_key='agent', agent_compute_key='compute')
+    if etag_available:
+        api._step(saved, None, None)
+        assert len(writes) == len(descriptors) == 1
+        assert current['entryFilePath'] == installer.ROOT + '/agent/market_intelligence.py'
+    else:
+        with pytest.raises(AidpProvisionConflict, match='concurrency token'):
+            api._step(saved, None, None)
+        assert not writes and not descriptors
+    assert saved['resources']['agent_key'] == 'agent'
+
+
+def test_binding_repair_preserves_an_active_production_deployment():
+    api = client()
+    api._agent_deployments = lambda *a: [{'key': 'production'}]
+    current = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE'}
+    def request(method, path, **kwargs):
+        assert method == 'GET'
+        return current, {'etag': 'revision-1'}
+    api._request = request
+    with pytest.raises(AidpProvisionConflict, match='production deployment'):
+        api._verify_agent_bindings('workspace', 'agent', 'compute')
 
 
 def test_model_requires_an_exact_empty_receipt_before_cleanup():
@@ -229,13 +323,13 @@ def test_reusing_another_credential_discards_a_failed_creation_token_hint(monkey
     api._step(saved, None, None)
     assert saved['resources']['apify_credential_key'] == 'another-project-credential'
     assert 'apify_token_suffix' not in saved['resources']
-    assert 'apify_token_suffix' not in installer.public_status(saved)
+    assert installer.public_status(saved)['apify_token_suffix'] == ''
 
 
 @pytest.mark.parametrize('suffix', ['', None, 1234, 'long-secret-value', 'a b!'])
 def test_unvalidated_or_missing_bearer_hints_are_not_exposed(suffix):
     result = installer.public_status(state('model_verify', apify_credential_key='project', apify_token_suffix=suffix))
-    assert 'apify_token_suffix' not in result
+    assert result['apify_token_suffix'] == ''
 
 
 def test_uncertain_bootstrap_start_is_not_repeated():

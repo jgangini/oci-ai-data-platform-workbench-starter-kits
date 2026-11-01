@@ -9,7 +9,9 @@ It replaces Social Network in the public catalog with an independent research
 graph, not a renamed ingestion pipeline. The package is **planned** pending native installation acceptance. The portal now
 provides an explicit, resumable installer; its fixture tests do not establish
 installation acceptance. Agent Hub registration and activation are outside this
-installer. An existing development experiment is not an installation receipt.
+installer. Apify uses Bearer authentication through the project Credential Store
+entry; OAuth through AI Registry is out of scope and is not an acceptance gate.
+An existing development experiment is not an installation receipt.
 
 The package declares twenty-two hash-checked runtime assets, including its own memory
 adapter, with no shared dependency on the legacy Social package. The loader
@@ -34,8 +36,9 @@ older receipts show masked characters when that suffix is unknown. The form neve
 retrieves or displays the complete saved secret. A matching name alone does not establish availability. Conflicts or
 an unavailable metadata check block submission. While the dialog is open, an
 unknown credential status is checked again automatically without starting work.
-Connection validity is checked separately in TEST. This form does not rotate
-an existing token, and it clears entered secrets after the credential phase.
+Connection validity is checked separately in TEST. Normal installation and Resume
+do not rotate an existing token; explicit Reinstall removes the project credential
+and requires a new token. Entered secrets clear after the new credential phase.
 Review resource/cost effects and
 submit **Deploy** to start. A recorded operation exposes **Resume installation**
 and its current phase; it is never reported installed merely because the portal
@@ -65,7 +68,30 @@ The administrator-only [installer](../../apps/backend/app/market_intelligence.py
 uses the existing OCI runtime identity, shared Spark compute and configured
 artifacts bucket. It creates or explicitly reuses only project-owned resources.
 An incompatible existing agent, credential, compute, table or active production
-binding blocks reconciliation rather than being replaced. Governance is retained.
+binding blocks normal reconciliation rather than being replaced. Only the explicit
+project-owned retirement described below permits replacement. Governance is retained.
+
+`AidpRuntime` is a shared OCI credential used by Market Intelligence and other
+modules, including Governance. Installation reuses its verified identity without
+rotation. If absent, it uses the existing shared-credential provisioning helper
+with the uploaded operator identity, records creation intent and reconciles an
+uncertain result before another write. Neither reinstall nor project removal
+deletes `AidpRuntime` or legacy shared-credential aliases.
+
+For an explicitly reused development agent, the installer accepts the canonical
+entry file or the former `/Workspace/ai_market_intelligence/agent/` entry. It
+records the existing agent identity before publishing files. Its agent phase
+checks the native entry file, dependencies and compute even when file bytes have
+not changed. Binding repair uses the GET response ETag with `If-Match`, preserves
+the agent identity and requires a matching GET afterward. Missing ETags, changed
+identities and existing production deployments block repair. This path is specific
+to Market Intelligence; it does not change the Governance updater.
+
+These checks do not repair a broken Development editor project root. Oracle's
+[UpdateAgentDetails contract](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aiwap/op-aidataplatforms-aidataplatformid-workspaces-workspacekey-agents-agentkey-put.html)
+supports entry/dependencies/compute updates but does not expose `pathInfo` as an
+update field. That separate root issue needs native reconciliation; the installer
+does not send an undocumented field or create a substitute agent to hide it.
 
 Model preparation uploads an operation-owned `model.py` through Workspace Objects
 and binds it to a `PYTHON_TASK` on the existing Spark compute. It initializes
@@ -103,9 +129,18 @@ lists MCP tools but starts no Actor and invokes no model.
 The installer expects one portal process to coordinate an operation; its in-process
 lock and native receipt are not a distributed compare-and-swap guarantee. Before
 running multiple portal replicas, introduce shared operation admission. Existing
-nonempty tables or storage/schema drift require a separate reviewed migration;
-this installer never drops them. An uncertain TEST submission remains actionable
+nonempty tables or storage/schema drift block normal installation; the explicit
+Reinstall action below deletes only verified project tables and their contents.
+An uncertain TEST submission remains actionable
 and blocked until the native operation is reconciled.
+
+Repairing tables does not turn an already failed bootstrap run into a successful
+one. Resume still observes the recorded run and will reject its failed state.
+Keep its history and use an explicitly reconciled native recovery before resuming;
+do not clear `model_start_requested` or resource keys to force another run. Native
+repair has not yet been accepted for this installer. The executable model tests
+exercise the artifacts URI used by installation and reject IDL or absent locations
+before creating any missing table.
 
 When AIDP rejects an installation request, the operation receipt retains only its
 HTTP method, endpoint without query, phase, status and Oracle request ID. The
@@ -122,6 +157,53 @@ origin from the verified Workbench hostname and opens `/static/ah/` in a new tab
 retaining only public `tenant`/`domain` context when configured. It does not pass
 session tokens, register tools, activate an agent or imply an agent-specific chat.
 The native agent endpoint has its own copy control after installation completes.
+
+## Delete and reinstall
+
+**Reinstall** is separate from **Resume installation**. It is available for a
+recorded installation that has failed, needs action or is complete; an operation
+already progressing cannot be replaced. The same administrator must confirm the
+project removal and enter the Apify token to save for the new installation.
+This is destructive: project tables and their contents are removed, not migrated.
+
+The authenticated `/api/admin/users/{user_id}/modules/ai_market_intelligence/reinstall`
+endpoint requires a new operation UUID, the preceding operation UUID and the
+exact project confirmation. It archives and verifies the prior receipt before
+creating a new generation. Repeated requests resume that generation; they do
+not clear failed-run flags or copy old TEST/production receipts into it.
+
+Seven retirement phases precede the existing twelve installation phases:
+
+1. Freeze project identities and ownership metadata before any cancellation or
+   deletion. Matching names alone do not authorize table, compute or credential
+   removal. Unknown model revisions, missing concurrency tokens or shared compute
+   consumers block retirement.
+2. Cancel project workflow runs and wait for their terminal states. Recheck runs
+   during retirement and before tables/storage are touched.
+3. Remove the inventoried workflows, deployments, agent and dedicated AI Compute.
+   Re-read resource scope and use conditional native deletes; wait for absence.
+4. Remove only the fourteen allowlisted, model-owned table names in artifacts or
+   their previous Gold location. Other tables, schemas and catalogs are retained.
+5. Clear only `ai_market_intelligence/` in the selected artifacts bucket, with
+   conditional object deletes. Versioned buckets block before retirement; version
+   purging requires a separately accepted implementation. Never recursively purge IDL.
+6. Remove project runtime/diagnostic files and the recorded temporary bootstrap
+   directories. Preserve installation receipts/history. The old top-level project
+   directory is removed only when the inventoried agent was bound there.
+7. Remove only the verified project Apify credential. Keep shared `AidpRuntime`.
+
+Then the existing installer creates fourteen empty tables with explicit artifacts
+locations, a new dedicated AI Compute and agent at the canonical path, recreates
+the project Apify credential, verifies permissions and tests the paused revision.
+Research, paid Actors, schedules and demo data remain disabled.
+
+The new token stays only in the open form and authenticated requests until the
+new credential phase completes. Reloading during retirement requires re-entry;
+the history and browser storage never contain the token. Native deletion has
+irreversible consequences and remains subject to the service's retention behavior.
+The application assumes one portal coordinator, not a distributed admission lock.
+Native retirement and fresh installation acceptance must be verified separately
+from the simulated resource and UI regressions.
 
 ## Research and output
 
@@ -141,9 +223,10 @@ emits progress milestones; it does not claim token-by-token model streaming.
   empty; preserve Governance and shared resources throughout recovery.
 - Only after installation acceptance, run separately authorized research questions
   with real data, test memory/SQL projection and reconcile provider costs.
-- Agent Hub registration, OAuth Registry execution and an agent-specific chat
-  remain separate native integration work. The general navigation link does not
-  establish any of those checks.
+- Agent Hub consumption and an agent-specific chat remain separate native
+  integration work. The general navigation link does not establish those checks.
+  Apify OAuth through AI Registry is discarded; do not require its execution or
+  provision an OAuth credential as a fallback for Bearer.
 
 The pinned runtime CI job exercises the graph with synthetic model/provider
 fixtures, including milestone streaming, retries, evidence references and budget

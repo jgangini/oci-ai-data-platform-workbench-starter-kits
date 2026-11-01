@@ -230,7 +230,7 @@ test("administrators manage one shared governance module from Settings outside p
   assert.match(manager, /moduleOperationsRef\.current\.set/);
   assert.match(manager, /shared OCI credentials are retained/);
   assert.doesNotMatch(manager, /type="checkbox"|<ConfirmModal|dedicated AI Compute, credential, notebook/);
-  assert.match(manager, /reuse_existing: reuseExisting/);
+  assert.match(manager, /reuse_existing: reinstall \? false : reuseExisting/);
   assert.doesNotMatch(source, /production && user\.is_aidp_admin|lab_id: "agent"/);
   assert.match(source, /function participantLabCatalog/);
   assert.match(source, /\["agent", "ai_data_governance"\]\.includes\(lab_id\)/);

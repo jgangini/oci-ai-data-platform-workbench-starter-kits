@@ -1207,6 +1207,109 @@ const marketHarness = (t, module = marketModule, initial = {}) => managerHarness
   { moduleId: marketModule.module_id, initialUserId: 'operator' },
   { '/api/admin/modules/ai_market_intelligence': module, ...initial });
 
+test('Market reinstall requires explicit removal confirmation and a new token, then keeps one operation through cleanup', async t => {
+  const previous = '00000000-0000-4000-8000-000000000001';
+  const old = { ...marketModule, operation_id: previous, operation_type: 'install', administrator_id: 'operator',
+    status: 'error', phase: 'model_verify', apify_credential_status: 'configured', apify_credential_owned_by_operation: true, apify_token_suffix: 'AB12' };
+  const h = await marketHarness(t, old);
+  h.act(() => action(h, 'Reinstall').props.onClick());
+  assert.equal(h.mutations().length, 0);
+  assert.equal(action(h, 'Delete and reinstall').props.disabled, true);
+  assert.match(text(h.nodes()[0]), /fourteen tables and their contents/);
+  assert.match(text(h.nodes()[0]), /shared OCI credentials/);
+  assert.match(text(h.find('div', props => props['aria-label'] === 'Installation progress')), /Paused at step 5 of 12/);
+  const field = () => h.find('input', props => props['aria-label'] === 'Apify Bearer token');
+  assert.equal(field().props.readOnly, false);
+  h.act(() => field().props.onChange({ target: { value: 'synthetic-fresh-apify-token' } }));
+  h.act(() => { const start = action(h, 'Delete and reinstall').props.onClick; start(); start(); });
+  const first = h.mutations()[0];
+  const body = JSON.parse(first.options.body);
+  assert.equal(h.mutations().length, 1);
+  assert.notEqual(body.operation_id, previous);
+  assert.equal(body.previous_operation_id, previous);
+  assert.equal(body.confirmation, 'ai_market_intelligence');
+  assert.equal(body.reuse_existing, false);
+  assert.equal(first.path, '/api/admin/users/operator/modules/ai_market_intelligence/reinstall');
+  const current = { ...old, operation_id: body.operation_id, previous_operation_id: previous, operation_type: 'redeploy', mode: 'reinstall', status: 'redeploying',
+    apify_credential_owned_by_operation: false, apify_credential_status: 'missing', apify_token_suffix: '' };
+  first.resolve({ ...current, phase: 'reinstall_stop', completed_phases: ['reinstall_inventory'] }, 202);
+  await h.settle();
+  assert.match(text(h.find('div', props => props['aria-label'] === 'Installation progress')), /Step 2 of 19/);
+  assert.equal(JSON.parse(h.mutations()[1].options.body).apify_token, body.apify_token);
+  h.mutations()[1].resolve({ ...current, phase: 'model_prepare', completed_phases: ['credentials'] }, 202);
+  await h.settle();
+  const third = JSON.parse(h.mutations()[2].options.body);
+  assert.equal(third.operation_id, body.operation_id);
+  assert.equal(third.previous_operation_id, previous);
+  assert.equal('apify_token' in third, false);
+  assert.equal(JSON.stringify([...h.sessionState]).includes(body.apify_token), false);
+  h.mutations()[2].resolve({ ...current, phase: 'test', status: 'awaiting_action', completed_phases: ['credentials'] });
+  await h.settle();
+  h.requests.at(-1).resolve({ ...current, phase: 'test', status: 'awaiting_action', completed_phases: ['credentials'] });
+  await h.settle();
+});
+
+test('Market resumes reinstall after reload with the same operation and asks again for an unpersisted token', async t => {
+  const operation = '00000000-0000-4000-8000-000000000002';
+  const previous = '00000000-0000-4000-8000-000000000001';
+  const module = { ...marketModule, operation_id: operation, previous_operation_id: previous, mode: 'reinstall',
+    operation_type: 'redeploy', administrator_id: 'operator', status: 'error', phase: 'reinstall_tables', apify_credential_status: 'configured' };
+  const h = await marketHarness(t, module);
+  assert.equal(action(h, 'Resume redeployment').props.disabled, true);
+  const field = h.find('input', props => props['aria-label'] === 'Apify Bearer token');
+  assert.equal(field.props.type, 'password');
+  h.act(() => field.props.onChange({ target: { value: 'synthetic-fresh-apify-token' } }));
+  h.act(() => action(h, 'Resume redeployment').props.onClick());
+  const body = JSON.parse(h.mutations()[0].options.body);
+  assert.equal(body.operation_id, operation);
+  assert.equal(body.previous_operation_id, previous);
+  assert.match(h.mutations()[0].path, /\/reinstall$/);
+  h.mutations()[0].resolve({ ...module, status: 'awaiting_action' });
+  await h.settle(); h.requests.at(-1).resolve(module); await h.settle();
+});
+
+test('Reinstall on an earlier failed reinstall starts a new operation rather than silently resuming it', async t => {
+  const previous = '00000000-0000-4000-8000-000000000001';
+  const current = '00000000-0000-4000-8000-000000000002';
+  const module = { ...marketModule, operation_id: current, previous_operation_id: previous, mode: 'reinstall',
+    operation_type: 'redeploy', administrator_id: 'operator', status: 'error', phase: 'reinstall_tables' };
+  const h = await marketHarness(t, module);
+  h.act(() => action(h, 'Reinstall').props.onClick());
+  h.act(() => h.find('input', props => props['aria-label'] === 'Apify Bearer token').props.onChange({ target: { value: 'synthetic-fresh-apify-token' } }));
+  h.act(() => action(h, 'Delete and reinstall').props.onClick());
+  const body = JSON.parse(h.mutations()[0].options.body);
+  assert.notEqual(body.operation_id, current);
+  assert.equal(body.previous_operation_id, current);
+  h.mutations()[0].resolve({ ...module, operation_id: body.operation_id, previous_operation_id: current, status: 'awaiting_action' });
+  await h.settle(); h.requests.at(-1).resolve(module); await h.settle();
+});
+
+test('An admitted reinstall error exits confirmation and resumes its existing generation', async t => {
+  const previous = '00000000-0000-4000-8000-000000000001';
+  const old = { ...marketModule, operation_id: previous, operation_type: 'install', administrator_id: 'operator',
+    status: 'error', phase: 'model_verify', apify_credential_status: 'configured', apify_credential_owned_by_operation: true, apify_token_suffix: 'AB12' };
+  const h = await marketHarness(t, old);
+  h.act(() => action(h, 'Reinstall').props.onClick());
+  h.act(() => h.find('input', props => props['aria-label'] === 'Apify Bearer token').props.onChange({ target: { value: 'synthetic-fresh-apify-token' } }));
+  h.act(() => action(h, 'Delete and reinstall').props.onClick());
+  const first = JSON.parse(h.mutations()[0].options.body);
+  const failed = { ...old, mode: 'reinstall', operation_type: 'redeploy', operation_id: first.operation_id,
+    previous_operation_id: previous, phase: 'reinstall_tables', status: 'error', message: 'Native check failed.',
+    apify_credential_status: 'missing', apify_credential_owned_by_operation: false, apify_token_suffix: '' };
+  h.mutations()[0].resolve(failed);
+  await h.settle(); h.requests.at(-1).resolve(failed); await h.settle();
+  assert.equal(h.nodes().some(node => node?.type === 'button' && text(node) === 'Delete and reinstall'), false);
+  const field = h.find('input', props => props['aria-label'] === 'Apify Bearer token');
+  assert.equal(field.props.value, 'synthetic-fresh-apify-token');
+  assert.equal(field.props.readOnly, false);
+  h.act(() => action(h, 'Resume redeployment').props.onClick());
+  const resumed = JSON.parse(h.mutations()[1].options.body);
+  assert.equal(resumed.operation_id, first.operation_id);
+  assert.equal(resumed.previous_operation_id, previous);
+  h.mutations()[1].resolve({ ...failed, status: 'awaiting_action' });
+  await h.settle(); h.requests.at(-1).resolve(failed); await h.settle();
+});
+
 test('Market places its Bearer field directly after the administrator and validates without a request', async t => {
   const h = await marketHarness(t);
   const administrator = h.find('SearchableCombobox', props => props.label === 'AI Data Platform administrator');

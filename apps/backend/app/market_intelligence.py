@@ -18,6 +18,7 @@ from .market_installation.compute import prepare_compute
 from .market_installation.credentials import ensure_apify_credential, _project_credential, existing_project_reference, created_by_operation
 from .market_installation.model_install import model_script, model_job
 from .market_installation.playground import MarketPlaygroundClient
+from .market_installation import reinstall as retirement
 from .labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.schema import definition, schema_sha256
 
 MODULE_ID = 'ai_market_intelligence'
@@ -26,18 +27,25 @@ PHASES = ('verify', 'credentials', 'model_prepare', 'model_run', 'model_verify',
           'compute', 'files', 'agent', 'permissions', 'test', 'production', 'ready')
 
 
+def installation_phases(state):
+    return retirement.PHASES + PHASES if state.get('mode') == 'reinstall' else PHASES
+
+
 def public_status(manifest=None):
     state = manifest or {}
+    phases = installation_phases(state)
     suffix = state.get('resources', {}).get('apify_token_suffix', '')
     return {'module_id': MODULE_ID, 'display_name': 'AI Market Intelligence',
             'status': state.get('status', 'not_installed'), 'installed': state.get('phase') == 'ready',
             'phase': state.get('phase', 'not_installed'), 'enabled': False,
-            'operation_id': state.get('operation_id'), 'operation_type': 'install',
+            'operation_id': state.get('operation_id'), 'operation_type': 'redeploy' if state.get('mode') == 'reinstall' else 'install',
+            'mode': state.get('mode', 'install'), 'previous_operation_id': state.get('previous_operation_id'),
             'message': state.get('message', ''), 'bundled_version': load_lab_pack(MODULE_ID, require_available=False).pack_version,
             'reuse_existing': state.get('reuse_existing', True),
-            'completed_phases': list(PHASES[:PHASES.index(state['phase'])]) if state.get('phase') in PHASES else [],
-            **({'apify_credential_status': 'configured', 'apify_credential_owned_by_operation': True} if state.get('resources', {}).get('apify_credential_key') else {}),
-            **({'apify_token_suffix': suffix} if state.get('resources', {}).get('apify_credential_key') and isinstance(suffix, str) and re.fullmatch(r'[A-Za-z0-9]{4}', suffix) else {}),
+            'completed_phases': list(phases[:phases.index(state['phase'])]) if state.get('phase') in phases else [],
+            'apify_credential_status': 'configured' if state.get('resources', {}).get('apify_credential_key') else 'missing',
+            'apify_credential_owned_by_operation': bool(state.get('resources', {}).get('apify_credential_key')),
+            'apify_token_suffix': suffix if state.get('resources', {}).get('apify_credential_key') and isinstance(suffix, str) and re.fullmatch(r'[A-Za-z0-9]{4}', suffix) else '',
             'test_sessions': state.get('test_sessions', [])}
 
 
@@ -91,7 +99,7 @@ class MarketAidpClient(AidpClient):
     def _read_installation(self, workspace):
         state = self._workspace_json(workspace, ROOT + '/installer.json', 'Invalid Market Intelligence installation receipt')
         if state is not None and (state.get('module_id') != MODULE_ID or state.get('installer_version') != 1
-                or state.get('workspace') != workspace or state.get('phase') not in PHASES):
+                or state.get('workspace') != workspace or state.get('phase') not in installation_phases(state)):
             raise AidpProvisionConflict('An incompatible installation receipt exists; preserve it for reconciliation.')
         return state
 
@@ -137,6 +145,48 @@ class MarketAidpClient(AidpClient):
         async with self._locks.setdefault(MODULE_ID, asyncio.Lock()):
             return await asyncio.to_thread(self._advance, user_ocid, operation_id, reuse_existing, token, test_session_id)
 
+    async def reinstall(self, user_ocid, operation_id, previous_operation_id, *, token=None, test_session_id=None):
+        if any(str(UUID(value)) != value for value in (operation_id, previous_operation_id)) or operation_id == previous_operation_id:
+            raise AidpProvisionConflict('Reinstall requires a new stable operation and its previous installation.')
+        async with self._locks.setdefault(MODULE_ID, asyncio.Lock()):
+            return await asyncio.to_thread(self._reinstall, user_ocid, operation_id, previous_operation_id, token, test_session_id)
+
+    def _reinstall(self, user, operation, previous, token, session):
+        workspace = str(self._workspace()['key'])
+        old = self._read_installation(workspace)
+        if not old or old['owner'] != user:
+            raise AidpProvisionConflict('Reinstall requires the original administrator and installation receipt.')
+        if old['operation_id'] == operation:
+            if old.get('mode') != 'reinstall' or old.get('previous_operation_id') != previous:
+                raise AidpProvisionConflict('The reinstall operation changed scope.')
+        else:
+            if old['operation_id'] != previous or old.get('status') not in {'error', 'awaiting_action', 'active'}:
+                raise AidpProvisionConflict('The previous installation is active or changed; no resources were removed.')
+            if token is None:
+                raise AidpProvisionConflict('Enter a new Apify token before deleting the previous project credential.')
+            history = ROOT + '/.installation-history'
+            self._ensure_folder(workspace, history)
+            path = history + '/' + previous + '.json'
+            archived = self._workspace_json(workspace, path, 'Invalid installation history')
+            if archived is not None and archived != old:
+                raise AidpProvisionConflict('The previous installation history changed; it was not overwritten.')
+            content = json.dumps(old, sort_keys=True, separators=(',', ':')).encode()
+            self._upload_file(workspace, path, content, repair_drift=False)
+            body, _ = self._workspace_object(workspace, path, phase='content')
+            if not self._content_matches(body, content):
+                raise AidpProvisionConflict('The installation history was not verified; no resources were removed.')
+            state = {'installer_version': 1, 'module_id': MODULE_ID, 'workspace': workspace,
+                     'operation_id': operation, 'previous_operation_id': previous, 'mode': 'reinstall',
+                     'retired_operations': list(dict.fromkeys([previous, *old.get('retired_operations', [])])),
+                     'owner': user, 'reuse_existing': False, 'status': 'redeploying',
+                     'phase': retirement.PHASES[0],
+                     'resources': {key: value for key, value in old['resources'].items()
+                                   if key in {'shared_oci_create_requested', 'shared_oci_credential_key'}},
+                     'previous_resources': old['resources'],
+                     'pack_sha256': load_lab_pack(MODULE_ID, require_available=False).pack_sha256}
+            self._save(state)
+        return self._advance(user, operation, False, token, session)
+
     async def agent_endpoint(self):
         def observe():
             workspace = str(self._workspace()['key'])
@@ -161,7 +211,8 @@ class MarketAidpClient(AidpClient):
             raise AidpProvisionConflict('Resume the saved installation with the same administrator and settings.')
         if state['phase'] == 'ready':
             return public_status(state)
-        state['status'] = 'installing'
+        pending_status = 'redeploying' if state.get('mode') == 'reinstall' else 'installing'
+        state['status'] = pending_status
         state['message'] = ''
         state.pop('native_error', None)
         self._save(state)
@@ -170,8 +221,9 @@ class MarketAidpClient(AidpClient):
             if next_phase:
                 state['phase'] = next_phase
             else:
-                state['phase'] = PHASES[PHASES.index(state['phase']) + 1]
-            state['status'] = 'active' if state['phase'] == 'ready' else 'installing'
+                phases = installation_phases(state)
+                state['phase'] = phases[phases.index(state['phase']) + 1]
+            state['status'] = 'active' if state['phase'] == 'ready' else pending_status
             self._save(state)
         except AidpProvisionPending as exc:
             state['message'] = str(exc)
@@ -194,7 +246,9 @@ class MarketAidpClient(AidpClient):
 
     def _step(self, state, token, session):
         workspace, resources, phase = state['workspace'], state['resources'], state['phase']
-        if phase == 'verify':
+        if phase in retirement.PHASES:
+            retirement.step(self, state)
+        elif phase == 'verify':
             self._ensure_governance_bucket()
             if not all((self.settings.agent_model_id, self.settings.objectstorage_namespace, self.settings.compartment_id)):
                 raise AidpProvisionConflict('Configure the OCI model, compartment and artifacts storage before installation.')
@@ -204,8 +258,18 @@ class MarketAidpClient(AidpClient):
                 raise AidpProvisionConflict('The existing oci_artifacts schema must be available; no other schema will be used.')
             resources.update(catalog_key=catalog['key'], schema_key=schemas[0]['key'], spark_key=self._shared_compute(workspace)['key'])
         elif phase == 'credentials':
-            if self._shared_oci_credential() is None:
-                raise AidpProvisionConflict('The shared AidpRuntime credential must be configured first.')
+            shared = self._shared_oci_credential()
+            if shared is None:
+                if resources.get('shared_oci_create_requested'):
+                    raise AidpProvisionConflict('Shared AidpRuntime creation was submitted but is not visible. Reconcile it before resuming; another shared credential will not be created.')
+                resources['shared_oci_create_requested'] = True
+                self._save(state)
+                shared_key, _ = self._ensure_governance_credential()
+            else:
+                shared_key = shared.get('key') or shared.get('id')
+            if not shared_key or resources.get('shared_oci_credential_key', shared_key) != shared_key:
+                raise AidpProvisionConflict('The shared OCI credential identity changed; it was preserved.')
+            resources['shared_oci_credential_key'] = shared_key
             existing = _project_credential(self)
             if existing and (state['reuse_existing'] or created_by_operation(existing, state)):
                 try:
@@ -238,10 +302,14 @@ class MarketAidpClient(AidpClient):
                 raise AidpProvisionConflict('Existing project agent requires explicit reuse; no agent was replaced.')
             if agents:
                 agent = self._request('GET', f"/workspaces/{workspace}/agents/{agents[0]['key']}")
-                if agent.get('type') != 'CODE' or agent.get('entryFilePath') != ROOT + '/agent/market_intelligence.py':
+                allowed_entries = {ROOT + '/agent/market_intelligence.py', '/Workspace/ai_market_intelligence/agent/market_intelligence.py'}
+                if (agent.get('type') != 'CODE' or agent.get('entryFilePath') not in allowed_entries
+                        or resources.get('agent_key', agent['key']) != agent['key']):
                     raise AidpProvisionConflict('Existing agent has a different source binding; no files were changed.')
                 if self._agent_deployments(f"/workspaces/{workspace}/agents/{agent['key']}/deployments"):
                     raise AidpProvisionConflict('An existing production deployment requires a separate reviewed update.')
+                resources['agent_key'] = agent['key']
+                self._save(state)
             for name, content in assets.items():
                 parent = (ROOT + '/agent/' + name).rsplit('/', 1)[0]
                 self._ensure_folder(workspace, parent)
@@ -249,9 +317,15 @@ class MarketAidpClient(AidpClient):
             self._upload_file(workspace, ROOT + '/agent/market_intelligence.py', source)
         elif phase == 'agent':
             source, assets = agent_package(self._runtime_config(state))
-            key, _ = self._ensure_agent(workspace, resources['agent_compute_key'], MODULE_ID, ROOT + '/agent', source,
-                json.dumps({'module_id': MODULE_ID, 'pack_sha256': state['pack_sha256']}, sort_keys=True, separators=(',', ':')).encode(),
-                repair_drift=True, expected_key=resources.get('agent_key', ''))
+            descriptor = json.dumps({'module_id': MODULE_ID, 'pack_sha256': state['pack_sha256']}, sort_keys=True, separators=(',', ':')).encode()
+            key = resources.get('agent_key')
+            if key:
+                self._verify_agent_bindings(workspace, key, resources['agent_compute_key'])
+                self._upload_file(workspace, ROOT + '/agent/agent-manifest.json', descriptor)
+            else:
+                key, _ = self._ensure_agent(workspace, resources['agent_compute_key'], MODULE_ID, ROOT + '/agent', source,
+                    descriptor, repair_drift=True)
+                self._verify_agent_bindings(workspace, key, resources['agent_compute_key'])
             resources['agent_key'] = key
         elif phase == 'permissions':
             for path, assignment in ((f"/workspaces/{workspace}/agents/{resources['agent_key']}", 'assignAgentPermissionDetails'),
@@ -265,6 +339,28 @@ class MarketAidpClient(AidpClient):
                 raise AidpProvisionPending('Publishing the TEST-verified paused agent.', 'production')
             resources['deployment_key'] = deployment['key']
         return None
+
+    def _verify_agent_bindings(self, workspace, agent_key, compute_key):
+        path = f'/workspaces/{workspace}/agents/{agent_key}'
+        expected = {'entryFilePath': ROOT + '/agent/market_intelligence.py',
+                    'dependenciesFilePath': ROOT + '/agent/requirements.txt', 'computeKey': compute_key}
+        detail, headers = self._request('GET', path, include_headers=True)
+        if (detail.get('key') != agent_key or detail.get('type') != 'CODE'
+                or self._resource_name(detail) != MODULE_ID):
+            raise AidpProvisionConflict('The recorded project agent identity changed; no binding was updated.')
+        if any(detail.get(key) != value for key, value in expected.items()):
+            if self._agent_deployments(path + '/deployments'):
+                raise AidpProvisionConflict('An existing production deployment requires a separate reviewed update.')
+            etag = next((value for key, value in headers.items() if key.lower() == 'etag'), None)
+            if not etag:
+                raise AidpProvisionConflict('The native agent has no concurrency token; reconcile its bindings before continuing.')
+            self._request('PUT', path, payload=expected, headers={'if-match': etag},
+                          retry_scope='market-agent-bindings:' + agent_key + ':' + hashlib.sha256(json.dumps(expected, sort_keys=True).encode()).hexdigest())
+            detail = self._request('GET', path)
+        if (detail.get('key') != agent_key or detail.get('type') != 'CODE'
+                or self._resource_name(detail) != MODULE_ID
+                or any(detail.get(key) != value for key, value in expected.items())):
+            raise AidpProvisionConflict('The native agent did not retain the expected source and compute bindings.')
 
     def _runtime_config(self, state):
         return {**self._governance_oci_config(), 'region': self.settings.aidp_region,

@@ -51,7 +51,9 @@ class MarketPlaygroundClient(AidpClient):
                 raise RuntimeError('Playground workspace identity changed')
             detail = ga._request('GET', f'/workspaces/{workspace}/agents/{agent_key}')
             entry = '/Workspace/.control/modules/ai_market_intelligence/agent/market_intelligence.py'
-            if detail.get('type') != 'CODE' or detail.get('entryFilePath') != entry or detail.get('computeKey') != compute_key:
+            if (detail.get('type') != 'CODE' or detail.get('entryFilePath') != entry
+                    or detail.get('dependenciesFilePath') != entry.rsplit('/', 1)[0] + '/requirements.txt'
+                    or detail.get('computeKey') != compute_key):
                 raise RuntimeError('Playground candidate binding differs from the project agent')
             root = '/Workspace/.control/modules/ai_market_intelligence/agent/'
             for name, content in candidate.items():
