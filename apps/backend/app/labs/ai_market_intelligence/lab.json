@@ -135,7 +135,7 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/prompts.json",
-      "sha256": "d39940ff26a63cab2f6618a0a704028703efb9d579dbb1097bda14395127d6c0",
+      "sha256": "3b531d443829721f576c4d36c96af54c1f4980d441c31ac361df5650f29f32b3",
       "workspace_path": "agent/ai_market_intelligence/prompts.json"
     },
     {
@@ -165,5 +165,5 @@
       "sha256": "87516a2e0f446f2e32cef8e5b05e99edb545d23fabfe08ed43d704bdf1776d04"
     }
   ],
-  "pack_sha256": "52f997e1f79a169d34b28ee630ae00f7e359c781752bf956c8d18718da601dcd"
+  "pack_sha256": "b18f73517a2d72b725ec3c2686cc847cb47442857203cce45976eaea0dd5eb64"
 }
