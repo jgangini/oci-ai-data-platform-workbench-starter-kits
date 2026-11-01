@@ -100,11 +100,6 @@ class AgentRuntime:
         from aidputils.agents.toolkit.tool_helper import create_langgraph_tool
         config = self.config
         lease = str(uuid4())
-        def claim(records, state):
-            if state.get('projection_lease'):
-                raise RuntimeError('Another projection owns this scope; retry delivery, not capture')
-            state['projection_lease'] = lease
-            return records
         from langgraph.config import get_stream_writer
         try:
             progress = get_stream_writer()
@@ -124,12 +119,16 @@ class AgentRuntime:
             if set(result) == {'tool_name', 'arguments'}:
                 raise RuntimeError('SQL helper returned a stub; no projection verified')
             return result
-        records = journal.transact(claim)
+        records, previous = journal.claim_projection(lease)
+        verified, fingerprints = False, []
         try:
             writes = list(projection_statements(records, config['catalog'], config['framework_schema']))
             checks = list(projection_checks(records, config['catalog'], config['framework_schema']))
             if len(writes) != len(checks):
                 raise RuntimeError('Projection rendering omitted a table verification')
+            fingerprints = [digest([config['gold_query_compute_id'], statement]) for statement in writes]
+            previous = previous if isinstance(previous, list) and len(previous) <= 14 else []
+            writes = [statement for statement, fingerprint in zip(writes, fingerprints) if fingerprint not in previous]
             batch = projection_batch_check(checks) if checks else None
             total = len(writes) + bool(batch)
             def notify(completed):
@@ -143,13 +142,9 @@ class AgentRuntime:
                 statement, expected = batch
                 verify_projection(await execute(statement), expected)
                 notify(total)
+            verified = True
         finally:
-            def release(current, state):
-                if state.get('projection_lease') != lease:
-                    raise RuntimeError('Projection ownership changed')
-                state['projection_lease'] = None
-                return current.tables == records.tables
-            current = journal.transact(release)
+            current = journal.finish_projection(lease, records, fingerprints if verified else None)
         if not current:
             raise RuntimeError('Records changed during projection; retry delivery without recapture')
 

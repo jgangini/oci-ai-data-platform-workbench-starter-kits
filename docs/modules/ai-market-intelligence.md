@@ -43,6 +43,13 @@ requires a separately verified cost envelope, including proxy usage.
 An empty evidence set cannot close as sufficient. Validated terminal provider
 costs are recorded even when an Actor fails; missing costs keep their reservation
 and are not reported as zero.
+The adapter preserves response-level `com.apify/ActorRun` usage metadata,
+including the `meta` alias serialized by Oracle/Pydantic. Costs must belong to
+the unique run in that same response and agree with any explicit run cost.
+USD values are rounded upward to integer microdollars; invalid or conflicting
+values cannot become a verified receipt. These are observed run costs, not a
+promise that later storage charges or model usage are included. See the
+[upstream metadata issue](https://github.com/apify/apify-mcp-server/issues/1429).
 An ungrounded model source selection asks for a registered name or an exact
 approved URL rather than failing the conversation or widening its scope.
 Intake receives up to twenty recent canonical topics with an active approved
@@ -76,6 +83,14 @@ name-based tool registry; per-scope leases still serialize that scope's writes.
 MERGEs remain sequential. Readback retains each table's scoped row, key and value
 checks inside one aggregate SQL request; every table must pass individually, so
 errors cannot cancel each other across tables. Empty snapshots issue no SQL.
+After a complete verified projection, the journal retains hashes of each MERGE
+and its query compute. Later turns omit matching MERGEs but still read back
+all nonempty tables. Claiming the projection lease invalidates saved hashes
+atomically before SQL. They are restored only after successful verification
+and an unchanged snapshot. An interrupted writer, changed destination or failed
+readback forces complete writes on the next delivery; it never repeats capture.
+External table drift is detected by readback, so that delivery fails before
+the following attempt repairs the projection.
 
 The package declares twenty-two hash-checked runtime assets, including its own memory
 adapter, with no shared dependency on the legacy Social package. The loader

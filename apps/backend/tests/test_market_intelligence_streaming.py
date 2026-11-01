@@ -381,3 +381,151 @@ def test_native_disconnect_releases_auth_and_buffered_mode_preserves_the_final_e
         assert json.loads(result['messages'][0].content)['markdown'] == 'Fixture validado.'
         assert native_auth == ['start', 'end', 'start', 'end']
     asyncio.run(check())
+
+
+@pytest.fixture
+def verified_projection(monkeypatch):
+    from types import SimpleNamespace
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import projection_checks
+
+    flow, model, provider, _ = configured()
+    runtime = AgentRuntime()
+    runtime.config = {'catalog': 'oci_medallion', 'framework_schema': 'oci_artifacts',
+                      'gold_query_compute_id': 'query-compute'}
+    queries, phase = [], {'failure': None}
+    configs = ModuleType('aidputils.agents.toolkit.configs')
+    helper = ModuleType('aidputils.agents.toolkit.tool_helper')
+    configs.AIDPToolConf = lambda **values: SimpleNamespace(model_dump=lambda: values)
+
+    def change_source(records, state):
+        source = records.rows('ai_mi_sources')[0]
+        records.upsert('ai_mi_sources', {**source, 'description': (source['description'] or '') + ' revised'})
+
+    def sql_tool(definition):
+        statement = definition['conf']['query']
+        async def invoke(arguments):
+            assert arguments == {}
+            value, _ = flow.journal.read()
+            assert value.get('projection_lease') and not value.get('projection_receipts')
+            queries.append(statement)
+            if phase['failure'] == 'merge_failure' and statement.startswith('MERGE INTO'):
+                raise RuntimeError('Synthetic interrupted MERGE')
+            if phase['failure'] == 'cancelled':
+                raise asyncio.CancelledError()
+            checks = list(projection_checks(flow.records(), runtime.config['catalog'], runtime.config['framework_schema']))
+            if statement.startswith('SELECT COUNT(*) AS total_rows, COUNT(DISTINCT check_id)'):
+                if phase['failure'] == 'snapshot_change':
+                    flow.journal.transact(change_source)
+                count = len(checks)
+                return {'rows': [{'total_rows': count, 'distinct_keys': count,
+                                  'matched_rows': count - 1 if phase['failure'] == 'readback_failure' else count}]}
+            return {'rows': []}
+        return SimpleNamespace(ainvoke=invoke)
+
+    helper.create_langgraph_tool = sql_tool
+    monkeypatch.setitem(sys.modules, configs.__name__, configs)
+    monkeypatch.setitem(sys.modules, helper.__name__, helper)
+    asyncio.run(runtime.project(flow.journal))
+    state, _ = flow.journal.read()
+    assert len(state['projection_receipts']) == len(queries) - 1
+    queries.clear()
+    return SimpleNamespace(flow=flow, runtime=runtime, queries=queries, phase=phase, change_source=change_source,
+                           model=model, provider=provider)
+
+
+def assert_full_projection(projection):
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import (
+        projection_statements, projection_checks, projection_batch_check)
+    runtime, records = projection.runtime, projection.flow.records()
+    writes = list(projection_statements(records, runtime.config['catalog'], runtime.config['framework_schema']))
+    checks = list(projection_checks(records, runtime.config['catalog'], runtime.config['framework_schema']))
+    assert projection.queries == [*writes, projection_batch_check(checks)[0]]
+    state, _ = projection.flow.journal.read()
+    assert len(state['projection_receipts']) == len(writes)
+    assert state['projection_lease'] is None
+    assert not projection.model.calls and not projection.provider.starts
+
+
+@pytest.mark.parametrize('changed', [False, True], ids=['unchanged', 'one-table-changed'])
+def test_verified_projection_only_merges_changed_tables_but_checks_all(verified_projection, changed):
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import (
+        projection_checks, projection_batch_check)
+    p = verified_projection
+    if changed:
+        p.flow.journal.transact(p.change_source)
+    asyncio.run(p.runtime.project(p.flow.journal))
+    assert len(p.queries) == 2 if changed else len(p.queries) == 1
+    if changed:
+        assert p.queries[0].startswith('MERGE INTO') and '`ai_mi_sources`' in p.queries[0]
+    checks = list(projection_checks(p.flow.records(), 'oci_medallion', 'oci_artifacts'))
+    assert p.queries[-1] == projection_batch_check(checks)[0]
+    assert p.flow.journal.read()[0]['projection_lease'] is None
+
+
+@pytest.mark.parametrize('key,value', [('catalog', 'other_medallion'), ('framework_schema', 'other_artifacts'),
+                                      ('gold_query_compute_id', 'other-query-compute')])
+def test_projection_receipts_cannot_skip_writes_to_another_destination(verified_projection, key, value):
+    p = verified_projection
+    p.runtime.config[key] = value
+    asyncio.run(p.runtime.project(p.flow.journal))
+    assert_full_projection(p)
+
+
+@pytest.mark.parametrize('failure', ['readback_failure', 'merge_failure', 'snapshot_change', 'cancelled'])
+def test_projection_failure_invalidates_receipts_and_next_delivery_rewrites_all(verified_projection, failure):
+    p = verified_projection
+    if failure == 'merge_failure':
+        p.flow.journal.transact(p.change_source)
+    p.phase['failure'] = failure
+    error = asyncio.CancelledError if failure == 'cancelled' else RuntimeError
+    with pytest.raises(error):
+        asyncio.run(p.runtime.project(p.flow.journal))
+    state, _ = p.flow.journal.read()
+    assert not state.get('projection_receipts') and state['projection_lease'] is None
+    assert len(p.queries) == 1
+    p.queries.clear()
+    p.phase['failure'] = None
+    asyncio.run(p.runtime.project(p.flow.journal))
+    assert_full_projection(p)
+
+
+def test_orphan_writer_recovery_does_not_reuse_invalidated_receipts(verified_projection):
+    p = verified_projection
+    records, previous = p.flow.journal.claim_projection('terminated-writer')
+    assert previous
+    state, _ = p.flow.journal.read()
+    assert not state.get('projection_receipts')
+    p.flow.journal.recover_projection('terminated-writer', state['revision'], writer_stopped=True)
+    asyncio.run(p.runtime.project(p.flow.journal))
+    assert_full_projection(p)
+
+
+@pytest.mark.parametrize('malformed', [None, {}, [{}], ['unexpected'] * 15])
+def test_malformed_projection_receipts_fall_back_to_complete_writes(verified_projection, malformed):
+    p = verified_projection
+    p.flow.journal.transact(lambda records, state: state.update(projection_receipts=malformed))
+    asyncio.run(p.runtime.project(p.flow.journal))
+    assert_full_projection(p)
+
+
+def test_another_lease_cannot_finish_or_restore_projection_receipts(verified_projection):
+    p = verified_projection
+    records, previous = p.flow.journal.claim_projection('writer-owner')
+    with pytest.raises(RuntimeError, match='ownership changed'):
+        p.flow.journal.finish_projection('other-writer', records, previous)
+    state, _ = p.flow.journal.read()
+    assert state['projection_lease'] == 'writer-owner' and not state.get('projection_receipts')
+    p.flow.journal.finish_projection('writer-owner', records)
+
+
+def test_projection_receipts_cannot_be_restored_from_another_scope(verified_projection):
+    from dataclasses import replace
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import Records
+    p = verified_projection
+    records, previous = p.flow.journal.claim_projection('writer-owner')
+    other = Records(replace(records.scope, owner_id='different-owner'))
+    with pytest.raises(ValueError, match='another scope'):
+        p.flow.journal.finish_projection('writer-owner', other, previous)
+    state, _ = p.flow.journal.read()
+    assert state['projection_lease'] == 'writer-owner' and not state.get('projection_receipts')
+    p.flow.journal.finish_projection('writer-owner', records)

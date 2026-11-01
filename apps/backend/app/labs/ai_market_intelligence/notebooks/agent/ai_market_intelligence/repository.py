@@ -210,6 +210,28 @@ class Journal:
         value['revision'] += 1
         self.snapshot.write(value, etag)
 
+    def claim_projection(self, lease):
+        def claim(records, state):
+            if state.get('projection_lease'):
+                raise RuntimeError('Another projection owns this scope; retry delivery, not capture')
+            state['projection_lease'] = lease
+            # Invalidate before SQL so a terminated writer cannot leave reusable receipts.
+            return records, state.pop('projection_receipts', [])
+        return self.transact(claim)
+
+    def finish_projection(self, lease, projected, receipts=None):
+        if projected.scope != self.scope:
+            raise ValueError('Projection records belong to another scope')
+        def release(current, state):
+            if state.get('projection_lease') != lease:
+                raise RuntimeError('Projection ownership changed')
+            state['projection_lease'] = None
+            unchanged = current.tables == projected.tables
+            if receipts is not None and unchanged:
+                state['projection_receipts'] = receipts
+            return unchanged
+        return self.transact(release)
+
 
 def projection_statements(records: Records, catalog: str, framework_schema: str):
     """Typed MERGE statements; no user/model SQL or unscoped overwrites."""
