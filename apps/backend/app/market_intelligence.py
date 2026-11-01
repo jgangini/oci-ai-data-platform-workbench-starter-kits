@@ -14,7 +14,7 @@ from .aidp import AidpClient, AidpProvisionConflict, AidpProvisionError, AidpPro
 from .lab_packs import load_lab_pack
 from .market_installation.agent_package import agent_package
 from .market_installation.compute import prepare_compute
-from .market_installation.credentials import ensure_apify_credential, _project_credential, _credential_reference
+from .market_installation.credentials import ensure_apify_credential, _project_credential, existing_project_reference, created_by_operation
 from .market_installation.model_install import model_script, model_job
 from .market_installation.playground import MarketPlaygroundClient
 from .labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.schema import definition, schema_sha256
@@ -34,6 +34,7 @@ def public_status(manifest=None):
             'message': state.get('message', ''), 'bundled_version': load_lab_pack(MODULE_ID, require_available=False).pack_version,
             'reuse_existing': state.get('reuse_existing', True),
             'completed_phases': list(PHASES[:PHASES.index(state['phase'])]) if state.get('phase') in PHASES else [],
+            **({'apify_credential_status': 'configured', 'apify_credential_owned_by_operation': True} if state.get('resources', {}).get('apify_credential_key') else {}),
             'test_sessions': state.get('test_sessions', [])}
 
 
@@ -106,8 +107,21 @@ class MarketAidpClient(AidpClient):
                     result['test_sessions'] = [{'value': row['key'], 'label': row.get('displayName') or row.get('name') or row['key']} for row in sessions if row.get('key')]
                 finally:
                     test.session.close()
-            existing = _project_credential(self)
-            result['apify_credential_available'] = bool(existing)
+            expected_key = (state or {}).get('resources', {}).get('apify_credential_key', '')
+            result['apify_credential_owned_by_operation'] = False
+            try:
+                existing = _project_credential(self)
+                if existing:
+                    existing_project_reference(existing, expected_key)
+                    result['apify_credential_status'] = 'configured'
+                    result['apify_credential_owned_by_operation'] = bool(expected_key or state and created_by_operation(existing, state))
+                else:
+                    result['apify_credential_status'] = 'conflict' if expected_key else 'missing'
+            except RuntimeError:
+                result['apify_credential_status'] = 'conflict'
+            except (AidpProvisionError, AidpProvisionPending):
+                result['apify_credential_status'] = 'unknown'
+            result['apify_credential_available'] = result['apify_credential_status'] == 'configured'
             return result
         return await asyncio.to_thread(observe)
 
@@ -187,11 +201,11 @@ class MarketAidpClient(AidpClient):
             if self._shared_oci_credential() is None:
                 raise AidpProvisionConflict('The shared AidpRuntime credential must be configured first.')
             existing = _project_credential(self)
-            if existing and state['reuse_existing']:
-                description = existing.get('credentialDescription') or existing.get('description') or ''
-                if not description.startswith('AI Market Intelligence'):
-                    raise AidpProvisionConflict('The existing Apify credential has unrelated ownership; it will not be changed.')
-                reference = _credential_reference(existing, resources.get('apify_credential_key') or existing.get('key') or existing.get('id'), description)
+            if existing and (state['reuse_existing'] or created_by_operation(existing, state)):
+                try:
+                    reference = existing_project_reference(existing, resources.get('apify_credential_key', ''))
+                except RuntimeError as exc:
+                    raise AidpProvisionConflict(str(exc)) from None
             elif token:
                 if not existing:
                     if resources.get('apify_create_requested'):

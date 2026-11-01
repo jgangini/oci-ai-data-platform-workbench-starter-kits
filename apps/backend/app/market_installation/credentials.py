@@ -32,6 +32,19 @@ def _credential_reference(existing, expected_key, description):
     return {'credential_key': key, 'credential_name': APIFY_CREDENTIAL_NAME, 'secret_key': APIFY_SECRET_KEY}
 
 
+def existing_project_reference(existing, expected_key=''):
+    description = (existing or {}).get('credentialDescription') or (existing or {}).get('description') or ''
+    if not description.startswith('AI Market Intelligence'):
+        raise RuntimeError('The existing Apify credential has unrelated ownership; it will not be changed.')
+    return _credential_reference(existing, expected_key or existing.get('key') or existing.get('id'), description)
+
+
+def created_by_operation(existing, state):
+    description = (existing or {}).get('credentialDescription') or (existing or {}).get('description')
+    return bool(state.get('resources', {}).get('apify_create_requested') and description ==
+                'AI Market Intelligence Apify connection; operation=' + state['operation_id'])
+
+
 def ensure_apify_credential(client, token: SecretStr, operation_id: str, *, expected_key=''):
     """Caller persists operation_id before this write; retries reuse its receipt."""
     if str(UUID(operation_id)) != operation_id or not isinstance(token, SecretStr):

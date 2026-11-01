@@ -24,11 +24,22 @@ installed runtime.
 ## Empty installation and recovery
 
 Settings → Application → Install AI Market Intelligence opens the shared module
-manager. Opening it performs only status and administrator reads. Select an AIDP
-administrator, review resource/cost effects, optionally enter an Apify token, and
+manager, using the same layout as Governance. Opening it performs only status
+and administrator reads. The **Apify Bearer token** field sits directly below the
+administrator. When missing, paste the API token without the `Bearer` prefix.
+When an active, project-owned credential matches the saved operation, the field
+shows a disabled placeholder and explains reuse; it never retrieves or displays
+the secret. A matching name alone does not establish availability. Conflicts or
+an unavailable metadata check block submission until reviewed or refreshed.
+Connection validity is checked separately in TEST. This form does not rotate
+an existing token, and it clears entered secrets after the credential phase.
+Review resource/cost effects and
 submit **Deploy** to start. A recorded operation exposes **Resume installation**
 and its current phase; it is never reported installed merely because the portal
 image was updated.
+
+Installation options and the saved step list are expandable. One status message
+reports the current error or required action, without repeating it in the form.
 
 The administrator-only [installer](../../apps/backend/app/market_intelligence.py)
 uses the existing OCI runtime identity, shared Spark compute and configured

@@ -76,8 +76,8 @@ button { min-height: 48px; border: 0; border-radius: 10px; color: white; backgro
 .release-table-hint { display: none; }
 .module-copy-notice { display: inline-block; padding: 3px 6px; color: #245e4b; background: #e7f5ed; border-radius: 4px; font-size: .75rem; vertical-align: middle; }
 .module-installation-pending { display: block; margin-top: 4px; color: #6f655e; font-size: .75rem; }
-.market-install-steps { margin: 16px 24px; padding-left: 20px; font-size: .875rem; line-height: 1.7; }
-.market-install-steps [aria-current="step"] { font-weight: 700; color: var(--accent); }
+.market-install-steps { margin: 12px 0 0; padding-left: 24px; font-size: .875rem; line-height: 1.7; }
+.market-install-steps [aria-current="step"] { font-weight: 700; color: #b33b2b; }
 @media (max-width: 700px) { .release-table-hint { display: block; margin: 0; } }
 .module-configure { display: inline-grid; width: 40px; height: 40px; min-height: 40px; padding: 0; place-items: center; color: #665c56; background: transparent; border: 1px solid #ded5cb; border-radius: 8px; }
 .module-configure svg { width: 22px; height: 22px; }
@@ -97,6 +97,15 @@ button { min-height: 48px; border: 0; border-radius: 10px; color: white; backgro
 
 @media (max-width: 520px) { .settings-registration-controls { grid-template-columns: minmax(0,1fr); }.settings-registration-controls .settings-save { justify-self: end; } }
 
-.module-connection-fields { display:grid; gap:1rem; margin:1rem 0; }
-.module-connection-fields label { display:grid; gap:.4rem; font-weight:600; }
-.module-connection-fields input { width:100%; }
+.module-connection-fields { display: grid; gap: 16px; }
+.market-bearer-field { min-width: 0; }
+.market-credential-help { color: #6f655e; font-size: .82rem; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; }
+.market-bearer-field input:disabled { color: #6f655e; background: #f5f2ee; opacity: 1; }
+.market-module-modal input::placeholder { color: #6f655e; opacity: 1; }
+.market-module-modal .market-reuse-option { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-top: 8px; line-height: 1.5; font-weight: 400; cursor: pointer; }
+.market-reuse-option input[type="checkbox"] { flex: 0 0 20px; width: 20px; height: 20px; min-height: 0; margin: 0; padding: 0; accent-color: #c74634; }
+.market-install-options summary, .market-install-details summary { min-height: 44px; align-content: center; color: #453a34; font-size: .86rem; font-weight: 700; cursor: pointer; }
+.market-install-options summary:focus-visible, .market-install-details summary:focus-visible { outline: 2px solid #c74634; outline-offset: 3px; border-radius: 4px; }
+.market-module-modal .market-refresh { justify-self: start; min-height: 44px; }
+.market-module-modal .governance-module-body { overscroll-behavior: contain; }
+@media (max-width: 520px) { .market-module-modal .governance-module-body { padding: 20px; } .market-module-modal { max-height: calc(100dvh - 24px); } }

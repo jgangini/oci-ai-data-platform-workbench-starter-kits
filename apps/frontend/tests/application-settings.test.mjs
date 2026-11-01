@@ -1202,10 +1202,59 @@ test('Agent URL copy fetches the verified native URL and exposes a manual fallba
 const flattenElements = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? flattenElements(child) : [])];
 const marketPackage = { package_id: 'ai_market_intelligence', display_name: 'AI Market Intelligence', scope: 'global', bundled_version: '1.0.0', status: 'planned' };
 const marketModule = { module_id: marketPackage.package_id, display_name: marketPackage.display_name,
-  installed: false, status: 'not_installed', phase: 'not_installed', enabled: false, completed_phases: [] };
+  installed: false, status: 'not_installed', phase: 'not_installed', enabled: false, completed_phases: [], apify_credential_status: 'missing' };
 const marketHarness = (t, module = marketModule, initial = {}) => managerHarness(t, module,
   { moduleId: marketModule.module_id, initialUserId: 'operator' },
   { '/api/admin/modules/ai_market_intelligence': module, ...initial });
+
+test('Market places its Bearer field directly after the administrator and validates without a request', async t => {
+  const h = await marketHarness(t);
+  const administrator = h.find('SearchableCombobox', props => props.label === 'AI Data Platform administrator');
+  const field = h.find('label', props => props.className === 'market-bearer-field');
+  const nodes = h.nodes();
+  assert.equal(nodes.filter(node => node?.props?.className === 'market-bearer-field').length, 1);
+  assert.ok(nodes.indexOf(field) > nodes.indexOf(administrator));
+  const input = () => h.find('input', props => props.type === 'password');
+  assert.equal(input().props.disabled, false);
+  assert.equal(input().props.required, true);
+  assert.ok(input().props['aria-describedby']);
+  assert.equal(action(h, 'Deploy').props.disabled, true);
+  for (const value of ['short', 'Bearer synthetic-secret-for-regression', 'token\nwith whitespace']) {
+    h.act(() => input().props.onChange({ target: { value } }));
+    assert.equal(action(h, 'Deploy').props.disabled, true);
+    h.act(() => action(h, 'Deploy').props.onClick());
+  }
+  assert.equal(h.mutations().length, 0);
+  h.act(() => input().props.onChange({ target: { value: 'synthetic-secret-for-regression' } }));
+  assert.equal(action(h, 'Deploy').props.disabled, false);
+});
+
+test('Market shows a saved Bearer reference without accepting or silently ignoring a replacement', async t => {
+  const h = await marketHarness(t, { ...marketModule, apify_credential_status: 'configured' });
+  const input = h.find('input', props => props.type === 'password');
+  assert.equal(input.props.disabled, true);
+  assert.equal(input.props.value, '');
+  assert.match(text(h.find('label', props => props.className === 'market-bearer-field')), /connection is checked in TEST/);
+  assert.equal(action(h, 'Deploy').props.disabled, false);
+  h.act(() => h.find('input', props => props.type === 'checkbox').props.onChange({ target: { checked: false } }));
+  assert.equal(action(h, 'Deploy').props.disabled, true);
+  h.act(() => action(h, 'Deploy').props.onClick());
+  assert.equal(h.mutations().length, 0);
+});
+
+for (const credential of ['unknown', 'conflict', 'missing']) {
+  test(`Market resume cannot collect an unusable token after credentials: ${credential}`, async t => {
+    const h = await marketHarness(t, { ...marketModule, apify_credential_status: credential,
+      operation_id: 'saved-operation', operation_type: 'install', reuse_existing: true,
+      phase: 'model_verify', status: 'error', completed_phases: ['verify', 'credentials'], message: 'Review the native task.' });
+    assert.equal(h.find('input', props => props.type === 'password').props.disabled, true);
+    assert.equal(action(h, 'Resume installation').props.disabled, true);
+    assert.equal(h.nodes().filter(node => node?.props?.role === 'alert').length, 1);
+    assert.equal(text(h.nodes()[0]).split('Review the native task.').length - 1, 1);
+    assert.equal(h.find('details', props => props.className === 'market-install-details').props.open, undefined);
+    assert.equal(h.mutations().length, 0);
+  });
+}
 
 test('Agent Hub opens separately with only public tenant context and no installation request', async t => {
   const h = await harness(t, release, '/admin/settings', { '/api/admin/settings': { ...settings,
@@ -1239,23 +1288,24 @@ test('Market setup is explicit, sends a secret only to its own API and updates r
   assert.equal(body.apify_token, 'synthetic-test-secret');
   assert.equal(body.reuse_existing, true);
   assert.equal(JSON.stringify([...h.sessionState]).includes('synthetic-test-secret'), false);
-  request.resolve({ ...marketModule, operation_id: body.operation_id, status: 'installing', phase: 'model_prepare', completed_phases: ['verify', 'credentials'] }, 202);
+  request.resolve({ ...marketModule, apify_credential_status: 'configured', operation_id: body.operation_id, status: 'installing', phase: 'model_prepare', completed_phases: ['verify', 'credentials'] }, 202);
   await h.settle();
   const steps = text(h.find('ol', props => props['aria-label'] === 'Installation steps'));
   assert.match(steps, /Complete: Verify the selected environmentComplete: Connect credentialsCurrent: Prepare fourteen empty tables/);
   const next = h.mutations()[1];
   assert.equal(JSON.parse(next.options.body).operation_id, body.operation_id);
   assert.equal('apify_token' in JSON.parse(next.options.body), false);
-  next.resolve({ ...marketModule, operation_id: body.operation_id, status: 'awaiting_action', phase: 'test', message: 'Create TEST session.' });
+  next.resolve({ ...marketModule, apify_credential_status: 'configured', operation_id: body.operation_id, status: 'awaiting_action', phase: 'test', message: 'Create TEST session.' });
   await h.settle();
-  h.requests.at(-1).resolve({ ...marketModule, operation_id: body.operation_id, status: 'awaiting_action', phase: 'test', message: 'Create TEST session.' });
+  h.requests.at(-1).resolve({ ...marketModule, apify_credential_status: 'configured', operation_id: body.operation_id, status: 'awaiting_action', phase: 'test', message: 'Create TEST session.' });
   await h.settle();
-  assert.equal(h.nodes().some(node => node?.type === 'input' && node.props.type === 'password'), false);
+  assert.equal(h.find('input', props => props.type === 'password').props.disabled, true);
+  assert.equal(h.find('input', props => props.type === 'password').props.value, '');
 });
 
 test('Market resume uses the server operation and selected TEST session, without Registry configuration', async t => {
   const operation = '00000000-0000-4000-8000-000000000001';
-  const module = { ...marketModule, status: 'awaiting_action', phase: 'test', reuse_existing: true,
+  const module = { ...marketModule, apify_credential_status: 'configured', status: 'awaiting_action', phase: 'test', reuse_existing: true,
     operation_id: operation, operation_type: 'install', test_sessions: [{ value: operation, label: 'TEST session' }] };
   const h = await marketHarness(t, module);
   h.act(() => h.find('SearchableCombobox', props => props.label === 'Workbench TEST session').props.onChange(operation));
@@ -1267,6 +1317,30 @@ test('Market resume uses the server operation and selected TEST session, without
   await h.settle();
   assert.ok(!h.nodes().some(node => node?.type === 'button' && text(node).includes('Redeploy')));
   assert.equal(h.changed(), 1);
+});
+
+test('Market resumes a newly created credential without changing the saved no-reuse setting', async t => {
+  const operation = '00000000-0000-4000-8000-000000000001';
+  const module = { ...marketModule, apify_credential_status: 'configured', status: 'awaiting_action', phase: 'test',
+    reuse_existing: false, operation_id: operation, operation_type: 'install' };
+  const h = await marketHarness(t, module);
+  assert.equal(h.find('input', props => props.type === 'checkbox').props.disabled, true);
+  assert.equal(action(h, 'Resume installation').props.disabled, false);
+  h.act(() => action(h, 'Resume installation').props.onClick());
+  assert.equal(JSON.parse(h.mutations()[0].options.body).reuse_existing, false);
+  assert.equal('apify_token' in JSON.parse(h.mutations()[0].options.body), false);
+});
+
+test('Market reconciles its own uncertain credential creation without requesting the secret again', async t => {
+  const module = { ...marketModule, apify_credential_status: 'configured', apify_credential_owned_by_operation: true,
+    status: 'error', phase: 'credentials', reuse_existing: false,
+    operation_id: '00000000-0000-4000-8000-000000000001', operation_type: 'install' };
+  const h = await marketHarness(t, module);
+  assert.equal(h.find('input', props => props.type === 'password').props.disabled, true);
+  assert.equal(action(h, 'Resume installation').props.disabled, false);
+  h.act(() => action(h, 'Resume installation').props.onClick());
+  assert.equal('apify_token' in JSON.parse(h.mutations()[0].options.body), false);
+  assert.equal(JSON.parse(h.mutations()[0].options.body).reuse_existing, false);
 });
 const fixtureHubUrl = 'https://fixtureagenthub.datalake.oci.oraclecloud.com/chat/fixture';
 function mockClipboard(t, writeText) {
