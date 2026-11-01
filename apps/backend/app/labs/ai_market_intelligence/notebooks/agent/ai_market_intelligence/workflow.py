@@ -92,7 +92,7 @@ class MarketWorkflow:
         routes = {
             'resolve_context': ['prepare_run', 'handle_confirmation', 'deliver_and_read'],
             'plan_research': ['admit_step', 'draft_report', 'deliver_and_read'],
-            'admit_step': ['execute_step', 'draft_report'],
+            'admit_step': ['execute_step', 'draft_report', 'deliver_and_read'],
             'execute_step': ['reconcile_step', 'normalize_evidence', 'draft_report'],
             'reconcile_step': ['normalize_evidence', 'draft_report', 'deliver_and_read'],
             'decide_next': ['plan_research', 'draft_report'],
@@ -257,8 +257,14 @@ class MarketWorkflow:
         choice = next((row for row in choices if row['source_key'] == plan['source_key']), None)
         if choice and choice['targets'] and plan['target_id'] not in {row['target_id'] for row in choice['targets']}:
             raise ValueError('Select one of the remaining approved base targets')
-        call = compile_call(scope['connector_revision'], plan['arguments'], state['window'], self.step_cap,
-                            approved_urls=scope['urls'], usage_cost_verified=self.usage_verified)
+        try:
+            call = compile_call(scope['connector_revision'], plan['arguments'], state['window'], self.step_cap,
+                                approved_urls=scope['urls'], approved_finance=scope['financial'], usage_cost_verified=self.usage_verified)
+        except ValueError:
+            if scope['financial'] is None:
+                raise
+            return {'route': 'deliver_and_read', 'response': {'markdown':
+                    'No pude validar la selección financiera y su periodo. Indica los destinos registrados y las fechas o años exactos que deseas comparar.'}}
         try:
             tool = self.paid.reserve(state['run_id'], plan['source_key'], plan['target_id'], call, self.step_cap,
                                      plan['purpose'], authorization_hash=scope['authorization_hash'])

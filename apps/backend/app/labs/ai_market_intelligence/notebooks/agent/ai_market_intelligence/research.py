@@ -109,6 +109,7 @@ class Research:
                 result.append({'evidence_id': item['evidence_key'], 'url': document['source_url'],
                     'published_at': document['published_at'], 'observed_at': document['observed_at'],
                     'text': json.loads(item['quoted_span_json'])['text'],
+                    'metrics': json.loads(document['metrics_json']),
                     'assessment': json.loads(item['assessment_json']) if item['assessment_json'] else None,
                     'provenance': json.loads(document['provenance_json'])})
         return result

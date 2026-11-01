@@ -92,7 +92,7 @@ readback forces complete writes on the next delivery; it never repeats capture.
 External table drift is detected by readback, so that delivery fails before
 the following attempt repairs the projection.
 
-The package declares twenty-two hash-checked runtime assets, including its own memory
+The package declares twenty-three hash-checked runtime assets, including its own memory
 adapter, with no shared dependency on the legacy Social package. The loader
 rejects undeclared paths and changed asset bytes. Its fourteen `ai_mi_` framework
 tables and 145 documented columns are defined in
@@ -101,6 +101,48 @@ All belong in the configured `oci_artifacts` schema. The installation contract
 requires empty tables, research disabled and no schedule or demonstration data.
 No permanent `create_model.ipynb` or diagnostic `ops` folder belongs in the
 installed runtime.
+
+## Financial research profiles
+
+Two additional reviewed Actor profiles reuse the same admitted MCP calls, operation
+ledger and framework tables. They are community-maintained Apify Actors. Metadata
+and input schemas were verified from the public Actor/build API on 2026-11-01;
+this does not establish native execution acceptance or an official Yahoo/World
+Bank integration maintained by those institutions.
+
+| Profile | Pinned build | Bounded selection |
+| --- | --- | --- |
+| `yahoo_finance` — [`architjn/yahoo-finance`](https://apify.com/architjn/yahoo-finance/input-schema) | `1.1.1` | One to three approved tickers, explicit daily dates spanning at most 31 days; only historical daily close data is normalized. |
+| `world_bank` — [`solidcode/world-bank-indicators-scraper`](https://apify.com/solidcode/world-bank-indicators-scraper/input-schema) | `1.0.6` | One to three countries and indicators, at most ten explicit historical years; compact series with an exact result limit. No aggregate, region or open indicator search. |
+
+Financial selections must appear in the intersection of the active source policy,
+target policy and topic approval. These policies use `tickers`, or `countries`
+and `indicator_codes`, as explicit lists. They participate in the authorization
+hash rechecked before paid start, so reducing any list invalidates an earlier
+reservation. The planner cannot infer or approve another ticker or indicator.
+Conversational administration for these policy lists remains pending; they are
+not populated by empty installation.
+
+`StepArguments.financial` carries the typed identifiers and explicit daily dates
+or years. Missing or invalid financial selections ask for clarification before
+reserving a provider call. Actor input, runtime/build, result and charge limits
+remain controller-owned. The event charge cap bounds billed events; a Store
+headline is not an account-specific price or a guarantee of complete results.
+
+The existing document `metrics_json` stores metric, entity, indicator, unit,
+currency and bounded period/value points. `provenance_json` records the Actor,
+run, requested range and whether the period is daily or annual. The reference
+links to the corresponding official entity/indicator page; the explanatory text
+is explicitly a summary derived from Actor output, not a direct quotation from
+that page. Publication time remains unknown; retrieval time and data period are
+different facts. An annual national indicator provides macroeconomic context,
+not a private retailer's revenue, solvency or market share.
+
+Optional charts use only persisted points of the same metric, entity, indicator,
+unit and currency. Unknown units, contradictory duplicate periods or mixed
+period granularities suppress the chart. Unknown numeric values remain null;
+zero stays zero. Yahoo quote/financial-statement formats and other undocumented
+output shapes fail closed. Neither the 14-table model nor its 145 columns change.
 
 ## Empty installation and recovery
 

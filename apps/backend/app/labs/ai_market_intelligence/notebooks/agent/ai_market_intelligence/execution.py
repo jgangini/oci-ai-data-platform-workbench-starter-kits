@@ -199,11 +199,34 @@ def resolve_source_scope(records, topic_id, source_key, target_id):
         urls = link_scope.get('urls', [])
     elif not policy.get('allow_discovery'):
         raise ValueError('Unregistered searches are outside the approved scope')
+    finance = _financial_authority(source['connector_revision'], policy, target, link_scope)
     authorization = {'source_key': source_key, 'profile': PROFILES[source['connector_revision']],
         'connector_revision': source['connector_revision'], 'policy': policy, 'topic_id': topic_id,
         'target_id': target_id, 'target_url': target['canonical_url_or_id'] if target else None,
-        'approved_scope': link_scope}
-    return {'connector_revision': source['connector_revision'], 'urls': urls, 'authorization_hash': digest(authorization)}
+        'approved_scope': link_scope, **finance}
+    return {'connector_revision': source['connector_revision'], 'urls': urls,
+            'financial': finance.get('financial_scope'), 'authorization_hash': digest(authorization)}
+
+
+def _financial_authority(profile, policy, target, link_scope):
+    """Additional authority fields; preserve the existing nonfinancial hash contract."""
+    if profile not in {'yahoo_finance', 'world_bank'}:
+        return {}
+    if not target or not link_scope or policy.get('allow_discovery'):
+        raise ValueError('Financial research requires an approved topic target without discovery')
+    target_scope = json.loads(target['allowed_scope_json'] or '{}')
+    keys = ('tickers',) if profile == 'yahoo_finance' else ('countries', 'indicator_codes')
+    scopes = (policy, target_scope, link_scope)
+    result = {}
+    for key in keys:
+        values = [scope.get(key) for scope in scopes]
+        if any(not isinstance(value, list) or not value or len(value) > 50
+               or any(not isinstance(item, str) or not 1 <= len(item) <= 100 for item in value) for value in values):
+            raise ValueError('Financial source, target and topic need explicit bounded allowlists')
+        result[key] = sorted(set(values[0]).intersection(*map(set, values[1:])))
+        if not result[key]:
+            raise ValueError('Financial selections no longer share an approved scope')
+    return {'financial_scope': result}
 
 
 def _admit_scope_and_limits(records, run, source_key, target_id, authorization_hash, *, existing_tool_id=None):

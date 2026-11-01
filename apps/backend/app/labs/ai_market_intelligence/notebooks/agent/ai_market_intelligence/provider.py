@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
 from .mcp_payload import unpack, unpack_run, locate, dataset_id
 from .catalog import public_url
+from .finance import normalize_finance
 
 
 def _run_records(value):
@@ -67,6 +68,12 @@ class ApifyProvider:
             raise RuntimeError('The successful run has no verified dataset')
         values = await self.invoke('get-dataset-items', {'datasetId': receipt['datasetId'], 'offset': 0, 'limit': 50, 'clean': True})
         rows = _items(values)
+        if call['actor'] in {'architjn/yahoo-finance', 'solidcode/world-bank-indicators-scraper'}:
+            observed_call = {**call, 'observed_at': datetime.now(timezone.utc).isoformat()}
+            observations = [item for row in rows for item in normalize_finance(row, call['actor'], receipt['runId'], observed_call)]
+            if len(observations) > 50:
+                raise ValueError('Financial evidence exceeds the bounded observation limit')
+            return observations, receipt.get('spent_microusd')
         return [_observation(row, call['actor'], receipt['runId']) for row in rows[:50]], receipt.get('spent_microusd')
 
 

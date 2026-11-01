@@ -31,11 +31,22 @@ class IntakeDecision(Output):
     selected_source_key: Short | None = None
 
 
+class FinancialArguments(Output):
+    tickers: Annotated[list[Short], Field(max_length=3)]
+    countries: Annotated[list[Short], Field(max_length=3)]
+    indicator_codes: Annotated[list[Short], Field(max_length=3)]
+    start_date: Short | None
+    end_date: Short | None
+    year_from: Annotated[int, Field(ge=1960, le=2100)] | None
+    year_to: Annotated[int, Field(ge=1960, le=2100)] | None
+
+
 class StepArguments(Output):
     query: Annotated[str, Field(max_length=500)]
     urls: Annotated[list[Short], Field(max_length=10)]
     max_items: Annotated[int, Field(ge=1, le=50)]
     sort: Literal['Latest', 'Top']
+    financial: FinancialArguments | None = None
 
 
 class ResearchPlan(Output):
@@ -74,6 +85,20 @@ class ChartRequest(Output):
     kind: Literal['bar', 'line', 'table']
     metric: Literal['observations', 'likes', 'close', 'value']
     group_by: Literal['source', 'date']
+
+
+class FinancialPoint(Output):
+    period: Annotated[str, Field(pattern=r'^\d{4}(?:-\d{2}-\d{2})?$')]
+    value: Annotated[float, Field(allow_inf_nan=False)] | None
+
+
+class FinancialMetrics(Output):
+    metric: Literal['close', 'value']
+    entity: Short
+    indicator: Short | None
+    unit: Short
+    currency: Short | None
+    points: Annotated[list[FinancialPoint], Field(min_length=1, max_length=50)]
 
 
 class ReportDraft(Output):
