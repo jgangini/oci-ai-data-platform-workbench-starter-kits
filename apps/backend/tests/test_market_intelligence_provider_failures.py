@@ -134,3 +134,22 @@ def test_financial_provider_rejects_more_rows_than_the_admitted_call():
     with pytest.raises(ValueError, match='admitted row limit'):
         asyncio.run(provider.observations({'runId': 'synthetic', 'status': 'SUCCEEDED', 'datasetId': 'synthetic'},
             {'actor': 'memo23/yahoo-finance-scraper', 'callOptions': {'maxItems': 1}}))
+
+
+@pytest.mark.parametrize('error', [ValueError('untrusted period'), RuntimeError('untrusted transport body')])
+@pytest.mark.parametrize('retain_verified', [False, True])
+def test_invalid_dataset_closes_with_coverage_limit_without_repeating_or_discarding_verified_evidence(error, retain_verified):
+    flow, model, provider, graph = configured()
+    original = provider.observations
+    async def invalid_result(receipt, call):
+        if retain_verified and len(provider.starts) == 1:
+            return await original(receipt, call)
+        raise error
+    provider.observations = invalid_result
+    result = turn(graph, 'invalid-provider-' + str(retain_verified) + type(error).__name__)
+    assert 'No se pudo validar la salida del proveedor' in result['response']['markdown']
+    assert 'untrusted' not in result['response']['markdown']
+    assert len(provider.starts) == (2 if retain_verified else 1)
+    assert len(flow.records().rows('ai_mi_documents')) == int(retain_verified)
+    assert len(flow.records().rows('ai_mi_reports')) == 1
+    assert result['reason'] == 'unresolved'

@@ -9,7 +9,7 @@ PROGRESS = {
     'admit_step': 'Alcance y presupuesto del paso evaluados.',
     'execute_step': 'Paso de captura procesado; conciliando su estado.',
     'reconcile_step': 'Conciliación de captura evaluada.',
-    'normalize_evidence': 'Evidencia recopilada.',
+    'normalize_evidence': 'Evidencia del paso revisada.',
     'assess_evidence': 'Evidencia contrastada.',
     'draft_report': 'Borrador preparado; verificando la entrega.',
     'publish_result': 'Informe registrado; verificando su persistencia.',

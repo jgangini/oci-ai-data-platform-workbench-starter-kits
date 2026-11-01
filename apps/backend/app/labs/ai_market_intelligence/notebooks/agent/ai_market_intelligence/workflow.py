@@ -318,14 +318,22 @@ class MarketWorkflow:
         return {'route': 'draft_report', 'reason': 'unresolved'}
 
     async def normalize_evidence(self, state):
-        observations, cost = await self.provider.observations(state['provider'], state['call'])
+        try:
+            observations, cost = await self.provider.observations(state['provider'], state['call'])
+        except (ValueError, RuntimeError):
+            return {'evidence': self.research.evidence(state['run_id']), 'connector_issue':
+                'No se pudo validar la salida del proveedor dentro del alcance solicitado. Ese paso no se incorporó como evidencia; se conservan únicamente los datos verificados.'}
         if cost is not None:
             self.paid.record_cost(state['tool_id'], state['provider']['runId'], cost)
         self.research.add_evidence(state['run_id'], state['tool_id'], observations)
         return {'evidence': self.research.evidence(state['run_id'])}
 
     async def assess_evidence(self, state):
-        assessment = await self.ask('assess_evidence', EvidenceAssessment, {'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'evidence': state['evidence']})
+        if state.get('connector_issue'):
+            assessment = {'assessments': [], 'continue_research': False,
+                          'reason': 'Salida del proveedor no validada', 'gap': state['connector_issue']}
+        else:
+            assessment = await self.ask('assess_evidence', EvidenceAssessment, {'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'evidence': state['evidence']})
         self.research.assess(state['run_id'], assessment['assessments'], {
             'continue': assessment['continue_research'], 'reason': assessment['reason'], 'gap': assessment['gap']})
         return {'assessment': assessment}
@@ -344,7 +352,7 @@ class MarketWorkflow:
     def decide_next(self, state):
         limit = self.close_limit(state['run_id'])
         more = state['assessment']['continue_research'] and bool(state['assessment']['gap']) and not limit
-        reason = 'no_data' if not state['evidence'] else ('unresolved' if state['assessment']['gap'] else 'sufficient')
+        reason = 'unresolved' if state['assessment']['gap'] else ('sufficient' if state['evidence'] else 'no_data')
         return {'route': 'plan_research' if more else 'draft_report', 'reason': limit or reason}
 
     async def draft_report(self, state):

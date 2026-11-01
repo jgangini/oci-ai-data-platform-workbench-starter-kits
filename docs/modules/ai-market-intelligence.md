@@ -136,6 +136,10 @@ Provider failures, interruptions and timeouts are recorded as coverage limits
 in the report, including partial reports. They must not be described as a
 successful search returning no results. No raw error body, token or provider
 run ID is added to user-facing failure notices.
+If a dataset cannot be retrieved or fails the reviewed output contract, that
+step contributes no evidence and the graph closes with an explicit coverage
+limit. Previously verified evidence in that investigation remains available;
+the same failure does not trigger another paid extraction.
 Each registered target can be captured only once per research run, even if the
 planner changes its arguments or result limit. Exhausting the approved base
 closes with unresolved gaps rather than restoring already visited targets.
