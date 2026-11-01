@@ -5,9 +5,11 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError
+from oci._vendor.requests.exceptions import RequestException
 
 from .aidp import AidpProvisionConflict, AidpProvisionError, AidpProvisionPending
 from .market_intelligence import public_status
+from .identity import IdentityPending
 
 
 class MarketInstallRequest(BaseModel):
@@ -37,7 +39,17 @@ def mount_market_intelligence(app, require_admin, selected_platform_admin):
     @app.get('/api/admin/modules/ai_market_intelligence')
     async def observe(_admin=Depends(require_admin)):
         try:
-            return await ready().status()
+            result = await ready().status()
+            owner = result.pop('administrator_ocid', None)
+            if owner:
+                try:
+                    users = await app.state.identity_factory().list_users_by_ocids({owner})
+                    matches = [user for user in users if user.get('ocid') == owner and user.get('id')]
+                    if len(matches) == 1:
+                        result['administrator_id'] = matches[0]['id']
+                except (IdentityPending, RequestException):
+                    pass
+            return result
         except (AidpProvisionError, AidpProvisionPending, AidpProvisionConflict):
             raise HTTPException(503, 'Unable to read the native installation. No installation was started.') from None
 

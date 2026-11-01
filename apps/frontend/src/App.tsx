@@ -88,6 +88,7 @@ type AdminModule = {
   update_available?: boolean;
   operation_id?: string | null;
   operation_type?: ModuleOperationKind | null;
+  administrator_id?: string;
   phase?: string;
   message?: string | null;
   enabled: boolean;
@@ -95,6 +96,9 @@ type AdminModule = {
   source_prefix?: string;
   completed_phases?: string[];
   apify_credential_available?: boolean;
+  apify_credential_status?: 'missing' | 'configured' | 'conflict' | 'unknown';
+  apify_credential_owned_by_operation?: boolean;
+  apify_token_suffix?: string;
   test_sessions?: { value: string; label: string }[];
   reuse_existing?: boolean;
 };
@@ -818,6 +822,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
   const titleId = useId();
   const descriptionId = useId();
   const phaseId = useId();
+  const tokenHelpId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   useDialogFocus(visible, onClose, panelRef, closeRef);
@@ -829,7 +834,39 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
   const recoverableKind = governanceModule && moduleOperationKind(governanceModule.status, governanceModule.operation_type);
   const transitioning = Boolean(governanceModule && ["installing", "redeploying", "deleting"].includes(governanceModule.status));
   const resumable = Boolean(recoverableKind && governanceModule?.operation_id);
+  const credentialStatus = governanceModule?.apify_credential_status || 'unknown';
+  const credentialStage = !governanceModule?.installed && (!governanceModule?.phase || ['not_installed', 'verify', 'credentials'].includes(governanceModule.phase));
+  const tokenEditable = credentialStage && credentialStatus === 'missing';
+  const savedTokenLabel = 'apify_api_...' + (/^[A-Za-z0-9]{4}$/.test(governanceModule?.apify_token_suffix || '') ? governanceModule?.apify_token_suffix : '••••');
+  const tokenValid = apifyToken.length >= 20 && apifyToken.length <= 512 && !/\s/.test(apifyToken);
+  const credentialBlocked = market && (credentialStatus === 'conflict' || credentialStatus === 'unknown'
+    || credentialStage && credentialStatus === 'configured' && !reuseExisting && !governanceModule?.apify_credential_owned_by_operation
+    || credentialStatus === 'missing' && (!tokenEditable || !tokenValid));
+  const credentialHelp = credentialStatus === 'configured'
+    ? 'AiMarketIntelligenceApifyBearer is saved in AIDP Credential Store. Its connection is checked in TEST.'
+    : credentialStatus === 'conflict' ? 'The existing credential needs review in AIDP Credential Store. It will not be replaced.'
+    : credentialStatus === 'unknown' ? 'Checking the saved credential before continuing…'
+    : !credentialStage ? 'The saved credential is missing. Review Credential Store before resuming this operation.'
+    : 'In Apify Console, open Settings → API & Integrations, create a token for this application and copy it here. Paste only the token; the application adds Bearer automatically.';
+  const marketNotice = moduleOperationError || (moduleOperating ? '' : governanceModule?.message || message);
+  const marketNeedsAttention = Boolean(moduleOperationError || ['error', 'awaiting_action'].includes(governanceModule?.status || ''));
+  const marketStatusLabels: Record<string, string> = { not_installed: 'Not installed', installing: 'In progress',
+    awaiting_action: 'Action required', error: 'Needs attention', active: 'Installed · Paused' };
+  const marketStatus = moduleOperating ? 'In progress' : marketStatusLabels[governanceModule?.status || ''] || 'Status unavailable';
+  const marketStepKeys = Object.keys(marketSteps).filter(key => key !== 'ready');
+  const marketPhase = moduleProgress?.phase || governanceModule?.phase || '';
+  const marketStepIndex = marketStepKeys.indexOf(marketPhase);
+  const marketCompletedSteps = marketStepKeys.filter(key => governanceModule?.completed_phases?.includes(key)).length;
+  const marketShowProgress = market && Boolean(moduleOperating || governanceModule?.operation_id);
+  const marketCredentialIssue = market && (credentialStatus !== 'configured'
+    || governanceModule?.phase === 'test' && governanceModule?.status === 'error');
+  const observingMarket = Boolean(market && visible && governanceModule &&
+    (credentialStatus === 'unknown' || governanceModule.phase === 'test' && governanceModule.status === 'awaiting_action'));
   const disabled = moduleOperating || !usersLoaded || !moduleManagerUser || !governanceModule || Boolean(moduleLoadError || usersError);
+  useEffect(() => { if (credentialStatus === 'configured') setApifyToken(''); }, [credentialStatus]);
+  useEffect(() => {
+    if (market && governanceModule?.operation_id && governanceModule.administrator_id) setModuleManagerUserId(governanceModule.administrator_id);
+  }, [market, governanceModule?.operation_id, governanceModule?.administrator_id]);
   useEffect(() => {
     onStatusChange?.({ module: governanceModule, busy: moduleOperating, unverified: Boolean(moduleLoadError) });
   }, [governanceModule, moduleOperating, moduleLoadError, onStatusChange]);
@@ -889,7 +926,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
     return () => { controller.abort(); moduleAbortRef.current?.abort(); };
   }, []);
   useEffect(() => {
-    if (!transitioning || moduleOperating) return;
+    if ((!transitioning && !observingMarket) || moduleOperating) return;
     let cancelled = false;
     let timeout = 0;
     const refresh = async () => {
@@ -898,9 +935,10 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
     };
     timeout = window.setTimeout(refresh, 2_000);
     return () => { cancelled = true; window.clearTimeout(timeout); };
-  }, [transitioning, moduleOperating, governanceModule?.operation_id]);
+  }, [transitioning, observingMarket, moduleOperating, governanceModule?.operation_id]);
   async function runModuleAction(kind: ModuleOperationKind) {
     if (disabled || moduleAbortRef.current || !governanceModule || !moduleManagerUser) return;
+    if (credentialBlocked) return;
     const recoverableKind = moduleOperationKind(governanceModule.status, governanceModule.operation_type);
     const operationKey = moduleOperationKey(governanceModule.module_id, kind);
     let operation;
@@ -927,7 +965,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
     setMessage("");
     setModuleProgress({
       status: "pending",
-      phase: kind === "delete" ? "cleanup" : "verify",
+      phase: market && governanceModule.operation_id ? governanceModule.phase || 'verify' : kind === "delete" ? "cleanup" : "verify",
       message: `${kind === "install" ? "Installing" : kind === "redeploy" ? "Redeploying" : "Deleting"} ${governanceModule.display_name}.`,
     });
     let operationId = operation.operationId;
@@ -997,36 +1035,65 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
   if (!visible) return null;
   return createPortal(
     <div className="lab-manager-overlay">
-      <section className="lab-manager-modal governance-module-modal module-manager-dialog" ref={panelRef} role="dialog"
+      <section className={`lab-manager-modal governance-module-modal module-manager-dialog${market ? ' market-module-modal' : ''}`} ref={panelRef} role="dialog"
         aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} aria-busy={moduleOperating} tabIndex={-1}>
         <header>
           <div>
-            {!market && <p className="eyebrow">Shared global module</p>}
+            <p className="eyebrow">Shared global module</p>
             <h2 id={titleId}>{moduleName}</h2>
-            <p id={descriptionId}>{market ? 'Install the research framework without loading business data. Review progress and resume the same operation here.' : 'One shared module for all AIDP developers, managed by AI Data Platform administrators.'}</p>
+            <p id={descriptionId}>{market ? 'On-demand market research, managed by AI Data Platform administrators.' : 'One shared module for all AIDP developers, managed by AI Data Platform administrators.'}</p>
           </div>
           {governanceModule && <span className={`lab-state ${governanceModule.enabled ? "installed" : "unassigned"}`}>
-            {moduleOperating ? "in progress" : governanceModule.status.replaceAll("_", " ")}
+            {market ? marketStatus : moduleOperating ? "in progress" : governanceModule.status.replaceAll("_", " ")}
           </span>}
         </header>
         <div className="governance-module-body">
+          {(moduleOperating || marketShowProgress) && <div className={`registration-result module-install-progress${market ? ' market-install-progress' : ''}`}
+            role={market ? 'region' : 'status'} aria-label={market ? 'Installation progress' : undefined}
+            aria-live={market ? undefined : 'polite'} aria-busy={moduleOperating || market && transitioning}>
+            {!market && <span className="progress-orbit" aria-hidden="true" />}
+            <p className={market ? 'market-progress-caption' : 'eyebrow'} role={market ? 'status' : undefined}>{market
+              ? marketStepIndex >= 0 ? `${marketNeedsAttention && !moduleOperating ? 'Paused at step' : 'Step'} ${marketStepIndex + 1} of ${marketStepKeys.length}`
+                : marketPhase === 'ready' ? 'Installation complete' : 'Checking installation step…'
+              : 'Deployment progress'}</p>
+            <p className="registration-progress-phase" id={phaseId}>{phaseLabel}</p>
+            <div className={`registration-progress-track${market && !moduleOperating && !transitioning ? ' market-progress-paused' : ' gods-eye-view-reset-track'}`}
+              role="progressbar" aria-labelledby={phaseId}
+              aria-valuemin={market ? 0 : undefined} aria-valuemax={market ? marketStepKeys.length : undefined}
+              aria-valuenow={market && !moduleOperating && !transitioning ? marketCompletedSteps : undefined}
+              aria-valuetext={market ? `${marketCompletedSteps} of ${marketStepKeys.length} steps complete. ${phaseLabel}` : 'Module operation in progress'}>
+              <span style={market && !moduleOperating && !transitioning ? { width: `${marketCompletedSteps / marketStepKeys.length * 100}%` } : undefined} />
+            </div>
+            <p className="registration-progress-detail" role={market && marketNeedsAttention && !moduleOperating ? 'alert' : undefined}>
+              {market ? marketNotice || moduleProgress?.message || `${marketCompletedSteps} of ${marketStepKeys.length} steps complete.` : moduleProgress?.message || 'Updating the shared module.'}</p>
+            <p className="registration-progress-detail">{market && !moduleOperating
+              ? governanceModule?.installed ? 'Installed with research and schedules paused.' : 'Resume installation continues from this saved step, keeping the same operation and resources.'
+              : 'Close hides this window while the operation continues in Settings. After a page reload or navigation, reopen it and select an administrator to resume the saved operation.'}</p>
+          </div>}
           {!moduleOperating && (!usersLoaded || (!governanceModule && !moduleLoadError) ? <LoadingIndicator label="Loading module settings…" /> : <>
-            <SearchableCombobox label="AI Data Platform administrator" placeholder="Select an administrator"
+            {marketShowProgress && (!governanceModule?.administrator_id || !moduleManagerUser) && <p className="governance-module-note">Select the administrator who started this operation to resume. Its saved resources and settings are retained.</p>}
+            {(!marketShowProgress || !governanceModule?.administrator_id || !moduleManagerUser) && <SearchableCombobox label="AI Data Platform administrator" placeholder="Select an administrator"
               value={moduleManagerUserId} disabled={moduleOperating || confirmDelete}
               options={users.filter(user => user.is_aidp_admin === true).map(user => ({ value: user.id, label: user.email }))}
-              onChange={value => { setModuleManagerUserId(value); setModuleOperationError(""); setMessage(""); }} />
+              onChange={value => { setModuleManagerUserId(value); setModuleOperationError(""); setMessage(""); }} />}
             {!usersError && !users.some(user => user.is_aidp_admin) && <p role="alert" className="lab-manager-error">No AI Data Platform administrator is available.</p>}
-            <p className="governance-module-note">{market ? 'Creates fourteen empty framework tables, a project Apify credential when needed, dedicated AI Compute and the agent. Compute incurs OCI costs. Research, paid Actors and schedules remain disabled. Governance and shared credentials are preserved.' : "Deploy or redeploy the shared Agent, dedicated AI Compute and governance workflow across the Master Catalog. Existing shared OCI credentials are retained; participants are not granted administrator access."}</p>
+            {market && (!marketShowProgress || marketCredentialIssue) && <label className="market-bearer-field">Apify Bearer token
+              <input type={credentialStatus === 'configured' ? 'text' : 'password'} aria-label="Apify Bearer token" value={credentialStatus === 'configured' ? savedTokenLabel : tokenEditable ? apifyToken : ''} autoComplete="off" spellCheck={false} maxLength={512}
+                readOnly={credentialStatus === 'configured'} disabled={!tokenEditable && credentialStatus !== 'configured'} required={tokenEditable} aria-required={tokenEditable}
+                aria-describedby={tokenHelpId} aria-invalid={tokenEditable && Boolean(apifyToken) && !tokenValid}
+                placeholder={credentialStatus === 'configured' ? 'Saved in AIDP Credential Store' : tokenEditable ? 'Paste your Apify API token' : 'Credential requires review'}
+                onChange={event => setApifyToken(event.target.value)} />
+              <span className="market-credential-help" id={tokenHelpId}>{marketShowProgress && governanceModule?.phase === 'test' && governanceModule?.status === 'error'
+                ? 'TEST could not verify the connection. Review this credential in AIDP Credential Store; the saved token has not been changed.' : credentialHelp} <a href="https://docs.apify.com/integrations/api#api-token" target="_blank" rel="noopener noreferrer">How to get an Apify API token</a></span>
+            </label>}
+            {!marketShowProgress && <p className="governance-module-note">{market ? 'Installs fourteen empty tables, dedicated AI Compute and the agent. OCI compute costs apply. Research and schedules remain paused; existing Governance resources are preserved.' : "Deploy or redeploy the shared Agent, dedicated AI Compute and governance workflow across the Master Catalog. Existing shared OCI credentials are retained; participants are not granted administrator access."}</p>}
             {market && <div className="module-connection-fields">
-              <label><input type="checkbox" checked={reuseExisting} disabled={Boolean(governanceModule?.operation_id)} onChange={event => setReuseExisting(event.target.checked)} /> Reuse verified resources owned by this project</label>
-              {!governanceModule?.installed && (!governanceModule?.phase || ['not_installed', 'verify', 'credentials'].includes(governanceModule.phase)) && <label>Apify API token {governanceModule?.apify_credential_available ? '(optional when reusing the project credential)' : ''}<input type="password" value={apifyToken} autoComplete="off" maxLength={512} onChange={event => setApifyToken(event.target.value)} /></label>}
-              {governanceModule?.phase === 'test' && <SearchableCombobox label="Workbench TEST session" placeholder="Create a session in Playground, then refresh" value={testSession} options={governanceModule.test_sessions || []} onChange={setTestSession} />}
-              {governanceModule?.message && <p role="status">{governanceModule.message}</p>}
-              <button type="button" className="secondary" onClick={() => void loadModules()}>Refresh installation status</button>
+              {credentialStage && !reuseExisting && credentialStatus === 'configured' && !governanceModule?.apify_credential_owned_by_operation && <p className="governance-module-note">The saved installation does not permit reusing this credential. Review the operation in AIDP before continuing.</p>}
+              {governanceModule?.phase === 'test' && <SearchableCombobox label="Workbench TEST session" placeholder="Create a session in Playground; it will appear here" value={testSession} options={governanceModule.test_sessions || []} onChange={setTestSession} />}
             </div>}
 
             <ul className="module-service-tags" aria-label="Services">
-              {(market ? ['Tables', 'Credential Store', 'Agent'] : governanceServices).map(service => <li className="badge inactive" key={service}>{service}</li>)}
+              {governanceServices.map(service => <li className="badge inactive" key={service}>{service}</li>)}
             </ul>
           </>)}
           {(usersError || moduleLoadError) && <>
@@ -1037,31 +1104,21 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
             }}>Retry settings</button>
           </>}
           {confirmDelete && !moduleOperating && <p className="lab-manager-warning" role="alert"><strong>Delete global governance module?</strong> This permanently deletes its Agent deployment, dedicated AI Compute, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema, shared Spark compute and shared OCI credentials are retained.</p>}
-          {(moduleOperationError || (!moduleOperating && governanceModule?.status === "error")) && <p className="lab-manager-error" role="alert">{moduleOperationError || governanceModule?.message || "The module operation failed. Resume to retry."}</p>}
-          {market && governanceModule && <ol className="market-install-steps" aria-label="Installation steps">{Object.entries(marketSteps).filter(([key]) => key !== 'ready').map(([key, label]) => <li key={key} aria-current={governanceModule.phase === key ? 'step' : undefined}>{governanceModule.completed_phases?.includes(key) ? 'Complete: ' : governanceModule.phase === key ? 'Current: ' : ''}{label}</li>)}</ol>}
-          {moduleOperating && <div className="registration-result module-install-progress" role="status" aria-live="polite" aria-busy="true">
-            <span className="progress-orbit" aria-hidden="true" />
-            <p className="eyebrow">Deployment progress</p>
-            <p className="registration-progress-phase" id={phaseId}>{phaseLabel}</p>
-            <div className="registration-progress-track gods-eye-view-reset-track" role="progressbar" aria-labelledby={phaseId} aria-valuetext="Module operation in progress">
-              <span />
-            </div>
-            <p className="registration-progress-detail">{moduleProgress?.message || 'Updating the shared module.'}</p>
-            <p className="registration-progress-detail">Close hides this window while the operation continues in Settings. After a page reload or navigation, reopen it and select an administrator to resume the saved operation.</p>
-          </div>}
-          {message && <p role="status" className="governance-module-note">{message}</p>}
+          {!market && (moduleOperationError || (!moduleOperating && governanceModule?.status === "error")) && <p className="lab-manager-error" role="alert">{moduleOperationError || governanceModule?.message || "The module operation failed. Resume to retry."}</p>}
+          {market && !marketShowProgress && marketNotice && <p className={marketNeedsAttention ? 'lab-manager-error' : 'governance-module-note'} role={marketNeedsAttention ? 'alert' : 'status'}>{marketNotice}</p>}
+          {!market && message && <p role="status" className="governance-module-note">{message}</p>}
         </div>
         <footer>
           <button ref={closeRef} className="secondary" type="button" onClick={() => confirmDelete && !moduleOperating ? setConfirmDelete(false) : onClose()}>
-            {confirmDelete && !moduleOperating ? "Back" : moduleOperating || message ? "Close" : "Cancel"}
+            {confirmDelete && !moduleOperating ? "Back" : moduleOperating || message || market && resumable ? "Close" : "Cancel"}
           </button>
           {moduleOperating ? <button type="button" disabled>Deploying…</button>
             : confirmDelete ? <button type="button" disabled={disabled} onClick={() => void runModuleAction("delete")}>Delete module</button>
-            : resumable ? <button type="button" disabled={disabled} onClick={() => recoverableKind && void runModuleAction(recoverableKind)}>
+            : resumable ? <button type="button" disabled={disabled || credentialBlocked} onClick={() => recoverableKind && void runModuleAction(recoverableKind)}>
               Resume {recoverableKind === "install" ? "installation" : recoverableKind === "redeploy" ? "redeployment" : "deletion"}
             </button> : <>
               {!market && governanceModule?.installed && <button className="secondary destructive" type="button" disabled={disabled || transitioning} onClick={() => { setConfirmDelete(true); closeRef.current?.focus(); }}>Delete</button>}
-              {!(market && governanceModule?.installed) && <button type="button" disabled={disabled || transitioning} onClick={() => void runModuleAction(governanceModule?.installed ? "redeploy" : "install")}>
+              {!(market && governanceModule?.installed) && <button type="button" disabled={disabled || transitioning || credentialBlocked} onClick={() => void runModuleAction(governanceModule?.installed ? "redeploy" : "install")}>
                 {governanceModule?.installed ? governanceModule.update_available ? "Update" : "Redeploy" : "Deploy"}
               </button>}
             </>}
@@ -2758,6 +2815,7 @@ function ApplicationReleaseSettings({
   copiedAgentModule = "",
   onConfigureMarket = () => {},
   marketModule = null,
+  agentHubUrl = '',
 }: {
   release: AdminApplicationRelease | null;
   busy: boolean;
@@ -2778,6 +2836,7 @@ function ApplicationReleaseSettings({
   copiedAgentModule?: string;
   onConfigureMarket?: () => void;
   marketModule?: AdminModule | null;
+  agentHubUrl?: string;
 }) {
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
@@ -2884,6 +2943,7 @@ function ApplicationReleaseSettings({
                       )}
                       {item.package_id === "ai_market_intelligence" && <>
                         <button type="button" className="module-configure module-agent-link" disabled={!marketModule?.installed || agentLinkBusy} onClick={() => onCopyAgent(item.package_id)} aria-label="Copy AI Market Intelligence agent URL" title="Copy the verified native agent endpoint"><CopyIcon /></button>
+                        {agentHubUrl && <a className="module-configure module-agent-link" href={agentHubUrl} target="_blank" rel="noopener noreferrer" aria-label="Open Agent Hub" title="Open Agent Hub"><img src="/icons/agent-link/lucide-bot-message-square.svg" alt="" aria-hidden="true" /></a>}
                         {copiedAgentModule === item.package_id && <span className="module-copy-notice" role="status">Copied</span>}
                         <button type="button" className="module-configure module-deploy" onClick={onConfigureMarket} aria-haspopup="dialog" aria-label={marketModule?.operation_id ? 'View AI Market Intelligence installation' : 'Install AI Market Intelligence'} title={marketModule?.operation_id ? 'View installation progress' : 'Configure and install AI Market Intelligence'}><InstallIcon /></button>
                       </>}
@@ -3385,7 +3445,6 @@ function AdminSettings() {
               <div>
                 <strong>Application</strong>
                 <p>Manage the application release, starter kit versions and module configuration.</p>
-                {agentHubHome(aidpUrl) && <a className="agent-hub-home" href={agentHubHome(aidpUrl)} target="_blank" rel="noopener noreferrer" aria-label="Open Agent Hub">Open Agent Hub <OpenExternalIcon /></a>}
               </div>
               {configuringModule && <a className="module-return" href="/admin/settings#application"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>Return</a>}
               {!configuringModule && applicationRelease && (applicationRelease.update_available || (applicationRelease.operation && applicationUpdateStates.has(applicationRelease.operation.status))) &&
@@ -3420,6 +3479,7 @@ function AdminSettings() {
               onCopyAgent={moduleId => void copyModuleAgent(moduleId)}
               onConfigureMarket={() => setConfirmMarket(true)}
               marketModule={marketState.module}
+              agentHubUrl={agentHubHome(aidpUrl) || ''}
               agentLinkBusy={agentLinkBusy}
               agentLink={agentLink}
             />

@@ -177,6 +177,67 @@ def test_uncertain_secret_creation_never_repeats_a_write(monkeypatch):
     assert writes == [True]
 
 
+@pytest.mark.parametrize('same_operation,create_requested', [(True, True), (False, True), (True, False)])
+def test_uncertain_created_credential_is_reconciled_only_by_its_recorded_operation(monkeypatch, same_operation, create_requested):
+    api = client()
+    api._shared_oci_credential = lambda: {'key': 'shared-oci'}
+    saved = state('credentials', apify_create_requested=create_requested)
+    saved['reuse_existing'] = False
+    operation = OP if same_operation else '00000000-0000-4000-8000-000000000002'
+    existing = {'key': 'new-project-key', 'type': 'SECRET_TOKEN', 'lifecycleState': 'ACTIVE',
+                'description': 'AI Market Intelligence Apify connection; operation=' + operation}
+    monkeypatch.setattr(installer, '_project_credential', lambda api: existing)
+    monkeypatch.setattr(installer, 'ensure_apify_credential', lambda *a, **k: pytest.fail('Must not create or rotate a secret'))
+    api._workspace = lambda: {'key': 'workspace'}
+    api._read_installation = lambda workspace: saved
+    observed = asyncio.run(api.status())
+    assert observed['apify_credential_owned_by_operation'] is (same_operation and create_requested)
+    if same_operation and create_requested:
+        api._step(saved, None, None)
+        assert saved['resources']['apify_credential_key'] == 'new-project-key'
+        assert saved['reuse_existing'] is False
+    else:
+        with pytest.raises(AidpProvisionConflict, match='Enter an Apify token'):
+            api._step(saved, None, None)
+        assert 'apify_credential_key' not in saved['resources']
+
+
+def test_new_bearer_preserves_only_its_four_character_hint_in_the_receipt(monkeypatch):
+    api = client()
+    saved = state('credentials')
+    writes = []
+    api._save = lambda item: writes.append(copy.deepcopy(item))
+    api._shared_oci_credential = lambda: {'key': 'oci'}
+    monkeypatch.setattr(installer, '_project_credential', lambda api: None)
+    monkeypatch.setattr(installer, 'ensure_apify_credential', lambda *a, **k: {'credential_key': 'project'})
+    token = SecretStr('apify_api_synthetic_private_value7Q2k')
+    api._step(saved, token, None)
+    result = installer.public_status(saved)
+    assert saved['resources']['apify_token_suffix'] == result['apify_token_suffix'] == '7Q2k'
+    assert token.get_secret_value() not in json.dumps([writes, saved, result])
+    assert writes[0]['resources']['apify_create_requested'] is True
+
+
+def test_reusing_another_credential_discards_a_failed_creation_token_hint(monkeypatch):
+    api = client()
+    saved = state('credentials', apify_create_requested=True, apify_token_suffix='7Q2k')
+    api._shared_oci_credential = lambda: {'key': 'oci'}
+    existing = {'key': 'another-project-credential', 'type': 'SECRET_TOKEN', 'lifecycleState': 'ACTIVE',
+                'description': 'AI Market Intelligence Apify connection; operation=another-operation'}
+    monkeypatch.setattr(installer, '_project_credential', lambda api: existing)
+    monkeypatch.setattr(installer, 'ensure_apify_credential', lambda *a, **k: pytest.fail('Must not create or rotate a secret'))
+    api._step(saved, None, None)
+    assert saved['resources']['apify_credential_key'] == 'another-project-credential'
+    assert 'apify_token_suffix' not in saved['resources']
+    assert 'apify_token_suffix' not in installer.public_status(saved)
+
+
+@pytest.mark.parametrize('suffix', ['', None, 1234, 'long-secret-value', 'a b!'])
+def test_unvalidated_or_missing_bearer_hints_are_not_exposed(suffix):
+    result = installer.public_status(state('model_verify', apify_credential_key='project', apify_token_suffix=suffix))
+    assert 'apify_token_suffix' not in result
+
+
 def test_uncertain_bootstrap_start_is_not_repeated():
     api = client()
     saved = state('model_run', model_job_key='job')
@@ -279,6 +340,44 @@ def test_status_refresh_reads_current_test_sessions_without_saving(monkeypatch):
     observed = asyncio.run(api.status())
     assert observed['test_sessions'] == [{'value': OP, 'label': 'New TEST session'}]
     assert not observed['installed']
+
+
+@pytest.mark.parametrize('change,expected_key,expected_status', [
+    ({}, '', 'configured'), ({}, 'project', 'configured'), ({}, 'other-key', 'conflict'),
+    ({'type': 'OAUTH'}, '', 'conflict'), ({'lifecycleState': 'INACTIVE'}, '', 'conflict'),
+    ({'description': 'Another module'}, '', 'conflict'), ({'key': ''}, '', 'conflict'),
+    (None, '', 'missing'), (None, 'project', 'conflict'),
+])
+def test_credential_status_matches_installation_metadata_guards_without_exposing_secrets(monkeypatch, change, expected_key, expected_status):
+    api = client()
+    api._workspace = lambda: {'key': 'workspace'}
+    api._read_installation = lambda workspace: state('credentials', **({'apify_credential_key': expected_key} if expected_key else {}))
+    api._save = lambda *a: pytest.fail('Status must not write')
+    existing = None if change is None else {'key': 'project', 'type': 'SECRET_TOKEN', 'lifecycleState': 'ACTIVE',
+        'description': 'AI Market Intelligence Apify connection', 'secretValue': 'synthetic-private-value', **change}
+    monkeypatch.setattr(installer, '_project_credential', lambda api: existing)
+    observed = asyncio.run(api.status())
+    assert observed['apify_credential_status'] == expected_status
+    assert observed['apify_credential_available'] is (expected_status == 'configured')
+    assert 'synthetic-private-value' not in json.dumps(observed)
+    assert 'apify_credential_key' not in observed
+
+
+@pytest.mark.parametrize('error,expected', [(RuntimeError('Duplicate credentials'), 'conflict'),
+    (AidpProvisionError('Synthetic provider failure'), 'unknown'), (AidpProvisionPending('Pending'), 'unknown')])
+def test_credential_lookup_failure_preserves_operation_without_claiming_a_configured_token(monkeypatch, error, expected):
+    api = client()
+    api._workspace = lambda: {'key': 'workspace'}
+    api._read_installation = lambda workspace: state('model_verify', apify_credential_key='project', apify_token_suffix='7Q2k')
+    api._save = lambda *a: pytest.fail('Status must not write')
+    def fail(api):
+        raise error
+    monkeypatch.setattr(installer, '_project_credential', fail)
+    observed = asyncio.run(api.status())
+    assert observed['apify_credential_status'] == expected and not observed['apify_credential_available']
+    assert 'apify_token_suffix' not in observed
+    assert observed['operation_id'] == OP and observed['phase'] == 'model_verify'
+    assert str(error) not in json.dumps(observed)
 
 
 def test_uncertain_test_submission_never_redeploys_automatically(monkeypatch):
@@ -394,3 +493,38 @@ def test_admin_routes_are_observation_only_until_explicit_install(tmp_path):
 def test_registry_is_not_an_installation_phase():
     assert 'registry' not in installer.PHASES
     assert installer.PHASES[-2:] == ('production', 'ready')
+
+
+@pytest.mark.parametrize('lookup', ['match', 'missing', 'foreign', 'pending', 'timeout', 'http_error'])
+def test_status_resolves_saved_administrator_without_exposing_native_identity_or_mutating(tmp_path, lookup):
+    from app.identity import IdentityPending
+    from oci._vendor.requests.exceptions import Timeout, HTTPError
+    portal = make_client(tmp_path)
+    calls = []
+    class Market:
+        async def status(self):
+            return {**installer.public_status(state('model_verify')), 'administrator_ocid': 'ocid1.user.oc1..ada'}
+        async def operate(self, *args, **kwargs):
+            pytest.fail('GET must not resume the installation')
+    class Identity:
+        async def list_users_by_ocids(self, owners):
+            calls.append(owners)
+            if lookup == 'pending':
+                raise IdentityPending('unavailable')
+            if lookup == 'timeout':
+                raise Timeout('unavailable')
+            if lookup == 'http_error':
+                raise HTTPError('unavailable')
+            if lookup == 'missing':
+                return []
+            return [{'id': 'user-id', 'ocid': 'ocid1.user.oc1..ada' if lookup == 'match' else 'foreign'}]
+    portal.app.state.market_factory = Market
+    portal.app.state.identity_factory = Identity
+    login(portal)
+    response = portal.get('/api/admin/modules/ai_market_intelligence')
+    assert response.status_code == 200
+    result = response.json()
+    assert result.get('administrator_id') == ('user-id' if lookup == 'match' else None)
+    assert 'administrator_ocid' not in result
+    assert result['phase'] == 'model_verify'
+    assert calls == [{'ocid1.user.oc1..ada'}]
