@@ -29,18 +29,33 @@ def _identity(detail):
     fields = ('key', 'id', 'displayName', 'type', 'createdBy', 'timeCreated', 'entryFilePath',
               'description', 'credentialDescription', 'credentialType', 'dependenciesFilePath', 'computeKey',
               'tasks', 'jobClusters', 'schedule', 'continuous', 'driverConfig', 'replicaConfig',
-              'catalogKey', 'schemaKey', 'location', 'tableType', 'tableProperties', 'tableFields', 'path')
+              'catalogKey', 'schemaKey', 'location', 'tableType', 'tableProperties', 'tableFields',
+              'path', 'pathInfo', 'name', 'version', 'managedTableDefinition', 'externalTableDefinition',
+              'partitionKeys', 'parameters', 'runAs', 'maxConcurrentRuns', 'gitConfig')
     value = {key: detail[key] for key in fields if key in detail}
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def _snapshot(client, path, kind):
+def _snapshot(client, path, kind, *, identity_recheck=False):
     detail, headers = client._request('GET', path, include_headers=True)
     key = detail.get('key') or detail.get('id')
     if not key:
         raise AidpProvisionConflict('Native resource identity is unavailable; no destructive action was submitted.')
+    etag = next((value for name, value in headers.items() if name.lower() == 'etag'), None)
+    if not etag:
+        if not identity_recheck or kind not in {'agent', 'workflow', 'compute', 'table'}:
+            _etag(headers)
+        if kind != 'table':
+            try:
+                UUID(key)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise AidpProvisionConflict('Native resource has no stable UUID; it was preserved.') from exc
+        elif not detail.get('location'):
+            raise AidpProvisionConflict('Native table storage identity is incomplete; it was preserved.')
+        if not detail.get('createdBy') or not detail.get('timeCreated') or path.rsplit('/', 1)[-1] != key:
+            raise AidpProvisionConflict('Native resource ownership is incomplete; it was preserved.')
     return {'path': path, 'kind': kind, 'key': key, 'identity': _identity(detail),
-            'etag': _etag(headers), 'done': False}, detail
+            'etag': etag, 'identity_recheck': not bool(etag), 'done': False}, detail
 
 
 def inventory(client, state):
@@ -55,7 +70,7 @@ def inventory(client, state):
     if len(agents) > 1:
         raise AidpProvisionConflict('Duplicate project agents require reconciliation before reinstalling.')
     for row in agents:
-        item, detail = _snapshot(client, scope + '/agents/' + quote(row['key'], safe=''), 'agent')
+        item, detail = _snapshot(client, scope + '/agents/' + quote(row['key'], safe=''), 'agent', identity_recheck=state.get('mode') == 'reinstall')
         entries = {ROOT + '/agent/market_intelligence.py', '/Workspace/ai_market_intelligence/agent/market_intelligence.py'}
         if (detail.get('type') != 'CODE' or detail.get('entryFilePath') not in entries
                 or old.get('agent_key', detail['key']) != detail['key']):
@@ -69,7 +84,7 @@ def inventory(client, state):
         path = row.get('path', '')
         if not (path == ROOT or path.startswith(ROOT + '/')):
             continue
-        item, detail = _snapshot(client, scope + '/jobs/' + quote(row['key'], safe=''), 'workflow')
+        item, detail = _snapshot(client, scope + '/jobs/' + quote(row['key'], safe=''), 'workflow', identity_recheck=state.get('mode') == 'reinstall')
         tasks = detail.get('tasks') or []
         if not tasks or any(task.get('source') != 'WORKSPACE' or not str(task.get('filePath') or task.get('notebookPath') or '').startswith(ROOT + '/') for task in tasks):
             raise AidpProvisionConflict('A project workflow has an unrelated task binding; nothing was removed.')
@@ -83,7 +98,7 @@ def inventory(client, state):
             name = client._resource_name(row)
             if not name.startswith('ai_mi_'):
                 continue
-            item, detail = _snapshot(client, '/tables/' + quote(row['key'], safe=''), 'table')
+            item, detail = _snapshot(client, '/tables/' + quote(row['key'], safe=''), 'table', identity_recheck=state.get('mode') == 'reinstall')
             properties = {prop['propertyName']: prop.get('propertyValue') for prop in detail.get('tableProperties', [])}
             if (name not in expected or client._resource_name(detail) != name
                     or detail.get('catalogKey') != catalog['key'] or detail.get('schemaKey') != schema['key']
@@ -91,11 +106,11 @@ def inventory(client, state):
                     or detail.get('tableType') not in {'MANAGED', 'EXTERNAL'}):
                 raise AidpProvisionConflict('An unverified table was found in the project scope; nothing was removed.')
             items.append(item)
-    computes = [row for row in client._list(scope + '/clusters') if client._resource_name(row) == COMPUTE_NAME]
+    computes = [row for row in client._list(scope + '/clusters', params={'type': 'AI_COMPUTE'}) if client._resource_name(row) == COMPUTE_NAME]
     if len(computes) > 1:
         raise AidpProvisionConflict('Duplicate dedicated AI Compute resources require reconciliation.')
     for row in computes:
-        item, detail = _snapshot(client, scope + '/clusters/' + quote(row['key'], safe=''), 'compute')
+        item, detail = _snapshot(client, scope + '/clusters/' + quote(row['key'], safe=''), 'compute', identity_recheck=state.get('mode') == 'reinstall')
         prefix = 'AI Market Intelligence development compute; operation='
         description = detail.get('description', '')
         if detail.get('type') != 'AI_COMPUTE' or not description.startswith(prefix):
@@ -122,12 +137,14 @@ def inventory(client, state):
 def _remove(client, state, item):
     detail, headers = client._request('GET', item['path'], allow_not_found=True, include_headers=True)
     if detail is None:
+        if not item.get('delete_requested'):
+            raise AidpProvisionConflict('An inventoried resource disappeared before removal; review the project inventory.')
         item['done'] = True
         client._save(state)
         return
     if _identity(detail) != item['identity']:
         raise AidpProvisionConflict('A resource changed after the reinstall inventory; it was preserved.')
-    if item['kind'] == 'table' and _etag(headers) != item['etag']:
+    if item['kind'] == 'table' and item.get('etag') and _etag(headers) != item['etag']:
         raise AidpProvisionConflict('The inventoried table revision changed; it was preserved.')
     if item['kind'] == 'compute':
         if any(agent.get('computeKey') == item['key'] for agent in client._list('/workspaces/' + state['workspace'] + '/agents')):
@@ -136,7 +153,20 @@ def _remove(client, state, item):
         raise AidpProvisionPending('Waiting for project resource removal.', state['phase'])
     item['delete_requested'] = True
     client._save(state)
-    client._request('DELETE', item['path'], headers={'if-match': _etag(headers)}, allow_not_found=True)
+    if item.get('identity_recheck'):
+        # Some native resources omit ETag. This final read is not atomic CAS.
+        detail, headers = client._request('GET', item['path'], allow_not_found=True, include_headers=True)
+        if detail is None or _identity(detail) != item['identity']:
+            raise AidpProvisionConflict('A resource changed before removal; it was preserved for review.')
+        if item['kind'] == 'table':
+            _no_writers(client, state)
+        if item['kind'] == 'compute' and any(agent.get('computeKey') == item['key'] for agent in client._list('/workspaces/' + state['workspace'] + '/agents')):
+            raise AidpProvisionConflict('An agent now uses this compute; it was preserved.')
+        etag = next((value for name, value in headers.items() if name.lower() == 'etag'), None)
+        delete_headers = {'if-match': etag} if etag else {}
+    else:
+        delete_headers = {'if-match': _etag(headers)}
+    client._request('DELETE', item['path'], headers=delete_headers, allow_not_found=True)
     raise AidpProvisionPending('Removing project ' + item['kind'] + '; its identity and progress are saved.', state['phase'])
 
 
@@ -214,5 +244,5 @@ def _no_writers(client, state):
     scope = '/workspaces/' + state['workspace']
     if any(row.get('path') == ROOT or str(row.get('path', '')).startswith(ROOT + '/') for row in client._list(scope + '/jobs')):
         raise AidpProvisionConflict('A project workflow still exists; tables and storage were preserved.')
-    if client._agents(state['workspace'], MODULE) or any(client._resource_name(row) == COMPUTE_NAME for row in client._list(scope + '/clusters')):
+    if client._agents(state['workspace'], MODULE) or any(client._resource_name(row) == COMPUTE_NAME for row in client._list(scope + '/clusters', params={'type': 'AI_COMPUTE'})):
         raise AidpProvisionConflict('The project agent or dedicated compute still exists; tables and storage were preserved.')

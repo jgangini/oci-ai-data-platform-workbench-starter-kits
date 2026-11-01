@@ -1217,6 +1217,7 @@ test('Market reinstall requires explicit removal confirmation and a new token, t
   assert.equal(action(h, 'Delete and reinstall').props.disabled, true);
   assert.match(text(h.nodes()[0]), /fourteen tables and their contents/);
   assert.match(text(h.nodes()[0]), /shared OCI credentials/);
+  assert.match(text(h.nodes()[0]), /concurrent changes cannot be protected atomically/);
   assert.match(text(h.find('div', props => props['aria-label'] === 'Installation progress')), /Paused at step 5 of 12/);
   const field = () => h.find('input', props => props['aria-label'] === 'Apify Bearer token');
   assert.equal(field().props.readOnly, false);
@@ -1258,6 +1259,7 @@ test('Market resumes reinstall after reload with the same operation and asks aga
   assert.equal(action(h, 'Resume redeployment').props.disabled, true);
   const field = h.find('input', props => props['aria-label'] === 'Apify Bearer token');
   assert.equal(field.props.type, 'password');
+  assert.doesNotMatch(text(h.nodes()[0]), /does not permit reusing this credential/);
   h.act(() => field.props.onChange({ target: { value: 'synthetic-fresh-apify-token' } }));
   h.act(() => action(h, 'Resume redeployment').props.onClick());
   const body = JSON.parse(h.mutations()[0].options.body);

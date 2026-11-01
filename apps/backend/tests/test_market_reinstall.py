@@ -20,6 +20,7 @@ class Native:
         self.settings = SimpleNamespace(artifacts_bucket_name='artifacts', objectstorage_namespace='ns',
                                         bucket_name='landing', gods_eye_control_bucket='gold')
         self.objects = {}
+        self.headers = {}
         self.calls, self.saved = [], []
         self.runs = []
         self.object_storage = SimpleNamespace(get_bucket=lambda *a: SimpleNamespace(data=SimpleNamespace(versioning='Disabled')))
@@ -35,9 +36,9 @@ class Native:
         row = self.objects.get(path)
         if method == 'GET':
             assert row is not None or kwargs.get('allow_not_found')
-            return (copy.deepcopy(row), {'etag': 'revision'}) if kwargs.get('include_headers') else copy.deepcopy(row)
+            return (copy.deepcopy(row), self.headers.get(path, {'etag': 'revision'})) if kwargs.get('include_headers') else copy.deepcopy(row)
         if method == 'DELETE':
-            assert kwargs['headers'] == {'if-match': 'revision'}
+            assert kwargs['headers'] == ({'if-match': 'revision'} if self.headers.get(path, {'etag': 'revision'}) else {})
             self.objects.pop(path, None)
         return {}
 
@@ -46,6 +47,8 @@ class Native:
             return [{'key': 'oci_medallion.oci_artifacts', 'displayName': 'oci_artifacts'}]
         if path.endswith('/jobRuns'):
             return copy.deepcopy(self.runs)
+        if path.endswith('/clusters') and kwargs.get('params') != {'type': 'AI_COMPUTE'}:
+            return []
         return [copy.deepcopy(row) for key, row in self.objects.items() if key.rsplit('/', 1)[0] == path]
 
     def _agents(self, workspace, module):
@@ -83,6 +86,184 @@ def test_inventory_is_complete_read_only_and_excludes_shared_resources():
     assert {item['kind'] for item in saved['retirement']['items']} == {'workflow', 'agent', 'table', 'compute', 'credential'}
     assert {item['key'] for item in saved['retirement']['items']} == {'job', 'market', 'market-table', 'compute', 'apify'}
     assert all(method == 'GET' for method, _, _ in api.calls)
+
+
+def unversioned_native():
+    api, saved = populated()
+    for index, collection in enumerate(('agents/market', 'jobs/job', 'clusters/compute'), 10):
+        original = SCOPE + '/' + collection
+        row = api.objects.pop(original)
+        row.update(key=f'00000000-0000-4000-8000-{index:012d}', createdBy='project-owner',
+                   timeCreated='2026-10-31T00:00:00Z')
+        path = original.rsplit('/', 1)[0] + '/' + row['key']
+        api.objects[path], api.headers[path] = row, {}
+    return api, saved
+
+
+@pytest.mark.parametrize('kind', ['agent', 'workflow', 'compute'])
+def test_missing_native_etag_rechecks_owned_uuid_after_saved_intent(kind):
+    api, saved = unversioned_native()
+    reinstall.inventory(api, saved)
+    item = next(item for item in saved['retirement']['items'] if item['kind'] == kind)
+    original = api._request
+    reads = []
+    def request(method, path, **kwargs):
+        if method == 'GET' and path == item['path']:
+            reads.append(item.get('delete_requested', False))
+        return original(method, path, **kwargs)
+    api._request = request
+    with pytest.raises(AidpProvisionPending):
+        reinstall._remove(api, saved, item)
+    assert reads == [False, True]
+    assert api.calls[-1] == ('DELETE', item['path'], {'headers': {}, 'allow_not_found': True})
+    reinstall._remove(api, saved, item)
+    assert item['done']
+    assert '/credentials/shared' in api.objects
+
+
+@pytest.mark.parametrize('kind', ['credential', 'deployment'])
+def test_missing_etag_remains_blocked_for_other_resource_types(kind):
+    api, saved = populated()
+    path = '/resource/test'
+    api.objects[path], api.headers[path] = {'key': NEW_OP, 'createdBy': 'owner', 'timeCreated': 'today'}, {}
+    with pytest.raises(AidpProvisionConflict, match='concurrency token'):
+        reinstall._snapshot(api, path, kind, identity_recheck=True)
+    assert all(method == 'GET' for method, _, _ in api.calls)
+
+
+@pytest.mark.parametrize('fault', ['not_reinstall', 'not_uuid', 'no_creator', 'no_created_at'])
+def test_unversioned_resources_require_explicit_reinstall_and_complete_identity(fault):
+    api, saved = unversioned_native()
+    path = next(path for path in api.objects if path.startswith(SCOPE + '/agents/000'))
+    if fault == 'not_reinstall':
+        saved['mode'] = 'install'
+    elif fault == 'not_uuid':
+        row = api.objects.pop(path)
+        row['key'] = 'market'
+        path = SCOPE + '/agents/market'
+        api.objects[path], api.headers[path] = row, {}
+    else:
+        api.objects[path].pop('createdBy' if fault == 'no_creator' else 'timeCreated')
+    with pytest.raises(AidpProvisionConflict):
+        reinstall.inventory(api, saved)
+    assert 'retirement' not in saved
+    assert all(method == 'GET' for method, _, _ in api.calls)
+
+
+@pytest.mark.parametrize('field,value', [('version', 38), ('pathInfo', {'path': '/another'}), ('timeCreated', 'replacement')])
+def test_unversioned_final_read_rejects_drift_after_intent(field, value):
+    api, saved = unversioned_native()
+    reinstall.inventory(api, saved)
+    item = next(item for item in saved['retirement']['items'] if item['kind'] == 'agent')
+    original = api._save
+    def save(state):
+        original(state)
+        api.objects[item['path']][field] = value
+    api._save = save
+    with pytest.raises(AidpProvisionConflict, match='changed before'):
+        reinstall._remove(api, saved, item)
+    assert item['delete_requested']
+    assert not any(method == 'DELETE' for method, _, _ in api.calls)
+
+
+def unversioned_tables():
+    api, saved = unversioned_native()
+    row = api.objects.pop('/tables/market-table')
+    row.update(key='oci_medallion.oci_artifacts.ai_mi_sources', createdBy='project-owner',
+               timeCreated='2026-10-31T00:00:00Z', location='oci://artifacts@ns/ai_market_intelligence/tables/ai_mi_sources')
+    path = '/tables/' + row['key']
+    api.objects[path], api.headers[path] = row, {}
+    return api, saved
+
+
+def test_unversioned_table_uses_qualified_name_and_rechecks_after_writers_are_removed():
+    api, saved = unversioned_tables()
+    reinstall.inventory(api, saved)
+    saved['phase'] = 'reinstall_resources'
+    for _ in range(5):
+        try:
+            reinstall.step(api, saved)
+            break
+        except AidpProvisionPending:
+            pass
+    saved['phase'] = 'reinstall_tables'
+    with pytest.raises(AidpProvisionPending):
+        reinstall.step(api, saved)
+    assert api.calls[-1] == ('DELETE', '/tables/oci_medallion.oci_artifacts.ai_mi_sources',
+                            {'headers': {}, 'allow_not_found': True})
+    reinstall.step(api, saved)
+    assert '/tables/gov-table' in api.objects
+
+
+@pytest.mark.parametrize('field', ['createdBy', 'timeCreated', 'location'])
+def test_unversioned_table_requires_storage_and_creation_metadata(field):
+    api, saved = unversioned_tables()
+    api.objects['/tables/oci_medallion.oci_artifacts.ai_mi_sources'].pop(field)
+    with pytest.raises(AidpProvisionConflict, match='incomplete'):
+        reinstall.inventory(api, saved)
+    assert 'retirement' not in saved
+    assert not any(method == 'DELETE' for method, _, _ in api.calls)
+
+
+@pytest.mark.parametrize('field,value', [('timeCreated', 'replacement'), ('location', 'another-dataset')])
+def test_unversioned_table_replacement_at_same_name_is_preserved(field, value):
+    api, saved = unversioned_tables()
+    reinstall.inventory(api, saved)
+    item = next(item for item in saved['retirement']['items'] if item['kind'] == 'table')
+    api.objects[item['path']][field] = value
+    with pytest.raises(AidpProvisionConflict, match='changed'):
+        reinstall._remove(api, saved, item)
+    assert not any(method == 'DELETE' for method, _, _ in api.calls)
+
+
+def test_unversioned_table_final_writer_check_preserves_new_workflow():
+    api, saved = unversioned_tables()
+    reinstall.inventory(api, saved)
+    item = next(item for item in saved['retirement']['items'] if item['kind'] == 'table')
+    for kind in ('jobs', 'agents', 'clusters'):
+        api.objects = {path: row for path, row in api.objects.items() if not path.startswith(SCOPE + '/' + kind + '/')}
+    original = api._save
+    def save(state):
+        original(state)
+        api.objects[SCOPE + '/jobs/new-job'] = {'key': NEW_OP, 'path': reinstall.ROOT + '/new-job'}
+    api._save = save
+    with pytest.raises(AidpProvisionConflict, match='workflow still exists'):
+        reinstall._remove(api, saved, item)
+    assert not any(method == 'DELETE' for method, _, _ in api.calls)
+
+
+def test_newly_available_etag_is_used_for_unversioned_inventory():
+    api, saved = unversioned_native()
+    reinstall.inventory(api, saved)
+    item = next(item for item in saved['retirement']['items'] if item['kind'] == 'agent')
+    api.headers[item['path']] = {'etag': 'revision'}
+    with pytest.raises(AidpProvisionPending):
+        reinstall._remove(api, saved, item)
+    assert api.calls[-1][2]['headers'] == {'if-match': 'revision'}
+
+
+def test_recorded_etag_cannot_silently_fall_back_to_unconditional_delete():
+    api, saved = populated()
+    reinstall.inventory(api, saved)
+    item = next(item for item in saved['retirement']['items'] if item['kind'] == 'agent')
+    api.headers[item['path']] = {}
+    with pytest.raises(AidpProvisionConflict, match='concurrency token'):
+        reinstall._remove(api, saved, item)
+    assert not any(method == 'DELETE' for method, _, _ in api.calls)
+
+
+def test_unversioned_compute_final_read_catches_a_new_consumer():
+    api, saved = unversioned_native()
+    reinstall.inventory(api, saved)
+    item = next(item for item in saved['retirement']['items'] if item['kind'] == 'compute')
+    original = api._save
+    def save(state):
+        original(state)
+        api.objects[SCOPE + '/agents/governance']['computeKey'] = item['key']
+    api._save = save
+    with pytest.raises(AidpProvisionConflict, match='now uses'):
+        reinstall._remove(api, saved, item)
+    assert not any(method == 'DELETE' for method, _, _ in api.calls)
 
 
 @pytest.mark.parametrize('fault', ['foreign_table', 'foreign_task', 'shared_compute', 'foreign_credential', 'versioned_bucket'])
