@@ -160,6 +160,14 @@ class ConversationActions:
     async def handle_confirmation(self, state):
         pending = state.get('pending')
         intent = state['intake']['intent']
+        if intent == 'list_sources':
+            topic = state['intake']['topic'] or state.get('last_topic')
+            if not topic or state['intake']['missing_fields']:
+                return {'response': {'markdown': '¿Para qué empresa, mercado y tema quieres ver las fuentes registradas?'}}
+            from .presentation import source_base_markdown
+            topic_id = self.flow.journal.scope.key(digest(['topic', topic]))
+            base = self.flow.catalog.approved_base(self.flow.records(), topic_id)
+            return {'response': {'markdown': source_base_markdown(topic, base)}}
         if not pending:
             if intent == 'read_report':
                 return self.read_report(state)

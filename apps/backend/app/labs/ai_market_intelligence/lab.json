@@ -55,12 +55,12 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/workflow.py",
-      "sha256": "74dbbfe3ccb692e15f44590eeee2529f0917d536b1dc8ee9476fe0b5127f48d2",
+      "sha256": "d40256882a63f8d42218edd7b4384bed51528d57ecada03d8a3ba491a2788130",
       "workspace_path": "agent/ai_market_intelligence/workflow.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/workflow_actions.py",
-      "sha256": "543400e3e21c5ecd44641c91bfe586e308f75851c0a857816f7adf43f2beb8b8",
+      "sha256": "8e4a962e8bfc5402c5301d5bd6c98b06d01d36b9df1322c965f6c852a0ed09bd",
       "workspace_path": "agent/ai_market_intelligence/workflow_actions.py"
     },
     {
@@ -110,7 +110,7 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/contracts.py",
-      "sha256": "b68454aeac3b55b5ae9be53c46daac49786080a385a8936289f6fb0749e8b288",
+      "sha256": "5f6557e01eddf1386301bd1317dc4651e65c9342685014511bb220bd8dc82b11",
       "workspace_path": "agent/ai_market_intelligence/contracts.py"
     },
     {
@@ -135,7 +135,7 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/prompts.json",
-      "sha256": "c00b9e934464ed5f227e574888edf80515de292e2fdb2fc25d96385e70c8cefc",
+      "sha256": "d3fa456ad1c1e5325fee64796c44d90c89922b96f9d7183d50ec212bff4176f0",
       "workspace_path": "agent/ai_market_intelligence/prompts.json"
     },
     {
@@ -165,7 +165,7 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/presentation.py",
-      "sha256": "f3c4da6b90cd15233f2c0db38cbfb4f09b368a9998111220bbc048da24d5fc5b",
+      "sha256": "4a544ec44e8f5cf5876221080075356c10022f246f55af6915ff84defa8536bb",
       "workspace_path": "agent/ai_market_intelligence/presentation.py"
     }
   ],
@@ -175,5 +175,5 @@
       "sha256": "87516a2e0f446f2e32cef8e5b05e99edb545d23fabfe08ed43d704bdf1776d04"
     }
   ],
-  "pack_sha256": "974738e4f89c42b2a90f4810dbbea081930efef7aab4b9f3e8c590750e1b7524"
+  "pack_sha256": "fee5e3c0dcbb08d41cf253e5d70dac833865bc891241cf01b877567002ea511f"
 }

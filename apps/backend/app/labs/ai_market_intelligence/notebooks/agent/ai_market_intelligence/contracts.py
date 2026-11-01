@@ -21,7 +21,7 @@ class TopicScope(Output):
 
 
 class IntakeDecision(Output):
-    intent: Literal['research', 'followup', 'source_request', 'source_decision',
+    intent: Literal['research', 'followup', 'source_request', 'source_decision', 'list_sources',
                     'schedule_request', 'schedule_decision', 'read_report', 'cancel']
     canonical_question: Short
     topic: TopicScope | None

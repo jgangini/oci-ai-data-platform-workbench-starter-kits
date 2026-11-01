@@ -150,7 +150,7 @@ class MarketWorkflow:
 
     async def resolve_context(self, state):
         intent = state['intake']['intent']
-        if state.get('pending') or intent in {'source_request', 'source_decision', 'schedule_request', 'schedule_decision', 'cancel', 'read_report'}:
+        if state.get('pending') or intent in {'source_request', 'source_decision', 'list_sources', 'schedule_request', 'schedule_decision', 'cancel', 'read_report'}:
             topic = state['intake'].get('topic')
             if topic and not state.get('pending'):
                 self.research.record_question(state['request_id'], state['question'], topic, 'administration')

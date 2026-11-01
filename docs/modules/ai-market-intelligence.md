@@ -402,6 +402,17 @@ streamed progress messages. The candidate therefore retains streaming Markdown;
 an optional negotiated A2UI response and actual client rendering require separate
 acceptance. No sample SDK or dependency is copied into this runtime.
 
+Questions such as “Which pages are registered for D1?” use the `list_sources`
+administration intent. The agent resolves the canonical topic or asks for it,
+then reads the authenticated catalog without starting research. It lists active
+source/target/topic relationships, shows suspended adapters explicitly and
+separates global discovery connectors from registered destinations. At most fifty
+destinations are displayed, with the total stated if truncated. The interaction
+does not count towards recurring research questions. This read does not verify
+connectivity, register a source, change approvals or call Apify. A pending approval
+continues through its existing confirmation flow; this change does not add
+side-question handling within that conversation.
+
 ## Remaining release acceptance
 
 - Verify the complete empty installation from the immutable release through

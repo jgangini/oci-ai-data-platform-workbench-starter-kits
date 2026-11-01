@@ -67,3 +67,27 @@ def response_markdown(response):
     if response.get('suggestion'):
         parts.append(_label(response['suggestion']))
     return '\n\n'.join(parts)
+
+
+def source_base_markdown(topic, base):
+    from .connectors import PROFILES
+    def availability(source):
+        profile = PROFILES.get(source['profile_id'])
+        return 'No soportado' if profile is None else ('Suspendido' if profile.get('unavailable_reason') else 'Configurado')
+    targets = [(source, target) for source in base for target in source['targets']]
+    lines = ['**Fuentes registradas: ' + _label(topic['entity']) + ' · ' + _label(topic['market']) + '**',
+             '', 'Tema: ' + _label(topic['objective']) + '.']
+    if targets:
+        lines.extend(['', '| Fuente | Destino aprobado | Disponibilidad del adaptador |', '| --- | --- | --- |'])
+        for source, target in targets[:50]:
+            lines.append('| ' + ' | '.join((_label(source['name']), _label(target['canonical_url_or_id']), availability(source))) + ' |')
+        if len(targets) > 50:
+            lines.extend(['', f'Listado limitado a los primeros 50 de {len(targets)} destinos.'])
+    else:
+        lines.extend(['', 'No hay destinos activos aprobados para este tema.'])
+    discovery = [source for source in base if not source['targets']]
+    if discovery:
+        lines.extend(['', 'Conectores con alcance de descubrimiento, sin destinos registrados para este tema: '
+                      + ', '.join(_label(source['name']) + ' (' + availability(source) + ')' for source in discovery) + '.'])
+    lines.extend(['', 'Consultar el catálogo no comprueba la conexión ni ejecuta Actors de Apify. La interpretación del chat usa el modelo configurado.'])
+    return '\n'.join(lines)
