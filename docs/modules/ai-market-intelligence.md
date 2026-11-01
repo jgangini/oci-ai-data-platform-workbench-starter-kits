@@ -36,6 +36,34 @@ TEST deployment is not a registered agent, and registration does not establish
 conversation or streaming acceptance. Apify remains authenticated by its Bearer
 credential inside the agent, independently of the Agent Hub caller.
 
+### Sharing and runtime credentials
+
+In AI Registry, **Local agent** means an agent hosted in AIDP; it does not mean
+localhost or an unpublished agent. A published agent exposes authenticated
+`/chat` and `/a2a` endpoints that a separate application can consume.
+[Oracle's invocation guide](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aidug/invoke-deployed-agent.html)
+requires an authenticated caller with at least USE permission. An Agent Hub link
+does not grant that permission or replace sign-in. Native registration, access
+for another authorized user and an actual Agent Hub conversation remain separate
+acceptance checks; do not distribute a token-bearing login callback as a chat link.
+
+| Boundary | Identity or credential | Purpose |
+| --- | --- | --- |
+| User to Agent Hub / endpoint | Authenticated caller and resource permissions | Authorize invocation and retain the caller's isolated conversation/research scope. |
+| Agent platform operations | Deployment Run As identity, where supported | Execute platform operations; this does not determine downstream tool authentication. |
+| OCI services used by the research runtime | Shared OCI-only credential named by `runtime.json → credential_name` | Initialize the configured model and Object Storage clients; verify the installation identity binding. |
+| Agent to Apify MCP | `AiMarketIntelligenceApifyBearer`, secret field `token` | Authenticate reviewed research tools without asking each chat user for an Apify token. |
+
+The implementation in
+[native.py](../../apps/backend/app/labs/ai_market_intelligence/notebooks/agent/ai_market_intelligence/native.py)
+loads both runtime credentials on the server through `aidputils.secrets.get`.
+Possession of a chat link does not authorize reading those secret values. Keep
+the caller's authenticated `subject_id` distinct from the runtime credential;
+sharing OCI/Apify connections must not merge users' journals or reports.
+Do not infer another user's credential permissions or successful Run As binding
+from an administrator's successful TEST. Confirm those bindings and isolation
+with an authorized second-user test before calling multi-user access accepted.
+
 ## Native chat in TEST
 
 The research runtime accepts ordinary questions of 1–500 characters. It keeps
