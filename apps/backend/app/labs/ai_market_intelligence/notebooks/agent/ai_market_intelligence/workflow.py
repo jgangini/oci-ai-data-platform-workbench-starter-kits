@@ -171,9 +171,10 @@ class MarketWorkflow:
                 evidence = self.research.evidence(report['run_id'])
                 draft = await self.ask('draft_report', ReportDraft, {'followup': state['question'],
                     'published_report': report['markdown'], 'published_at': report['published_at'], 'evidence': evidence})
-                from .workflow_actions import validate_report_links
+                from .workflow_actions import chart_projection, validate_report_links
                 validate_report_links(draft, evidence)
-                response = {**self.report_response(report), 'markdown': draft['answer_markdown'], 'chart': None, 'reused': True}
+                chart = chart_projection(self.records(), draft, report['run_id'])
+                response = {**self.report_response(report), 'markdown': draft['answer_markdown'], 'chart': chart, 'reused': True}
             return {'question_id': question_id, 'topic_id': topic_id, 'route': 'deliver_and_read',
                     'response': response}
         try:

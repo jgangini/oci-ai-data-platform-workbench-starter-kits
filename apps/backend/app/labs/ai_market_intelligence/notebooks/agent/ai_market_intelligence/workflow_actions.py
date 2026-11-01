@@ -76,7 +76,8 @@ def _financial_chart(records, request, evidence, citations):
         return None
     if request['kind'] == 'line' and len(series) < 2:
         return None
-    return {'version': 1, 'type': request['kind'], 'title': identity[0] + ' · ' + request['metric'],
+    title = identity[0] + (' · Precio de cierre' if request['metric'] == 'close' else ' · Indicador anual')
+    return {'version': 1, 'type': request['kind'], 'title': title,
             'caption': 'Serie recuperada; periodo del dato, no fecha de publicación. Unidad: ' + identity[2],
             'columns': ['period', request['metric']], 'rows': [[period, value] for period, value in sorted(series.items())],
             'scope': 'retrieved_financial_series', 'unit': identity[2], 'currency': identity[3],

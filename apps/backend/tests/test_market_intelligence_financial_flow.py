@@ -156,7 +156,8 @@ def test_financial_graph_routes_mcp_to_persisted_evidence_and_optional_chart(mis
             raise AssertionError('A succeeded identified run should not be polled')
     flow.provider = ApifyProvider({name: Tool(name) for name in ('call-actor', 'get-actor-run', 'get-dataset-items')})
     from langgraph.checkpoint.memory import InMemorySaver
-    result = turn(flow.build(InMemorySaver()), 'financial-graph-' + str(missing_period))
+    graph = flow.build(InMemorySaver())
+    result = turn(graph, 'financial-graph-' + str(missing_period))
     if missing_period:
         assert calls == [] and 'periodo' in result['response']['markdown']
         assert flow.records().rows('ai_mi_tool_runs') == []
@@ -168,3 +169,18 @@ def test_financial_graph_routes_mcp_to_persisted_evidence_and_optional_chart(mis
     assert json.loads(report['chart_spec_json'])['rows'] == [['2023', 10.0], ['2024', 0]]
     assert flow.records().rows('ai_mi_tool_runs')[0]['spent_microusd'] == 6900
     assert len(flow.records().rows('ai_mi_documents')) == 1
+    model.intents.append('followup')
+    followup = turn(graph, 'financial-chart-followup', 'Grafica las cifras del informe guardado sin consultar fuentes nuevas')
+    assert followup['response']['chart']['rows'] == [['2023', 10.0], ['2024', 0.0]]
+    assert followup['response']['reused'] is True
+    assert followup['response']['report_id'] == result['response']['report_id']
+    assert len(calls) == 2
+
+
+def test_evidence_for_models_omits_operational_run_ids_but_persists_them_for_audit():
+    research, run, tool = running()
+    research.add_evidence(run, tool, [{**observation(),
+        'provenance': {'source': 'fixture', 'provider_run_id': 'private-operation-id'}}])
+    assert 'provider_run_id' not in research.evidence(run)[0]['provenance']
+    stored = research.journal.read()[0]['tables']['ai_mi_documents']
+    assert json.loads(next(iter(stored.values()))['provenance_json'])['provider_run_id'] == 'private-operation-id'

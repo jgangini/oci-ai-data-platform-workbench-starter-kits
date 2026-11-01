@@ -56,9 +56,11 @@ Intake receives up to twenty recent canonical topics with an active approved
 base in the authenticated owner's journal. It can reuse an unambiguous topic
 without inventing a differently worded objective. This is model-assisted
 selection, not guaranteed semantic identity or an exhaustive catalog search.
-Intake distinguishes requests to summarize or explain an existing report
+Intake distinguishes requests to summarize, graph or explain an existing report
 (`followup`) from reopening it unchanged (`read_report`). Followups reuse the
-published evidence rather than starting another extraction; model routing still
+published evidence rather than starting another extraction. A requested chart is
+calculated from the same validated, persisted evidence without changing the
+original report; model routing still
 requires native conversation acceptance.
 Sources with neither approved targets nor discovery permission are excluded.
 For a website step, an omitted target ID can be resolved only from a unique
@@ -135,7 +137,11 @@ run, requested range and whether the period is daily or annual. The reference
 links to the corresponding official entity/indicator page; the explanatory text
 is explicitly a summary derived from Actor output, not a direct quotation from
 that page. Publication time remains unknown; retrieval time and data period are
-different facts. An annual national indicator provides macroeconomic context,
+different facts. Retrieval after the admission window's end is expected and
+does not invalidate an explicitly requested financial period. A structured
+series supports its values without requiring a literal quotation from a web
+page. Provider run identifiers remain in the audit journal and are omitted from
+evidence presented to the model. An annual national indicator provides macroeconomic context,
 not a private retailer's revenue, solvency or market share.
 
 Optional charts use only persisted points of the same metric, entity, indicator,

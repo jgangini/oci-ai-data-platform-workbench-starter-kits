@@ -111,7 +111,8 @@ class Research:
                     'text': json.loads(item['quoted_span_json'])['text'],
                     'metrics': json.loads(document['metrics_json']),
                     'assessment': json.loads(item['assessment_json']) if item['assessment_json'] else None,
-                    'provenance': json.loads(document['provenance_json'])})
+                    'provenance': {key: value for key, value in json.loads(document['provenance_json']).items()
+                                   if key != 'provider_run_id'}})
         return result
 
     def assess(self, run_id, assessments, decision):
