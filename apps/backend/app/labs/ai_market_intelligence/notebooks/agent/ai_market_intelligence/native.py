@@ -8,7 +8,7 @@ from uuid import uuid4
 from . import APIFY_CREDENTIAL_NAME
 from .model import DecisionModel
 from .provider import ApifyProvider
-from .repository import Scope, ObjectSnapshot, Journal, digest, projection_statements, projection_checks
+from .repository import Scope, ObjectSnapshot, Journal, digest, projection_statements, projection_checks, projection_batch_check
 from .workflow import MarketWorkflow
 from .execution import ProviderPending
 from .streaming import run_turn, stream_turn
@@ -128,7 +128,10 @@ class AgentRuntime:
         try:
             writes = list(projection_statements(records, config['catalog'], config['framework_schema']))
             checks = list(projection_checks(records, config['catalog'], config['framework_schema']))
-            total = len(writes) + len(checks)
+            if len(writes) != len(checks):
+                raise RuntimeError('Projection rendering omitted a table verification')
+            batch = projection_batch_check(checks) if checks else None
+            total = len(writes) + bool(batch)
             def notify(completed):
                 progress({'stage': 'project_records', 'completed_steps': completed,
                           'total_steps': total})
@@ -136,9 +139,10 @@ class AgentRuntime:
             for completed, statement in enumerate(writes, 1):
                 await execute(statement)
                 notify(completed)
-            for completed, (statement, expected) in enumerate(checks, len(writes) + 1):
+            if batch:
+                statement, expected = batch
                 verify_projection(await execute(statement), expected)
-                notify(completed)
+                notify(total)
         finally:
             def release(current, state):
                 if state.get('projection_lease') != lease:

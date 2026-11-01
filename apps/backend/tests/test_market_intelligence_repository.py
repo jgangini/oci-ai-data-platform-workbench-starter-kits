@@ -1,11 +1,12 @@
 import copy
 import io
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
 
 from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import (
-    Conflict, Journal, ObjectSnapshot, Records, Scope, projection_statements)
+    Conflict, Journal, ObjectSnapshot, Records, Scope, projection_batch_check, projection_checks, projection_statements)
 
 
 SCOPE = Scope('tenant-a', 'owner-a', '00000000-0000-4000-8000-000000000001')
@@ -132,3 +133,78 @@ def test_generation_cannot_overwrite_another_generations_identity():
     assert SCOPE.key('same-topic') != other.key('same-topic')
     with pytest.raises(ValueError, match='bound generation'):
         Records(other).upsert('ai_mi_topics', {'topic_id': SCOPE.key('same-topic')})
+
+
+def test_projection_batch_validates_checks_instead_of_summing_their_expected_rows():
+    checks = [('SELECT 2 AS total_rows, 2 AS distinct_keys, 2 AS matched_rows', 2),
+              ('SELECT 3 AS total_rows, 3 AS distinct_keys, 3 AS matched_rows', 3)]
+    statement, expected = projection_batch_check(checks)
+    with sqlite3.connect(':memory:') as database:
+        assert database.execute(statement).fetchone() == (2, 2, 2)
+    assert expected == 2
+
+
+@pytest.mark.parametrize('bad_check', [
+    'SELECT 1 AS total_rows, 1 AS distinct_keys, 1 AS matched_rows WHERE 0',
+    'SELECT 1 AS total_rows, 1 AS distinct_keys, 1 AS matched_rows UNION ALL SELECT 1, 1, 1',
+    'SELECT 0 AS total_rows, 1 AS distinct_keys, 1 AS matched_rows',
+    'SELECT 1 AS total_rows, 0 AS distinct_keys, 1 AS matched_rows',
+    'SELECT 1 AS total_rows, 1 AS distinct_keys, 0 AS matched_rows',
+    'SELECT 1 AS total_rows, 1 AS distinct_keys, NULL AS matched_rows',
+], ids=['missing-result', 'duplicate-result', 'wrong-row-count', 'duplicate-keys', 'wrong-values', 'null-values'])
+def test_projection_batch_rejects_incomplete_duplicate_or_mismatched_readback(bad_check):
+    checks = [('SELECT 1 AS total_rows, 1 AS distinct_keys, 1 AS matched_rows', 1), (bad_check, 1)]
+    statement, expected = projection_batch_check(checks)
+    with sqlite3.connect(':memory:') as database:
+        result = database.execute(statement).fetchone()
+    assert result != (expected, expected, expected)
+
+
+def test_projection_batch_cannot_hide_compensating_count_errors_between_tables():
+    checks = [('SELECT 1 AS total_rows, 1 AS distinct_keys, 1 AS matched_rows', 2),
+              ('SELECT 3 AS total_rows, 3 AS distinct_keys, 3 AS matched_rows', 2)]
+    statement, expected = projection_batch_check(checks)
+    with sqlite3.connect(':memory:') as database:
+        assert database.execute(statement).fetchone() == (2, 2, 0)
+    assert expected == 2
+
+
+def test_projection_batch_cannot_replace_a_missing_check_with_another_checks_duplicate():
+    checks = [('SELECT 1 AS total_rows, 1 AS distinct_keys, 1 AS matched_rows WHERE 0', 1),
+              ('SELECT 1 AS total_rows, 1 AS distinct_keys, 1 AS matched_rows UNION ALL SELECT 1, 1, 1', 1)]
+    statement, expected = projection_batch_check(checks)
+    with sqlite3.connect(':memory:') as database:
+        assert database.execute(statement).fetchone() == (2, 1, 2)
+    assert expected == 2
+
+
+def test_projection_batch_empty_readback_produces_zero_counts_instead_of_success():
+    statement, expected = projection_batch_check([
+        ('SELECT 1 AS total_rows, 1 AS distinct_keys, 1 AS matched_rows WHERE 0', 1)])
+    with sqlite3.connect(':memory:') as database:
+        assert database.execute(statement).fetchone() == (0, 0, 0)
+    assert expected == 1
+
+
+def test_projection_batch_accepts_the_fourteen_table_bound_and_preserves_original_selects():
+    checks = [(f'SELECT {count} AS total_rows, {count} AS distinct_keys, {count} AS matched_rows', count)
+              for count in range(1, 15)]
+    statement, expected = projection_batch_check(checks)
+    with sqlite3.connect(':memory:') as database:
+        assert database.execute(statement).fetchone() == (14, 14, 14)
+    assert expected == 14
+    records = Records(SCOPE)
+    records.upsert('ai_mi_topics', {'topic_id': SCOPE.key('batch-topic')})
+    records.upsert('ai_mi_questions', {'question_id': SCOPE.key('batch-question'), 'topic_id': SCOPE.key('batch-topic')})
+    generated = list(projection_checks(records, 'catalog', 'oci_artifacts'))
+    statement, expected = projection_batch_check(generated)
+    assert expected == len(generated) == 2
+    assert all('FROM (' + select + ')' in statement for select, _ in generated)
+
+
+@pytest.mark.parametrize('checks', [None, [], [('SELECT 1', 1)] * 15, [('SELECT 1', 0)],
+                                   [('SELECT 1', -1)], [('SELECT 1', True)], [('SELECT 1', 1.0)],
+                                   [('', 1)], [(None, 1)], [('SELECT 1',)]])
+def test_projection_batch_rejects_invalid_shape_or_nonpositive_expected_rows(checks):
+    with pytest.raises(ValueError):
+        projection_batch_check(checks)

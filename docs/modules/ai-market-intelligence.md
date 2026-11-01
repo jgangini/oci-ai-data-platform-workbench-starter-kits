@@ -69,6 +69,9 @@ and cannot produce a verified success response.
 SQL tool registry names are scoped to tenant, owner and generation. This avoids
 concurrent projections replacing another scope's query configuration in Oracle's
 name-based tool registry; per-scope leases still serialize that scope's writes.
+MERGEs remain sequential. Readback retains each table's scoped row, key and value
+checks inside one aggregate SQL request; every table must pass individually, so
+errors cannot cancel each other across tables. Empty snapshots issue no SQL.
 
 The package declares twenty-two hash-checked runtime assets, including its own memory
 adapter, with no shared dependency on the legacy Social package. The loader

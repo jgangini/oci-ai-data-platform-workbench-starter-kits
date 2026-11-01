@@ -121,12 +121,12 @@ def test_native_projection_stream_reports_verified_steps_and_releases_its_lease(
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.graph import END, START, StateGraph
     from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import (
-        projection_checks, projection_statements)
+        projection_batch_check, projection_checks, projection_statements)
 
     flow, model, provider, _ = configured()
     before = flow.records()
     writes = list(projection_statements(before, 'oci_medallion', 'oci_artifacts'))
-    checks = dict(projection_checks(before, 'oci_medallion', 'oci_artifacts'))
+    batch, expected_checks = projection_batch_check(list(projection_checks(before, 'oci_medallion', 'oci_artifacts')))
     queries = []
     configs = ModuleType('aidputils.agents.toolkit.configs')
     helper = ModuleType('aidputils.agents.toolkit.tool_helper')
@@ -137,8 +137,8 @@ def test_native_projection_stream_reports_verified_steps_and_releases_its_lease(
         async def invoke(arguments):
             assert arguments == {}
             queries.append(statement)
-            if statement in checks:
-                expected = checks[statement]
+            if statement == batch:
+                expected = expected_checks
                 return {'rows': [{'total_rows': expected, 'distinct_keys': expected,
                                   'matched_rows': expected + 1 if fail_readback else expected}]}
             assert statement in writes
@@ -172,13 +172,13 @@ def test_native_projection_stream_reports_verified_steps_and_releases_its_lease(
                 await collect()
             assert all(event['event'] != 'result' for event in events)
             completed = len(writes)
-            assert queries == [*writes, next(iter(checks))]
+            assert queries == [*writes, batch]
         else:
             await collect()
             assert events[-1]['state']['response']['markdown'] == 'Projection verified'
-            completed = len(writes) + len(checks)
-            assert queries == [*writes, *checks]
-        total = len(writes) + len(checks)
+            completed = len(writes) + 1
+            assert queries == [*writes, batch]
+        total = len(writes) + 1
         progress = [event for event in events if event.get('stage') == 'project_records']
         assert [event['markdown'] for event in progress] == [
             f'Guardando y verificando registros: {step} de {total} pasos.' for step in range(completed + 1)]
@@ -196,7 +196,7 @@ def test_concurrent_projection_tools_resolve_only_the_sql_for_their_own_scope(mo
     from dataclasses import replace
     from types import SimpleNamespace
     from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import (
-        Journal, Records, digest, json_text, projection_checks, projection_statements)
+        Journal, Records, digest, json_text, projection_batch_check, projection_checks, projection_statements)
     from test_market_intelligence_repository import MemorySnapshot, SCOPE
 
     other = replace(SCOPE, owner_id='other-owner') if scope_change == 'owner' else replace(
@@ -211,10 +211,10 @@ def test_concurrent_projection_tools_resolve_only_the_sql_for_their_own_scope(mo
             'canonical_scope_json': json_text({'entity': scope.owner_id, 'market': 'Colombia', 'objective': 'Scope fixture'})}))
         records = Records(scope, journal.read()[0]['tables'])
         writes = list(projection_statements(records, 'oci_medallion', 'oci_artifacts'))
-        checks = dict(projection_checks(records, 'oci_medallion', 'oci_artifacts'))
+        batch, check_count = projection_batch_check(list(projection_checks(records, 'oci_medallion', 'oci_artifacts')))
         journals.append(journal)
-        expected.append([*writes, *checks])
-        expected_checks.update(checks)
+        expected.append([*writes, batch])
+        expected_checks[batch] = check_count
     owners = {statement: index for index, statements in enumerate(expected) for statement in statements}
     registry, executed, names = {}, [[], []], [set(), set()]
     configs = ModuleType('aidputils.agents.toolkit.configs')
@@ -255,7 +255,8 @@ def test_concurrent_projection_tools_resolve_only_the_sql_for_their_own_scope(mo
         assert journal.read()[0]['projection_lease'] is None
 
 
-def test_projection_rendering_failure_releases_its_lease_before_any_sql(monkeypatch):
+@pytest.mark.parametrize('failure', ['rendering', 'omitted_check'])
+def test_projection_rendering_failure_releases_its_lease_before_any_sql(monkeypatch, failure):
     from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence import native
 
     flow, model, provider, _ = configured()
@@ -270,16 +271,39 @@ def test_projection_rendering_failure_releases_its_lease_before_any_sql(monkeypa
     def broken_statements(*args):
         yield from ()
         raise RuntimeError('Synthetic projection rendering failure')
-    monkeypatch.setattr(native, 'projection_statements', broken_statements)
+    if failure == 'rendering':
+        monkeypatch.setattr(native, 'projection_statements', broken_statements)
+    else:
+        monkeypatch.setattr(native, 'projection_checks', lambda *args: iter(()))
     runtime = AgentRuntime()
     runtime.config = {'catalog': 'oci_medallion', 'framework_schema': 'oci_artifacts',
                       'gold_query_compute_id': 'synthetic-query-compute'}
-    with pytest.raises(RuntimeError, match='projection rendering failure'):
+    with pytest.raises(RuntimeError, match='projection rendering failure|omitted a table verification'):
         asyncio.run(runtime.project(flow.journal))
     value, _ = flow.journal.read()
     assert value['projection_lease'] is None
     assert value['tables'] == before.tables
     assert not model.calls and not provider.starts
+
+
+def test_empty_projection_needs_no_sql_and_releases_its_lease(monkeypatch):
+    from test_market_intelligence_repository import MemorySnapshot
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import Journal
+    configs = ModuleType('aidputils.agents.toolkit.configs')
+    helper = ModuleType('aidputils.agents.toolkit.tool_helper')
+    def forbidden(*args, **kwargs):
+        pytest.fail('An empty projection must not execute SQL')
+    configs.AIDPToolConf = helper.create_langgraph_tool = forbidden
+    monkeypatch.setitem(sys.modules, configs.__name__, configs)
+    monkeypatch.setitem(sys.modules, helper.__name__, helper)
+    runtime = AgentRuntime()
+    runtime.config = {'catalog': 'oci_medallion', 'framework_schema': 'oci_artifacts',
+                      'gold_query_compute_id': 'synthetic-query-compute'}
+    journal = Journal(MemorySnapshot(), 0)
+    asyncio.run(runtime.project(journal))
+    value, _ = journal.read()
+    assert value['projection_lease'] is None
+    assert all(not rows for rows in value['tables'].values())
 
 
 def test_denied_budget_is_not_presented_as_admission_or_a_sent_capture():
