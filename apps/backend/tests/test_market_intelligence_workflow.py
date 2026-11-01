@@ -802,14 +802,14 @@ def test_package_is_readable_unseeded_and_uses_the_existing_dependency_contract(
     source, assets = agent_package(config)
     assert b'MarketIntelligenceAgent' in source
     import ast
-    entry = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef))
+    entry = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == 'MarketIntelligenceAgent')
     assert {'setup', 'invoke'}.issubset({node.name for node in entry.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))})
     assert not any('development_pilot' in name for name in assets)
     assert assets['requirements.txt'] == b'# AIDP provides aidputils, LangGraph and OCI runtime libraries.\n'
-    for name, content in assets.items():
-        if name.endswith('.json'):
-            assert content == json.dumps(json.loads(content), sort_keys=True, separators=(',', ':')).encode()
-    assert json.loads(assets['ai_market_intelligence/runtime.json'])['research_enabled'] is False
+    assert set(assets) == {'requirements.txt'}
+    binding = next(node.value for node in ast.parse(source).body if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == 'RUNTIME_CONFIG' for target in node.targets))
+    assert ast.literal_eval(binding) == config
 
 
 def test_provider_cannot_mix_an_actor_id_with_an_unrelated_status():

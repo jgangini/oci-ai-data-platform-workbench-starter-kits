@@ -2,7 +2,7 @@
   "schema_version": 1,
   "lab_id": "ai_market_intelligence",
   "display_name": "AI Market Intelligence",
-  "pack_version": "1.0.2",
+  "pack_version": "1.0.3",
   "status": "planned",
   "kind": "global_module",
   "scope": "global",
@@ -49,7 +49,7 @@
     "card": {
       "name": "ai_market_intelligence",
       "description": "On-demand market research using approved sources, explicit periods and bounded budgets. Returns evidence-based Markdown reports and comparable data tables; discloses partial coverage. Uses stored evidence for follow-up and lists registered topic sources. Recurring research is proposed for human confirmation; automatic scheduled dispatch and visual charts are not yet enabled.",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "capabilities": {
         "isStreaming": true
       },
@@ -224,5 +224,5 @@
       "sha256": "87516a2e0f446f2e32cef8e5b05e99edb545d23fabfe08ed43d704bdf1776d04"
     }
   ],
-  "pack_sha256": "0d63882f403e051261e0ff96cc0f4947c5a00cab359bb06ac9f2a7c2ae921d5d"
+  "pack_sha256": "c794589f32c268b87d65acfead483d1d4642ef0daffd4a7672bbdc547e15eee7"
 }

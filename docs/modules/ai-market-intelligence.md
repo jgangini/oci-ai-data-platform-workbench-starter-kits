@@ -51,7 +51,7 @@ acceptance checks; do not distribute a token-bearing login callback as a chat li
 | --- | --- | --- |
 | User to Agent Hub / endpoint | Authenticated caller and resource permissions | Authorize invocation and retain the caller's isolated conversation/research scope. |
 | Agent platform operations | Deployment Run As identity, where supported | Execute platform operations; this does not determine downstream tool authentication. |
-| OCI services used by the research runtime | Shared OCI-only credential named by `runtime.json → credential_name` | Initialize the configured model and Object Storage clients; verify the installation identity binding. |
+| OCI services used by the research runtime | Shared OCI-only credential named by the entry's `RUNTIME_CONFIG['credential_name']` | Initialize the configured model and Object Storage clients; verify the installation identity binding. |
 | Agent to Apify MCP | `AiMarketIntelligenceApifyBearer`, secret field `token` | Authenticate reviewed research tools without asking each chat user for an Apify token. |
 
 The implementation in
@@ -145,9 +145,15 @@ readback forces complete writes on the next delivery; it never repeats capture.
 External table drift is detected by readback, so that delivery fails before
 the following attempt repairs the projection.
 
-The package declares twenty-three hash-checked runtime assets, including its own memory
-adapter, with no shared dependency on the legacy Social package. The loader
-rejects undeclared paths and changed asset bytes. Its fourteen `ai_mi_` framework
+The package declares twenty-four hash-checked authoring assets, including its own memory
+adapter, with no shared dependency on the legacy Social package. During packaging,
+the installer assembles them into one readable `market_intelligence.py` and deploys
+only that entry, `requirements.txt` and `agent-manifest.json`. It resolves local
+imports and embeds prompts, schema, MCP definitions and nonsecret runtime settings
+as visible Python constants. No runtime loader or supplementary source folder is
+required. The loader rejects undeclared paths and changed asset bytes; assembly
+rejects unknown local imports, changed entry-wrapper behavior and global-definition
+collisions. Its fourteen `ai_mi_` framework
 tables and 145 documented columns are defined in
 [schema.json](../../apps/backend/app/labs/ai_market_intelligence/notebooks/agent/ai_market_intelligence/schema.json).
 All belong in the configured `oci_artifacts` schema. The installation contract
@@ -506,3 +512,43 @@ medallion notebooks and CSV inputs because it is a data pipeline. This module
 has no seed data and generates only an operation-owned temporary model script,
 which is removed after verified success. Host-side provisioning stays outside
 the package in `app/market_installation/`, and is not uploaded to AIDP.
+
+The repository tree above is the maintained authoring layout. The deployed agent
+project follows the same three-file layout as Governance:
+
+```text
+/Workspace/.control/modules/ai_market_intelligence/agent/
+  agent-manifest.json
+  market_intelligence.py
+  requirements.txt
+```
+
+The native agent's create-time `pathInfo` must equal this directory, in addition
+to its correct entry and dependencies paths. Correcting only those two file
+bindings leaves an old project root unresolved in Development. The installer
+rejects that mismatch and requires explicit agent recreation; it does not claim
+to repair a create-only root through an update payload. Existing extra workspace
+files require separately scoped cleanup after verifying their identity and bytes.
+
+Standalone regressions import and execute the assembled entry with the installed
+LangGraph, exercise research, evidence, replay and streaming, and simulate native
+service bindings for setup and paused invocation. They complement native TEST;
+they do not establish Registry discovery or published endpoint acceptance.
+
+The first TEST must currently be initialized by opening the new agent's native
+Workbench Playground. Subsequent revision refreshes use the verified TEST-only
+redeploy adapter. Creating a bare deployment record is not a substitute for
+starting the native deployment: the adapter refuses an uninitialized TEST before
+recording a submission. Fully automated first-time TEST initialization remains
+pending a verified execution contract. Existing pending deployments must be
+reconciled before retrying; a still-`CREATING` record is not execution acceptance.
+
+For native Registry acceptance, verify that the active deployment returns a
+nonempty `agentCardUrl`, not only an HTTP 200 from a manually constructed card
+URL. If the metadata is missing, use Workbench's **Edit agent metadata**, save
+the reviewed card and redeploy; then read the native deployment again and test
+the local-agent selector in AI Registry. This repair was verified separately
+from recreating the workspace project. Do not delete sources, tables or
+credentials to repair a missing card-discovery URL. The installer does not yet
+automate this metadata-repair sequence or Registry registration; these remain
+explicit native acceptance steps.

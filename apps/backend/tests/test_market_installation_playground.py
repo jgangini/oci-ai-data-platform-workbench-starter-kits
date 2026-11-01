@@ -16,6 +16,7 @@ def test_refresh_uses_only_test_payload_and_verified_entry(monkeypatch):
     calls = []
     source = b'approved readable source'
     ga = SimpleNamespace(_workspace=lambda: {'key': 'workspace'}, _request=lambda *a: {'type': 'CODE', 'computeKey': 'compute',
+        'pathInfo': '/Workspace/.control/modules/ai_market_intelligence/agent',
         'entryFilePath': '/Workspace/.control/modules/ai_market_intelligence/agent/market_intelligence.py',
         'dependenciesFilePath': '/Workspace/.control/modules/ai_market_intelligence/agent/requirements.txt'},
         _workspace_object=lambda workspace, path, **k: (b'dependency' if path.endswith('requirements.txt') else source, {}),
@@ -37,6 +38,24 @@ def test_refresh_uses_only_test_payload_and_verified_entry(monkeypatch):
     assert result['deployment_type'] == 'TEST' and result['previous_version'] == 'old'
     assert calls[0][0] == 'POST' and calls[0][2] == {
         'agentFlowKey': 'agent', 'agentFlowComputeKey': 'compute', 'deploymentType': 'TEST'}
+
+
+def test_initial_test_requires_native_initialization_without_creating_a_pending_record(monkeypatch):
+    from app.aidp import AidpProvisionConflict
+    root = '/Workspace/.control/modules/ai_market_intelligence/agent'
+    ga = SimpleNamespace(_workspace=lambda: {'key': 'workspace'},
+        _request=lambda *a: {'type': 'CODE', 'computeKey': 'compute', 'pathInfo': root,
+            'entryFilePath': root + '/market_intelligence.py', 'dependenciesFilePath': root + '/requirements.txt'},
+        _workspace_object=lambda *a, **k: (b'content', {}), _content_matches=lambda *a: True,
+        session=SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr('app.market_installation.playground.AidpClient', lambda settings: ga)
+    client = MarketPlaygroundClient.__new__(MarketPlaygroundClient)
+    client.settings = object()
+    client.test_deployments = lambda *a: []
+    client._request = lambda *a, **k: pytest.fail('Do not create an unverified TEST record')
+    with pytest.raises(AidpProvisionConflict, match='initialize TEST'):
+        client.refresh('workspace', 'agent', 'compute', b'content', assets={'requirements.txt': b'content'},
+            expected_workspace='workspace', on_submit=lambda *a: pytest.fail('No mutation intent was submitted'))
 
 
 def test_refresh_refuses_other_workspace_before_any_request():

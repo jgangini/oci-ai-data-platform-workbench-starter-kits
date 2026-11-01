@@ -75,7 +75,7 @@ def output_receipt():
 def test_native_agent_bindings_are_reconciled_without_replacing_identity(drift):
     api = client()
     api._agent_deployments = lambda *a: []
-    expected = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE',
+    expected = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE', 'pathInfo': installer.ROOT + '/agent',
                 'entryFilePath': installer.ROOT + '/agent/market_intelligence.py',
                 'dependenciesFilePath': installer.ROOT + '/agent/requirements.txt', 'computeKey': 'compute'}
     current = {**expected, **({drift: 'old-binding'} if drift else {})}
@@ -99,7 +99,7 @@ def test_native_agent_bindings_are_reconciled_without_replacing_identity(drift):
 def test_native_agent_binding_repair_fails_closed(fault):
     api = client()
     api._agent_deployments = lambda *a: []
-    current = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE',
+    current = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE', 'pathInfo': installer.ROOT + '/agent',
                'entryFilePath': installer.ROOT + '/agent/market_intelligence.py',
                'dependenciesFilePath': '/old/requirements.txt', 'computeKey': 'compute'}
     if fault == 'foreign_name':
@@ -127,7 +127,7 @@ def test_existing_agent_phase_uses_only_the_conditional_binding_writer(monkeypat
     monkeypatch.setattr(installer, 'agent_package', lambda config: (b'changed-source', {}))
     api._ensure_agent = lambda *a, **k: pytest.fail('Existing identity must not enter the unconditional base updater')
     api._agent_deployments = lambda *a: []
-    current = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE',
+    current = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE', 'pathInfo': installer.ROOT + '/agent',
                'entryFilePath': '/Workspace/ai_market_intelligence/agent/market_intelligence.py',
                'dependenciesFilePath': '/Workspace/ai_market_intelligence/agent/requirements.txt', 'computeKey': 'old'}
     writes, descriptors = [], []
@@ -155,12 +155,26 @@ def test_existing_agent_phase_uses_only_the_conditional_binding_writer(monkeypat
 def test_binding_repair_preserves_an_active_production_deployment():
     api = client()
     api._agent_deployments = lambda *a: [{'key': 'production'}]
-    current = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE'}
+    current = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE', 'pathInfo': installer.ROOT + '/agent'}
     def request(method, path, **kwargs):
         assert method == 'GET'
         return current, {'etag': 'revision-1'}
     api._request = request
     with pytest.raises(AidpProvisionConflict, match='production deployment'):
+        api._verify_agent_bindings('workspace', 'agent', 'compute')
+
+
+@pytest.mark.parametrize('root', ['/Workspace/ai_market_intelligence/agent', None])
+def test_correct_entry_does_not_hide_a_stale_or_missing_project_root(root):
+    api = client()
+    detail = {'key': 'agent', 'displayName': installer.MODULE_ID, 'type': 'CODE', 'pathInfo': root,
+              'entryFilePath': installer.ROOT + '/agent/market_intelligence.py',
+              'dependenciesFilePath': installer.ROOT + '/agent/requirements.txt', 'computeKey': 'compute'}
+    def request(method, path, **kwargs):
+        assert method == 'GET', 'A create-only project root cannot be repaired by PUT'
+        return detail, {'etag': 'revision-1'}
+    api._request = request
+    with pytest.raises(AidpProvisionConflict, match='project root'):
         api._verify_agent_bindings('workspace', 'agent', 'compute')
 
 

@@ -1,6 +1,6 @@
 """Readable workspace package; no source discovery or secrets in generated code."""
-import json
 from app.lab_packs import LabPackError, load_lab_pack
+from .agent_source import assemble_agent
 
 
 FILES = ('__init__.py', 'workflow.py', 'workflow_actions.py', 'model.py', 'native.py', 'streaming.py', 'presentation.py', 'provider.py',
@@ -25,14 +25,7 @@ def agent_package(config):
     if {asset.name for asset in pack.runtime_files} != declared:
         raise LabPackError('Market package must declare every reviewed runtime file')
     assets = {asset.name.removeprefix('notebooks/agent/'): asset.read_bytes() for asset in pack.runtime_files}
-    source = assets.pop('market_intelligence.py')
-    assets['ai_market_intelligence/runtime.json'] = json.dumps(config, ensure_ascii=False, sort_keys=True).encode()
-    # Workbench GET decodes JSON objects; canonical bytes preserve semantic/hash verification.
-    for name, value in list(assets.items()):
-        if name.endswith('.json'):
-            assets[name] = json.dumps(json.loads(value), sort_keys=True, separators=(',', ':')).encode()
-    compile(source, 'market_intelligence.py', 'exec')
-    for name, content in assets.items():
-        if name.endswith('.py'):
-            compile(content, name, 'exec')
-    return source, assets
+    files = {name.removeprefix('ai_market_intelligence/'): content for name, content in assets.items()
+             if name.startswith('ai_market_intelligence/')}
+    source = assemble_agent(files, assets['market_intelligence.py'], config)
+    return source, {'requirements.txt': assets['requirements.txt']}
