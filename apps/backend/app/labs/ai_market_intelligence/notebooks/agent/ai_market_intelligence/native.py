@@ -110,8 +110,9 @@ class AgentRuntime:
             progress = get_stream_writer()
         except RuntimeError:
             progress = lambda event: None
+        tool_name = 'ai_mi_projection_' + digest(journal.scope.__dict__)[:32]
         async def execute(statement):
-            tool = create_langgraph_tool(AIDPToolConf(name='ai_mi_projection', description='Project validated owner-scoped research records',
+            tool = create_langgraph_tool(AIDPToolConf(name=tool_name, description='Project validated owner-scoped research records',
                 tool_class='SQLTool', conf={'catalogType': 'STANDARD', 'clusterKey': config['gold_query_compute_id'],
                 'catalogKey': config['catalog'], 'schemaKey': config['framework_schema'], 'query': statement,
                 'isRowLimitEnabled': True, 'maxRows': 1}, params=[]).model_dump())

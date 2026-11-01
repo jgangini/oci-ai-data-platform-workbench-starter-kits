@@ -55,6 +55,9 @@ exact approved URL match; ambiguous or unapproved choices ask for clarification.
 When evidence exists but the planner needs a broader source scope, the runtime
 publishes a partial report with an unresolved conclusion and the remaining gap;
 it does not start unapproved searches or withhold all recovered findings.
+Reports default to a short executive summary with readable source links;
+technical evidence identifiers stay in the structured findings. Explicit requests
+for detail can receive a longer explanation.
 Replaying an admitted request also preserves its original research window,
 including when its journal is recovered from a new native session.
 
@@ -63,6 +66,9 @@ Completed-node milestones follow their updated state; an event alone does not
 prove native checkpoint persistence. Disconnect/resume remains subject to the
 managed checkpointer and paid-operation journal. Projection failures release their lease
 and cannot produce a verified success response.
+SQL tool registry names are scoped to tenant, owner and generation. This avoids
+concurrent projections replacing another scope's query configuration in Oracle's
+name-based tool registry; per-scope leases still serialize that scope's writes.
 
 The package declares twenty-two hash-checked runtime assets, including its own memory
 adapter, with no shared dependency on the legacy Social package. The loader

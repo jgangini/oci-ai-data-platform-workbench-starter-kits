@@ -191,6 +191,70 @@ def test_native_projection_stream_reports_verified_steps_and_releases_its_lease(
     assert not model.calls and not provider.starts
 
 
+@pytest.mark.parametrize('scope_change', ['owner', 'generation'])
+def test_concurrent_projection_tools_resolve_only_the_sql_for_their_own_scope(monkeypatch, scope_change):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import (
+        Journal, Records, digest, json_text, projection_checks, projection_statements)
+    from test_market_intelligence_repository import MemorySnapshot, SCOPE
+
+    other = replace(SCOPE, owner_id='other-owner') if scope_change == 'owner' else replace(
+        SCOPE, generation_id='00000000-0000-4000-8000-000000000002')
+    journals, expected, expected_checks = [], [], {}
+    for scope in (SCOPE, other):
+        snapshot = MemorySnapshot()
+        snapshot.scope = scope
+        journal = Journal(snapshot, 0)
+        journal.transact(lambda records, state: records.upsert('ai_mi_topics', {
+            'topic_id': scope.key('projection-topic'),
+            'canonical_scope_json': json_text({'entity': scope.owner_id, 'market': 'Colombia', 'objective': 'Scope fixture'})}))
+        records = Records(scope, journal.read()[0]['tables'])
+        writes = list(projection_statements(records, 'oci_medallion', 'oci_artifacts'))
+        checks = dict(projection_checks(records, 'oci_medallion', 'oci_artifacts'))
+        journals.append(journal)
+        expected.append([*writes, *checks])
+        expected_checks.update(checks)
+    owners = {statement: index for index, statements in enumerate(expected) for statement in statements}
+    registry, executed, names = {}, [[], []], [set(), set()]
+    configs = ModuleType('aidputils.agents.toolkit.configs')
+    helper = ModuleType('aidputils.agents.toolkit.tool_helper')
+    configs.AIDPToolConf = lambda **values: SimpleNamespace(model_dump=lambda: values)
+
+    def register(definition):
+        name = definition['name']
+        caller = owners[definition['conf']['query']]
+        registry[name] = definition
+        names[caller].add(name)
+        async def invoke(arguments):
+            assert arguments == {}
+            # Oracle resolves the registered configuration by name after async dispatch.
+            await asyncio.sleep(0)
+            statement = registry[name]['conf']['query']
+            executed[caller].append(statement)
+            if statement in expected_checks:
+                count = expected_checks[statement]
+                return {'rows': [{'total_rows': count, 'distinct_keys': count, 'matched_rows': count}]}
+            return {'rows': []}
+        return SimpleNamespace(ainvoke=invoke)
+
+    helper.create_langgraph_tool = register
+    monkeypatch.setitem(sys.modules, configs.__name__, configs)
+    monkeypatch.setitem(sys.modules, helper.__name__, helper)
+    runtimes = [AgentRuntime(), AgentRuntime()]
+    for runtime in runtimes:
+        runtime.config = {'catalog': 'oci_medallion', 'framework_schema': 'oci_artifacts',
+                          'gold_query_compute_id': 'synthetic-query-compute'}
+    async def project_both():
+        await asyncio.gather(*(runtime.project(journal) for runtime, journal in zip(runtimes, journals)))
+    asyncio.run(project_both())
+    assert executed == expected
+    assert names[0].isdisjoint(names[1])
+    for index, journal in enumerate(journals):
+        assert names[index] == {'ai_mi_projection_' + digest(journal.scope.__dict__)[:32]}
+        assert journal.read()[0]['projection_lease'] is None
+
+
 def test_projection_rendering_failure_releases_its_lease_before_any_sql(monkeypatch):
     from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence import native
 
