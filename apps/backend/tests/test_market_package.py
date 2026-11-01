@@ -8,6 +8,27 @@ from app import lab_packs
 from app.market_installation.agent_package import FILES
 
 
+def test_market_agent_card_matches_version_identity_streaming_and_reviewed_capabilities():
+    pack = lab_packs.load_lab_pack('ai_market_intelligence', require_available=False)
+    card = pack.agent['card']
+    assert set(card) == {'name', 'description', 'version', 'capabilities', 'skills'}
+    assert card['name'] == pack.agent['name'] == 'ai_market_intelligence'
+    assert card['version'] == pack.pack_version
+    assert card['capabilities'] == {'isStreaming': True}
+    assert {skill['id'] for skill in card['skills']} == {
+        'approved_market_research', 'stored_report_followup', 'registered_topic_sources'}
+    assert len(card['skills']) == 3
+    for skill in card['skills']:
+        assert set(skill) == {'id', 'name', 'description', 'tags', 'examples'}
+        assert all(isinstance(skill[field], str) and skill[field].strip()
+                   for field in ('id', 'name', 'description'))
+        assert skill['tags'] and all(isinstance(tag, str) and tag for tag in skill['tags'])
+        assert skill['examples'] and all(isinstance(example, str) and example for example in skill['examples'])
+    assert 'not yet enabled' in card['description']
+    assert 'automatic scheduled dispatch' in card['description']
+    assert 'visual charts' in card['description']
+
+
 def test_market_candidate_has_documented_empty_framework_and_own_runtime():
     pack = lab_packs.load_lab_pack('ai_market_intelligence', require_available=False)
     assert pack.status == 'planned'

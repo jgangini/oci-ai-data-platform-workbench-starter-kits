@@ -13,6 +13,29 @@ installer. Apify uses Bearer authentication through the project Credential Store
 entry; OAuth through AI Registry is out of scope and is not an acceptance gate.
 An existing development experiment is not an installation receipt.
 
+## Agent card and Agent Hub
+
+`lab.json → agent.card` is the maintained definition of the A2A card: lowercase
+agent name, package version, streaming and three skills covering approved-source
+research, stored-report follow-up and registered-source listing. It explicitly
+excludes automatic scheduled dispatch and rendered visual charts. This metadata
+does not enable a tool or grant access.
+
+Oracle distinguishes the development card from the card snapshotted with a
+[published deployment](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aidug/agent-flow-deployment.html).
+Apply the package definition through **Edit agent metadata** in Workbench and
+verify its readback before publishing the TEST-accepted candidate. The current
+installer does not automate card reconciliation or AI Registry registration;
+those remain explicit native operations. The GA read exposes `agentCardConfig`,
+but that alone does not prove a conditional GA update contract. Do not infer it
+from the older AgentFlows API or overwrite a published card automatically.
+
+Use AIDP authentication and the existing dedicated compute when publishing for
+Agent Hub. Registration and permissions must be checked separately; a successful
+TEST deployment is not a registered agent, and registration does not establish
+conversation or streaming acceptance. Apify remains authenticated by its Bearer
+credential inside the agent, independently of the Agent Hub caller.
+
 ## Native chat in TEST
 
 The research runtime accepts ordinary questions of 1–500 characters. It keeps

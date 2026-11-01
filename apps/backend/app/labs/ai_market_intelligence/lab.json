@@ -45,7 +45,56 @@
     "name": "ai_market_intelligence",
     "memory": "AI_LAKEHOUSE",
     "streaming": "graph_milestones",
-    "graphs": "optional"
+    "graphs": "optional",
+    "card": {
+      "name": "ai_market_intelligence",
+      "description": "On-demand market research using approved sources, explicit periods and bounded budgets. Returns evidence-based Markdown reports and comparable data tables; discloses partial coverage. Uses stored evidence for follow-up and lists registered topic sources. Recurring research is proposed for human confirmation; automatic scheduled dispatch and visual charts are not yet enabled.",
+      "version": "1.0.2",
+      "capabilities": {
+        "isStreaming": true
+      },
+      "skills": [
+        {
+          "id": "approved_market_research",
+          "name": "Research approved market sources",
+          "description": "Investigate a company or market within an explicit time window and approved source and budget scope. Contrast retrieved evidence, preserve citations and limitations, and return a partial report when coverage is insufficient. Supports reviewed web, X, World Bank and daily financial-history adapters; does not claim complete social coverage.",
+          "tags": [
+            "market-research",
+            "evidence",
+            "approved-sources"
+          ],
+          "examples": [
+            "Investiga las novedades de D1 en Colombia en los ultimos siete dias usando las fuentes aprobadas."
+          ]
+        },
+        {
+          "id": "stored_report_followup",
+          "name": "Explain stored research",
+          "description": "Answer follow-up questions using the report and evidence already recovered. Can summarize or show comparable data as a table without starting another paid extraction. Does not promise a rendered visual chart.",
+          "tags": [
+            "reports",
+            "follow-up",
+            "evidence"
+          ],
+          "examples": [
+            "Resume el informe anterior en dos frases sin hacer otra extraccion."
+          ]
+        },
+        {
+          "id": "registered_topic_sources",
+          "name": "List registered topic sources",
+          "description": "List active source destinations registered for the authenticated user and canonical topic. Distinguish discovery scope and suspended adapters. This reads the catalog; interpretation uses the configured model and does not run Apify Actors.",
+          "tags": [
+            "sources",
+            "catalog",
+            "read-only"
+          ],
+          "examples": [
+            "Que fuentes y destinos tengo registrados para el tema actual?"
+          ]
+        }
+      ]
+    }
   },
   "runtime_files": [
     {
@@ -175,5 +224,5 @@
       "sha256": "87516a2e0f446f2e32cef8e5b05e99edb545d23fabfe08ed43d704bdf1776d04"
     }
   ],
-  "pack_sha256": "fee5e3c0dcbb08d41cf253e5d70dac833865bc891241cf01b877567002ea511f"
+  "pack_sha256": "0d63882f403e051261e0ff96cc0f4947c5a00cab359bb06ac9f2a7c2ae921d5d"
 }
