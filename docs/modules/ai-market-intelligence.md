@@ -176,12 +176,12 @@ Seven retirement phases precede the existing twelve installation phases:
 
 1. Freeze project identities and ownership metadata before any cancellation or
    deletion. Matching names alone do not authorize table, compute or credential
-   removal. Unknown model revisions, missing concurrency tokens or shared compute
-   consumers block retirement.
+   removal. Unknown model revisions or shared compute consumers block retirement.
 2. Cancel project workflow runs and wait for their terminal states. Recheck runs
    during retirement and before tables/storage are touched.
 3. Remove the inventoried workflows, deployments, agent and dedicated AI Compute.
-   Re-read resource scope and use conditional native deletes; wait for absence.
+   Re-read resource scope and use conditional native deletes when ETag is present;
+   wait for absence.
 4. Remove only the fourteen allowlisted, model-owned table names in artifacts or
    their previous Gold location. Other tables, schemas and catalogs are retained.
 5. Clear only `ai_market_intelligence/` in the selected artifacts bucket, with
@@ -202,6 +202,17 @@ new credential phase completes. Reloading during retirement requires re-entry;
 the history and browser storage never contain the token. Native deletion has
 irreversible consequences and remains subject to the service's retention behavior.
 The application assumes one portal coordinator, not a distributed admission lock.
+For explicit Reinstall only, AIDP may omit ETag for agents, workflows, dedicated
+compute and tables. The first three require UUIDs; tables use their qualified
+names, which can be reused. All require creator and creation timestamp, the full
+project ownership checks, a frozen binding/version/storage fingerprint and a
+second GET after persisting deletion intent. Table removal also rechecks absence
+of project writers. Any observed drift blocks removal; a newly available ETag is
+used. This compatibility path cannot prevent a concurrent edit or table replacement
+between the final GET and DELETE and is **not atomic compare-and-swap**. Avoid
+concurrent administrative changes during retirement. Credentials and deployments
+still require ETag; versions are never fabricated into ETags. Native AI Compute
+listing explicitly selects `type=AI_COMPUTE`; the default list only returns Spark.
 Native retirement and fresh installation acceptance must be verified separately
 from the simulated resource and UI regressions.
 
