@@ -41,8 +41,15 @@ def test_web_reader_requires_cost_envelope_and_explicit_approved_urls():
     with pytest.raises(ValueError, match='approved targets'):
         compile_call('website', args, WINDOW, 100000, usage_cost_verified=True)
     call = compile_call('website', args, WINDOW, 100000, approved_urls=args['urls'], usage_cost_verified=True)
+    assert call['waitSecs'] == 0
+    assert call['callOptions']['memory'] == 512
     assert call['input']['maxCrawlPages'] == 1 and call['input']['maxCrawlDepth'] == 0
     assert not call['input']['saveScreenshots'] and not call['input']['saveFiles']
+    assert call['input']['proxyConfiguration'] == {'useApifyProxy': True}
+    assert call['input']['maxConcurrency'] == 1 and call['input']['requestTimeoutSecs'] == 60
+    assert call['callOptions']['timeout'] > call['input']['requestTimeoutSecs']
+    assert call['callOptions']['timeout'] == 120
+    assert call['input']['maxRequestRetries'] == call['input']['maxSessionRotations'] == 0
 
 
 @pytest.mark.parametrize('url', ['http://example.com', 'https://user:pass@example.com', 'https://127.0.0.1',

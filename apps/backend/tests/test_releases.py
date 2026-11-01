@@ -87,7 +87,7 @@ def test_release_snapshot_uses_image_metadata_and_pack_manifests(tmp_path: Path)
         ("healthcare", "2.0.0"),
         ("ai_data_governance", "3.0.4"),
         ("gods_eye_view", "1.0.1"),
-        ("ai_market_intelligence", "1.0.1"),
+        ("ai_market_intelligence", "1.0.3"),
     }
 
 

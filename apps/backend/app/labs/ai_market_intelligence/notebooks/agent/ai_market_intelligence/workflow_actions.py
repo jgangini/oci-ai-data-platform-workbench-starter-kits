@@ -7,8 +7,20 @@ from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
 from .catalog import public_url
-from .contracts import ConfirmationDecision, OpportunityDecision, Recurrence, ScheduleResearch
+from .contracts import ConfirmationDecision, FinancialMetrics, OpportunityDecision, Recurrence, ScheduleResearch
 from .repository import digest
+
+
+def provider_limitations(records, run_id, connector_issue=None):
+    failures = [connector_issue] if connector_issue else []
+    messages = {'failed': 'El proveedor falló', 'aborted': 'La extracción se interrumpió',
+                'timed_out': 'La extracción agotó su tiempo', 'uncertain': 'El resultado de la extracción requiere conciliación'}
+    for row in records.rows('ai_mi_tool_runs'):
+        if row['run_id'] == run_id and row['state'] in messages:
+            source = records.get('ai_mi_sources', row['source_key'])
+            name = (source or {}).get('name') or 'Fuente seleccionada'
+            failures.append(name + ': ' + messages[row['state']] + '. Su cobertura no está verificada; no equivale a una búsqueda sin resultados.')
+    return list(dict.fromkeys(failures))
 
 
 def validate_report_links(draft, evidence):
@@ -27,10 +39,14 @@ def validate_report_links(draft, evidence):
 
 def chart_projection(records, draft, run_id):
     request = draft['chart_request']
-    if not request or request['metric'] != 'observations':
+    if not request:
         return None
     citations = set(draft['cited_evidence_ids'])
     evidence = [row for row in records.rows('ai_mi_run_evidence') if row['run_id'] == run_id and row['evidence_key'] in citations]
+    if request['metric'] in {'close', 'value'}:
+        return _financial_chart(records, request, evidence, citations)
+    if request['metric'] != 'observations':
+        return None
     groups = Counter()
     for row in evidence:
         document = records.get('ai_mi_documents', row['observation_key'])
@@ -45,6 +61,53 @@ def chart_projection(records, draft, run_id):
             'caption': 'Muestra recuperada; no representa cuota de mercado.', 'columns': [request['group_by'], 'observations'],
             'rows': [[name, count] for name, count in sorted(groups.items())],
             'scope': 'retrieved_observations_not_market_share', 'evidence_ids': sorted(citations)}
+
+
+def _financial_chart(records, request, evidence, citations):
+    if request['group_by'] != 'date' or not evidence:
+        return None
+    series, identity = {}, None
+    for row in evidence:
+        document = records.get('ai_mi_documents', row['observation_key'])
+        metrics = json.loads(document['metrics_json'])
+        validated = _chart_series(metrics, request['metric'])
+        if validated is None:
+            return None
+        key, points = validated
+        if identity not in (None, key):
+            return None
+        identity = key
+        for point in points:
+            period, value = point['period'], point['value']
+            if period in series and series[period] != value:
+                return None
+            series[period] = value
+    if len({len(period) for period in series}) > 1:
+        return None
+    if not series or len(series) > 50 or not any(value is not None for value in series.values()):
+        return None
+    if request['kind'] == 'line' and len(series) < 2:
+        return None
+    title = identity[0] + (' · Precio de cierre' if request['metric'] == 'close' else ' · Indicador anual')
+    return {'version': 1, 'type': request['kind'], 'title': title,
+            'caption': 'Serie recuperada; periodo del dato, no fecha de publicación. Unidad: ' + identity[2],
+            'columns': ['period', request['metric']], 'rows': [[period, value] for period, value in sorted(series.items())],
+            'scope': 'retrieved_financial_series', 'unit': identity[2], 'currency': identity[3],
+            'evidence_ids': sorted(citations)}
+
+
+def _chart_series(metrics, metric):
+    """Validate persisted numeric input independently of chart presentation."""
+    try:
+        metrics = FinancialMetrics.model_validate(metrics).model_dump()
+    except ValueError:
+        return None
+    if metrics['metric'] != metric or metrics['unit'].strip().lower() in ('', 'unknown'):
+        return None
+    key = tuple(metrics.get(name) for name in ('entity', 'indicator', 'unit', 'currency'))
+    if metric == 'close' and not key[3]:
+        return None
+    return key, metrics['points']
 
 
 def explicit_decision(text):
@@ -97,6 +160,14 @@ class ConversationActions:
     async def handle_confirmation(self, state):
         pending = state.get('pending')
         intent = state['intake']['intent']
+        if intent == 'list_sources':
+            topic = state['intake']['topic'] or state.get('last_topic')
+            if not topic or state['intake']['missing_fields']:
+                return {'response': {'markdown': '¿Para qué empresa, mercado y tema quieres ver las fuentes registradas?'}}
+            from .presentation import source_base_markdown
+            topic_id = self.flow.journal.scope.key(digest(['topic', topic]))
+            base = self.flow.catalog.approved_base(self.flow.records(), topic_id)
+            return {'response': {'markdown': source_base_markdown(topic, base)}}
         if not pending:
             if intent == 'read_report':
                 return self.read_report(state)
@@ -171,6 +242,9 @@ class ConversationActions:
         recurrence = Recurrence.model_validate({key: draft[key] for key in ('weekdays', 'hour', 'minute', 'timezone')}).model_dump()
         research = ScheduleResearch.model_validate({key: draft[key] for key in ('window_days', 'target_ids', 'cap_microusd')}).model_dump()
         summary_hash = flow.proposals.present_schedule(pending['id'], recurrence, research)
-        summary = {'recurrence': recurrence, 'research': research}
+        summary = {'recurrence': recurrence, 'research': research, 'sources': [
+            {'name': records.get('ai_mi_sources', targets[target_id]['source_key'])['name'],
+             'target': targets[target_id]['canonical_url_or_id']}
+            for target_id in research['target_ids']]}
         return {'pending': {**pending, 'hash': summary_hash}, 'response': {
             'markdown': 'Confirma el horario, fuentes, ventana y presupuesto mostrados antes de activarlo. ¿Lo apruebas?', 'schedule_summary': summary}}

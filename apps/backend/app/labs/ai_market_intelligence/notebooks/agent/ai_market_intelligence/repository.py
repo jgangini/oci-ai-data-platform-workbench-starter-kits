@@ -210,6 +210,28 @@ class Journal:
         value['revision'] += 1
         self.snapshot.write(value, etag)
 
+    def claim_projection(self, lease):
+        def claim(records, state):
+            if state.get('projection_lease'):
+                raise RuntimeError('Another projection owns this scope; retry delivery, not capture')
+            state['projection_lease'] = lease
+            # Invalidate before SQL so a terminated writer cannot leave reusable receipts.
+            return records, state.pop('projection_receipts', [])
+        return self.transact(claim)
+
+    def finish_projection(self, lease, projected, receipts=None):
+        if projected.scope != self.scope:
+            raise ValueError('Projection records belong to another scope')
+        def release(current, state):
+            if state.get('projection_lease') != lease:
+                raise RuntimeError('Projection ownership changed')
+            state['projection_lease'] = None
+            unchanged = current.tables == projected.tables
+            if receipts is not None and unchanged:
+                state['projection_receipts'] = receipts
+            return unchanged
+        return self.transact(release)
+
 
 def projection_statements(records: Records, catalog: str, framework_schema: str):
     """Typed MERGE statements; no user/model SQL or unscoped overwrites."""
@@ -252,3 +274,23 @@ def projection_checks(records: Records, catalog: str, framework_schema: str):
         statement = 'SELECT COUNT(*) AS total_rows, COUNT(DISTINCT ' + identifier(primary) + ') AS distinct_keys, SUM(CASE WHEN ' + ' OR '.join(expected) + ' THEN 1 ELSE 0 END) AS matched_rows FROM ' + target
         statement += ' WHERE ' + scope + ' AND ' + identifier(primary) + ' IN (' + keys + ')'
         yield statement, len(rows)
+
+
+def projection_batch_check(checks):
+    """Batch trusted projection_checks output without cancelling errors across tables."""
+    if not isinstance(checks, list) or not 1 <= len(checks) <= 14:
+        raise ValueError('A projection batch requires one to fourteen checks')
+    parts = []
+    for index, check in enumerate(checks):
+        if not isinstance(check, (tuple, list)) or len(check) != 2:
+            raise ValueError('A projection check requires SQL and its expected row count')
+        statement, expected = check
+        if not isinstance(statement, str) or not statement.strip() or type(expected) is not int or expected < 1:
+            raise ValueError('A projection check requires SQL and a positive integer row count')
+        parts.append(f'SELECT {index} AS check_id, CASE WHEN total_rows = {expected}'
+                     f' AND distinct_keys = {expected} AND matched_rows = {expected}'
+                     f' THEN 1 ELSE 0 END AS check_ok FROM ({statement}) AS ai_mi_check_{index}')
+    statement = ('SELECT COUNT(*) AS total_rows, COUNT(DISTINCT check_id) AS distinct_keys, '
+                 'COALESCE(SUM(CASE WHEN check_ok = 1 THEN 1 ELSE 0 END), 0) AS matched_rows '
+                 'FROM (' + ' UNION ALL '.join(parts) + ') AS ai_mi_projection_checks')
+    return statement, len(checks)

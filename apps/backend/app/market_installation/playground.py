@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 from pathlib import PurePosixPath
 
-from app.aidp import AidpClient
+from app.aidp import AidpClient, AidpProvisionConflict
 
 
 class MarketPlaygroundClient(AidpClient):
@@ -52,6 +52,7 @@ class MarketPlaygroundClient(AidpClient):
             detail = ga._request('GET', f'/workspaces/{workspace}/agents/{agent_key}')
             entry = '/Workspace/.control/modules/ai_market_intelligence/agent/market_intelligence.py'
             if (detail.get('type') != 'CODE' or detail.get('entryFilePath') != entry
+                    or detail.get('pathInfo') != entry.rsplit('/', 1)[0]
                     or detail.get('dependenciesFilePath') != entry.rsplit('/', 1)[0] + '/requirements.txt'
                     or detail.get('computeKey') != compute_key):
                 raise RuntimeError('Playground candidate binding differs from the project agent')
@@ -63,19 +64,17 @@ class MarketPlaygroundClient(AidpClient):
         finally:
             ga.session.close()
         rows = self.test_deployments(workspace, agent_key)
+        if not rows:
+            raise AidpProvisionConflict('Open this agent in Workbench Playground to initialize TEST, then resume. No deployment record was created by this check.')
         previous = rows[0].get('deploymentVersion') if rows else None
         payload = {'agentFlowKey': agent_key, 'agentFlowComputeKey': compute_key, 'deploymentType': 'TEST'}
         hashes = {name: hashlib.sha256(content).hexdigest() for name, content in candidate.items()}
         digest = hashlib.sha256(json.dumps(hashes, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         if on_submit:
             on_submit({'package_sha256': digest, 'previous_version': previous})
-        if rows:
-            path = f'/workspaces/{workspace}/agentFlows/{agent_key}/deployments/actions/redeploy'
-            result, headers = self._request('POST', path, payload=payload, include_headers=True,
-                phase='deployment', retry_scope='market-test:' + agent_key + ':' + compute_key + ':' + digest)
-        else:
-            result, headers = self._request('PUT', f'/workspaces/{workspace}/agentFlowDeployments',
-                                            payload=payload, include_headers=True, phase='deployment')
+        path = f'/workspaces/{workspace}/agentFlows/{agent_key}/deployments/actions/redeploy'
+        result, headers = self._request('POST', path, payload=payload, include_headers=True,
+            phase='deployment', retry_scope='market-test:' + agent_key + ':' + compute_key + ':' + digest)
         return {'package_sha256': digest, 'previous_version': previous, 'compute_key': compute_key,
                 'deployment_type': 'TEST', 'operation_key': next((value for key, value in headers.items()
                     if key.lower() == 'aidp-async-operation-key'), None),

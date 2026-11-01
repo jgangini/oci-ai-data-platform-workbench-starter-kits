@@ -348,6 +348,8 @@ class MarketAidpClient(AidpClient):
         if (detail.get('key') != agent_key or detail.get('type') != 'CODE'
                 or self._resource_name(detail) != MODULE_ID):
             raise AidpProvisionConflict('The recorded project agent identity changed; no binding was updated.')
+        if detail.get('pathInfo') != ROOT + '/agent':
+            raise AidpProvisionConflict('The project root differs from the canonical agent folder. Recreate this project agent before updating its entry binding.')
         if any(detail.get(key) != value for key, value in expected.items()):
             if self._agent_deployments(path + '/deployments'):
                 raise AidpProvisionConflict('An existing production deployment requires a separate reviewed update.')

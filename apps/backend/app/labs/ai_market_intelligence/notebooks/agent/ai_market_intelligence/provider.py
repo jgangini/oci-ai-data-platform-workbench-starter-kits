@@ -1,9 +1,10 @@
 """MCP transport is reachable only through the admitted operation ledger."""
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
-from .mcp_payload import unpack, locate, dataset_id
+from .mcp_payload import unpack, unpack_run, locate, dataset_id
 from .catalog import public_url
+from .finance import ACTORS, normalize_finance
 
 
 def _run_records(value):
@@ -31,25 +32,27 @@ class ApifyProvider:
         raw = await self.tools[name].ainvoke(arguments)
         if getattr(raw, 'isError', False) or isinstance(raw, dict) and (raw.get('isError') or raw.get('error')):
             raise RuntimeError('MCP returned a provider error')
-        value = unpack(raw)
+        value = unpack_run(raw) if name in {'call-actor', 'get-actor-run'} else unpack(raw)
         if isinstance(value, dict) and value.get('error'):
             raise RuntimeError('MCP returned an error envelope')
         return value
 
     @staticmethod
     def receipt(value, expected_id=None):
-        matches = [item for item in _run_records(value)
+        meta = value.get('_meta', {}) if isinstance(value, dict) else {}
+        usage = meta.get('com.apify/ActorRun') if isinstance(meta, dict) else None
+        payload = value['payload'] if isinstance(value, dict) and '_meta' in value and 'payload' in value else value
+        records = list(_run_records(payload))
+        matches = [item for item in records
                    if expected_id is None or (item.get('runId') or item.get('actorRunId') or item['id']) == expected_id]
         if len(matches) != 1:
             raise ValueError('Provider run identity and status could not be verified together')
         run = matches[0]
-        cost = run.get('usageTotalUsd')
+        identity = run.get('runId') or run.get('actorRunId') or run['id']
+        cost = _run_cost(run, usage, identity, len(records))
         if cost is not None:
-            amount = Decimal(str(cost))
-            if not amount.is_finite() or amount < 0:
-                raise ValueError('Provider cost is not a finite nonnegative amount')
-            cost = int((amount * 1000000).to_integral_value(rounding=ROUND_CEILING))
-        return {'runId': run.get('runId') or run.get('actorRunId') or run['id'],
+            cost = int((cost * 1000000).to_integral_value(rounding=ROUND_CEILING))
+        return {'runId': identity,
                 'status': run['status'], 'datasetId': dataset_id(run), 'spent_microusd': cost}
 
     async def start(self, call):
@@ -65,7 +68,46 @@ class ApifyProvider:
             raise RuntimeError('The successful run has no verified dataset')
         values = await self.invoke('get-dataset-items', {'datasetId': receipt['datasetId'], 'offset': 0, 'limit': 50, 'clean': True})
         rows = _items(values)
+        if call['actor'] in ACTORS.values():
+            if len(rows) > call['callOptions']['maxItems']:
+                raise ValueError('Financial dataset exceeds the admitted row limit')
+            observed_call = {**call, 'observed_at': datetime.now(timezone.utc).isoformat()}
+            observations = [item for row in rows for item in normalize_finance(row, call['actor'], receipt['runId'], observed_call)]
+            if len(observations) > 50:
+                raise ValueError('Financial evidence exceeds the bounded observation limit')
+            return observations, receipt.get('spent_microusd')
         return [_observation(row, call['actor'], receipt['runId']) for row in rows[:50]], receipt.get('spent_microusd')
+
+
+def _run_cost(run, usage, identity, run_count):
+    """Reconcile total-cost channels only after the payload run is identified."""
+    cost = _cost_amount(run.get('usageTotalUsd'))
+    if usage is None:
+        return cost
+    if not isinstance(usage, dict) or run_count != 1:
+        raise ValueError('Provider usage metadata has no unique run')
+    if any(usage[key] != identity for key in ('runId', 'actorRunId', 'id') if key in usage):
+        raise ValueError('Provider usage metadata belongs to another run')
+    metadata_cost = _cost_amount(usage.get('usageTotalUsd'))
+    if metadata_cost is None:
+        return cost
+    if cost not in (None, metadata_cost):
+        raise ValueError('Provider run cost disagrees with its usage metadata')
+    return metadata_cost
+
+
+def _cost_amount(value):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        raise ValueError('Provider cost is not a finite nonnegative amount')
+    try:
+        amount = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ValueError('Provider cost is not a finite nonnegative amount') from exc
+    if not amount.is_finite() or amount < 0:
+        raise ValueError('Provider cost is not a finite nonnegative amount')
+    return amount
 
 
 def _items(value):

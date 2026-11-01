@@ -2,7 +2,7 @@
   "schema_version": 1,
   "lab_id": "ai_market_intelligence",
   "display_name": "AI Market Intelligence",
-  "pack_version": "1.0.1",
+  "pack_version": "1.0.3",
   "status": "planned",
   "kind": "global_module",
   "scope": "global",
@@ -45,7 +45,56 @@
     "name": "ai_market_intelligence",
     "memory": "AI_LAKEHOUSE",
     "streaming": "graph_milestones",
-    "graphs": "optional"
+    "graphs": "optional",
+    "card": {
+      "name": "ai_market_intelligence",
+      "description": "On-demand market research using approved sources, explicit periods and bounded budgets. Returns evidence-based Markdown reports and comparable data tables; discloses partial coverage. Uses stored evidence for follow-up and lists registered topic sources. Recurring research is proposed for human confirmation; automatic scheduled dispatch and visual charts are not yet enabled.",
+      "version": "1.0.3",
+      "capabilities": {
+        "isStreaming": true
+      },
+      "skills": [
+        {
+          "id": "approved_market_research",
+          "name": "Research approved market sources",
+          "description": "Investigate a company or market within an explicit time window and approved source and budget scope. Contrast retrieved evidence, preserve citations and limitations, and return a partial report when coverage is insufficient. Supports reviewed web, X, World Bank and daily financial-history adapters; does not claim complete social coverage.",
+          "tags": [
+            "market-research",
+            "evidence",
+            "approved-sources"
+          ],
+          "examples": [
+            "Investiga las novedades de D1 en Colombia en los ultimos siete dias usando las fuentes aprobadas."
+          ]
+        },
+        {
+          "id": "stored_report_followup",
+          "name": "Explain stored research",
+          "description": "Answer follow-up questions using the report and evidence already recovered. Can summarize or show comparable data as a table without starting another paid extraction. Does not promise a rendered visual chart.",
+          "tags": [
+            "reports",
+            "follow-up",
+            "evidence"
+          ],
+          "examples": [
+            "Resume el informe anterior en dos frases sin hacer otra extraccion."
+          ]
+        },
+        {
+          "id": "registered_topic_sources",
+          "name": "List registered topic sources",
+          "description": "List active source destinations registered for the authenticated user and canonical topic. Distinguish discovery scope and suspended adapters. This reads the catalog; interpretation uses the configured model and does not run Apify Actors.",
+          "tags": [
+            "sources",
+            "catalog",
+            "read-only"
+          ],
+          "examples": [
+            "Que fuentes y destinos tengo registrados para el tema actual?"
+          ]
+        }
+      ]
+    }
   },
   "runtime_files": [
     {
@@ -55,12 +104,12 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/workflow.py",
-      "sha256": "4e4722beb563abb86339a6cbdda63b9d9aa18c1ef56ad9778e642a38fbe9da45",
+      "sha256": "d40256882a63f8d42218edd7b4384bed51528d57ecada03d8a3ba491a2788130",
       "workspace_path": "agent/ai_market_intelligence/workflow.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/workflow_actions.py",
-      "sha256": "5864fee0e789ab8b23f25c3f4aced4c8cda343da544b0dc568e2dcf1a9d340eb",
+      "sha256": "8e4a962e8bfc5402c5301d5bd6c98b06d01d36b9df1322c965f6c852a0ed09bd",
       "workspace_path": "agent/ai_market_intelligence/workflow_actions.py"
     },
     {
@@ -70,37 +119,37 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/native.py",
-      "sha256": "4c1054897e5e8bf8afd8d41cfdf81ce9194fc30499f3d70c190e9aaf096a164f",
+      "sha256": "7040685ad28b1549a221053826d8750565a1b323ae92d865513d4d888359b74b",
       "workspace_path": "agent/ai_market_intelligence/native.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/streaming.py",
-      "sha256": "e00cb79bfe73179db192f6450a1a83f9717a4a4360d8302571df2e7eb416121f",
+      "sha256": "98d123715de1dff07cdc3585b7d80279700bbcb600d2a5ef039726ea4337ac04",
       "workspace_path": "agent/ai_market_intelligence/streaming.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/provider.py",
-      "sha256": "8c937ce2d8cb656ce760dcaedb7ab9b715e784e41ec00718f4bae51c7f247749",
+      "sha256": "93fa202af2a1e3694f90cde31272adf5c48d76379e7368932c7d1485a130f6b7",
       "workspace_path": "agent/ai_market_intelligence/provider.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/repository.py",
-      "sha256": "388685cd14b524b885d36fde1feb9a2fb37e27e7cc91c5754884219d9b8174b0",
+      "sha256": "8cb6dd19573ed969f541feb945348897dc55351a0ed2a20e0cc4bbe6570373eb",
       "workspace_path": "agent/ai_market_intelligence/repository.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/research.py",
-      "sha256": "6f92c87e0f3ac542535bac973456b201baabdf0c244922a6d11e4bcd6d021a58",
+      "sha256": "edeb542658f731835f6399dea0a8377ad474d1f034a5e60635a56963b57b1888",
       "workspace_path": "agent/ai_market_intelligence/research.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/execution.py",
-      "sha256": "f049d08a4bb1e3de8dcaf6db0e3718e32a0e1ccbcef52442a6486ec88f7bd3f4",
+      "sha256": "dd9f62802c1f89979805c6ae96e1b491e5ad134c3af06fa2e0947b1700555670",
       "workspace_path": "agent/ai_market_intelligence/execution.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/catalog.py",
-      "sha256": "614c034add9128fb46f26bc05e1a57db234ce00691b7455afc1aa5ee2d2e4d83",
+      "sha256": "a5ec60b345d70b4a7e3939a8250b944c6eadc5d4e7cab9c813157ecc268c4da3",
       "workspace_path": "agent/ai_market_intelligence/catalog.py"
     },
     {
@@ -110,12 +159,12 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/contracts.py",
-      "sha256": "45df665b22d09386151584450508ecb71a781ff3df52b329e5ddcca80ba06ecf",
+      "sha256": "5f6557e01eddf1386301bd1317dc4651e65c9342685014511bb220bd8dc82b11",
       "workspace_path": "agent/ai_market_intelligence/contracts.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/connectors.py",
-      "sha256": "c648fc0ab0e4e186e162ee8b499a72ea1802cc67b013d6bb493de3088a213b02",
+      "sha256": "be881d4b688861fe174f471e70b8df07df679918c7d44eadfd5085b81cd91a94",
       "workspace_path": "agent/ai_market_intelligence/connectors.py"
     },
     {
@@ -135,12 +184,12 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/prompts.json",
-      "sha256": "745b54828d496c0fd89d3781f273ccd3b430ac536af643b19a68e0dde589a902",
+      "sha256": "d3fa456ad1c1e5325fee64796c44d90c89922b96f9d7183d50ec212bff4176f0",
       "workspace_path": "agent/ai_market_intelligence/prompts.json"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/mcp_payload.py",
-      "sha256": "7146758dc9e1823aabfcdb5851bc9f5744a8a6669d1aba9fb5656c6a6775078a",
+      "sha256": "c95437f67a296bf27f2da9e88f7f01d3a68e320f97c0ce794fa66c3a1d37523e",
       "workspace_path": "agent/ai_market_intelligence/mcp_payload.py"
     },
     {
@@ -157,6 +206,16 @@
       "file": "notebooks/agent/requirements.txt",
       "workspace_path": "agent/requirements.txt",
       "sha256": "4f9ece15c1c5d4ce0ac20005fe0a71383e1864e41561f21f68cf07c77d55833d"
+    },
+    {
+      "file": "notebooks/agent/ai_market_intelligence/finance.py",
+      "workspace_path": "agent/ai_market_intelligence/finance.py",
+      "sha256": "70de0344380bbfb14df3e07b7373c2fdea2028b581d702b537b3b8490ed119e0"
+    },
+    {
+      "file": "notebooks/agent/ai_market_intelligence/presentation.py",
+      "sha256": "9fbfb8f9e40ec7bd372a8b6b6e65d06bc24e0ada482506150ff19f8ea91af336",
+      "workspace_path": "agent/ai_market_intelligence/presentation.py"
     }
   ],
   "source_manifests": [
@@ -165,5 +224,5 @@
       "sha256": "87516a2e0f446f2e32cef8e5b05e99edb545d23fabfe08ed43d704bdf1776d04"
     }
   ],
-  "pack_sha256": "1e042432ae1ac340e747aef3f6b184261296474dde24678fc4e6492e8768aefc"
+  "pack_sha256": "83a44ca620a70308de88433622b1f796e05190f563b1968a0a48332a6128d3d0"
 }

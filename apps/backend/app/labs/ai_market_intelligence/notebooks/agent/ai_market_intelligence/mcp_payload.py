@@ -34,6 +34,32 @@ def unpack(value):
     return value
 
 
+def unpack_run(value):
+    """Keep response-level run usage bound to its own decoded MCP payload."""
+    if hasattr(value, 'model_dump'):
+        value = value.model_dump(mode='json')
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            pass
+    payload = unpack(value)
+    if isinstance(payload, dict) and payload.get('error'):
+        raise RuntimeError('MCP returned an error envelope')
+    metadata = _run_metadata(value)
+    return {'payload': payload, **metadata} if metadata else payload
+
+
+def _run_metadata(value):
+    """Normalize wire and Pydantic aliases only at the MCP envelope boundary."""
+    if not isinstance(value, dict) or not ('structuredContent' in value or 'content' in value):
+        return {}
+    aliases = [value[key] for key in ('_meta', 'meta') if key in value]
+    if len(aliases) == 2 and aliases[0] != aliases[1]:
+        raise ValueError('Conflicting MCP metadata aliases')
+    return {'_meta': aliases[0]} if aliases else {}
+
+
 def locate(value, names):
     if isinstance(value, dict):
         for name in names:

@@ -6,13 +6,17 @@ import re
 from datetime import datetime, timezone
 from typing import TypedDict
 
-from .catalog import Catalog
-from .connectors import PROFILES, compile_call, resolve_window
+from .catalog import Catalog, public_url
+from .connectors import ConnectorUnavailable, PROFILES, compile_call, resolve_window
 from .contracts import IntakeDecision, ResearchPlan, EvidenceAssessment, ReportDraft
-from .execution import AdmissionBlocked, ProviderPending, PaidOperations, execute_selected, resolve_source_scope
+from .execution import AdmissionBlocked, ProviderPending, PaidOperations, TargetAlreadyInvestigated, execute_selected, resolve_source_scope
 from .proposals import Proposals
 from .repository import Records, digest
 from .research import Research
+
+
+class SourceSelectionRequired(ValueError):
+    pass
 
 
 class TurnState(TypedDict, total=False):
@@ -40,6 +44,7 @@ class TurnState(TypedDict, total=False):
     pending: dict | None
     schedule_run_id: str | None
     plan_sources: list
+    connector_issue: str
 
 
 class MarketWorkflow:
@@ -88,7 +93,7 @@ class MarketWorkflow:
         routes = {
             'resolve_context': ['prepare_run', 'handle_confirmation', 'deliver_and_read'],
             'plan_research': ['admit_step', 'draft_report', 'deliver_and_read'],
-            'admit_step': ['execute_step', 'draft_report'],
+            'admit_step': ['execute_step', 'draft_report', 'deliver_and_read'],
             'execute_step': ['reconcile_step', 'normalize_evidence', 'draft_report'],
             'reconcile_step': ['normalize_evidence', 'draft_report', 'deliver_and_read'],
             'decide_next': ['plan_research', 'draft_report'],
@@ -111,7 +116,7 @@ class MarketWorkflow:
             raise ValueError('Question must contain 1–500 characters')
         return {'intake': {}, 'catalog': [], 'plan': {}, 'provider': {}, 'evidence': [],
                 'assessment': {}, 'draft': {}, 'chart': None, 'reason': '', 'response': {},
-                'run_id': '', 'question_id': '', 'topic_id': '', 'tool_id': '', 'call': {}}
+                'run_id': '', 'question_id': '', 'topic_id': '', 'tool_id': '', 'call': {}, 'connector_issue': ''}
 
     async def understand(self, state):
         if state.get('schedule_run_id'):
@@ -127,16 +132,25 @@ class MarketWorkflow:
             return {'intake': {'intent': 'scheduled', 'topic': topic}}
         if state.get('pending'):
             return {'intake': {'intent': 'schedule_decision', 'topic': state.get('last_topic')}}
+        records = self.records()
+        sources = [row for row in records.rows('ai_mi_sources') if row['status'] == 'active']
+        targets = {row['target_id'] for row in records.rows('ai_mi_source_targets')
+                   if row['status'] == 'active' and row['source_key'] in {source['source_key'] for source in sources}}
+        topics = {row['topic_id'] for row in records.rows('ai_mi_topic_sources')
+                  if row['status'] == 'active' and row['target_id'] in targets}
+        registered = sorted((row for row in records.rows('ai_mi_topics') if row['topic_id'] in topics),
+                            key=lambda row: row['created_at'] or '', reverse=True)[:20]
         result = await self.ask('understand', IntakeDecision, {
             'question': state['question'], 'last_topic': state.get('last_topic'),
             'has_previous_report': bool(state.get('last_report_id')),
-            'sources': [{'source_key': row['source_key'], 'name': row['name']} for row in self.records().rows('ai_mi_sources') if row['status'] == 'active'],
+            'sources': [{'source_key': row['source_key'], 'name': row['name']} for row in sources],
+            'registered_topics': [json.loads(row['canonical_scope_json']) for row in registered],
             'now': self.clock().isoformat(), 'timezone': self.timezone})
         return {'intake': result}
 
     async def resolve_context(self, state):
         intent = state['intake']['intent']
-        if state.get('pending') or intent in {'source_request', 'source_decision', 'schedule_request', 'schedule_decision', 'cancel', 'read_report'}:
+        if state.get('pending') or intent in {'source_request', 'source_decision', 'list_sources', 'schedule_request', 'schedule_decision', 'cancel', 'read_report'}:
             topic = state['intake'].get('topic')
             if topic and not state.get('pending'):
                 self.research.record_question(state['request_id'], state['question'], topic, 'administration')
@@ -158,12 +172,18 @@ class MarketWorkflow:
                 evidence = self.research.evidence(report['run_id'])
                 draft = await self.ask('draft_report', ReportDraft, {'followup': state['question'],
                     'published_report': report['markdown'], 'published_at': report['published_at'], 'evidence': evidence})
-                from .workflow_actions import validate_report_links
+                from .workflow_actions import chart_projection, validate_report_links
                 validate_report_links(draft, evidence)
-                response = {**self.report_response(report), 'markdown': draft['answer_markdown'], 'chart': None, 'reused': True}
+                chart = chart_projection(self.records(), draft, report['run_id'])
+                response = {**self.report_response(report), 'markdown': draft['answer_markdown'], 'chart': chart, 'reused': True}
             return {'question_id': question_id, 'topic_id': topic_id, 'route': 'deliver_and_read',
                     'response': response}
-        catalog = self.catalog_for_question(state, topic_id, run)
+        try:
+            catalog = self.catalog_for_question(state, topic_id, run)
+        except SourceSelectionRequired:
+            return {'question_id': question_id, 'topic_id': topic_id, 'last_topic': intake['topic'],
+                    'route': 'deliver_and_read', 'response': {'markdown':
+                        'No identifiqué esa fuente con certeza. Indica su nombre registrado o su URL exacta para continuar.'}}
         return {'question_id': question_id, 'topic_id': topic_id, 'last_topic': intake['topic'],
                 'window': {key: json.loads(run['plan_window_json'])[key] for key in ('start', 'end')} if intent == 'scheduled' else resolve_window(intake['window_spec'], self.clock(), self.timezone),
                 'catalog': catalog, 'route': 'prepare_run'}
@@ -179,15 +199,28 @@ class MarketWorkflow:
         selected = state['intake'].get('selected_source_key')
         if selected:
             source = next((row for row in catalog if row['source_key'] == selected), None)
-            if not source or not source['name'] or not re.search(r'\b' + re.escape(source['name']) + r'\b', state['question'], re.I):
-                raise ValueError('An explicit source selection must be grounded in the user question')
+            urls = set()
+            for raw in re.findall(r'https://[^\s<>\]"\x27)]+', state['question']):
+                try:
+                    urls.add(public_url(raw.rstrip('.,;')))
+                except ValueError:
+                    continue
+            named = source and source['name'] and re.search(r'\b' + re.escape(source['name']) + r'\b', state['question'], re.I)
+            linked = source and any(target['canonical_url_or_id'] in urls for target in source['targets'])
+            if not (named or linked):
+                raise SourceSelectionRequired('An explicit source selection must be grounded in the user question')
+            if linked:
+                source = {**source, 'targets': [target for target in source['targets'] if target['canonical_url_or_id'] in urls]}
             catalog = [source]
         return catalog
 
     def prepare_run(self, state):
         run = state.get('schedule_run_id') or self.research.prepare_run(state['question_id'], state['window'], state['question'], self.cap, max_steps=self.max_steps)
-        prior = next((row for row in self.records().rows('ai_mi_reports') if row['run_id'] == run), None)
-        return {'run_id': run, 'response': self.report_response(prior) if prior else {}}
+        records = self.records()
+        prior = next((row for row in records.rows('ai_mi_reports') if row['run_id'] == run), None)
+        window = json.loads(records.get('ai_mi_research_runs', run)['plan_window_json'])
+        return {'run_id': run, 'window': {key: window[key] for key in ('start', 'end')},
+                'response': self.report_response(prior) if prior else {}}
 
     async def plan_research(self, state):
         if state['response']:
@@ -201,15 +234,23 @@ class MarketWorkflow:
         visited = {row['target_id'] for row in self.records().rows('ai_mi_tool_runs') if row['run_id'] == state['run_id']}
         base = [{**row, 'targets': [target for target in row['targets'] if target['target_id'] not in visited]} for row in state['catalog']]
         base = [row for row in base if row['targets']]
-        available = base or state['catalog']
+        available = base or [row for row in state['catalog'] if not row['targets']]
+        if not available:
+            return {'reason': 'unresolved' if evidence else 'no_data', 'route': 'draft_report'}
         plan = await self.ask('plan_research', ResearchPlan, {
             'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'catalog': available,
             'evidence': evidence, 'assessment': state['assessment']})
+        if plan['next_action'] == 'request_extension' and evidence:
+            return {'plan': plan, 'route': 'draft_report', 'reason': 'unresolved'}
         if plan['next_action'] in {'clarify', 'request_extension'}:
             return {'plan': plan, 'route': 'deliver_and_read', 'response': {'markdown': plan['user_question'] or 'Necesito delimitar el alcance antes de continuar.'}}
         if plan['next_action'] != 'execute':
             return {'plan': plan, 'route': 'draft_report', 'reason': 'sufficient' if evidence else 'no_data'}
-        return {'plan': plan, 'plan_sources': available, 'route': 'admit_step'}
+        bound_plan = self.catalog.bind_plan_target(plan, available)
+        if bound_plan is None:
+            return {'plan': plan, 'route': 'deliver_and_read', 'response': {'markdown':
+                    'No hay un destino aprobado inequívoco para ese paso. Indica una fuente registrada para este objetivo o solicita registrar la página.'}}
+        return {'plan': bound_plan, 'plan_sources': available, 'route': 'admit_step'}
 
     def admit_step(self, state):
         plan, records = state['plan'], self.records()
@@ -220,11 +261,21 @@ class MarketWorkflow:
         choice = next((row for row in choices if row['source_key'] == plan['source_key']), None)
         if choice and choice['targets'] and plan['target_id'] not in {row['target_id'] for row in choice['targets']}:
             raise ValueError('Select one of the remaining approved base targets')
-        call = compile_call(scope['connector_revision'], plan['arguments'], state['window'], self.step_cap,
-                            approved_urls=scope['urls'], usage_cost_verified=self.usage_verified)
+        try:
+            call = compile_call(scope['connector_revision'], plan['arguments'], state['window'], self.step_cap,
+                                approved_urls=scope['urls'], approved_finance=scope['financial'], usage_cost_verified=self.usage_verified)
+        except ConnectorUnavailable as error:
+            return {'route': 'draft_report', 'reason': 'unresolved', 'connector_issue': str(error)}
+        except ValueError:
+            if scope['financial'] is None:
+                raise
+            return {'route': 'deliver_and_read', 'response': {'markdown':
+                    'No pude validar la selección financiera y su periodo. Indica los destinos registrados y las fechas o años exactos que deseas comparar.'}}
         try:
             tool = self.paid.reserve(state['run_id'], plan['source_key'], plan['target_id'], call, self.step_cap,
                                      plan['purpose'], authorization_hash=scope['authorization_hash'])
+        except TargetAlreadyInvestigated as error:
+            return {'reason': 'unresolved', 'route': 'draft_report', 'connector_issue': str(error)}
         except AdmissionBlocked as error:
             return {'reason': error.reason, 'route': 'draft_report'}
         previous = self.records().get('ai_mi_tool_runs', tool)
@@ -242,6 +293,8 @@ class MarketWorkflow:
     async def execute_step(self, state):
         try:
             result = await execute_selected(self.paid, state['tool_id'], state['call'], self.provider.start)
+        except (ConnectorUnavailable, TargetAlreadyInvestigated) as error:
+            return {'reason': 'unresolved', 'route': 'draft_report', 'connector_issue': str(error)}
         except RuntimeError:
             return {'reason': 'uncertain', 'route': 'draft_report'}
         route = 'normalize_evidence' if result.get('status') == 'SUCCEEDED' else 'reconcile_step'
@@ -256,6 +309,8 @@ class MarketWorkflow:
         status = {'SUCCEEDED': 'succeeded', 'FAILED': 'failed', 'ABORTED': 'aborted', 'TIMED-OUT': 'timed_out', 'RUNNING': 'running', 'READY': 'running'}[result['status']]
         self.paid.record_provider(state['tool_id'], operation['permit'], operation['provider_run_id'], status,
                                   {key: result[key] for key in ('runId', 'status')})
+        if status in {'succeeded', 'failed', 'aborted', 'timed_out'} and result.get('spent_microusd') is not None:
+            self.paid.record_cost(state['tool_id'], result['runId'], result['spent_microusd'])
         if status == 'succeeded':
             return {'provider': result, 'route': 'normalize_evidence'}
         if status == 'running':
@@ -263,14 +318,22 @@ class MarketWorkflow:
         return {'route': 'draft_report', 'reason': 'unresolved'}
 
     async def normalize_evidence(self, state):
-        observations, cost = await self.provider.observations(state['provider'], state['call'])
+        try:
+            observations, cost = await self.provider.observations(state['provider'], state['call'])
+        except (ValueError, RuntimeError):
+            return {'evidence': self.research.evidence(state['run_id']), 'connector_issue':
+                'No se pudo validar la salida del proveedor dentro del alcance solicitado. Ese paso no se incorporó como evidencia; se conservan únicamente los datos verificados.'}
         if cost is not None:
             self.paid.record_cost(state['tool_id'], state['provider']['runId'], cost)
         self.research.add_evidence(state['run_id'], state['tool_id'], observations)
         return {'evidence': self.research.evidence(state['run_id'])}
 
     async def assess_evidence(self, state):
-        assessment = await self.ask('assess_evidence', EvidenceAssessment, {'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'evidence': state['evidence']})
+        if state.get('connector_issue'):
+            assessment = {'assessments': [], 'continue_research': False,
+                          'reason': 'Salida del proveedor no validada', 'gap': state['connector_issue']}
+        else:
+            assessment = await self.ask('assess_evidence', EvidenceAssessment, {'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'evidence': state['evidence']})
         self.research.assess(state['run_id'], assessment['assessments'], {
             'continue': assessment['continue_research'], 'reason': assessment['reason'], 'gap': assessment['gap']})
         return {'assessment': assessment}
@@ -289,16 +352,22 @@ class MarketWorkflow:
     def decide_next(self, state):
         limit = self.close_limit(state['run_id'])
         more = state['assessment']['continue_research'] and bool(state['assessment']['gap']) and not limit
-        return {'route': 'plan_research' if more else 'draft_report',
-                'reason': limit or ('unresolved' if state['assessment']['gap'] else 'sufficient')}
+        reason = 'unresolved' if state['assessment']['gap'] else ('sufficient' if state['evidence'] else 'no_data')
+        return {'route': 'plan_research' if more else 'draft_report', 'reason': limit or reason}
 
     async def draft_report(self, state):
         evidence = self.research.evidence(state['run_id'])
+        from .workflow_actions import provider_limitations, validate_report_links
+        failures = provider_limitations(self.records(), state['run_id'], state.get('connector_issue'))
         if not evidence:
-            return {'draft': {'answer_markdown': 'No se obtuvo evidencia verificable para responder. La ausencia de resultados no demuestra que el problema no exista.',
-                             'cited_evidence_ids': [], 'findings': [], 'limitations': ['Sin evidencia recuperada; cierre: ' + state['reason']], 'chart_request': None}}
-        draft = await self.ask('draft_report', ReportDraft, {'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'evidence': evidence, 'close_reason': state['reason']})
-        from .workflow_actions import validate_report_links
+            text = 'No se obtuvo evidencia verificable para responder. La ausencia de resultados no demuestra que el problema no exista.'
+            return {'draft': {'answer_markdown': '\n\n'.join([*failures, text]),
+                             'cited_evidence_ids': [], 'findings': [], 'limitations': [*failures, 'Sin evidencia recuperada; cierre: ' + state['reason']], 'chart_request': None}}
+        draft = await self.ask('draft_report', ReportDraft, {'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'evidence': evidence, 'close_reason': state['reason'],
+            'remaining_gap': state['assessment'].get('gap', ''), 'provider_limitations': failures})
+        if failures:
+            draft['answer_markdown'] = '\n\n'.join([*failures, draft['answer_markdown']])
+            draft['limitations'] = list(dict.fromkeys([*failures, *draft['limitations']]))[:20]
         validate_report_links(draft, evidence)
         return {'draft': draft}
 
