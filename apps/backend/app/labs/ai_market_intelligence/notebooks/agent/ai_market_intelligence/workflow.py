@@ -6,13 +6,17 @@ import re
 from datetime import datetime, timezone
 from typing import TypedDict
 
-from .catalog import Catalog
+from .catalog import Catalog, public_url
 from .connectors import PROFILES, compile_call, resolve_window
 from .contracts import IntakeDecision, ResearchPlan, EvidenceAssessment, ReportDraft
 from .execution import AdmissionBlocked, ProviderPending, PaidOperations, execute_selected, resolve_source_scope
 from .proposals import Proposals
 from .repository import Records, digest
 from .research import Research
+
+
+class SourceSelectionRequired(ValueError):
+    pass
 
 
 class TurnState(TypedDict, total=False):
@@ -127,10 +131,19 @@ class MarketWorkflow:
             return {'intake': {'intent': 'scheduled', 'topic': topic}}
         if state.get('pending'):
             return {'intake': {'intent': 'schedule_decision', 'topic': state.get('last_topic')}}
+        records = self.records()
+        sources = [row for row in records.rows('ai_mi_sources') if row['status'] == 'active']
+        targets = {row['target_id'] for row in records.rows('ai_mi_source_targets')
+                   if row['status'] == 'active' and row['source_key'] in {source['source_key'] for source in sources}}
+        topics = {row['topic_id'] for row in records.rows('ai_mi_topic_sources')
+                  if row['status'] == 'active' and row['target_id'] in targets}
+        registered = sorted((row for row in records.rows('ai_mi_topics') if row['topic_id'] in topics),
+                            key=lambda row: row['created_at'] or '', reverse=True)[:20]
         result = await self.ask('understand', IntakeDecision, {
             'question': state['question'], 'last_topic': state.get('last_topic'),
             'has_previous_report': bool(state.get('last_report_id')),
-            'sources': [{'source_key': row['source_key'], 'name': row['name']} for row in self.records().rows('ai_mi_sources') if row['status'] == 'active'],
+            'sources': [{'source_key': row['source_key'], 'name': row['name']} for row in sources],
+            'registered_topics': [json.loads(row['canonical_scope_json']) for row in registered],
             'now': self.clock().isoformat(), 'timezone': self.timezone})
         return {'intake': result}
 
@@ -163,7 +176,12 @@ class MarketWorkflow:
                 response = {**self.report_response(report), 'markdown': draft['answer_markdown'], 'chart': None, 'reused': True}
             return {'question_id': question_id, 'topic_id': topic_id, 'route': 'deliver_and_read',
                     'response': response}
-        catalog = self.catalog_for_question(state, topic_id, run)
+        try:
+            catalog = self.catalog_for_question(state, topic_id, run)
+        except SourceSelectionRequired:
+            return {'question_id': question_id, 'topic_id': topic_id, 'last_topic': intake['topic'],
+                    'route': 'deliver_and_read', 'response': {'markdown':
+                        'No identifiqué esa fuente con certeza. Indica su nombre registrado o su URL exacta para continuar.'}}
         return {'question_id': question_id, 'topic_id': topic_id, 'last_topic': intake['topic'],
                 'window': {key: json.loads(run['plan_window_json'])[key] for key in ('start', 'end')} if intent == 'scheduled' else resolve_window(intake['window_spec'], self.clock(), self.timezone),
                 'catalog': catalog, 'route': 'prepare_run'}
@@ -179,15 +197,28 @@ class MarketWorkflow:
         selected = state['intake'].get('selected_source_key')
         if selected:
             source = next((row for row in catalog if row['source_key'] == selected), None)
-            if not source or not source['name'] or not re.search(r'\b' + re.escape(source['name']) + r'\b', state['question'], re.I):
-                raise ValueError('An explicit source selection must be grounded in the user question')
+            urls = set()
+            for raw in re.findall(r'https://[^\s<>\]"\x27)]+', state['question']):
+                try:
+                    urls.add(public_url(raw.rstrip('.,;')))
+                except ValueError:
+                    continue
+            named = source and source['name'] and re.search(r'\b' + re.escape(source['name']) + r'\b', state['question'], re.I)
+            linked = source and any(target['canonical_url_or_id'] in urls for target in source['targets'])
+            if not (named or linked):
+                raise SourceSelectionRequired('An explicit source selection must be grounded in the user question')
+            if linked:
+                source = {**source, 'targets': [target for target in source['targets'] if target['canonical_url_or_id'] in urls]}
             catalog = [source]
         return catalog
 
     def prepare_run(self, state):
         run = state.get('schedule_run_id') or self.research.prepare_run(state['question_id'], state['window'], state['question'], self.cap, max_steps=self.max_steps)
-        prior = next((row for row in self.records().rows('ai_mi_reports') if row['run_id'] == run), None)
-        return {'run_id': run, 'response': self.report_response(prior) if prior else {}}
+        records = self.records()
+        prior = next((row for row in records.rows('ai_mi_reports') if row['run_id'] == run), None)
+        window = json.loads(records.get('ai_mi_research_runs', run)['plan_window_json'])
+        return {'run_id': run, 'window': {key: window[key] for key in ('start', 'end')},
+                'response': self.report_response(prior) if prior else {}}
 
     async def plan_research(self, state):
         if state['response']:
@@ -205,11 +236,17 @@ class MarketWorkflow:
         plan = await self.ask('plan_research', ResearchPlan, {
             'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'catalog': available,
             'evidence': evidence, 'assessment': state['assessment']})
+        if plan['next_action'] == 'request_extension' and evidence:
+            return {'plan': plan, 'route': 'draft_report', 'reason': 'unresolved'}
         if plan['next_action'] in {'clarify', 'request_extension'}:
             return {'plan': plan, 'route': 'deliver_and_read', 'response': {'markdown': plan['user_question'] or 'Necesito delimitar el alcance antes de continuar.'}}
         if plan['next_action'] != 'execute':
             return {'plan': plan, 'route': 'draft_report', 'reason': 'sufficient' if evidence else 'no_data'}
-        return {'plan': plan, 'plan_sources': available, 'route': 'admit_step'}
+        bound_plan = self.catalog.bind_plan_target(plan, available)
+        if bound_plan is None:
+            return {'plan': plan, 'route': 'deliver_and_read', 'response': {'markdown':
+                    'No hay un destino aprobado inequívoco para ese paso. Indica una fuente registrada para este objetivo o solicita registrar la página.'}}
+        return {'plan': bound_plan, 'plan_sources': available, 'route': 'admit_step'}
 
     def admit_step(self, state):
         plan, records = state['plan'], self.records()
@@ -256,6 +293,8 @@ class MarketWorkflow:
         status = {'SUCCEEDED': 'succeeded', 'FAILED': 'failed', 'ABORTED': 'aborted', 'TIMED-OUT': 'timed_out', 'RUNNING': 'running', 'READY': 'running'}[result['status']]
         self.paid.record_provider(state['tool_id'], operation['permit'], operation['provider_run_id'], status,
                                   {key: result[key] for key in ('runId', 'status')})
+        if status in {'succeeded', 'failed', 'aborted', 'timed_out'} and result.get('spent_microusd') is not None:
+            self.paid.record_cost(state['tool_id'], result['runId'], result['spent_microusd'])
         if status == 'succeeded':
             return {'provider': result, 'route': 'normalize_evidence'}
         if status == 'running':
@@ -289,15 +328,16 @@ class MarketWorkflow:
     def decide_next(self, state):
         limit = self.close_limit(state['run_id'])
         more = state['assessment']['continue_research'] and bool(state['assessment']['gap']) and not limit
-        return {'route': 'plan_research' if more else 'draft_report',
-                'reason': limit or ('unresolved' if state['assessment']['gap'] else 'sufficient')}
+        reason = 'no_data' if not state['evidence'] else ('unresolved' if state['assessment']['gap'] else 'sufficient')
+        return {'route': 'plan_research' if more else 'draft_report', 'reason': limit or reason}
 
     async def draft_report(self, state):
         evidence = self.research.evidence(state['run_id'])
         if not evidence:
             return {'draft': {'answer_markdown': 'No se obtuvo evidencia verificable para responder. La ausencia de resultados no demuestra que el problema no exista.',
                              'cited_evidence_ids': [], 'findings': [], 'limitations': ['Sin evidencia recuperada; cierre: ' + state['reason']], 'chart_request': None}}
-        draft = await self.ask('draft_report', ReportDraft, {'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'evidence': evidence, 'close_reason': state['reason']})
+        draft = await self.ask('draft_report', ReportDraft, {'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'evidence': evidence, 'close_reason': state['reason'],
+            'remaining_gap': state['assessment'].get('gap', '')})
         from .workflow_actions import validate_report_links
         validate_report_links(draft, evidence)
         return {'draft': draft}

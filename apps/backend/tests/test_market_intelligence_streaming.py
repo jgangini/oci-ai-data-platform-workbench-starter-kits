@@ -75,6 +75,149 @@ def test_projection_failure_never_streams_success_and_resumes_delivery_without_r
     asyncio.run(check())
 
 
+def test_custom_projection_progress_uses_only_bounded_counts_without_echoing_payloads():
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.config import get_stream_writer
+    from langgraph.graph import END, START, StateGraph
+
+    async def project(state):
+        write = get_stream_writer()
+        for completed in range(3):
+            write({'stage': 'project_records', 'completed_steps': completed, 'total_steps': 2,
+                   'sql': 'SELECT private_customer FROM secret_table', 'markdown': 'UNTRUSTED PAYLOAD'})
+        for invalid in [None, 'UNTRUSTED PAYLOAD', {'stage': 'unknown', 'completed_steps': 1, 'total_steps': 2},
+                        {'stage': 'project_records'},
+                        {'stage': 'project_records', 'completed_steps': '1', 'total_steps': 2},
+                        {'stage': 'project_records', 'completed_steps': True, 'total_steps': 2},
+                        {'stage': 'project_records', 'completed_steps': 0, 'total_steps': False},
+                        {'stage': 'project_records', 'completed_steps': -1, 'total_steps': 2},
+                        {'stage': 'project_records', 'completed_steps': 3, 'total_steps': 2},
+                        {'stage': 'project_records', 'completed_steps': 1, 'total_steps': 29}]:
+            write(invalid)
+        return {**state, 'response': {'markdown': 'Verified result', 'chart': None}}
+
+    builder = StateGraph(dict)
+    builder.add_node('publish_result', project)
+    builder.add_edge(START, 'publish_result')
+    builder.add_edge('publish_result', END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+
+    async def check():
+        events = [event async for event in stream_turn(graph, REQUEST, THREAD)]
+        progress = [event for event in events if event.get('stage') == 'project_records']
+        assert progress == [{'event': 'progress', 'stage': 'project_records',
+                             'markdown': f'Guardando y verificando registros: {completed} de 2 pasos.'}
+                            for completed in range(3)]
+        assert events[-1]['state']['response'] == {'markdown': 'Verified result', 'chart': None}
+        assert sum(event['event'] == 'result' for event in events) == 1
+        serialized = json.dumps(events)
+        assert 'secret_table' not in serialized and 'UNTRUSTED PAYLOAD' not in serialized
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize('fail_readback', [False, True], ids=['verified', 'readback-fails'])
+def test_native_projection_stream_reports_verified_steps_and_releases_its_lease(monkeypatch, fail_readback):
+    from types import SimpleNamespace
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import (
+        projection_checks, projection_statements)
+
+    flow, model, provider, _ = configured()
+    before = flow.records()
+    writes = list(projection_statements(before, 'oci_medallion', 'oci_artifacts'))
+    checks = dict(projection_checks(before, 'oci_medallion', 'oci_artifacts'))
+    queries = []
+    configs = ModuleType('aidputils.agents.toolkit.configs')
+    helper = ModuleType('aidputils.agents.toolkit.tool_helper')
+    configs.AIDPToolConf = lambda **values: SimpleNamespace(model_dump=lambda: values)
+
+    def sql_tool(definition):
+        statement = definition['conf']['query']
+        async def invoke(arguments):
+            assert arguments == {}
+            queries.append(statement)
+            if statement in checks:
+                expected = checks[statement]
+                return {'rows': [{'total_rows': expected, 'distinct_keys': expected,
+                                  'matched_rows': expected + 1 if fail_readback else expected}]}
+            assert statement in writes
+            return {'rows': []}
+        return SimpleNamespace(ainvoke=invoke)
+
+    helper.create_langgraph_tool = sql_tool
+    monkeypatch.setitem(sys.modules, configs.__name__, configs)
+    monkeypatch.setitem(sys.modules, helper.__name__, helper)
+    runtime = AgentRuntime()
+    runtime.config = {'catalog': 'oci_medallion', 'framework_schema': 'oci_artifacts',
+                      'gold_query_compute_id': 'synthetic-query-compute'}
+
+    async def project(state):
+        await runtime.project(flow.journal)
+        return {**state, 'response': {'markdown': 'Projection verified'}}
+
+    builder = StateGraph(dict)
+    builder.add_node('publish_result', project)
+    builder.add_edge(START, 'publish_result')
+    builder.add_edge('publish_result', END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+
+    async def check():
+        events = []
+        async def collect():
+            async for event in stream_turn(graph, REQUEST, THREAD):
+                events.append(event)
+        if fail_readback:
+            with pytest.raises(RuntimeError, match='does not match'):
+                await collect()
+            assert all(event['event'] != 'result' for event in events)
+            completed = len(writes)
+            assert queries == [*writes, next(iter(checks))]
+        else:
+            await collect()
+            assert events[-1]['state']['response']['markdown'] == 'Projection verified'
+            completed = len(writes) + len(checks)
+            assert queries == [*writes, *checks]
+        total = len(writes) + len(checks)
+        progress = [event for event in events if event.get('stage') == 'project_records']
+        assert [event['markdown'] for event in progress] == [
+            f'Guardando y verificando registros: {step} de {total} pasos.' for step in range(completed + 1)]
+        assert all(set(event) == {'event', 'stage', 'markdown'} for event in progress)
+        assert 'MERGE INTO' not in json.dumps(events) and 'COUNT(*)' not in json.dumps(events)
+    asyncio.run(check())
+    value, _ = flow.journal.read()
+    assert value['projection_lease'] is None
+    assert value['tables'] == before.tables
+    assert not model.calls and not provider.starts
+
+
+def test_projection_rendering_failure_releases_its_lease_before_any_sql(monkeypatch):
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence import native
+
+    flow, model, provider, _ = configured()
+    before = flow.records()
+    configs = ModuleType('aidputils.agents.toolkit.configs')
+    helper = ModuleType('aidputils.agents.toolkit.tool_helper')
+    def forbidden(*args, **kwargs):
+        pytest.fail('A rendering failure must not execute SQL')
+    configs.AIDPToolConf = helper.create_langgraph_tool = forbidden
+    monkeypatch.setitem(sys.modules, configs.__name__, configs)
+    monkeypatch.setitem(sys.modules, helper.__name__, helper)
+    def broken_statements(*args):
+        yield from ()
+        raise RuntimeError('Synthetic projection rendering failure')
+    monkeypatch.setattr(native, 'projection_statements', broken_statements)
+    runtime = AgentRuntime()
+    runtime.config = {'catalog': 'oci_medallion', 'framework_schema': 'oci_artifacts',
+                      'gold_query_compute_id': 'synthetic-query-compute'}
+    with pytest.raises(RuntimeError, match='projection rendering failure'):
+        asyncio.run(runtime.project(flow.journal))
+    value, _ = flow.journal.read()
+    assert value['projection_lease'] is None
+    assert value['tables'] == before.tables
+    assert not model.calls and not provider.starts
+
+
 def test_denied_budget_is_not_presented_as_admission_or_a_sent_capture():
     flow, _, provider, graph = configured()
     flow.cap = 0

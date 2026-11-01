@@ -170,6 +170,8 @@ async def execute_selected(ledger, tool_id, arguments, call_actor):
         # Store only selected metadata; content belongs in documents/evidence.
         receipt = {key: result[key] for key in ('runId', 'actorId', 'status', 'startedAt', 'finishedAt') if key in result}
         ledger.record_provider(tool_id, permit, result['runId'], status, receipt)
+        if status in {'succeeded', 'failed', 'aborted', 'timed_out'} and result.get('spent_microusd') is not None:
+            ledger.record_cost(tool_id, result['runId'], result['spent_microusd'])
         return result
     except Exception:
         ledger.mark_uncertain(tool_id, permit)

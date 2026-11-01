@@ -31,6 +31,30 @@ def verify_projection(result, expected):
         raise RuntimeError('Delta projection does not match the exact scoped records')
 
 
+async def chat_request(user_query, trace_id, graph, config):
+    """Keep explicit command IDs; bind ordinary chat to its native invocation."""
+    if not isinstance(user_query, str) or not user_query.strip():
+        raise ValueError('Question must contain 1–500 characters')
+    question = user_query.strip()
+    if question.startswith('{'):
+        request = json.loads(question)
+        if not isinstance(request, dict):
+            raise ValueError('The chat command must be an object')
+        return request
+    if len(question) > 500:
+        raise ValueError('Question must contain 1–500 characters')
+    session = config.get('configurable', {}).get('thread_id')
+    if not isinstance(session, str) or not session.strip() or not isinstance(trace_id, str) or not 1 <= len(trace_id.strip()) <= 128:
+        raise ValueError('An authenticated native session and invocation ID are required')
+    previous = await graph.aget_state(config)
+    if previous.next:
+        values = previous.values or {}
+        if values.get('question') != question or not values.get('request_id'):
+            raise RuntimeError('Resume the interrupted request before starting a new turn')
+        return {'request_id': values['request_id'], 'question': question}
+    return {'request_id': 'native:' + digest([session, trace_id]), 'question': question}
+
+
 class AgentRuntime:
     def setup(self):
         import aidputils
@@ -56,9 +80,9 @@ class AgentRuntime:
             allowed_tools=[{'tool': tool, 'instruction': '', 'argOverrides': {}} for tool in contract['tools']],
             server_name='AiMarketIntelligenceApify', endpoint=contract['endpoint'], transport='streamable_http',
             auth={'authType': 'BEARER_TOKEN', 'token': token}, headers={})
-        self.provider = ApifyProvider({tool.name: tool for tool in tools})
         self.mcp_client = get_mcp_client(server_name='AiMarketIntelligenceApify', server_url=contract['endpoint'],
             auth={'authType': 'BEARER_TOKEN', 'token': token}, transport='streamable_http')
+        self.provider = ApifyProvider({tool.name: tool for tool in tools})
         self.model = DecisionModel(GenAIChatInvoker(provider='generic', auth_type='API_KEY',
             client=GenerativeAiInferenceV2Client(endpoint=config['model_endpoint'], signer=signer),
             is_stream=False, compartment_id=config['compartment_id'], service_endpoint=config['model_endpoint'],
@@ -81,7 +105,11 @@ class AgentRuntime:
                 raise RuntimeError('Another projection owns this scope; retry delivery, not capture')
             state['projection_lease'] = lease
             return records
-        records = journal.transact(claim)
+        from langgraph.config import get_stream_writer
+        try:
+            progress = get_stream_writer()
+        except RuntimeError:
+            progress = lambda event: None
         async def execute(statement):
             tool = create_langgraph_tool(AIDPToolConf(name='ai_mi_projection', description='Project validated owner-scoped research records',
                 tool_class='SQLTool', conf={'catalogType': 'STANDARD', 'clusterKey': config['gold_query_compute_id'],
@@ -95,11 +123,21 @@ class AgentRuntime:
             if set(result) == {'tool_name', 'arguments'}:
                 raise RuntimeError('SQL helper returned a stub; no projection verified')
             return result
+        records = journal.transact(claim)
         try:
-            for statement in projection_statements(records, config['catalog'], config['framework_schema']):
+            writes = list(projection_statements(records, config['catalog'], config['framework_schema']))
+            checks = list(projection_checks(records, config['catalog'], config['framework_schema']))
+            total = len(writes) + len(checks)
+            def notify(completed):
+                progress({'stage': 'project_records', 'completed_steps': completed,
+                          'total_steps': total})
+            notify(0)
+            for completed, statement in enumerate(writes, 1):
                 await execute(statement)
-            for statement, expected in projection_checks(records, config['catalog'], config['framework_schema']):
+                notify(completed)
+            for completed, (statement, expected) in enumerate(checks, len(writes) + 1):
                 verify_projection(await execute(statement), expected)
+                notify(completed)
         finally:
             def release(current, state):
                 if state.get('projection_lease') != lease:
@@ -152,9 +190,12 @@ class AgentRuntime:
                 'mcp_verified': mcp_verified,
                 'node_names': sorted(graph.get_graph().nodes), 'research_enabled': False, 'apify_starts': 0, 'model_calls': 0}}
             return
-        request = json.loads(user_query)
-        if not isinstance(request, dict):
-            raise ValueError('The authenticated chat adapter must supply a command object')
+        config = root_graph_config(native_config)
+        session = config.get('configurable', {}).get('thread_id')
+        if not isinstance(session, str) or not session:
+            raise ValueError('An authenticated native session is required')
+        config['configurable']['thread_id'] = digest([scope.__dict__, session])
+        request = await chat_request(user_query, kwargs.get('trace_id'), graph, config)
         if set(request) == {'read_notification'}:
             report = flow.proposals.read_notification(request['read_notification'])
             await self.project(journal)
@@ -169,11 +210,8 @@ class AgentRuntime:
             request = flow.scheduled_input(run_id)
         elif set(request) != {'request_id', 'question'}:
             raise ValueError('The authenticated chat adapter must supply request_id and question')
-        config = root_graph_config(native_config)
-        session = config.get('configurable', {}).get('thread_id')
-        if not isinstance(session, str) or not session:
-            raise ValueError('An authenticated native session is required')
-        config['configurable']['thread_id'] = digest([scope.__dict__, 'scheduled:' + run_id if scheduled else session])
+        if scheduled:
+            config['configurable']['thread_id'] = digest([scope.__dict__, 'scheduled:' + run_id])
         config['recursion_limit'] = 100
         try:
             async with aclosing(stream_turn(graph, request, config)) as events:

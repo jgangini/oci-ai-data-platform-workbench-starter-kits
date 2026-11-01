@@ -13,6 +13,57 @@ installer. Apify uses Bearer authentication through the project Credential Store
 entry; OAuth through AI Registry is out of scope and is not an acceptance gate.
 An existing development experiment is not an installation receipt.
 
+## Native chat in TEST
+
+The research runtime accepts ordinary questions of 1–500 characters. It keeps
+the authenticated `subject_id` and session supplied by AIDP, and derives the
+turn ID from the native session and `trace_id`; user text cannot choose an
+owner. An interrupted checkpoint resumes the same question and paid-operation
+ID. A different question cannot replace pending work. Native progress messages
+stream before the final response, which is delivered after projection checks.
+
+Explicit JSON commands with a caller-maintained `request_id` remain supported.
+They are the retry contract for clients that need to replay a completed request:
+a fresh native trace after completion represents a new conversation turn.
+Ordinary chat alone cannot distinguish that turn from a network retry with a
+new trace. Do not claim exactly-once research across those retries.
+
+Installing the package still leaves research disabled and budgets at zero.
+Testing the research graph requires separate development activation and source
+approval; a successful paused MCP check does not validate a research answer.
+
+Actor starts request an immediate receipt (`waitSecs=0`), followed by reads of
+that run's status through Oracle's standard MCP invoker. An unknown outcome
+still blocks another start until reconciled. Website reads explicitly configure
+Apify Proxy, as required by the Actor's [input contract](https://apify.com/apify/website-content-crawler/input-schema).
+Page reads use the Actor's documented 60-second request timeout, inside a
+120-second run limit so startup does not consume the entire page deadline.
+Request retries and session rotations are disabled. Usage-priced crawling still
+requires a separately verified cost envelope, including proxy usage.
+An empty evidence set cannot close as sufficient. Validated terminal provider
+costs are recorded even when an Actor fails; missing costs keep their reservation
+and are not reported as zero.
+An ungrounded model source selection asks for a registered name or an exact
+approved URL rather than failing the conversation or widening its scope.
+Intake receives up to twenty recent canonical topics with an active approved
+base in the authenticated owner's journal. It can reuse an unambiguous topic
+without inventing a differently worded objective. This is model-assisted
+selection, not guaranteed semantic identity or an exhaustive catalog search.
+Sources with neither approved targets nor discovery permission are excluded.
+For a website step, an omitted target ID can be resolved only from a unique
+exact approved URL match; ambiguous or unapproved choices ask for clarification.
+When evidence exists but the planner needs a broader source scope, the runtime
+publishes a partial report with an unresolved conclusion and the remaining gap;
+it does not start unapproved searches or withhold all recovered findings.
+Replaying an admitted request also preserves its original research window,
+including when its journal is recovered from a new native session.
+
+Projection streams only bounded step counts, never SQL or row contents.
+Completed-node milestones follow their updated state; an event alone does not
+prove native checkpoint persistence. Disconnect/resume remains subject to the
+managed checkpointer and paid-operation journal. Projection failures release their lease
+and cannot produce a verified success response.
+
 The package declares twenty-two hash-checked runtime assets, including its own memory
 adapter, with no shared dependency on the legacy Social package. The loader
 rejects undeclared paths and changed asset bytes. Its fourteen `ai_mi_` framework

@@ -126,6 +126,74 @@ def test_t10_t17_research_contrasts_closes_and_persists_citations_without_treati
     assert len(records.rows('ai_mi_notifications')) == 0
 
 
+def test_no_evidence_cannot_be_reported_as_sufficient_even_when_the_assessment_has_no_gap():
+    flow, model, provider, graph = configured()
+    original = model.ask
+    async def empty_assessment(name, schema, payload):
+        if name == 'assess_evidence':
+            model.calls.append((name, payload))
+            assert payload['evidence'] == []
+            return {'assessments': [], 'continue_research': False,
+                    'reason': 'Synthetic assessment claims completion', 'gap': ''}
+        return await original(name, schema, payload)
+    async def empty_observations(receipt, call):
+        return [], 1000
+    model.ask = empty_assessment
+    provider.observations = empty_observations
+    result = turn(graph, 'empty-evidence-is-not-sufficient')
+    records = flow.records()
+    run = records.get('ai_mi_research_runs', result['run_id'])
+    report = records.get('ai_mi_reports', result['response']['report_id'])
+    assert run['termination_reason'] == result['reason'] == 'no_data'
+    assert json.loads(report['cited_evidence_ids_json']) == []
+    assert 'no_data' in report['limitations_json']
+    assert records.rows('ai_mi_documents') == records.rows('ai_mi_run_evidence') == []
+    assert 'draft_report' not in [name for name, _ in model.calls]
+    assert len(provider.starts) == 1
+
+
+@pytest.mark.parametrize('status, expected_state', [('FAILED', 'failed'), ('ABORTED', 'aborted'), ('TIMED-OUT', 'timed_out')])
+@pytest.mark.parametrize('cost', [0, 2000, None, 50001], ids=['zero', 'measured', 'unknown', 'overrun'])
+def test_reconciling_failed_capture_persists_its_cost_without_requesting_observations(status, expected_state, cost):
+    flow, model, provider, _ = configured()
+    question, _ = flow.research.record_question('terminal-poll', 'Novedades de D1 en Colombia', TOPIC)
+    now = datetime.now(timezone.utc)
+    run = flow.research.prepare_run(question, {'start': (now - timedelta(days=7)).isoformat(), 'end': now.isoformat()},
+                                    'Reconcile a terminal capture', 50000)
+    source = SCOPE.key('x')
+    authorization = flow.paid.authorize(run, source, None)['authorization_hash']
+    tool = flow.paid.reserve(run, source, None, {'actor': 'reviewed-x'}, 50000,
+                             'Find current mentions', authorization_hash=authorization)
+    permit = flow.paid.claim_start(tool)
+    flow.paid.record_provider(tool, permit, 'running-provider-run', 'running', {'status': 'RUNNING'})
+    reads = []
+    async def terminal(run_id):
+        reads.append(run_id)
+        return {'runId': run_id, 'status': status, 'spent_microusd': cost}
+    async def forbidden_observations(*args):
+        pytest.fail('A failed capture cannot fetch a dataset to learn its charge')
+    provider.read, provider.observations = terminal, forbidden_observations
+    result = asyncio.run(flow.reconcile_step({'tool_id': tool}))
+    assert result['route'] == 'draft_report' and reads == ['running-provider-run']
+    value, _ = flow.journal.read()
+    operation = value['operations'][tool]
+    row = value['tables']['ai_mi_tool_runs'][tool]
+    assert operation['spent_microusd'] == row['spent_microusd'] == cost
+    if cost is not None and cost > 50000:
+        assert operation['state'] == row['state'] == 'uncertain'
+        assert operation['cost_overrun'] is True
+        with pytest.raises(RuntimeError, match='reconciled first'):
+            flow.paid.reserve(run, source, None, {'actor': 'contrast'}, 1000, 'Contrast', authorization_hash=authorization)
+    else:
+        assert operation['state'] == row['state'] == expected_state
+        if cost is None:
+            with pytest.raises(RuntimeError, match='budget exhausted'):
+                flow.paid.reserve(run, source, None, {'actor': 'contrast'}, 1000, 'Contrast', authorization_hash=authorization)
+        else:
+            assert flow.paid.reserve(run, source, None, {'actor': 'contrast'}, 1000, 'Contrast', authorization_hash=authorization)
+    assert not model.calls and not provider.starts
+
+
 def test_t12_followup_answers_the_new_question_without_an_actor_or_another_report():
     flow, model, provider, graph = configured()
     initial = turn(graph, 'request-1')
@@ -135,6 +203,76 @@ def test_t12_followup_answers_the_new_question_without_an_actor_or_another_repor
     assert response['response']['reused'] is True
     assert len(provider.starts) == 2 and len(flow.records().rows('ai_mi_reports')) == 1
     assert len(flow.proposals.recurring_questions(initial['topic_id'])) == 1
+
+
+def test_requesting_an_extension_after_capture_publishes_a_cited_partial_report_without_another_actor():
+    flow, model, provider, graph = configured()
+    sources = flow.records().tables['ai_mi_sources']
+    targets = flow.records().tables['ai_mi_source_targets']
+    original = model.ask
+    async def request_extension(name, schema, payload):
+        if name == 'plan_research' and payload['evidence']:
+            model.calls.append((name, payload))
+            return {'next_action': 'request_extension', 'source_key': None, 'target_id': None, 'arguments': None,
+                    'purpose': 'The available reference leaves a synthetic gap', 'expected_contribution': 'Independent contrast',
+                    'user_question': '¿Deseas ampliar las fuentes de esta investigación?'}
+        return await original(name, schema, payload)
+    model.ask = request_extension
+    result = turn(graph, 'partial-before-extension')
+    records = flow.records()
+    run = records.get('ai_mi_research_runs', result['run_id'])
+    report = records.get('ai_mi_reports', result['response']['report_id'])
+    evidence = flow.research.evidence(result['run_id'])
+    assert run['state'] == 'closed' and run['termination_reason'] == result['reason'] == 'unresolved'
+    assert len(evidence) == len(provider.starts) == 1
+    assert json.loads(report['cited_evidence_ids_json']) == [evidence[0]['evidence_id']]
+    assert evidence[0]['url'] in report['markdown']
+    assert records.tables['ai_mi_sources'] == sources and records.tables['ai_mi_source_targets'] == targets
+    assert records.rows('ai_mi_source_candidates') == []
+
+
+def test_requesting_an_extension_without_evidence_keeps_the_question_without_a_report_or_capture():
+    flow, model, provider, graph = configured()
+    question = '¿Deseas ampliar las fuentes de esta investigación?'
+    original = model.ask
+    async def request_extension(name, schema, payload):
+        if name == 'plan_research':
+            model.calls.append((name, payload))
+            assert payload['evidence'] == []
+            return {'next_action': 'request_extension', 'source_key': None, 'target_id': None, 'arguments': None,
+                    'purpose': 'Clarify permitted coverage', 'expected_contribution': 'Identify an approved reference',
+                    'user_question': question}
+        return await original(name, schema, payload)
+    model.ask = request_extension
+    result = turn(graph, 'extension-before-capture')
+    assert result['response']['markdown'] == question
+    assert flow.records().rows('ai_mi_reports') == flow.records().rows('ai_mi_tool_runs') == []
+    assert flow.journal.read()[0]['operations'] == {}
+    assert [name for name, _ in model.calls] == ['understand', 'plan_research']
+    assert not provider.starts
+
+
+def test_recovery_in_a_new_native_session_preserves_the_admitted_window_without_recapture():
+    flow, model, provider, graph = configured()
+    request_id = 'cross-session-recovery'
+    model.fail_report_once = True
+    with pytest.raises(RuntimeError, match='Synthetic model timeout'):
+        turn(graph, request_id)
+    records = flow.records()
+    run = records.rows('ai_mi_research_runs')[0]
+    original_window = {key: json.loads(run['plan_window_json'])[key] for key in ('start', 'end')}
+    evidence_ids = {row['evidence_id'] for row in flow.research.evidence(run['run_id'])}
+    assert len(evidence_ids) == len(provider.starts) == 2 and not records.rows('ai_mi_reports')
+    flow.clock = lambda: datetime.fromisoformat(original_window['end']) + timedelta(minutes=1)
+    new_session = {'configurable': {'thread_id': 'new-native-session'}, 'recursion_limit': 100}
+    recovered = asyncio.run(run_turn(graph, {'request_id': request_id, 'question': 'Novedades de D1 en Colombia'}, new_session))
+    assert recovered['run_id'] == run['run_id'] and recovered['window'] == original_window
+    assert len(provider.starts) == 2
+    records = flow.records()
+    assert len(records.rows('ai_mi_research_runs')) == len(records.rows('ai_mi_reports')) == 1
+    report = records.get('ai_mi_reports', recovered['response']['report_id'])
+    assert set(json.loads(report['cited_evidence_ids_json'])) == evidence_ids
+    assert {row['evidence_id'] for row in flow.research.evidence(run['run_id'])} == evidence_ids
 
 
 @pytest.mark.parametrize('unsafe', ['<img src=x onerror=alert(1)>', '```html\nunsafe\n```'])
@@ -189,6 +327,184 @@ def test_ambiguous_website_registration_clarifies_without_a_second_model_or_disc
     assert 'URL exacta' in result['response']['markdown']
     assert not result.get('pending') and not provider.starts
     assert not flow.records().rows('ai_mi_source_candidates')
+
+
+@pytest.mark.parametrize('unavailable', [None, 'unlinked', 'link', 'target', 'source'])
+def test_understand_receives_only_registered_topics_with_an_active_approved_base(unavailable):
+    flow, model, provider, _ = configured()
+    if unavailable:
+        def disable(records, state):
+            if unavailable == 'unlinked':
+                records.tables['ai_mi_topic_sources'].clear()
+            else:
+                table, key = {'link': ('ai_mi_topic_sources', SCOPE.key('link')),
+                              'target': ('ai_mi_source_targets', SCOPE.key('reference')),
+                              'source': ('ai_mi_sources', SCOPE.key('web'))}[unavailable]
+                records.upsert(table, {**records.get(table, key), 'status': 'disabled'})
+        flow.journal.transact(disable)
+    asyncio.run(flow.understand({'question': '¿Qué novedades hay?', 'last_topic': None}))
+    payload = model.calls[0][1]
+    assert payload['registered_topics'] == ([{'version': 1, **TOPIC}] if unavailable is None else [])
+    assert not provider.starts
+
+
+def test_understand_bounds_registered_topic_context_to_the_twenty_most_recent_approved_scopes():
+    flow, model, provider, _ = configured()
+    scopes = [{'entity': 'Entity ' + str(index), 'market': 'Colombia', 'objective': 'Registered objective'}
+              for index in range(22)]
+    def seed(records, state):
+        for index, scope in enumerate(scopes):
+            topic = SCOPE.key('registered-topic-' + str(index))
+            records.upsert('ai_mi_topics', {'topic_id': topic, 'canonical_scope_json': json_text(scope),
+                'created_at': (datetime(2026, 10, 1, tzinfo=timezone.utc) + timedelta(days=index)).isoformat()})
+            records.upsert('ai_mi_topic_sources', {'topic_source_id': SCOPE.key('registered-link-' + str(index)),
+                'topic_id': topic, 'target_id': SCOPE.key('reference'),
+                'approved_scope_json': json_text({'urls': ['https://example.com/reference']}), 'status': 'active'})
+    flow.journal.transact(seed)
+    asyncio.run(flow.understand({'question': '¿Qué novedades hay?', 'last_topic': None}))
+    assert model.calls[0][1]['registered_topics'] == [{'version': 1, **scope} for scope in reversed(scopes[2:])]
+    assert not provider.starts
+
+
+def test_an_empty_approved_catalog_closes_without_asking_the_planner_or_starting_capture():
+    flow, model, provider, _ = configured()
+    question, _ = flow.research.record_question('no-approved-base', 'Consulta un objetivo sin fuentes aprobadas', TOPIC)
+    now = datetime.now(timezone.utc)
+    run = flow.research.prepare_run(question, {'start': (now - timedelta(days=7)).isoformat(), 'end': now.isoformat()},
+                                    'No approved research base', 100000)
+    result = asyncio.run(flow.plan_research({'run_id': run, 'response': {}, 'catalog': []}))
+    assert result == {'route': 'draft_report', 'reason': 'no_data'}
+    assert flow.records().rows('ai_mi_tool_runs') == []
+    assert not model.calls and not provider.starts
+
+
+@pytest.mark.parametrize('urls, duplicate_target, accepted', [
+    (['https://EXAMPLE.com/reference?utm_source=feed'], False, True),
+    ([], False, False),
+    (['https://example.com/unapproved'], False, False),
+    (['https://example.com/reference', 'https://example.com/other-approved'], False, False),
+    (['https://127.0.0.1/private'], False, False),
+    (['https://example.com/reference'], True, False),
+], ids=['unique-normalized', 'missing-url', 'unapproved-url', 'multiple-urls', 'private-url', 'ambiguous-targets'])
+def test_a_missing_web_target_is_resolved_only_from_one_unambiguous_approved_url(urls, duplicate_target, accepted):
+    flow, model, provider, _ = configured()
+    question, topic = flow.research.record_question('missing-target', 'Consulta la página registrada', TOPIC)
+    second = SCOPE.key('second-reference')
+    other_url = 'https://example.com/reference' if duplicate_target else 'https://example.com/other-approved'
+    def seed(records, state):
+        records.upsert('ai_mi_source_targets', {'target_id': second, 'source_key': SCOPE.key('web'),
+            'canonical_url_or_id': other_url, 'description': 'Synthetic second reference', 'status': 'active'})
+        records.upsert('ai_mi_topic_sources', {'topic_source_id': SCOPE.key('second-link'), 'topic_id': topic,
+            'target_id': second, 'approved_scope_json': json_text({'urls': [other_url]}), 'status': 'active'})
+    flow.journal.transact(seed)
+    now = datetime.now(timezone.utc)
+    window = {'start': (now - timedelta(days=7)).isoformat(), 'end': now.isoformat()}
+    run = flow.research.prepare_run(question, window, 'Read an approved page', 100000)
+    state = {'question': 'Consulta la página registrada', 'intake': {'topic': TOPIC}, 'topic_id': topic,
+             'run_id': run, 'window': window, 'catalog': flow.catalog.approved_base(flow.records(), topic),
+             'response': {}, 'assessment': {}}
+    original = model.ask
+    async def omit_target(name, schema, payload):
+        plan = await original(name, schema, payload)
+        assert name == 'plan_research'
+        plan['target_id'], plan['arguments']['urls'] = None, urls
+        return plan
+    model.ask = omit_target
+    result = asyncio.run(flow.plan_research(state))
+    if accepted:
+        assert result['route'] == 'admit_step' and result['plan']['target_id'] == SCOPE.key('reference')
+        admitted = flow.admit_step({**state, **result})
+        row = flow.records().get('ai_mi_tool_runs', admitted['tool_id'])
+        assert row['target_id'] == SCOPE.key('reference')
+        assert admitted['call']['input']['startUrls'] == [{'url': 'https://example.com/reference'}]
+    else:
+        assert result['route'] == 'deliver_and_read' and result['response']['markdown']
+        assert flow.records().rows('ai_mi_tool_runs') == []
+        assert flow.journal.read()[0]['operations'] == {}
+    assert not provider.starts
+
+
+def test_ungrounded_model_source_selection_asks_for_clarification_without_starting_research():
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.workflow import SourceSelectionRequired
+    flow, model, provider, graph = configured()
+    selected = SCOPE.key('web')
+    topic_id = SCOPE.key(digest(['topic', TOPIC]))
+    question = '¿Qué novedades hay sobre D1 en Colombia?'
+    with pytest.raises(SourceSelectionRequired):
+        flow.catalog_for_question({'question': question, 'intake': {'selected_source_key': selected}}, topic_id, None)
+    original = model.ask
+    async def select_without_user_grounding(name, schema, payload):
+        result = await original(name, schema, payload)
+        if name == 'understand':
+            result['selected_source_key'] = selected
+        return result
+    model.ask = select_without_user_grounding
+    result = turn(graph, 'ungrounded-source', question)
+    assert result['route'] == 'deliver_and_read'
+    assert 'nombre registrado o su URL exacta' in result['response']['markdown']
+    assert result['last_topic'] == TOPIC
+    assert [name for name, _ in model.calls] == ['understand']
+    assert not provider.starts and not result['run_id']
+    records = flow.records()
+    assert len(records.rows('ai_mi_questions')) == 1
+    assert records.rows('ai_mi_research_runs') == records.rows('ai_mi_tool_runs') == []
+
+
+def test_an_exact_approved_url_with_tracking_parameters_grounds_only_its_registered_source():
+    flow, model, provider, _ = configured()
+    before = flow.records().tables
+    topic_id = SCOPE.key(digest(['topic', TOPIC]))
+    catalog = flow.catalog_for_question({
+        'question': 'Investiga https://EXAMPLE.com/reference?utm_source=feed&gclid=tracking#section.',
+        'intake': {'selected_source_key': SCOPE.key('web')}}, topic_id, None)
+    assert [source['source_key'] for source in catalog] == [SCOPE.key('web')]
+    assert [target['canonical_url_or_id'] for target in catalog[0]['targets']] == ['https://example.com/reference']
+    assert flow.records().tables == before
+    assert not model.calls and not provider.starts
+
+
+def test_url_grounding_does_not_add_other_approved_pages_from_the_same_source():
+    flow, model, provider, _ = configured()
+    topic_id = SCOPE.key(digest(['topic', TOPIC]))
+    second_target = SCOPE.key('another-reference')
+    def seed(records, state):
+        records.upsert('ai_mi_source_targets', {'target_id': second_target, 'source_key': SCOPE.key('web'),
+            'canonical_url_or_id': 'https://example.com/another-approved-page',
+            'description': 'Another synthetic approved reference', 'status': 'active'})
+        records.upsert('ai_mi_topic_sources', {'topic_source_id': SCOPE.key('another-link'),
+            'topic_id': topic_id, 'target_id': second_target,
+            'approved_scope_json': json_text({'urls': ['https://example.com/another-approved-page']}),
+            'status': 'active'})
+    flow.journal.transact(seed)
+    before = flow.records()
+    source = next(row for row in flow.catalog.approved_base(before, topic_id) if row['source_key'] == SCOPE.key('web'))
+    assert len(source['targets']) == 2
+    catalog = flow.catalog_for_question({'question': 'Investiga https://example.com/reference',
+        'intake': {'selected_source_key': SCOPE.key('web')}}, topic_id, None)
+    assert len(catalog) == 1
+    assert [target['target_id'] for target in catalog[0]['targets']] == [SCOPE.key('reference')]
+    assert flow.records().tables == before.tables
+    assert not model.calls and not provider.starts
+
+
+@pytest.mark.parametrize('selected_source, url', [
+    ('web', 'https://example.com/unapproved'),
+    ('web', 'https://example.com/reference?different=scope'),
+    ('web', 'https://unapproved.example.org/reference'),
+    ('web', 'https://127.0.0.1/reference'),
+    ('web', 'https://service.internal/reference'),
+    ('x', 'https://example.com/reference'),
+])
+def test_unapproved_private_or_other_source_urls_cannot_widen_source_selection(selected_source, url):
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.workflow import SourceSelectionRequired
+    flow, model, provider, _ = configured()
+    before = flow.records().tables
+    topic_id = SCOPE.key(digest(['topic', TOPIC]))
+    with pytest.raises(SourceSelectionRequired):
+        flow.catalog_for_question({'question': 'Investiga ' + url,
+            'intake': {'selected_source_key': SCOPE.key(selected_source)}}, topic_id, None)
+    assert flow.records().tables == before
+    assert not model.calls and not provider.starts
 
 
 def test_evidence_can_use_one_owned_snapshot_without_rereading_the_remote_journal(monkeypatch):

@@ -81,6 +81,38 @@ def test_unknown_cost_keeps_reservation_until_measured():
     assert ledger.reserve(run, source, None, {'actor': 'another'}, 1000, 'Contrast', authorization_hash=ledger.authorize(run, source, None)['authorization_hash'])
 
 
+@pytest.mark.parametrize('status, expected_state', [('FAILED', 'failed'), ('ABORTED', 'aborted'), ('TIMED-OUT', 'timed_out')])
+@pytest.mark.parametrize('cost', [0, 2000, None, 10001], ids=['zero', 'measured', 'unknown', 'overrun'])
+def test_terminal_start_receipts_persist_measured_cost_and_keep_unknown_or_exceeded_budgets_blocked(status, expected_state, cost):
+    ledger, run, source = prepared(limit=10000)
+    arguments = {'actor': 'reviewed-x'}
+    authorization = ledger.authorize(run, source, None)['authorization_hash']
+    tool = ledger.reserve(run, source, None, arguments, 10000, 'Find current mentions', authorization_hash=authorization)
+    calls = []
+    async def terminal(arguments):
+        calls.append(arguments)
+        return {'runId': 'terminal-provider-run', 'status': status, 'spent_microusd': cost}
+    result = asyncio.run(execute_selected(ledger, tool, arguments, terminal))
+    assert result['status'] == status and calls == [arguments]
+    value, _ = ledger.journal.read()
+    operation = value['operations'][tool]
+    row = value['tables']['ai_mi_tool_runs'][tool]
+    assert operation['provider_run_id'] == row['provider_run_id'] == 'terminal-provider-run'
+    assert operation['spent_microusd'] == row['spent_microusd'] == cost
+    if cost is not None and cost > 10000:
+        assert operation['state'] == row['state'] == 'uncertain'
+        assert operation['cost_overrun'] is True
+        with pytest.raises(RuntimeError, match='reconciled first'):
+            ledger.reserve(run, source, None, {'actor': 'contrast'}, 1000, 'Contrast', authorization_hash=authorization)
+    else:
+        assert operation['state'] == row['state'] == expected_state
+        if cost is None:
+            with pytest.raises(RuntimeError, match='budget exhausted'):
+                ledger.reserve(run, source, None, {'actor': 'contrast'}, 1000, 'Contrast', authorization_hash=authorization)
+        else:
+            assert ledger.reserve(run, source, None, {'actor': 'contrast'}, 1000, 'Contrast', authorization_hash=authorization)
+
+
 def test_observed_overrun_blocks_further_starts():
     ledger, run, source = prepared()
     key = ledger.reserve(run, source, None, {}, 10000, 'Find current mentions', authorization_hash=ledger.authorize(run, source, None)['authorization_hash'])

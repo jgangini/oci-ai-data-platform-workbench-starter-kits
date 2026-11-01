@@ -45,10 +45,34 @@ class Catalog:
             sources = [source for source in sources if any(
                 targets[link['target_id']]['source_key'] == source['source_key']
                 for link in links if link['target_id'] in targets)]
-        return [{'source_key': row['source_key'], 'name': row['name'], 'profile_id': row['connector_revision'],
-                 'targets': [targets[link['target_id']] for link in links if link['target_id'] in targets
-                             and targets[link['target_id']]['source_key'] == row['source_key']]}
-                for row in sources]
+        base = []
+        for row in sources:
+            selected = [targets[link['target_id']] for link in links if link['target_id'] in targets
+                        and targets[link['target_id']]['source_key'] == row['source_key']]
+            if selected or json.loads(row['allowed_scope_json'] or '{}').get('allow_discovery'):
+                base.append({'source_key': row['source_key'], 'name': row['name'],
+                             'profile_id': row['connector_revision'], 'targets': selected})
+        return base
+
+    @staticmethod
+    def bind_plan_target(plan, sources):
+        """Bind the planner's selection to the topic's approved catalog targets."""
+        source = next((row for row in sources if row['source_key'] == plan['source_key']), None)
+        if source is None:
+            return None
+        if source['profile_id'] != 'website':
+            return plan
+        target_id = plan['target_id']
+        if target_id is None:
+            try:
+                urls = {public_url(url) for url in (plan['arguments'] or {}).get('urls', [])}
+            except ValueError:
+                return None
+            matches = [target for target in source['targets'] if urls == {target['canonical_url_or_id']}]
+            target_id = matches[0]['target_id'] if len(matches) == 1 else None
+        if target_id not in {target['target_id'] for target in source['targets']}:
+            return None
+        return {**plan, 'target_id': target_id}
 
     def register_operator_website(self, topic_id, url, user_request_id):
         url = public_url(url)

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "lab_id": "ai_market_intelligence",
   "display_name": "AI Market Intelligence",
-  "pack_version": "1.0.1",
+  "pack_version": "1.0.2",
   "status": "planned",
   "kind": "global_module",
   "scope": "global",
@@ -55,7 +55,7 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/workflow.py",
-      "sha256": "4e4722beb563abb86339a6cbdda63b9d9aa18c1ef56ad9778e642a38fbe9da45",
+      "sha256": "79c894237e7fe31c2a18d7a4130e5f8511ef3b868171125c508cef867e673e24",
       "workspace_path": "agent/ai_market_intelligence/workflow.py"
     },
     {
@@ -70,12 +70,12 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/native.py",
-      "sha256": "4c1054897e5e8bf8afd8d41cfdf81ce9194fc30499f3d70c190e9aaf096a164f",
+      "sha256": "4da9c00d81ac4386cce407ddcbad68217ef30506336ffe7fcfa414cc6ab35079",
       "workspace_path": "agent/ai_market_intelligence/native.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/streaming.py",
-      "sha256": "e00cb79bfe73179db192f6450a1a83f9717a4a4360d8302571df2e7eb416121f",
+      "sha256": "040624f1bf60bf9114c0eb79f2945f4ff837e2c71408de932e3647ba17034357",
       "workspace_path": "agent/ai_market_intelligence/streaming.py"
     },
     {
@@ -95,12 +95,12 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/execution.py",
-      "sha256": "f049d08a4bb1e3de8dcaf6db0e3718e32a0e1ccbcef52442a6486ec88f7bd3f4",
+      "sha256": "a368b2b99b532ecdaa645a92f0c03bd87525cfbd4f4b3e7f021cf34763b7306d",
       "workspace_path": "agent/ai_market_intelligence/execution.py"
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/catalog.py",
-      "sha256": "614c034add9128fb46f26bc05e1a57db234ce00691b7455afc1aa5ee2d2e4d83",
+      "sha256": "a5ec60b345d70b4a7e3939a8250b944c6eadc5d4e7cab9c813157ecc268c4da3",
       "workspace_path": "agent/ai_market_intelligence/catalog.py"
     },
     {
@@ -115,7 +115,7 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/connectors.py",
-      "sha256": "c648fc0ab0e4e186e162ee8b499a72ea1802cc67b013d6bb493de3088a213b02",
+      "sha256": "57a2c998b043ca54d11915ce731dc248873da4e7949aa9b720e7f1ba738e6968",
       "workspace_path": "agent/ai_market_intelligence/connectors.py"
     },
     {
@@ -135,7 +135,7 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/prompts.json",
-      "sha256": "745b54828d496c0fd89d3781f273ccd3b430ac536af643b19a68e0dde589a902",
+      "sha256": "ba0181d0c91b18d1d4d87f1ab7c52ed63f80659de5cf80085c6c3fe195f1f893",
       "workspace_path": "agent/ai_market_intelligence/prompts.json"
     },
     {
@@ -165,5 +165,5 @@
       "sha256": "87516a2e0f446f2e32cef8e5b05e99edb545d23fabfe08ed43d704bdf1776d04"
     }
   ],
-  "pack_sha256": "1e042432ae1ac340e747aef3f6b184261296474dde24678fc4e6492e8768aefc"
+  "pack_sha256": "f432336bafe7456cc9c8fc1951cbc1a83ad94b84cc2708bf08c545ab80107960"
 }

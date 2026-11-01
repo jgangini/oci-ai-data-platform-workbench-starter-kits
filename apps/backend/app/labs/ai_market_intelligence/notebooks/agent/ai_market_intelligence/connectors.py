@@ -45,8 +45,10 @@ def compile_call(profile_id, args, window, cap_microusd, *, approved_urls=(), us
         if not usage_cost_verified:
             raise RuntimeError('Usage-priced crawling requires a verified cost envelope before admission')
         inputs = _web_input(args, approved_urls)
-    return {'actor': profile['actor'], 'input': inputs, 'waitSecs': 45,
-            'callOptions': {'build': profile['build'], 'memory': 256, 'timeout': 60,
+    # Return the run identity before the native MCP helper's shorter deadline.
+    return {'actor': profile['actor'], 'input': inputs, 'waitSecs': 0,
+            'callOptions': {'build': profile['build'], 'memory': 512 if profile_id == 'website' else 256,
+                            'timeout': 120 if profile_id == 'website' else 60,
                             'maxItems': limit, 'maxTotalChargeUsd': cap_microusd / 1000000}}
 
 
@@ -73,6 +75,9 @@ def _web_input(args, approved_urls):
         raise ValueError('Crawler URLs exceed the approved targets')
     return {'startUrls': [{'url': url} for url in urls], 'crawlerType': 'cheerio',
             'maxCrawlDepth': 0, 'maxCrawlPages': len(urls), 'maxResults': len(urls),
+            'proxyConfiguration': {'useApifyProxy': True},
+            'maxConcurrency': 1, 'requestTimeoutSecs': 60,
+            'maxRequestRetries': 0, 'maxSessionRotations': 0,
             'useSitemaps': False, 'useLlmsTxt': False, 'respectRobotsTxtFile': True,
             'saveMarkdown': True, 'saveHtml': False, 'saveFiles': False,
             'saveScreenshots': False, 'summarize': False}
