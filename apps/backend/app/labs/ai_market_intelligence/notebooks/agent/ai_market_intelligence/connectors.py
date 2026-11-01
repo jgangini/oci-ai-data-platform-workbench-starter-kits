@@ -14,10 +14,23 @@ PROFILES = {
     'website': {'actor': 'apify/website-content-crawler', 'actor_id': 'aYG0l9s7dbB7j3gbS',
                 'build': '0.3.102', 'platform': 'web', 'operation': 'read_urls', 'pricing': 'usage'},
     'yahoo_finance': {'actor': 'architjn/yahoo-finance', 'actor_id': 'lujI4mrby2M9OV868',
-                      'build': '1.1.1', 'platform': 'finance', 'operation': 'ticker_history', 'pricing': 'event'},
+                      'build': '1.1.1', 'platform': 'finance', 'operation': 'ticker_history', 'pricing': 'event',
+                      'unavailable_reason': 'Yahoo Finance está suspendido: la versión del proveedor rechaza el origen MCP. No se inició otra extracción; se requiere una versión compatible verificada.'},
+    'yahoo_history': {'actor': 'memo23/yahoo-finance-scraper', 'actor_id': 'fDacJgPkfZVoNFLCq',
+                      'build': '0.0.27', 'platform': 'finance', 'operation': 'ticker_history', 'pricing': 'event'},
     'world_bank': {'actor': 'solidcode/world-bank-indicators-scraper', 'actor_id': 'h9FnVs8QXP9lBK6Gp',
                    'build': '1.0.6', 'platform': 'economics', 'operation': 'annual_series', 'pricing': 'event'},
 }
+
+
+class ConnectorUnavailable(RuntimeError):
+    pass
+
+
+def require_available(profile_id):
+    reason = PROFILES[profile_id].get('unavailable_reason')
+    if reason:
+        raise ConnectorUnavailable(reason)
 
 
 def resolve_window(kind, clock, timezone_name):
@@ -35,6 +48,7 @@ def resolve_window(kind, clock, timezone_name):
 
 
 def compile_call(profile_id, args, window, cap_microusd, *, approved_urls=(), approved_finance=None, usage_cost_verified=False):
+    require_available(profile_id)
     profile = PROFILES[profile_id]
     start, end = _window(window)
     if type(cap_microusd) is not int or not 0 < cap_microusd <= 5000000:
@@ -44,7 +58,7 @@ def compile_call(profile_id, args, window, cap_microusd, *, approved_urls=(), ap
     limit = args['max_items']
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError('Result limit must be between one and fifty')
-    if profile_id in {'yahoo_finance', 'world_bank'}:
+    if profile_id in {'yahoo_finance', 'yahoo_history', 'world_bank'}:
         if args['query'] or args['urls']:
             raise ValueError('Financial sources accept only approved structured selections')
         inputs = compile_finance(profile_id, args.get('financial'), approved_finance, limit, end)
@@ -58,7 +72,7 @@ def compile_call(profile_id, args, window, cap_microusd, *, approved_urls=(), ap
         inputs = _web_input(args, approved_urls)
     # Return the run identity before the native MCP helper's shorter deadline.
     return {'actor': profile['actor'], 'input': inputs, 'waitSecs': 0,
-            'callOptions': {'build': profile['build'], 'memory': 512 if profile_id == 'website' else 256,
+            'callOptions': {'build': profile['build'], 'memory': 512 if profile_id in {'website', 'yahoo_history'} else 256,
                             'timeout': 120 if profile_id == 'website' else 60,
                             'maxItems': limit, 'maxTotalChargeUsd': cap_microusd / 1000000}}
 

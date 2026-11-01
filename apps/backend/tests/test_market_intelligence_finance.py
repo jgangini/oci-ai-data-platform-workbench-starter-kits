@@ -20,7 +20,7 @@ WORLD = {**BASE, 'countries': ['CO'], 'indicator_codes': ['NY.GDP.MKTP.CD'], 'ye
 
 def call_for(profile, args=None):
     return {'actor': ACTORS[profile], 'observed_at': CLOCK.isoformat(),
-            'input': compile_finance(profile, args or (YAHOO if profile == 'yahoo_finance' else WORLD), SCOPE, 10, CLOCK)}
+            'input': compile_finance(profile, args or (WORLD if profile == 'world_bank' else YAHOO), SCOPE, 10, CLOCK)}
 
 
 def yahoo_row():
@@ -200,3 +200,90 @@ def test_provider_errors_and_missing_observation_clock_are_not_financial_evidenc
     del call['observed_at']
     with pytest.raises(ValueError, match='timezone-aware'):
         normalize_finance(world_row(), call['actor'], 'synthetic-run', call)
+
+
+def candle_row():
+    return {'symbol': 'AAPL', 'type': 'candle', 'date': '2026-10-02T13:30:00.000Z',
+            'close': 298.01, 'currency': 'USD', 'interval': '1d'}
+
+
+def test_compile_yahoo_history_caps_all_rows_and_disables_other_products():
+    args, scope = copy.deepcopy(YAHOO), copy.deepcopy(SCOPE)
+    assert compile_finance('yahoo_history', args, scope, 10, CLOCK) == {
+        'operation': 'historical', 'operations': [], 'tickers': ['AAPL'],
+        'startDate': '2026-10-01', 'endDate': '2026-10-31', 'interval': '1d',
+        'includeEvents': False, 'includePrePost': False, 'maxItems': 10}
+    assert args == YAHOO and scope == SCOPE
+
+
+@pytest.mark.parametrize('changes', [
+    {'tickers': ['D1']}, {'start_date': None}, {'start_date': '2026-09-01'},
+    {'end_date': '2026-11-02'}, {'countries': ['CO']}, {'operation': 'quotes'},
+    {'operations': ['quotes']}, {'maxItems': 0}, {'tickers': [True]},
+])
+def test_yahoo_history_reuses_scope_and_date_validation_without_accepting_raw_actor_options(changes):
+    with pytest.raises(ValueError):
+        compile_finance('yahoo_history', {**YAHOO, **changes}, SCOPE, 10, CLOCK)
+
+
+@pytest.mark.parametrize('value', [298.01, 0, None])
+def test_daily_candle_keeps_explicit_currency_period_and_unknown_value(value):
+    row, call = {**candle_row(), 'close': value}, call_for('yahoo_history')
+    originals = copy.deepcopy((row, call))
+    result, = normalize_finance(row, call['actor'], 'synthetic-run', call)
+    assert result['metrics'] == {'metric': 'close', 'unit': 'USD', 'currency': 'USD',
+                                 'entity': 'AAPL', 'indicator': None,
+                                 'points': [{'period': '2026-10-02', 'value': value}]}
+    assert result['published_at'] is None and result['observed_at'] == CLOCK.isoformat()
+    assert result['url'] == 'https://finance.yahoo.com/quote/AAPL/history/'
+    assert result['provenance']['source_timestamp'] == row['date']
+    assert result['provenance']['provider_run_id'] == 'synthetic-run'
+    assert result['provenance']['source'] == ACTORS['yahoo_history']
+    assert result['provenance']['temporal_basis'] == 'financial_period'
+    assert 'no cita literal' in result['text']
+    assert (row, call) == originals
+
+
+@pytest.mark.parametrize('changes', [
+    {'symbol': 'MSFT'}, {'type': 'dividend'}, {'type': 'quote'}, {'interval': '1h'},
+    {'date': '2026-10-02'}, {'date': '2026-10-02T13:30:00'},
+    {'date': '2026-09-30T13:30:00Z'}, {'date': '2026-11-01T13:30:00Z'},
+    {'date': '2026-10-99T13:30:00Z'}, {'currency': False}, {'currency': '$'},
+    {'close': True}, {'close': '298.01'}, {'close': float('nan')}, {'close': float('inf')},
+    {'error': 'provider failure'},
+])
+def test_yahoo_history_rejects_unrequested_or_untrustworthy_candles(changes):
+    call = call_for('yahoo_history')
+    with pytest.raises(ValueError):
+        normalize_finance({**candle_row(), **changes}, call['actor'], 'synthetic-run', call)
+
+
+@pytest.mark.parametrize('timestamp,period', [
+    ('2026-10-01T00:30:00+02:00', '2026-10-01'),
+    ('2026-10-31T23:30:00-03:00', '2026-10-31'),
+])
+def test_daily_candle_preserves_provider_calendar_date_across_utc_boundaries(timestamp, period):
+    call = call_for('yahoo_history')
+    row, = normalize_finance({**candle_row(), 'date': timestamp}, call['actor'], 'synthetic-run', call)
+    assert row['metrics']['points'][0]['period'] == period
+    assert row['provenance']['source_timestamp'] == timestamp
+    assert row['provenance']['period_basis'] == 'provider_timestamp_calendar_date'
+
+
+@pytest.mark.parametrize('changes', [{'operation': 'quotes'}, {'operations': ['quotes']},
+                                     {'operations': None}, {'interval': '1h'}])
+def test_yahoo_history_requires_the_exact_admitted_operation(changes):
+    call = call_for('yahoo_history')
+    call['input'].update(changes)
+    with pytest.raises(ValueError, match='operation'):
+        normalize_finance(candle_row(), call['actor'], 'synthetic-run', call)
+
+
+def test_yahoo_history_missing_currency_stays_unknown_and_missing_close_is_rejected():
+    row, call = candle_row(), call_for('yahoo_history')
+    del row['currency']
+    result, = normalize_finance(row, call['actor'], 'synthetic-run', call)
+    assert result['metrics']['currency'] is None and result['metrics']['unit'] == 'unknown'
+    del row['close']
+    with pytest.raises(ValueError, match='shape'):
+        normalize_finance(row, call['actor'], 'synthetic-run', call)

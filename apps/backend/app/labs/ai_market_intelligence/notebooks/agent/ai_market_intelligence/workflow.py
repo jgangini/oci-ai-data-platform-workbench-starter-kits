@@ -7,9 +7,9 @@ from datetime import datetime, timezone
 from typing import TypedDict
 
 from .catalog import Catalog, public_url
-from .connectors import PROFILES, compile_call, resolve_window
+from .connectors import ConnectorUnavailable, PROFILES, compile_call, resolve_window
 from .contracts import IntakeDecision, ResearchPlan, EvidenceAssessment, ReportDraft
-from .execution import AdmissionBlocked, ProviderPending, PaidOperations, execute_selected, resolve_source_scope
+from .execution import AdmissionBlocked, ProviderPending, PaidOperations, TargetAlreadyInvestigated, execute_selected, resolve_source_scope
 from .proposals import Proposals
 from .repository import Records, digest
 from .research import Research
@@ -44,6 +44,7 @@ class TurnState(TypedDict, total=False):
     pending: dict | None
     schedule_run_id: str | None
     plan_sources: list
+    connector_issue: str
 
 
 class MarketWorkflow:
@@ -115,7 +116,7 @@ class MarketWorkflow:
             raise ValueError('Question must contain 1–500 characters')
         return {'intake': {}, 'catalog': [], 'plan': {}, 'provider': {}, 'evidence': [],
                 'assessment': {}, 'draft': {}, 'chart': None, 'reason': '', 'response': {},
-                'run_id': '', 'question_id': '', 'topic_id': '', 'tool_id': '', 'call': {}}
+                'run_id': '', 'question_id': '', 'topic_id': '', 'tool_id': '', 'call': {}, 'connector_issue': ''}
 
     async def understand(self, state):
         if state.get('schedule_run_id'):
@@ -233,7 +234,9 @@ class MarketWorkflow:
         visited = {row['target_id'] for row in self.records().rows('ai_mi_tool_runs') if row['run_id'] == state['run_id']}
         base = [{**row, 'targets': [target for target in row['targets'] if target['target_id'] not in visited]} for row in state['catalog']]
         base = [row for row in base if row['targets']]
-        available = base or state['catalog']
+        available = base or [row for row in state['catalog'] if not row['targets']]
+        if not available:
+            return {'reason': 'unresolved' if evidence else 'no_data', 'route': 'draft_report'}
         plan = await self.ask('plan_research', ResearchPlan, {
             'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'catalog': available,
             'evidence': evidence, 'assessment': state['assessment']})
@@ -261,6 +264,8 @@ class MarketWorkflow:
         try:
             call = compile_call(scope['connector_revision'], plan['arguments'], state['window'], self.step_cap,
                                 approved_urls=scope['urls'], approved_finance=scope['financial'], usage_cost_verified=self.usage_verified)
+        except ConnectorUnavailable as error:
+            return {'route': 'draft_report', 'reason': 'unresolved', 'connector_issue': str(error)}
         except ValueError:
             if scope['financial'] is None:
                 raise
@@ -269,6 +274,8 @@ class MarketWorkflow:
         try:
             tool = self.paid.reserve(state['run_id'], plan['source_key'], plan['target_id'], call, self.step_cap,
                                      plan['purpose'], authorization_hash=scope['authorization_hash'])
+        except TargetAlreadyInvestigated as error:
+            return {'reason': 'unresolved', 'route': 'draft_report', 'connector_issue': str(error)}
         except AdmissionBlocked as error:
             return {'reason': error.reason, 'route': 'draft_report'}
         previous = self.records().get('ai_mi_tool_runs', tool)
@@ -286,6 +293,8 @@ class MarketWorkflow:
     async def execute_step(self, state):
         try:
             result = await execute_selected(self.paid, state['tool_id'], state['call'], self.provider.start)
+        except (ConnectorUnavailable, TargetAlreadyInvestigated) as error:
+            return {'reason': 'unresolved', 'route': 'draft_report', 'connector_issue': str(error)}
         except RuntimeError:
             return {'reason': 'uncertain', 'route': 'draft_report'}
         route = 'normalize_evidence' if result.get('status') == 'SUCCEEDED' else 'reconcile_step'
@@ -340,12 +349,17 @@ class MarketWorkflow:
 
     async def draft_report(self, state):
         evidence = self.research.evidence(state['run_id'])
+        from .workflow_actions import provider_limitations, validate_report_links
+        failures = provider_limitations(self.records(), state['run_id'], state.get('connector_issue'))
         if not evidence:
-            return {'draft': {'answer_markdown': 'No se obtuvo evidencia verificable para responder. La ausencia de resultados no demuestra que el problema no exista.',
-                             'cited_evidence_ids': [], 'findings': [], 'limitations': ['Sin evidencia recuperada; cierre: ' + state['reason']], 'chart_request': None}}
+            text = 'No se obtuvo evidencia verificable para responder. La ausencia de resultados no demuestra que el problema no exista.'
+            return {'draft': {'answer_markdown': '\n\n'.join([*failures, text]),
+                             'cited_evidence_ids': [], 'findings': [], 'limitations': [*failures, 'Sin evidencia recuperada; cierre: ' + state['reason']], 'chart_request': None}}
         draft = await self.ask('draft_report', ReportDraft, {'question': state['question'], 'topic': state['intake']['topic'], 'window': state['window'], 'evidence': evidence, 'close_reason': state['reason'],
-            'remaining_gap': state['assessment'].get('gap', '')})
-        from .workflow_actions import validate_report_links
+            'remaining_gap': state['assessment'].get('gap', ''), 'provider_limitations': failures})
+        if failures:
+            draft['answer_markdown'] = '\n\n'.join([*failures, draft['answer_markdown']])
+            draft['limitations'] = list(dict.fromkeys([*failures, *draft['limitations']]))[:20]
         validate_report_links(draft, evidence)
         return {'draft': draft}
 

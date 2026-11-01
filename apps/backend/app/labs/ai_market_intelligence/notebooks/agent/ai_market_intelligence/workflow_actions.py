@@ -11,6 +11,18 @@ from .contracts import ConfirmationDecision, FinancialMetrics, OpportunityDecisi
 from .repository import digest
 
 
+def provider_limitations(records, run_id, connector_issue=None):
+    failures = [connector_issue] if connector_issue else []
+    messages = {'failed': 'El proveedor falló', 'aborted': 'La extracción se interrumpió',
+                'timed_out': 'La extracción agotó su tiempo', 'uncertain': 'El resultado de la extracción requiere conciliación'}
+    for row in records.rows('ai_mi_tool_runs'):
+        if row['run_id'] == run_id and row['state'] in messages:
+            source = records.get('ai_mi_sources', row['source_key'])
+            name = (source or {}).get('name') or 'Fuente seleccionada'
+            failures.append(name + ': ' + messages[row['state']] + '. Su cobertura no está verificada; no equivale a una búsqueda sin resultados.')
+    return list(dict.fromkeys(failures))
+
+
 def validate_report_links(draft, evidence):
     selected = set(draft['cited_evidence_ids'])
     available = {item['evidence_id']: item['url'] for item in evidence}

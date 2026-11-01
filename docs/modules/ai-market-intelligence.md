@@ -106,7 +106,7 @@ installed runtime.
 
 ## Financial research profiles
 
-Two additional reviewed Actor profiles reuse the same admitted MCP calls, operation
+Reviewed financial Actor profiles reuse the same admitted MCP calls, operation
 ledger and framework tables. They are community-maintained Apify Actors. Metadata
 and input schemas were verified from the public Actor/build API on 2026-11-01;
 this does not establish native execution acceptance or an official Yahoo/World
@@ -114,8 +114,34 @@ Bank integration maintained by those institutions.
 
 | Profile | Pinned build | Bounded selection |
 | --- | --- | --- |
-| `yahoo_finance` — [`architjn/yahoo-finance`](https://apify.com/architjn/yahoo-finance/input-schema) | `1.1.1` | One to three approved tickers, explicit daily dates spanning at most 31 days; only historical daily close data is normalized. |
+| `yahoo_finance` — [`architjn/yahoo-finance`](https://apify.com/architjn/yahoo-finance/input-schema) | `1.1.1` | Suspended: native TEST failed before data retrieval because the bundled SDK rejects the MCP run origin. Compilation, reservation and paid start are blocked. Its output reader remains for historical receipts. |
+| `yahoo_history` — [`memo23/yahoo-finance-scraper`](https://apify.com/memo23/yahoo-finance-scraper/input-schema) | `0.0.27` | Explicit historical daily closes for one to three approved tickers, at most 31 days and a total row cap. No bundled products, events, intraday or pre/post-market data. Native acceptance is separate. |
 | `world_bank` — [`solidcode/world-bank-indicators-scraper`](https://apify.com/solidcode/world-bank-indicators-scraper/input-schema) | `1.0.6` | One to three countries and indicators, at most ten explicit historical years; compact series with an exact result limit. No aggregate, region or open indicator search. |
+
+The Yahoo suspension is a remote Actor-image compatibility issue, not an AIDP
+credential failure. Apify's [Python client releases](https://github.com/apify/apify-client-python/releases)
+document the missing MCP enum correction in 3.0.5. Re-enabling the suspended
+build requires a verified compatible provider revision and a native acceptance
+test; changing the local SDK or retrying the same image does not repair it.
+Selecting `yahoo_history` requires its own approved source and target, rather
+than silently rebinding the old source. Its public tariff at verification was
+US$0.001/start plus US$0.001/row, platform included; the bounded reservation
+remains authoritative, and actual receipts determine observed spend.
+Daily candles preserve the calendar date and explicit offset of the provider's
+timestamp. The publisher's ISO examples do not establish a universal exchange
+timezone; provenance records that limit rather than shifting a candle's day
+when converting its observation time to UTC.
+
+Provider failures, interruptions and timeouts are recorded as coverage limits
+in the report, including partial reports. They must not be described as a
+successful search returning no results. No raw error body, token or provider
+run ID is added to user-facing failure notices.
+Each registered target can be captured only once per research run, even if the
+planner changes its arguments or result limit. Exhausting the approved base
+closes with unresolved gaps rather than restoring already visited targets.
+Distinct bounded global-discovery queries remain subject to their own scope,
+request identity, step and budget limits. An exact retry reconciles its prior
+operation; it does not obtain another paid start.
 
 Financial selections must appear in the intersection of the active source policy,
 target policy and topic approval. These policies use `tickers`, or `countries`

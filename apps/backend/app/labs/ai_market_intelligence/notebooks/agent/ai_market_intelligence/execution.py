@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .repository import Records, digest, encoded
-from .connectors import PROFILES
+from .connectors import PROFILES, require_available
 
 
 class AdmissionBlocked(RuntimeError):
@@ -19,6 +19,10 @@ class AdmissionBlocked(RuntimeError):
 
 
 class ProviderPending(RuntimeError):
+    pass
+
+
+class TargetAlreadyInvestigated(RuntimeError):
     pass
 
 
@@ -210,12 +214,12 @@ def resolve_source_scope(records, topic_id, source_key, target_id):
 
 def _financial_authority(profile, policy, target, link_scope):
     """Additional authority fields; preserve the existing nonfinancial hash contract."""
-    if profile not in {'yahoo_finance', 'world_bank'}:
+    if profile not in {'yahoo_finance', 'yahoo_history', 'world_bank'}:
         return {}
     if not target or not link_scope or policy.get('allow_discovery'):
         raise ValueError('Financial research requires an approved topic target without discovery')
     target_scope = json.loads(target['allowed_scope_json'] or '{}')
-    keys = ('tickers',) if profile == 'yahoo_finance' else ('countries', 'indicator_codes')
+    keys = ('countries', 'indicator_codes') if profile == 'world_bank' else ('tickers',)
     scopes = (policy, target_scope, link_scope)
     result = {}
     for key in keys:
@@ -231,8 +235,10 @@ def _financial_authority(profile, policy, target, link_scope):
 
 def _admit_scope_and_limits(records, run, source_key, target_id, authorization_hash, *, existing_tool_id=None):
     current = resolve_source_scope(records, run['topic_id'], source_key, target_id)
+    require_available(current['connector_revision'])
     if current['authorization_hash'] != authorization_hash:
         raise ValueError('Approved source scope changed; compile and authorize again before capture')
+    _admit_target_once(records, run['run_id'], target_id, existing_tool_id)
     _admit_schedule(records, run, target_id)
     policy = json.loads(run['completion_policy_json'])
     if sum(row['run_id'] == run['run_id'] and row['tool_run_id'] != existing_tool_id
@@ -241,6 +247,12 @@ def _admit_scope_and_limits(records, run, source_key, target_id, authorization_h
     started = datetime.fromisoformat(json.loads(run['started_finished_at_json'])['started_at'])
     if (datetime.now(timezone.utc) - started).total_seconds() >= policy['max_elapsed_seconds']:
         raise AdmissionBlocked('time')
+
+
+def _admit_target_once(records, run_id, target_id, existing_tool_id):
+    if target_id is not None and any(row['run_id'] == run_id and row['target_id'] == target_id
+            and row['tool_run_id'] != existing_tool_id for row in records.rows('ai_mi_tool_runs')):
+        raise TargetAlreadyInvestigated('Este destino ya se consultó en esta investigación. No se repetirá la captura; el informe conservará las brechas pendientes.')
 
 
 def _admit_schedule(records, run, target_id):

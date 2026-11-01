@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 
 ACTORS = {'yahoo_finance': 'architjn/yahoo-finance',
+          'yahoo_history': 'memo23/yahoo-finance-scraper',
           'world_bank': 'solidcode/world-bank-indicators-scraper'}
 ARGUMENTS = {'tickers', 'countries', 'indicator_codes', 'start_date', 'end_date', 'year_from', 'year_to'}
 PATTERNS = {'tickers': r'[A-Z0-9^][A-Z0-9^=.\-]{0,29}',
@@ -50,9 +51,9 @@ def compile_finance(profile_id, args, approved_scope, limit, clock_end):
     if any(not isinstance(args[key], list) for key in ('tickers', 'countries', 'indicator_codes') if key in args):
         raise ValueError('Financial identifiers must be lists')
     end_clock = _moment(clock_end)
-    if profile_id == 'yahoo_finance':
-        return _yahoo_input(args, approved_scope, limit, end_clock)
-    return _world_bank_input(args, approved_scope, limit, end_clock)
+    compiler = {'yahoo_finance': _yahoo_input, 'yahoo_history': _yahoo_history_input,
+                'world_bank': _world_bank_input}[profile_id]
+    return compiler(args, approved_scope, limit, end_clock)
 
 
 def _yahoo_input(args, approved_scope, limit, end_clock):
@@ -81,6 +82,13 @@ def _world_bank_input(args, approved_scope, limit, end_clock):
             'includeIndicatorDetails': True, 'includeCountryDetails': True}
 
 
+def _yahoo_history_input(args, approved_scope, limit, end_clock):
+    history = _yahoo_input(args, approved_scope, limit, end_clock)
+    return {'operation': 'historical', 'operations': [], 'tickers': history['tickers'],
+            'startDate': history['start_date'], 'endDate': history['end_date'], 'interval': '1d',
+            'includeEvents': False, 'includePrePost': False, 'maxItems': limit}
+
+
 def _number(value):
     if value is None:
         return None
@@ -101,6 +109,12 @@ def _text(value, limit=500):
     return value
 
 
+def _currency(value):
+    if value is not None and (not isinstance(value, str) or not re.fullmatch(r'[A-Za-z]{3}', value)):
+        raise ValueError('Invalid Yahoo currency')
+    return value
+
+
 def _yahoo(row, inputs):
     ticker = _text(row.get('ticker'), 30)
     if ticker not in inputs.get('tickers', []):
@@ -115,9 +129,7 @@ def _yahoo(row, inputs):
         stock = {}
     if not isinstance(stock, dict):
         raise ValueError('Unsupported Yahoo stock metadata shape')
-    currency = stock.get('currency')
-    if currency is not None and (not isinstance(currency, str) or not re.fullmatch(r'[A-Za-z]{3}', currency)):
-        raise ValueError('Invalid Yahoo currency')
+    currency = _currency(stock.get('currency'))
     metrics = {'metric': 'close', 'unit': currency or 'unknown', 'currency': currency,
                'entity': ticker, 'indicator': None, 'points': points}
     return 'https://finance.yahoo.com/quote/' + quote(ticker, safe='') + '/history/', metrics, {
@@ -136,6 +148,31 @@ def _history_points(rows, start, end):
             raise ValueError('Yahoo output period exceeds the requested range')
         points.append({'period': period.isoformat(), 'value': _number(item['close'])})
     return points
+
+
+def _yahoo_candle(row, inputs):
+    if inputs.get('operation') != 'historical' or inputs.get('operations') != [] or inputs.get('interval') != '1d':
+        raise ValueError('Only the admitted daily historical operation is supported')
+    if row.get('type') != 'candle' or row.get('interval') != '1d' or 'close' not in row:
+        raise ValueError('Unsupported Yahoo daily candle shape')
+    ticker = _text(row.get('symbol'), 30)
+    if ticker not in inputs.get('tickers', []):
+        raise ValueError('Yahoo output ticker was not requested')
+    timestamp = _text(row.get('date'), 64)
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T.+', timestamp):
+        raise ValueError('Yahoo candle date must be an explicit ISO timestamp')
+    _moment(timestamp)  # Validate an explicit offset without moving a daily candle to another date.
+    period = _date(timestamp[:10])
+    start, end = _date(inputs.get('startDate')), _date(inputs.get('endDate'))
+    if not start <= period <= end:
+        raise ValueError('Yahoo output period exceeds the requested range')
+    currency = _currency(row.get('currency'))
+    metrics = {'metric': 'close', 'unit': currency or 'unknown', 'currency': currency,
+               'entity': ticker, 'indicator': None,
+               'points': [{'period': period.isoformat(), 'value': _number(row['close'])}]}
+    return 'https://finance.yahoo.com/quote/' + quote(ticker, safe='') + '/history/', metrics, {
+        'temporal_basis': 'financial_period', 'requested_start': start.isoformat(), 'requested_end': end.isoformat(),
+        'source_timestamp': timestamp, 'period_basis': 'provider_timestamp_calendar_date', 'interval': '1d'}
 
 
 def _world_bank(row, inputs):
@@ -182,12 +219,11 @@ def normalize_finance(row, actor, run_id, call):
     inputs = call.get('input')
     if not isinstance(inputs, dict):
         raise ValueError('Financial input receipt is required')
-    if actor == ACTORS['yahoo_finance']:
-        url, metrics, provenance = _yahoo(row, inputs)
-    elif actor == ACTORS['world_bank']:
-        url, metrics, provenance = _world_bank(row, inputs)
-    else:
+    normalizer = {ACTORS['yahoo_finance']: _yahoo, ACTORS['yahoo_history']: _yahoo_candle,
+                  ACTORS['world_bank']: _world_bank}.get(actor)
+    if normalizer is None:
         raise ValueError('Unsupported financial Actor')
+    url, metrics, provenance = normalizer(row, inputs)
     points = sorted(metrics['points'], key=lambda point: point['period'])
     if len({point['period'] for point in points}) != len(points):
         raise ValueError('Financial periods must be unique')

@@ -45,7 +45,10 @@ def test_financial_authority_is_the_intersection_of_source_target_and_topic():
     ('ai_mi_source_targets', 'target', 'allowed_scope_json'),
     ('ai_mi_topic_sources', 'link', 'approved_scope_json'),
 ])
-def test_financial_revocation_after_reservation_prevents_provider_start(table, key_name, column):
+def test_financial_revocation_after_reservation_prevents_provider_start(table, key_name, column, monkeypatch):
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.connectors import PROFILES
+    # Exercise scope revocation with a synthetic compatible Yahoo build.
+    monkeypatch.delitem(PROFILES['yahoo_finance'], 'unavailable_reason')
     research, run, _, source, target, link = financial_target()
     paid = PaidOperations(research.journal)
     authorization = paid.authorize(run, source, target)
@@ -109,17 +112,27 @@ def test_financial_arguments_use_strict_types_and_forbid_free_form_options():
 
 
 @pytest.mark.parametrize('missing_period', [False, True])
-def test_financial_graph_routes_mcp_to_persisted_evidence_and_optional_chart(missing_period):
+@pytest.mark.parametrize('profile', ['world_bank', 'yahoo_history'])
+def test_financial_graph_routes_mcp_to_persisted_evidence_and_optional_chart(missing_period, profile):
     from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.provider import ApifyProvider
     from test_market_intelligence_workflow import configured, turn, TOPIC
     from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import digest
     flow, model, _, _ = configured()
     source, target = SCOPE.key('world-bank'), SCOPE.key('colombia-inflation')
     topic = SCOPE.key(digest(['topic', TOPIC]))
-    scope = {'countries': ['COL'], 'indicator_codes': ['FP.CPI.TOTL.ZG']}
+    bank = profile == 'world_bank'
+    scope = {'countries': ['COL'], 'indicator_codes': ['FP.CPI.TOTL.ZG']} if bank else {'tickers': ['WMMVY']}
+    metric = 'value' if bank else 'close'
+    expected = [['2023', 10.0], ['2024', 0]] if bank else [['2026-10-26', 30.0], ['2026-10-27', 0]]
+    arguments = {'tickers': [], 'countries': ['COL'], 'indicator_codes': ['FP.CPI.TOTL.ZG'],
+                 'start_date': None, 'end_date': None, 'year_from': None if missing_period else 2023,
+                 'year_to': 2024} if bank else {
+                 'tickers': ['WMMVY'], 'countries': [], 'indicator_codes': [],
+                 'start_date': None if missing_period else '2026-10-26', 'end_date': '2026-10-31',
+                 'year_from': None, 'year_to': None}
     def seed(rows, state):
         rows.upsert('ai_mi_sources', {'source_key': source, 'name': 'Banco Mundial', 'status': 'active',
-            'connector_revision': 'world_bank', 'allowed_scope_json': json_text(scope)})
+            'connector_revision': profile, 'allowed_scope_json': json_text(scope)})
         rows.upsert('ai_mi_source_targets', {'target_id': target, 'source_key': source, 'status': 'active',
             'allowed_scope_json': json_text(scope),
             'canonical_url_or_id': 'https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG?locations=CO'})
@@ -130,16 +143,15 @@ def test_financial_graph_routes_mcp_to_persisted_evidence_and_optional_chart(mis
     async def financial_model(name, schema, payload):
         if name == 'plan_research':
             return {'next_action': 'execute', 'source_key': source, 'target_id': target,
-                'arguments': {'query': '', 'urls': [], 'max_items': 1, 'sort': 'Latest', 'financial': {
-                    'tickers': [], 'countries': ['COL'], 'indicator_codes': ['FP.CPI.TOTL.ZG'],
-                    'start_date': None, 'end_date': None, 'year_from': None if missing_period else 2023, 'year_to': 2024}},
+                'arguments': {'query': '', 'urls': [], 'max_items': 1 if bank else 2,
+                              'sort': 'Latest', 'financial': arguments},
                 'purpose': 'Contexto macro sintético', 'expected_contribution': 'Comparación anual', 'user_question': None}
         if name == 'assess_evidence':
-            assert payload['evidence'][0]['metrics']['points'][1]['value'] == 0
+            assert payload['evidence'][-1]['metrics']['points'][-1]['value'] == 0
             return {'assessments': [], 'continue_research': False, 'reason': 'Fixture completo', 'gap': ''}
         result = await ask(name, schema, payload)
         if name == 'draft_report':
-            result['chart_request'] = {'kind': 'line', 'metric': 'value', 'group_by': 'date'}
+            result['chart_request'] = {'kind': 'line', 'metric': metric, 'group_by': 'date'}
         return result
     model.ask = financial_model
     calls = []
@@ -151,27 +163,35 @@ def test_financial_graph_routes_mcp_to_persisted_evidence_and_optional_chart(mis
             if self.name == 'call-actor':
                 return {'id': 'synthetic-financial-run', 'status': 'SUCCEEDED', 'defaultDatasetId': 'synthetic-data', 'usageTotalUsd': 0.0069}
             if self.name == 'get-dataset-items':
+                if not bank:
+                    return [{'symbol': 'WMMVY', 'type': 'candle', 'date': period + 'T13:30:00Z',
+                             'interval': '1d', 'close': value, 'currency': 'USD'} for period, value in expected]
                 return [{'recordType': 'series', 'isAggregate': False, 'countryCode': 'CO', 'countryIso3': 'COL',
                     'indicatorCode': 'FP.CPI.TOTL.ZG', 'unit': 'annual %', 'values': {'2023': 10.0, '2024': 0}}]
             raise AssertionError('A succeeded identified run should not be polled')
     flow.provider = ApifyProvider({name: Tool(name) for name in ('call-actor', 'get-actor-run', 'get-dataset-items')})
     from langgraph.checkpoint.memory import InMemorySaver
     graph = flow.build(InMemorySaver())
-    result = turn(graph, 'financial-graph-' + str(missing_period))
+    result = turn(graph, 'financial-graph-' + profile + str(missing_period))
     if missing_period:
         assert calls == [] and 'periodo' in result['response']['markdown']
         assert flow.records().rows('ai_mi_tool_runs') == []
         return
     assert [name for name, _ in calls] == ['call-actor', 'get-dataset-items']
-    assert calls[0][1]['input']['outputFormat'] == 'series'
-    assert calls[0][1]['callOptions']['build'] == '1.0.6'
+    if bank:
+        assert calls[0][1]['input']['outputFormat'] == 'series'
+        assert calls[0][1]['callOptions']['build'] == '1.0.6'
+    else:
+        assert calls[0][1]['input']['operation'] == 'historical'
+        assert calls[0][1]['input']['maxItems'] == 2
+        assert calls[0][1]['callOptions']['build'] == '0.0.27'
     report = flow.records().get('ai_mi_reports', result['response']['report_id'])
-    assert json.loads(report['chart_spec_json'])['rows'] == [['2023', 10.0], ['2024', 0]]
+    assert json.loads(report['chart_spec_json'])['rows'] == expected
     assert flow.records().rows('ai_mi_tool_runs')[0]['spent_microusd'] == 6900
-    assert len(flow.records().rows('ai_mi_documents')) == 1
+    assert len(flow.records().rows('ai_mi_documents')) == (1 if bank else 2)
     model.intents.append('followup')
     followup = turn(graph, 'financial-chart-followup', 'Grafica las cifras del informe guardado sin consultar fuentes nuevas')
-    assert followup['response']['chart']['rows'] == [['2023', 10.0], ['2024', 0.0]]
+    assert followup['response']['chart']['rows'] == expected
     assert followup['response']['reused'] is True
     assert followup['response']['report_id'] == result['response']['report_id']
     assert len(calls) == 2
