@@ -122,6 +122,12 @@ it does not start unapproved searches or withhold all recovered findings.
 Reports default to a short executive summary with readable source links;
 technical evidence identifiers stay in the structured findings. Explicit requests
 for detail can receive a longer explanation.
+Catalog replies use source names, references and plain availability labels. They
+state that no new information was searched, without exposing Actor, adapter or
+model implementation details. A registered source is not proof of a live
+connection; unavailable sources remain visible as unavailable. Provider calls
+and model usage remain in operational evidence rather than a client-facing
+catalog disclaimer.
 Replaying an admitted request also preserves its original research window,
 including when its journal is recovered from a new native session.
 

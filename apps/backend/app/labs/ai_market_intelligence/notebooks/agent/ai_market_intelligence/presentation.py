@@ -73,12 +73,12 @@ def source_base_markdown(topic, base):
     from .connectors import PROFILES
     def availability(source):
         profile = PROFILES.get(source['profile_id'])
-        return 'No soportado' if profile is None else ('Suspendido' if profile.get('unavailable_reason') else 'Configurado')
+        return 'Sin conexión configurada' if profile is None else ('No disponible' if profile.get('unavailable_reason') else 'Registrada')
     targets = [(source, target) for source in base for target in source['targets']]
     lines = ['**Fuentes registradas: ' + _label(topic['entity']) + ' · ' + _label(topic['market']) + '**',
              '', 'Tema: ' + _label(topic['objective']) + '.']
     if targets:
-        lines.extend(['', '| Fuente | Destino aprobado | Disponibilidad del adaptador |', '| --- | --- | --- |'])
+        lines.extend(['', '| Fuente | Referencia | Estado |', '| --- | --- | --- |'])
         for source, target in targets[:50]:
             lines.append('| ' + ' | '.join((_label(source['name']), _label(target['canonical_url_or_id']), availability(source))) + ' |')
         if len(targets) > 50:
@@ -87,7 +87,7 @@ def source_base_markdown(topic, base):
         lines.extend(['', 'No hay destinos activos aprobados para este tema.'])
     discovery = [source for source in base if not source['targets']]
     if discovery:
-        lines.extend(['', 'Conectores con alcance de descubrimiento, sin destinos registrados para este tema: '
+        lines.extend(['', 'Fuentes para búsquedas abiertas, sin páginas o cuentas registradas para este tema: '
                       + ', '.join(_label(source['name']) + ' (' + availability(source) + ')' for source in discovery) + '.'])
-    lines.extend(['', 'Consultar el catálogo no comprueba la conexión ni ejecuta Actors de Apify. La interpretación del chat usa el modelo configurado.'])
+    lines.extend(['', 'Estas son tus fuentes registradas; todavía no se ha buscado información nueva.'])
     return '\n'.join(lines)

@@ -33,9 +33,11 @@ def test_registered_sources_are_listed_without_research_capture_or_recurrence_in
     result = turn(graph, 'list-sources', '¿Qué páginas tengo registradas para D1?')
     text = response_markdown(result['response'])
     assert 'https://example.com/reference' in text and 'Colombia' in text
-    assert 'alcance de descubrimiento' in text and 'x (Configurado)' in text
+    assert 'búsquedas abiertas' in text and 'x (Registrada)' in text
     assert 'other-private-topic' not in text and SCOPE.key('reference') not in text
-    assert 'no comprueba la conexión' in text and 'usa el modelo configurado' in text
+    assert 'todavía no se ha buscado información nueva' in text
+    assert '| Fuente | Referencia | Estado |' in text
+    assert all(term not in text for term in ('Actors', 'Apify', 'adaptador', 'modelo configurado'))
     assert model.calls == ['understand'] and not provider.starts
     assert not flow.records().rows('ai_mi_research_runs')
     assert not flow.records().rows('ai_mi_reports')
@@ -77,7 +79,7 @@ def test_suspended_connector_is_visible_but_not_described_as_available():
                                        'connector_revision': 'yahoo_finance'})
     flow.journal.transact(suspend)
     text = turn(graph, 'list-suspended')['response']['markdown']
-    assert 'Suspendido' in text and '<img>' not in text
+    assert 'No disponible' in text and '<img>' not in text
     assert '&lt;img&gt;' in text and '\\[Ir\\]\\(https://other.example\\)' in text
     assert not provider.starts
 
@@ -96,5 +98,5 @@ def test_discovery_does_not_describe_suspended_or_unknown_adapters_as_enabled(mo
     text = source_base_markdown(TOPIC, [
         {'name': 'X', 'profile_id': 'x_search', 'targets': []},
         {'name': 'Unknown', 'profile_id': 'not-installed', 'targets': []}])
-    assert 'X (Suspendido)' in text and 'Unknown (No soportado)' in text
+    assert 'X (No disponible)' in text and 'Unknown (Sin conexión configurada)' in text
     assert 'habilitados' not in text
