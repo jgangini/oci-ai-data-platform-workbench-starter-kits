@@ -234,6 +234,9 @@ class ConversationActions:
         recurrence = Recurrence.model_validate({key: draft[key] for key in ('weekdays', 'hour', 'minute', 'timezone')}).model_dump()
         research = ScheduleResearch.model_validate({key: draft[key] for key in ('window_days', 'target_ids', 'cap_microusd')}).model_dump()
         summary_hash = flow.proposals.present_schedule(pending['id'], recurrence, research)
-        summary = {'recurrence': recurrence, 'research': research}
+        summary = {'recurrence': recurrence, 'research': research, 'sources': [
+            {'name': records.get('ai_mi_sources', targets[target_id]['source_key'])['name'],
+             'target': targets[target_id]['canonical_url_or_id']}
+            for target_id in research['target_ids']]}
         return {'pending': {**pending, 'hash': summary_hash}, 'response': {
             'markdown': 'Confirma el horario, fuentes, ventana y presupuesto mostrados antes de activarlo. ¿Lo apruebas?', 'schedule_summary': summary}}

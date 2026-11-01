@@ -364,7 +364,11 @@ def test_native_stream_keeps_auth_context_until_consumption_and_cleans_up(native
         first = await anext(stream)
         assert first.additional_kwargs['ai_mi_event'] == 'progress' and native_auth == ['start']
         tail = [message async for message in stream]
-        assert json.loads(tail[-1].content) == {'markdown': 'Fixture validado.', 'chart': None}
+        assert tail[0].content == 'Evidencia contrastada.\n\n'
+        assert tail[-1].content == 'Fixture validado.'
+        assert tail[-1].additional_kwargs['ai_mi_response'] == {'markdown': 'Fixture validado.', 'chart': None}
+        assert ''.join(message.content for message in [first, *tail]) == (
+            'Revisando la solicitud.\n\nEvidencia contrastada.\n\nFixture validado.')
         assert tail[-1].additional_kwargs['ai_mi_event'] == 'result'
         assert native_auth == ['start', 'end']
     asyncio.run(check())
@@ -378,7 +382,8 @@ def test_native_disconnect_releases_auth_and_buffered_mode_preserves_the_final_e
         assert native_auth == ['start', 'end']
         result = await NativeFixture().invoke('fixture', stream=False)
         assert len(result['messages']) == 1
-        assert json.loads(result['messages'][0].content)['markdown'] == 'Fixture validado.'
+        assert result['messages'][0].content == 'Fixture validado.'
+        assert result['messages'][0].additional_kwargs['ai_mi_response']['markdown'] == 'Fixture validado.'
         assert native_auth == ['start', 'end', 'start', 'end']
     asyncio.run(check())
 

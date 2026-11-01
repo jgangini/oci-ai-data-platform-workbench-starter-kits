@@ -60,7 +60,7 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/workflow_actions.py",
-      "sha256": "e7fc0dd6f61c5a6dd540994129adbdcd7fac66ccff6d38a919eb56dba41cf8b6",
+      "sha256": "543400e3e21c5ecd44641c91bfe586e308f75851c0a857816f7adf43f2beb8b8",
       "workspace_path": "agent/ai_market_intelligence/workflow_actions.py"
     },
     {
@@ -70,7 +70,7 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/native.py",
-      "sha256": "3e011b0c40d676d00daa958e00bdeef340548870d947702726bebf93c913f250",
+      "sha256": "7040685ad28b1549a221053826d8750565a1b323ae92d865513d4d888359b74b",
       "workspace_path": "agent/ai_market_intelligence/native.py"
     },
     {
@@ -162,6 +162,11 @@
       "file": "notebooks/agent/ai_market_intelligence/finance.py",
       "workspace_path": "agent/ai_market_intelligence/finance.py",
       "sha256": "70de0344380bbfb14df3e07b7373c2fdea2028b581d702b537b3b8490ed119e0"
+    },
+    {
+      "file": "notebooks/agent/ai_market_intelligence/presentation.py",
+      "sha256": "f3c4da6b90cd15233f2c0db38cbfb4f09b368a9998111220bbc048da24d5fc5b",
+      "workspace_path": "agent/ai_market_intelligence/presentation.py"
     }
   ],
   "source_manifests": [
@@ -170,5 +175,5 @@
       "sha256": "87516a2e0f446f2e32cef8e5b05e99edb545d23fabfe08ed43d704bdf1776d04"
     }
   ],
-  "pack_sha256": "1121f3862a2825e3f4d6ea114e8310973ce3d6441bed76fcb17b4e8c6de9ab9c"
+  "pack_sha256": "974738e4f89c42b2a90f4810dbbea081930efef7aab4b9f3e8c590750e1b7524"
 }

@@ -12,6 +12,7 @@ from .repository import Scope, ObjectSnapshot, Journal, digest, projection_state
 from .workflow import MarketWorkflow
 from .execution import ProviderPending
 from .streaming import run_turn, stream_turn
+from .presentation import response_markdown
 
 
 def verify_projection(result, expected):
@@ -164,12 +165,16 @@ class AgentRuntime:
         from langchain_core.messages import AIMessage
         token = pre_tool_setup(**kwargs)
         try:
-            yield AIMessage(content='Revisando la solicitud.', additional_kwargs={'ai_mi_event': 'progress'})
+            yield AIMessage(content='Revisando la solicitud.\n\n', additional_kwargs={'ai_mi_event': 'progress'})
             async with aclosing(self.events(user_query, native_config, kwargs)) as events:
                 async for event in events:
-                    response = event['response'] if event['event'] == 'result' else event
-                    yield AIMessage(content=json.dumps(response, ensure_ascii=False),
-                                    additional_kwargs={'ai_mi_event': event['event']})
+                    if event['event'] == 'result':
+                        response = event['response']
+                        yield AIMessage(content=response_markdown(response),
+                                        additional_kwargs={'ai_mi_event': 'result', 'ai_mi_response': response})
+                    else:
+                        yield AIMessage(content=event['markdown'] + '\n\n',
+                                        additional_kwargs={'ai_mi_event': event['event']})
         finally:
             post_tool_setup(token, kwargs=kwargs)
 

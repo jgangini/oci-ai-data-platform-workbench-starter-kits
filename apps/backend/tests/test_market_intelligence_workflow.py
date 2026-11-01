@@ -634,6 +634,13 @@ def test_t13_schedule_collects_partial_details_then_requires_real_confirmation()
     assert not flow.records().rows('ai_mi_schedules')
     summary = turn(graph, 'details-2', 'Colombia, siete días y las mismas fuentes con el presupuesto indicado')
     assert summary['pending']['hash'] and not flow.records().rows('ai_mi_schedules')
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.presentation import response_markdown
+    visible = response_markdown(summary['response'])
+    assert 'lunes' in visible and '09:00' in visible and 'America/Bogota' in visible
+    assert 'US$0.050000' in visible and 'últimos 7 días' in visible
+    target = flow.records().get('ai_mi_source_targets', SCOPE.key('reference'))
+    assert target['canonical_url_or_id'] in visible
+    assert SCOPE.key('reference') not in visible
     turn(graph, 'confirmation', 'sí')
     assert len(flow.records().rows('ai_mi_schedules')) == 1
     assert len(provider.starts) == 2

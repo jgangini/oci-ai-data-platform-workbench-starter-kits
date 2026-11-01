@@ -203,7 +203,7 @@ def test_global_runtime_sources_are_declared_and_not_participant_kits():
     modules = module_catalog()
     assert {pack.lab_id for pack in modules} == {"ai_data_governance", "gods_eye_view", "ai_market_intelligence"}
     assert {pack.lab_id: len(pack.runtime_files) for pack in modules} == {
-        'ai_data_governance': 2, 'gods_eye_view': 3, 'ai_market_intelligence': 23,
+        'ai_data_governance': 2, 'gods_eye_view': 3, 'ai_market_intelligence': 24,
     }
     for pack in modules:
         assert pack.lab_id not in lab_packs.available_lab_ids()

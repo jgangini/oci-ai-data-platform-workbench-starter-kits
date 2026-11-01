@@ -382,6 +382,25 @@ scope, model and spending caps. The package keeps evidence, findings, limitation
 and references, with charts only when useful. Its
 [streaming adapter](../../apps/backend/app/labs/ai_market_intelligence/notebooks/agent/ai_market_intelligence/streaming.py)
 emits progress milestones; it does not claim token-by-token model streaming.
+The native chat presents those milestones as separate Markdown paragraphs and
+the final answer as readable Markdown, preserving citations and any proposal.
+Financial or observation chart specifications also have a bounded two-column
+table fallback: units and data periods are retained, unknown values stay unknown,
+and displayed numbers use at most eight significant digits. Stored evidence and
+the in-process structured response in `AIMessage.additional_kwargs.ai_mi_response`
+retain their original values. The native SSE gateway omits those extra message
+fields; clients must not assume that metadata is an external API contract.
+Schedule confirmation shows the weekdays, time, timezone,
+lookback, exact USD ceiling and each registered source/target before activation.
+
+This does **not** establish a rendered chart in Agent Hub. Oracle's pinned
+[A2UI gallery transport](https://github.com/oracle-samples/oracle-aidp-samples/blob/d006f1eb1843e82278b988366a2d20bd1ba983fc/ai/agent-hub/agent-samples/a2ui-component-gallery/a2ui_sdk/parser.py)
+serializes one message beginning with `A2UI`, including its text and component
+operations. The [weekly review example](https://github.com/oracle-samples/oracle-aidp-samples/blob/d006f1eb1843e82278b988366a2d20bd1ba983fc/ai/agent-hub/agent-samples/weekly-business-review/agent.py)
+uses `OAChart`; neither example demonstrates appending that envelope to multiple
+streamed progress messages. The candidate therefore retains streaming Markdown;
+an optional negotiated A2UI response and actual client rendering require separate
+acceptance. No sample SDK or dependency is copied into this runtime.
 
 ## Remaining release acceptance
 

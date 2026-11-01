@@ -3,7 +3,7 @@ import json
 from app.lab_packs import LabPackError, load_lab_pack
 
 
-FILES = ('__init__.py', 'workflow.py', 'workflow_actions.py', 'model.py', 'native.py', 'streaming.py', 'provider.py',
+FILES = ('__init__.py', 'workflow.py', 'workflow_actions.py', 'model.py', 'native.py', 'streaming.py', 'presentation.py', 'provider.py',
          'repository.py', 'research.py', 'execution.py', 'catalog.py', 'proposals.py', 'contracts.py',
          'connectors.py', 'finance.py', 'schema.py', 'schema.json', 'mcp_tools.json', 'prompts.json', 'mcp_payload.py', 'memory.py')
 
