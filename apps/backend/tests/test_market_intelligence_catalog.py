@@ -13,7 +13,7 @@ def candidate():
     evidence, = research.add_evidence(run, tool, [observation()])
     source = SCOPE.key('website-connector')
     research.journal.transact(lambda records, state: records.upsert('ai_mi_sources', {
-        'source_key': source, 'status': 'active', 'platform': 'web'}))
+        'source_key': source, 'status': 'active', 'platform': 'web', 'connector_revision': 'website'}))
     state, _ = research.journal.read()
     topic = state['tables']['ai_mi_research_runs'][run]['topic_id']
     catalog = Catalog(research.journal)
@@ -40,6 +40,18 @@ def test_rejecting_candidate_never_creates_target_or_topic_link():
     assert catalog.decide_target(key, revision, False, 'user-no') is None
     state, _ = catalog.journal.read()
     assert state['tables']['ai_mi_source_targets'] == state['tables']['ai_mi_topic_sources'] == {}
+
+
+def test_a_pending_page_cannot_be_approved_after_its_reader_changes_to_a_search_connector():
+    catalog, key, revision = candidate()
+    target = json.loads(catalog.journal.read()[0]['tables']['ai_mi_source_candidates'][key]['proposed_target_json'])
+    def change(records, state):
+        source = records.get('ai_mi_sources', target['source_key'])
+        records.upsert('ai_mi_sources', {**source, 'connector_revision': 'web_search'})
+    catalog.journal.transact(change)
+    with pytest.raises(ValueError, match='connector is no longer active'):
+        catalog.decide_target(key, revision, True, 'user-yes')
+    assert catalog.journal.read()[0]['tables']['ai_mi_source_targets'] == {}
 
 
 @pytest.mark.parametrize('unavailable', ['other_topic', 'link', 'target', 'source'])

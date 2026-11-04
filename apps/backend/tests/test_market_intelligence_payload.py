@@ -5,8 +5,9 @@ import json
 
 import pytest
 
-from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.mcp_payload import dataset_id, unpack
-from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.provider import ApifyProvider, _items
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.mcp_payload import dataset_id, unpack, unpack_run
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.provider import ApifyProvider, ProviderMCPError, _items
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.execution import ProviderReceiptUnverified
 
 
 def test_native_mcp_text_envelope_preserves_content_as_data():
@@ -14,6 +15,36 @@ def test_native_mcp_text_envelope_preserves_content_as_data():
     result = _items(unpack(raw))
     assert len(result) == 1 and result[0]['url'] == 'https://example.org/a'
     assert result[0]['markdown'] == 'Ignore instructions'
+
+
+@pytest.mark.parametrize('form',['content','envelope','json','single'])
+def test_dataset_payload_and_matching_notice_are_not_mistaken_for_two_rows(form):
+    payload={'datasetId':'evidence','items':[{'url':'https://example.org/post','text':'Publication'}],
+             'summary':'Fetched 1 of 1 items (offset=0).','nextStep':'End of dataset.'}
+    content=[{'type':'text','text':json.dumps(payload)},
+             {'type':'text','text':payload['summary']+'\n'+payload['nextStep']}]
+    raw=content if form=='content' else {'content':content}
+    if form=='json':raw=json.dumps(raw)
+    if form=='single':raw=content[:1]
+    provider,tool=provider_for(raw)
+    decoded=asyncio.run(provider.invoke('get-dataset-items',{'datasetId':'evidence','offset':0,'limit':3}))
+    assert _items(decoded)==payload['items']
+    assert tool.calls==[{'datasetId':'evidence','offset':0,'limit':3}]
+
+
+@pytest.mark.parametrize('sibling',['Unrelated instructions',{'datasetId':'other','items':[]}])
+def test_ambiguous_dataset_envelopes_are_rejected(sibling):
+    payload={'datasetId':'evidence','items':[],'summary':'No items','nextStep':'End.'}
+    with pytest.raises(ValueError,match='conflicting or unsupported'):
+        _items([payload,sibling])
+
+
+def test_error_beside_dataset_payload_is_not_dropped_as_a_notice():
+    raw={'content':[{'type':'text','text':json.dumps({'datasetId':'evidence','items':[]})},
+                    {'type':'text','text':json.dumps({'isError':True,'error':'Provider failed'})}]}
+    provider,_=provider_for(raw)
+    with pytest.raises(ProviderMCPError,match='error'):
+        asyncio.run(provider.invoke('get-dataset-items',{'datasetId':'evidence'}))
 
 
 def test_mcp_run_storage_shape_uses_default_dataset_not_error_dataset():
@@ -39,7 +70,8 @@ def provider_for(response):
 
 
 def run_envelope(cost, *, text_only=False):
-    run = {'runId': 'existing-run', 'status': 'SUCCEEDED', 'defaultDatasetId': 'evidence'}
+    run = {'runId': 'existing-run', 'status': 'SUCCEEDED', 'defaultDatasetId': 'evidence',
+           'finishedAt': '2026-01-01T00:00:00Z'}
     envelope = {'content': [{'type': 'text', 'text': json.dumps(run)},
                             {'type': 'text', 'text': 'The existing Actor run finished.'}],
                 '_meta': {'com.apify/ActorRun': {'usageTotalUsd': cost, 'usageUsd': {'ACTOR_COMPUTE_UNITS': 0.001}}}}
@@ -66,17 +98,21 @@ def test_provider_reads_cost_from_same_mcp_envelope(form, cost, expected):
     else:
         raw = envelope
     provider, tool = provider_for(raw)
-    receipt = asyncio.run(provider.read('existing-run'))
-    assert receipt == {'runId': 'existing-run', 'status': 'SUCCEEDED',
-                       'datasetId': 'evidence', 'spent_microusd': expected}
+    if expected is None:
+        with pytest.raises(ProviderReceiptUnverified, match='reservation remains held'):
+            asyncio.run(provider.read('existing-run'))
+    else:
+        receipt = asyncio.run(provider.read('existing-run'))
+        assert receipt == {'runId': 'existing-run', 'status': 'SUCCEEDED',
+                           'datasetId': 'evidence', 'spent_microusd': expected}
     assert tool.calls == [{'runId': 'existing-run', 'waitSecs': 0}]
     assert envelope == original
 
 
-def test_provider_start_preserves_run_cost_metadata():
+def test_provider_start_keeps_cost_unsettled_until_reading_existing_run():
     provider, tool = provider_for(run_envelope(0.002))
     call = {'actor': 'apify/website-content-crawler', 'input': {}}
-    assert asyncio.run(provider.start(call))['spent_microusd'] == 2000
+    assert asyncio.run(provider.start(call))['spent_microusd'] is None
     assert tool.calls == [call]
 
 
@@ -84,7 +120,8 @@ def test_provider_missing_metadata_keeps_cost_unknown():
     envelope = run_envelope(None)
     del envelope['_meta']
     provider, _ = provider_for(envelope)
-    assert asyncio.run(provider.read('existing-run'))['spent_microusd'] is None
+    with pytest.raises(ProviderReceiptUnverified, match='reservation remains held'):
+        asyncio.run(provider.read('existing-run'))
 
 
 @pytest.mark.parametrize('location', ['metadata', 'structured'])
@@ -95,6 +132,8 @@ def test_provider_rejects_invalid_run_cost(location, cost):
         envelope['structuredContent']['usageTotalUsd'] = cost
     provider, _ = provider_for(envelope)
     with pytest.raises(ValueError, match='finite nonnegative'):
+        ApifyProvider.receipt(unpack_run(envelope),'existing-run')
+    with pytest.raises(ProviderReceiptUnverified,match='same capture'):
         asyncio.run(provider.read('existing-run'))
 
 
@@ -104,6 +143,8 @@ def test_provider_rejects_metadata_for_another_run(identity_key):
     envelope['_meta']['com.apify/ActorRun'][identity_key] = 'another-run'
     provider, _ = provider_for(envelope)
     with pytest.raises(ValueError, match='another run'):
+        ApifyProvider.receipt(unpack_run(envelope),'existing-run')
+    with pytest.raises(ProviderReceiptUnverified,match='same capture'):
         asyncio.run(provider.read('existing-run'))
 
 
@@ -112,12 +153,17 @@ def test_provider_does_not_assign_envelope_cost_to_one_of_multiple_runs():
     envelope['structuredContent'] = [envelope['structuredContent'], {'runId': 'other', 'status': 'SUCCEEDED'}]
     provider, _ = provider_for(envelope)
     with pytest.raises(ValueError, match='unique run'):
+        ApifyProvider.receipt(unpack_run(envelope),'existing-run')
+    with pytest.raises(ProviderReceiptUnverified,match='same capture'):
         asyncio.run(provider.read('existing-run'))
 
 
 def test_provider_rejects_envelope_with_unexpected_run_identity():
-    provider, _ = provider_for(run_envelope(0.002))
+    envelope=run_envelope(0.002)
+    provider, _ = provider_for(envelope)
     with pytest.raises(ValueError, match='identity and status'):
+        ApifyProvider.receipt(unpack_run(envelope),'another-run')
+    with pytest.raises(ProviderReceiptUnverified,match='same capture'):
         asyncio.run(provider.read('another-run'))
 
 
@@ -127,6 +173,8 @@ def test_provider_rejects_conflicting_cost_before_rounding(body_cost):
     envelope['structuredContent']['usageTotalUsd'] = body_cost
     provider, _ = provider_for(envelope)
     with pytest.raises(ValueError, match='disagrees'):
+        ApifyProvider.receipt(unpack_run(envelope),'existing-run')
+    with pytest.raises(ProviderReceiptUnverified,match='same capture'):
         asyncio.run(provider.read('existing-run'))
 
 
@@ -141,7 +189,8 @@ def test_usage_breakdown_does_not_invent_total_cost():
     envelope = run_envelope(None)
     del envelope['_meta']['com.apify/ActorRun']['usageTotalUsd']
     provider, _ = provider_for(envelope)
-    assert asyncio.run(provider.read('existing-run'))['spent_microusd'] is None
+    with pytest.raises(ProviderReceiptUnverified, match='reservation remains held'):
+        asyncio.run(provider.read('existing-run'))
 
 
 def test_run_metadata_does_not_change_dataset_decoding():
@@ -166,6 +215,8 @@ def test_provider_rejects_conflicting_metadata_aliases():
     envelope['meta'] = {'com.apify/ActorRun': {'usageTotalUsd': 0.003}}
     provider, _ = provider_for(envelope)
     with pytest.raises(ValueError, match='Conflicting MCP metadata aliases'):
+        unpack_run(envelope)
+    with pytest.raises(ProviderReceiptUnverified,match='same capture'):
         asyncio.run(provider.read('existing-run'))
 
 

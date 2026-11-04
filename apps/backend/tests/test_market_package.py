@@ -5,7 +5,7 @@ import json
 import pytest
 
 from app import lab_packs
-from app.market_installation.agent_package import FILES
+from app.market_installation.agent_package import FILES, V2_FILES
 
 
 def test_market_agent_card_matches_version_identity_streaming_and_reviewed_capabilities():
@@ -36,8 +36,9 @@ def test_market_candidate_has_documented_empty_framework_and_own_runtime():
         lab_packs.load_lab_pack(pack.lab_id)
     assert pack.agent['name'] == 'ai_market_intelligence'
     assert not pack.datasets and not pack.notebooks
-    expected = {'notebooks/agent/ai_market_intelligence/' + name for name in FILES}
-    expected.update({'notebooks/agent/market_intelligence.py', 'notebooks/agent/requirements.txt'})
+    expected = {'notebooks/agent/ai_market_intelligence/' + name for name in set(FILES)|set(V2_FILES)}
+    expected.update({'notebooks/agent/market_intelligence.py', 'notebooks/agent/requirements.txt',
+                     'notebooks/agent/requirements-v2.txt'})
     assert {asset.name for asset in pack.runtime_files} == expected
     assert 'memory.py' in FILES
     schema = json.loads(lab_packs.module_runtime_source(pack.lab_id, 'notebooks/agent/ai_market_intelligence/schema.json', require_available=False))
@@ -60,6 +61,15 @@ def test_retired_social_package_cannot_be_loaded_or_installed_as_market():
         lab_packs.load_lab_pack('ai_social_network')
     assert 'ai_social_network' not in {pack.lab_id for pack in lab_packs.lab_catalog()}
     assert not (lab_packs.LABS_ROOT.parent / 'legacy_labs' / 'ai_social_network').exists()
+
+
+def test_market_runtime_hashes_survive_the_repository_lf_checkout_policy():
+    pack = lab_packs.load_lab_pack('ai_market_intelligence', require_available=False)
+    for asset in pack.runtime_files:
+        raw = asset.read_bytes()
+        raw.decode('utf-8')
+        assert b'\r\n' not in raw, asset.name
+        assert hashlib.sha256(raw.replace(b'\r\n', b'\n')).hexdigest() == asset.sha256
 
 
 @pytest.mark.parametrize('filename', ['../outside.py', '/outside.py', 'nested/file.py', 'C:/outside.py', 'nested\\file.py', '..'])

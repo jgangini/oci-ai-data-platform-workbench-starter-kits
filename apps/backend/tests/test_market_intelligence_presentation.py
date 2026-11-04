@@ -47,15 +47,20 @@ def test_invalid_financial_values_do_not_become_displayed_evidence(value):
 def test_schedule_consent_shows_full_plan_and_keeps_recurring_suggestion():
     response = {'markdown': '¿Lo apruebas?', 'suggestion': 'Este tema es recurrente.',
                 'schedule_summary': {
+                    'topic': {'entity': 'D1', 'market': 'Colombia', 'objective': 'Novedades'},
                     'recurrence': {'weekdays': [1, 5], 'hour': 9, 'minute': 5, 'timezone': 'America/Bogota'},
                     'research': {'window_days': 7, 'target_ids': ['internal-target'], 'cap_microusd': 100001},
                     'sources': [{'name': 'Fuente oficial', 'target': 'https://example.test/news'}]}}
     text = response_markdown(response)
-    for expected in ('lunes, viernes', '09:05', 'America/Bogota', 'últimos 7 días',
+    for expected in ('D1 · Colombia · Novedades', 'lunes, viernes', '09:05', 'America/Bogota', 'últimos 7 días',
                      'US$0.100001', 'Fuente oficial', 'https://example.test/news',
                      '¿Lo apruebas?', 'Este tema es recurrente.'):
         assert expected in text
     assert 'internal-target' not in text
+    response['schedule_summary']['topic']['objective'] = '<img src=x> [cambiar](https://untrusted.example)'
+    escaped = response_markdown(response)
+    assert '<img' not in escaped and '&lt;img src=x&gt;' in escaped
+    assert '\\[cambiar\\]\\(https://untrusted.example\\)' in escaped
     response['schedule_summary']['sources'] = []
     with pytest.raises(ValueError, match='visible source'):
         response_markdown(response)

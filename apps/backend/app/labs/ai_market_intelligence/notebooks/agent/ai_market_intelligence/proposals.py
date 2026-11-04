@@ -7,6 +7,9 @@ from zoneinfo import ZoneInfo
 
 from .repository import Records, digest, encoded, json_text, utc_now
 from .contracts import Recurrence, ScheduleResearch
+from .execution import schedule_scope_bindings, validate_scheduled_research
+from .research import require_runtime_revision, runtime_bound_brief
+from .contracts import RuntimeBinding
 
 
 def next_occurrence(plan, after):
@@ -29,8 +32,9 @@ def next_occurrence(plan, after):
 
 
 class Proposals:
-    def __init__(self, journal):
+    def __init__(self, journal, *, runtime_binding=None):
         self.journal, self.scope = journal, journal.scope
+        self.runtime_binding = None if runtime_binding is None else RuntimeBinding.model_validate(runtime_binding).model_dump(mode='json')
 
     def recurring_questions(self, topic_id, now=None):
         clock = now or datetime.now(timezone.utc)
@@ -72,13 +76,11 @@ class Proposals:
             row = records.get('ai_mi_schedule_proposals', proposal_id)
             if not row or row['state'] not in {'pending', 'awaiting_confirmation'}:
                 raise ValueError('No pending schedule proposal')
-            for target_id in research_plan['target_ids']:
-                target = records.get('ai_mi_source_targets', target_id)
-                links = records.rows('ai_mi_topic_sources')
-                if not target or target['status'] != 'active' or not any(link['topic_id'] == row['topic_id'] and link['target_id'] == target_id and link['status'] == 'active' for link in links):
-                    raise ValueError('Schedule target is outside the approved topic base')
+            research = {'version': 2, **research_plan,
+                        'source_authorizations': schedule_scope_bindings(records, row['topic_id'], research_plan)}
+            research = validate_scheduled_research(records, row['topic_id'], research)
             previous = json.loads(row['proposed_plan_json'])
-            plan = {'recurrence': recurrence, 'research': research_plan}
+            plan = {'recurrence': recurrence, 'research': research}
             summary_hash = digest(plan)
             records.upsert('ai_mi_schedule_proposals', {**row, 'state': 'awaiting_confirmation',
                 'proposed_plan_json': json_text({'revision': previous['revision'] + 1,
@@ -113,6 +115,8 @@ class Proposals:
                 raise ValueError('Only the exact presented, complete plan can be approved')
             if not accept and row['state'] not in {'pending', 'awaiting_confirmation'}:
                 raise ValueError('Proposal is no longer pending')
+            if accept:
+                validate_scheduled_research(records, row['topic_id'], proposal['plan']['research'])
             approval = {'actor_id': self.scope.owner_id, 'request_id': user_request_id,
                         'at': clock.isoformat(), 'presented_hash': presented_hash, 'accepted': accept}
             records.upsert('ai_mi_schedule_proposals', {**row, 'state': 'approved' if accept else 'rejected',
@@ -146,22 +150,24 @@ class Proposals:
             schedule = records.get('ai_mi_schedules', schedule_id)
             if not schedule or schedule['status'] != 'active' or not schedule['next_due_at']:
                 return None
+            plan = validate_scheduled_research(records, schedule['topic_id'], json.loads(schedule['approved_plan_budget_json']))
             pending = [row for row in records.rows('ai_mi_research_runs') if row['schedule_id'] == schedule_id and row['state'] == 'running']
             if len(pending) > 1:
                 raise RuntimeError('Multiple unfinished scheduled runs require reconciliation')
             if pending:
+                require_runtime_revision(pending[0], self.runtime_binding)
                 return pending[0]['run_id'] if resume_pending else None
             due = datetime.fromisoformat(schedule['next_due_at'])
             if due > clock:
                 return None
             occurrence = digest([schedule_id, schedule['revision'], due.isoformat()])
             run_id = self.scope.key(digest(['scheduled-run', occurrence]))
-            plan = json.loads(schedule['approved_plan_budget_json'])
             window = {'start': (clock - timedelta(days=plan['window_days'])).isoformat(), 'end': clock.isoformat()}
             records.upsert('ai_mi_research_runs', {'run_id': run_id, 'schedule_id': schedule_id,
                 'occurrence_key': occurrence, 'topic_id': schedule['topic_id'], 'state': 'running',
                 'reserved_microusd': plan['cap_microusd'], 'plan_window_json': json_text(window),
-                'brief_json': json_text({'objective': 'Investigación del tema y fuentes aprobados en la programación', 'schedule_revision': schedule['revision']}),
+                'brief_json': json_text(runtime_bound_brief({'objective': 'Investigación del tema y fuentes aprobados en la programación',
+                    'schedule_revision': schedule['revision']}, self.runtime_binding)),
                 'completion_policy_json': json_text({'max_steps': 4, 'max_elapsed_seconds': 300}),
                 'decision_log_json': json_text({'decisions': []}),
                 'started_finished_at_json': json_text({'started_at': clock.isoformat(), 'finished_at': None})})

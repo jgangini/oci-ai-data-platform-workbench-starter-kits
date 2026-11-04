@@ -2,13 +2,55 @@
 from __future__ import annotations
 
 import json
+import re
 
 from app.notebooks import WORKSPACE_ROOT
-from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.schema import create_statements, definition, identifier, schema_sha256
+from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.schema import definition, identifier, literal, schema_sha256
 
 MODULE_ROOT = WORKSPACE_ROOT + '/.control/modules/ai_market_intelligence'
 SCRIPT_PATH = MODULE_ROOT + '/create_model.py'
 JOB_NAME = 'wf_ai_market_intelligence_model'
+
+
+def create_statements(catalog: str, framework_schema: str, *, storage_root: str = '') -> list[str]:
+    for name in (catalog, framework_schema):
+        identifier(name)
+    digest = schema_sha256()
+    if storage_root and not re.fullmatch(r'oci://[A-Za-z0-9_.-]{1,128}@[A-Za-z0-9_-]{1,128}/ai_market_intelligence/delta', storage_root):
+        raise ValueError('Invalid dedicated artifacts location')
+    statements = []
+    for table in definition()['tables']:
+        qualified = '.'.join(identifier(name) for name in (catalog, framework_schema, table['name']))
+        columns = ',\n  '.join(
+            identifier(column['name']) + ' ' + column['type']
+            + ('' if column['nullable'] else ' NOT NULL')
+            + ' COMMENT ' + literal(column['description']) for column in table['columns'])
+        statements.append(
+            'CREATE TABLE ' + qualified + ' (\n  ' + columns + '\n) USING DELTA'
+            + ('\nLOCATION ' + literal(storage_root + '/' + table['name']) if storage_root else '') + '\nCOMMENT '
+            + literal(table['description']) + "\nTBLPROPERTIES ('ai_mi.module_id'='ai_market_intelligence', "
+            + "'ai_mi.schema_version'='2', 'ai_mi.schema_sha256'=" + literal(digest) + ')')
+    return statements
+
+
+def data_dictionary() -> str:
+    parts = ['# AI Market Intelligence · Diccionario de datos', '',
+             'Generado desde schema.json. Claves y relaciones son invariantes de aplicación; '
+             'Delta no impone PK/FK/UNIQUE ni admisión multitabla.', '']
+    for table in definition()['tables']:
+        parts.extend(['## ' + table['name'], '', table['description'], '',
+                      'Capa: ' + table['layer'] + '.', '',
+                      '| Columna | Tipo | Admite NULL | Clave lógica | Referencia | Descripción |',
+                      '| --- | --- | --- | --- | --- | --- |'])
+        for column in table['columns']:
+            comment = column['description'].replace('|', '\\|')
+            keys = column.get('key', [])
+            key_text = ', '.join(keys) if isinstance(keys, list) else keys
+            parts.append('| ' + column['name'] + ' | ' + column['type'] + ' | '
+                         + ('Sí' if column['nullable'] else 'No') + ' | ' + key_text + ' | '
+                         + column.get('references', '') + ' | ' + comment + ' |')
+        parts.append('')
+    return '\n'.join(parts)
 
 
 def model_notebook(catalog: str, framework_schema: str, *, storage_root: str = '') -> dict:

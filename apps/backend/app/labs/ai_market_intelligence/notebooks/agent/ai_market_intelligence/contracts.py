@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Short = Annotated[str, Field(min_length=1, max_length=500)]
 Reason = Annotated[str, Field(max_length=2000)]
 Keys = Annotated[list[Short], Field(max_length=50)]
+ROLLING_DAYS_PATTERN = r'last_([1-9]|[12][0-9]|3[01])_days'
 
 
 class Output(BaseModel):
@@ -20,15 +21,71 @@ class TopicScope(Output):
     objective: Short
 
 
+class SearchContext(Output):
+    country_code: Annotated[str, Field(pattern=r'^[A-Z]{2}$')]
+    language_code: Annotated[str, Field(pattern=r'^[a-z]{2}(?:-[A-Z]{2})?$')]
+
+
+RevisionHash = Annotated[str, Field(pattern=r'^[0-9a-f]{64}$')]
+
+
+class RuntimeBinding(Output):
+    version: Literal[1]
+    implementation_sha256: RevisionHash
+    deployed_file_sha256: RevisionHash
+    runtime_config_sha256: RevisionHash
+    prompts_sha256: RevisionHash
+    policy_sha256: RevisionHash
+    model_sha256: RevisionHash
+    model_id: Short
+    dependencies: dict[Short, Short | None]
+
+
+class ClarificationAnswer(Output):
+    request_id: Annotated[str, Field(min_length=1, max_length=128)]
+    text: Short
+
+
+Clarifications = Annotated[list[ClarificationAnswer], Field(max_length=3)]
+
+
+class ResearchRequest(Output):
+    version: Literal[1]
+    request_id: Annotated[str, Field(min_length=1, max_length=128)]
+    question: Short
+    scope_key: Short
+    answers: Clarifications
+
+    @field_validator('version', mode='before')
+    @classmethod
+    def exact_version(cls, value):
+        if type(value) is not int:
+            raise ValueError('Research request version must be an integer')
+        return value
+
+
+class PendingClarification(ResearchRequest):
+    topic: TopicScope | None
+    missing_fields: Annotated[list[Short], Field(max_length=5)]
+    user_question: Short | None
+    selected_source_key: Short | None = None
+    prepared_run_id: Short | None = None
+    prepared_window_spec: Short | None = None
+    search_context: SearchContext | None = None
+
+
 class IntakeDecision(Output):
     intent: Literal['research', 'followup', 'source_request', 'source_decision', 'list_sources',
                     'schedule_request', 'schedule_decision', 'read_report', 'cancel']
     canonical_question: Short
     topic: TopicScope | None
-    window_spec: Literal['last_7_days', 'rolling_24h', 'calendar_today']
+    window_spec: Annotated[str, Field(max_length=32,
+        pattern=rf'^(calendar_today|rolling_24h|{ROLLING_DAYS_PATTERN})$')]
     missing_fields: Annotated[list[Short], Field(max_length=5)]
     user_question: Short | None
     selected_source_key: Short | None = None
+    clarification_action: Literal['continue', 'replace', 'cancel'] | None = None
+    search_context: SearchContext | None = None
 
 
 class FinancialArguments(Output):
@@ -47,6 +104,7 @@ class StepArguments(Output):
     max_items: Annotated[int, Field(ge=1, le=50)]
     sort: Literal['Latest', 'Top']
     financial: FinancialArguments | None = None
+    search_mode: Literal['research', 'navigation'] = 'research'
 
 
 class ResearchPlan(Output):
@@ -64,6 +122,7 @@ class Assessment(Output):
     stance: Literal['supports', 'refutes', 'context', 'unclear']
     reason: Reason
     independence: Literal['known', 'unknown', 'duplicate']
+    relevance: Literal['relevant', 'uncertain', 'irrelevant'] = 'uncertain'
 
 
 class EvidenceAssessment(Output):
@@ -79,6 +138,24 @@ class Finding(Output):
     supports: Keys
     refutes: Keys
     limitations: Annotated[list[Reason], Field(max_length=10)]
+
+
+class FactualIssue(Output):
+    claim: Annotated[str, Field(min_length=1, max_length=2000)]
+    evidence_id: Short
+    quoted_text: Annotated[str, Field(min_length=1, max_length=2000)]
+    reason: Annotated[str, Field(min_length=1, max_length=2000)]
+
+
+class FactualReview(Output):
+    accepted: bool
+    issues: Annotated[list[FactualIssue], Field(max_length=10)]
+
+    @model_validator(mode='after')
+    def consistent_verdict(self):
+        if self.accepted != (not self.issues):
+            raise ValueError('Factual verdict must agree with its issues')
+        return self
 
 
 class ChartRequest(Output):
@@ -101,7 +178,7 @@ class FinancialMetrics(Output):
     points: Annotated[list[FinancialPoint], Field(min_length=1, max_length=50)]
 
 
-class ReportDraft(Output):
+class ReportContent(Output):
     answer_markdown: Annotated[str, Field(min_length=1, max_length=20000)]
     cited_evidence_ids: Keys
     findings: Annotated[list[Finding], Field(max_length=20)]
@@ -114,6 +191,22 @@ class ReportDraft(Output):
         if '<' in value or '```' in value:
             raise ValueError('A bounded Markdown answer without raw HTML/code is required')
         return value
+
+
+class ResearchConclusion(Output):
+    status: Literal['answered', 'partial', 'unresolved']
+    reason: Annotated[str, Field(min_length=1, max_length=2000)]
+    material_gaps: Annotated[list[Short], Field(max_length=5)]
+
+    @model_validator(mode='after')
+    def consistent_resolution(self):
+        if (self.status == 'answered') == bool(self.material_gaps):
+            raise ValueError('An answered question has no material gaps; partial or unresolved requires one')
+        return self
+
+
+class ReportDraft(ReportContent):
+    decision: ResearchConclusion
 
 
 class OpportunityDecision(Output):
@@ -141,8 +234,22 @@ class Recurrence(Output):
 
 class ScheduleResearch(Output):
     window_days: Annotated[int, Field(ge=1, le=31)]
-    target_ids: Annotated[list[Short], Field(min_length=1, max_length=10)]
+    target_ids: Annotated[list[Short], Field(max_length=10)] = Field(default_factory=list)
+    source_keys: Annotated[list[Short], Field(max_length=10)] = Field(default_factory=list)
     cap_microusd: Annotated[int, Field(gt=0)]
+
+    @field_validator('target_ids', 'source_keys')
+    @classmethod
+    def unique_selections(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError('Scheduled source and target selections must be distinct')
+        return value
+
+    @model_validator(mode='after')
+    def selected_scope(self):
+        if not self.target_ids and not self.source_keys:
+            raise ValueError('Select at least one approved target or public source')
+        return self
 
 
 class ScheduleDraft(Output):
@@ -152,6 +259,7 @@ class ScheduleDraft(Output):
     timezone: Short | None = None
     window_days: Annotated[int, Field(ge=1, le=31)] | None = None
     target_ids: Annotated[list[Short], Field(max_length=10)] | None = None
+    source_keys: Annotated[list[Short], Field(max_length=10)] | None = None
     cap_microusd: Annotated[int, Field(gt=0)] | None = None
 
 

@@ -26,3 +26,10 @@ openwiki/
 graphify-out/
 # Generated from the exact release commit before building its image.
 apps/backend/app/labs/package-releases.json
+.aidp-local/
+
+# Local selected OCI/runtime identity; template lives in test documentation.
+aidp-agent.toml
+# Active evaluation policy and case map refer to private local evidence.
+/node-progress.json
+/test-campaign.json

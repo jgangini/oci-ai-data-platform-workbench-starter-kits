@@ -16,6 +16,10 @@ __pycache__
 *.tfstate*
 .oci
 .tmp
+.aidp-local
+aidp-agent.toml
+node-progress.json
+test-campaign.json
 .sentrux
 graphify-out
 .env

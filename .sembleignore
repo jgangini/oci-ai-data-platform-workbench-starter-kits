@@ -1,6 +1,8 @@
 .tmp/
 .source/
 .aidp/
+.aidp-local/
+aidp-agent.toml
 .oci/
 .codex/
 .venv/

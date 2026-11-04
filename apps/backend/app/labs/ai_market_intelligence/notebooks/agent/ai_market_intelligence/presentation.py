@@ -2,6 +2,7 @@
 from decimal import Decimal
 from html import escape
 import math
+from urllib.parse import quote, urlsplit, urlunsplit
 
 
 def _label(value):
@@ -9,6 +10,31 @@ def _label(value):
     for char in ('\\', '`', '*', '_', '[', ']', '(', ')', '|', '!'):
         text = text.replace(char, '\\' + char)
     return text
+
+
+def extension_markdown(question):
+    if not question:
+        return ''
+    from .catalog import requested_public_urls
+    requested_public_urls(question)
+    return '\n\n**Para continuar**\n\n' + _label(question)
+
+
+def reference_markdown(references):
+    from .catalog import public_url
+    if not isinstance(references, list) or len(references) > 50:
+        raise ValueError('At most fifty verified reference URLs are required')
+    urls = list(dict.fromkeys(public_url(url) for url in references))
+    if not urls:
+        return ''
+    lines = ['**Referencias**', '']
+    for number, url in enumerate(urls, 1):
+        parts = urlsplit(url)
+        # Encode Markdown delimiters and entity syntax without changing query separators.
+        path = quote(parts.path, safe='/%:@!$*+,;=-._~')
+        destination = urlunsplit((parts.scheme, parts.netloc, path, parts.query, ''))
+        lines.append(f'- [{number} · {_label(parts.hostname)}]({destination})')
+    return '\n'.join(lines)
 
 
 def _chart_table(chart):
@@ -38,11 +64,14 @@ def _schedule_summary(summary):
     selected_days = ', '.join(days[number - 1] for number in recurrence['weekdays'])
     clock = f"{recurrence['hour']:02d}:{recurrence['minute']:02d}"
     sources = summary['sources']
-    if not sources or len(sources) != len(research['target_ids']):
+    if not sources or len(sources) != len(research['target_ids']) + len(research.get('source_keys', [])):
         raise ValueError('Every scheduled target must have a visible source')
     budget = Decimal(research['cap_microusd']) / Decimal(1_000_000)
+    topic = summary.get('topic')
+    subject = ['- Tema: ' + ' · '.join(_label(topic[key]) for key in ('entity', 'market', 'objective')) + '.'] if topic else []
     return '\n'.join([
         '**Programación propuesta**', '',
+        *subject,
         '- Días: ' + selected_days + '.',
         '- Hora: ' + clock + ' (' + _label(recurrence['timezone']) + ').',
         '- Ventana: últimos ' + str(research['window_days']) + ' días en cada ejecución.',
@@ -62,6 +91,9 @@ def response_markdown(response):
     parts = [markdown]
     if response.get('chart') is not None:
         parts.append(_chart_table(response['chart']))
+    references = reference_markdown(response.get('references', []))
+    if references:
+        parts.append(references)
     if response.get('schedule_summary') is not None:
         parts.append(_schedule_summary(response['schedule_summary']))
     if response.get('suggestion'):

@@ -1,2 +1,5 @@
 -r requirements.txt
 pytest==8.4.1
+jsonschema==4.26.0
+pypdf==6.20.1
+tzdata==2026.6; sys_platform == 'win32'

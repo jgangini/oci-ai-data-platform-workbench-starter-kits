@@ -1,5 +1,6 @@
 """Administrator-only installation and observed progress; GET never provisions."""
 import json
+from typing import Literal
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
@@ -18,6 +19,7 @@ class MarketInstallRequest(BaseModel):
     reuse_existing: bool = False
     apify_token: SecretStr | None = None
     test_session_id: str | None = None
+    runtime_version: Literal['legacy', 'v2'] = 'legacy'
 
     def validate_values(self):
         if str(UUID(self.operation_id)) != self.operation_id:
@@ -43,15 +45,15 @@ class MarketReinstallRequest(MarketInstallRequest):
 
 
 def mount_market_intelligence(app, require_admin, selected_platform_admin):
-    def ready():
+    def ready(runtime_version='legacy'):
         if not app.state.settings.aidp_ready():
             raise HTTPException(503, 'AIDP workspace provisioning is not configured')
-        return app.state.market_factory()
+        return app.state.market_v2_factory() if runtime_version == 'v2' else app.state.market_factory()
 
     @app.get('/api/admin/modules/ai_market_intelligence')
-    async def observe(_admin=Depends(require_admin)):
+    async def observe(runtime_version: Literal['legacy', 'v2'] = 'legacy', _admin=Depends(require_admin)):
         try:
-            result = await ready().status()
+            result = await ready(runtime_version).status()
             owner = result.pop('administrator_ocid', None)
             if owner:
                 try:
@@ -77,7 +79,7 @@ def mount_market_intelligence(app, require_admin, selected_platform_admin):
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
             raise HTTPException(400, 'Invalid installation settings. Check the operation, test session and credential selection.') from None
         try:
-            result = await ready().operate(str(user['ocid']), values.operation_id,
+            result = await ready(values.runtime_version).operate(str(user['ocid']), values.operation_id,
                 reuse_existing=values.reuse_existing, token=values.apify_token, test_session_id=values.test_session_id)
             return JSONResponse(result, status_code=202 if result['status'] == 'installing' else 200)
         except AidpProvisionConflict as exc:
@@ -86,9 +88,10 @@ def mount_market_intelligence(app, require_admin, selected_platform_admin):
             raise HTTPException(503, 'Native setup is unavailable. Preserve this operation and retry its status.') from None
 
     @app.get('/api/admin/modules/ai_market_intelligence/agent-endpoint')
-    async def endpoint(_admin=Depends(require_admin)):
+    async def endpoint(runtime_version: Literal['legacy', 'v2'] = 'legacy', _admin=Depends(require_admin)):
         try:
-            return {'url': await ready().agent_endpoint()}
+            return {'url': await ready(runtime_version).agent_endpoint(), 'runtime_version': runtime_version,
+                    'deployment_surface': 'TEST' if runtime_version == 'v2' else 'PROD'}
         except AidpProvisionConflict as exc:
             raise HTTPException(409, str(exc)) from None
         except (AidpProvisionError, AidpProvisionPending):
@@ -105,7 +108,7 @@ def mount_market_intelligence(app, require_admin, selected_platform_admin):
         except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
             raise HTTPException(400, 'Confirm the project removal, previous operation and new token before reinstalling.') from None
         try:
-            result = await ready().reinstall(str(user['ocid']), values.operation_id, values.previous_operation_id,
+            result = await ready(values.runtime_version).reinstall(str(user['ocid']), values.operation_id, values.previous_operation_id,
                                             token=values.apify_token, test_session_id=values.test_session_id)
             return JSONResponse(result, status_code=202 if result['status'] == 'redeploying' else 200)
         except AidpProvisionConflict as exc:
@@ -115,11 +118,14 @@ def mount_market_intelligence(app, require_admin, selected_platform_admin):
 
 
 class LocalMarketClient:
+    def __init__(self, *, runtime_version='legacy'):
+        self.runtime_version = runtime_version
+
     async def close(self):
         pass
 
     async def status(self):
-        return {**public_status(), 'apify_credential_available': False}
+        return {**public_status({'runtime_version': self.runtime_version}), 'apify_credential_available': False}
 
     async def operate(self, *_args, **_kwargs):
         raise AidpProvisionConflict('Native AIDP is required; the local fixture does not create a simulated installation.')

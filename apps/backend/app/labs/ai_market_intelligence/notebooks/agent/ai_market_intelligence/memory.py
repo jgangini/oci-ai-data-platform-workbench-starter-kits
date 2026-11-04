@@ -5,6 +5,7 @@ checkpoint_ns as well, without changing its session/agent authorization context.
 LangGraph sees its original namespace; only public checkpoint IO is adapted.
 """
 import os
+import hashlib
 from uuid import UUID
 
 from langchain_core.messages import convert_to_messages
@@ -25,10 +26,12 @@ def root_graph_config(config):
 
 
 class GenerationMemory(BaseCheckpointSaver):
-    def __init__(self,delegate,generation_id):
+    def __init__(self,delegate,generation_id,*,request_id=None):
         super().__init__(serde=delegate.serde)
         self.delegate=delegate
         self.prefix='sonda/'+str(UUID(str(generation_id)))+'/'
+        if request_id is not None:
+            self.prefix+='v2/'+hashlib.sha256(request_id.encode()).hexdigest()+'/'
 
     def namespaced(self,config,*,reverse=False):
         result=dict(config)
@@ -87,10 +90,10 @@ class GenerationMemory(BaseCheckpointSaver):
         await self.delegate.aput_writes(self.namespaced(config),writes,task_id,task_path=task_path)
 
 
-def native_memory(generation_id,agent_name):
+def native_memory(generation_id,agent_name,*,request_id=None):
     from oracle_memory_clients.client import AsyncProxyCheckpointClient
     # Do not mask unavailable memory as an empty conversation.
     os.environ['AIDP_CHECKPOINTER_GET_GRACEFUL']='false'
     client=AsyncProxyCheckpointClient(base_url=os.getenv('MEMORY_SERVER_URL') or
         os.getenv('MEMORY_URL') or 'http://127.0.0.1:21100',agent=agent_name)
-    return GenerationMemory(client,generation_id)
+    return GenerationMemory(client,generation_id,request_id=request_id)

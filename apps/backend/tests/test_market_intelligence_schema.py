@@ -5,20 +5,21 @@ import re
 import pytest
 
 from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence import schema
+from app.market_installation.model_install import create_statements, data_dictionary
 
 STORAGE_ROOT = 'oci://selected-artifacts@namespace/ai_market_intelligence/delta'
 
 
 def test_installer_storage_is_dedicated_to_the_selected_artifacts_bucket():
     root = 'oci://selected-artifacts@namespace/ai_market_intelligence/delta'
-    statements = schema.create_statements('oci_medallion', 'oci_artifacts', storage_root=root)
+    statements = create_statements('oci_medallion', 'oci_artifacts', storage_root=root)
     assert len(statements) == 14
     for table, statement in zip(schema.definition()['tables'], statements):
         assert "LOCATION '" + root + '/' + table['name'] + "'" in statement
         assert '`oci_medallion`.`oci_artifacts`.' in statement
     for invalid in ('oci://bucket@ns/shared', root + "';DROP TABLE x", 'https://example.test/'):
         with pytest.raises(ValueError, match='dedicated artifacts'):
-            schema.create_statements('oci_medallion', 'oci_artifacts', storage_root=invalid)
+            create_statements('oci_medallion', 'oci_artifacts', storage_root=invalid)
 
 
 def test_approved_tables_belong_to_the_agent_framework_and_keep_all_column_comments():
@@ -34,7 +35,7 @@ def test_approved_tables_belong_to_the_agent_framework_and_keep_all_column_comme
 
 
 def test_native_ddl_preserves_comments_without_silent_reuse():
-    statements = schema.create_statements('oci_medallion', 'oci_artifacts')
+    statements = create_statements('oci_medallion', 'oci_artifacts')
     assert len(statements) == 14
     assert all('IF NOT EXISTS' not in statement and 'USING DELTA' in statement for statement in statements)
     assert sum(statement.count(' COMMENT ') for statement in statements) == 145
@@ -48,11 +49,11 @@ def test_native_ddl_preserves_comments_without_silent_reuse():
 @pytest.mark.parametrize('bad', ['oci_gold; DROP SCHEMA x', 'a.b', '', 'name`', '../other'])
 def test_schema_identifiers_cannot_escape_the_qualified_name(bad):
     with pytest.raises(ValueError):
-        schema.create_statements('oci_medallion', bad)
+        create_statements('oci_medallion', bad)
 
 
 def test_dictionary_and_definition_share_every_column():
-    text = schema.data_dictionary()
+    text = data_dictionary()
     assert text.count('| Sí |') + text.count('| No |') == 145
     assert 'microusd' in text and 'nulo' in text
 
@@ -88,7 +89,7 @@ def test_native_notebook_checks_existing_ownership_and_all_column_comments():
 
 
 def test_dictionary_contains_actual_reference_targets():
-    text = schema.data_dictionary()
+    text = data_dictionary()
     for table in schema.definition()['tables']:
         for column in table['columns']:
             if column.get('references'):

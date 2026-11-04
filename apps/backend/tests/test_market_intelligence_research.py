@@ -82,6 +82,22 @@ def test_provider_day_search_does_not_expand_the_exact_research_window():
     assert len(research.evidence(run)) == 1
 
 
+def test_day_precision_excludes_clearly_old_or_future_references_without_inventing_a_time():
+    research, run, tool = running()
+    def narrow(records, state):
+        records.upsert('ai_mi_research_runs', {**records.get('ai_mi_research_runs', run),
+            'plan_window_json': json.dumps({'version': 1, 'start': '2026-10-29T14:30:00+00:00',
+                                           'end': '2026-10-30T14:30:00+00:00'})})
+    research.journal.transact(narrow)
+    dates = ['2026-10-27', '2026-10-29', '2026-10-30', '2026-11-03']
+    rows = [{**observation(url='https://example.com/' + day), 'published_at': None,
+             'provenance': {'publication_date_raw': day, 'publication_date_precision': 'day'}} for day in dates]
+    assert len(research.add_evidence(run, tool, rows)) == 2
+    evidence = research.evidence(run)
+    assert {row['url'] for row in evidence} == {'https://example.com/2026-10-29', 'https://example.com/2026-10-30'}
+    assert all(row['published_at'] is None for row in evidence)
+
+
 def test_supporting_and_contradictory_evidence_are_retained():
     research, run, tool = running()
     support, refute = research.add_evidence(run, tool, [observation('A favor'), observation('En contra', 'https://example.com/otra')])

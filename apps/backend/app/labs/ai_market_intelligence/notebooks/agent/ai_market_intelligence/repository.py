@@ -12,89 +12,30 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
+from .runtime_core import encoded, digest, json_text, utc_now, Scope, Conflict, ObjectSnapshot
 from .schema import definition, identifier, schema_sha256
 
 
-def encoded(value) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True,
-                      separators=(',', ':'), allow_nan=False).encode('utf-8')
 
 
-def digest(value) -> str:
-    return hashlib.sha256(encoded(value)).hexdigest()
 
 
-def json_text(value) -> str:
-    return encoded({'version': 1, **value}).decode()
 
 
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
-@dataclass(frozen=True)
-class Scope:
-    tenant_id: str
-    owner_id: str
-    generation_id: str
-
-    def __post_init__(self):
-        for value in (self.tenant_id, self.owner_id):
-            if not isinstance(value, str) or not 1 <= len(value) <= 256 or any(ord(c) < 32 for c in value):
-                raise ValueError('Authenticated tenant and owner are required')
-        if str(UUID(self.generation_id)) != self.generation_id:
-            raise ValueError('A canonical generation UUID is required')
-
-    @property
-    def prefix(self):
-        owner = digest([self.tenant_id, self.owner_id])
-        return f'ai_market_intelligence/generations/{self.generation_id}/owners/{owner}/'
-
-    def key(self, local_id: str) -> str:
-        if not isinstance(local_id, str) or not 1 <= len(local_id) <= 256 or any(ord(c) < 32 for c in local_id):
-            raise ValueError('A bounded record identity is required')
-        return self.generation_id + ':' + local_id
 
 
-class Conflict(RuntimeError):
-    pass
 
 
-class ObjectSnapshot:
-    """One conditional object per scope; deliberately bounded for this pilot."""
-    maximum_bytes = 4 * 1024 * 1024
+class ProjectionPending(RuntimeError):
+    def __init__(self, reason):
+        messages = {'busy': 'Another projection owns this scope; retry delivery, not capture',
+                    'changed': 'Records changed during projection; retry delivery without recapture'}
+        self.reason = reason
+        super().__init__(messages[reason])
 
-    def __init__(self, storage, namespace: str, bucket: str, scope: Scope):
-        self.storage, self.namespace, self.bucket, self.scope = storage, namespace, bucket, scope
-        self.key = scope.prefix + 'state.json'
 
-    def read(self):
-        try:
-            response = self.storage.get_object(self.namespace, self.bucket, self.key)
-        except Exception as error:
-            if getattr(error, 'status', None) == 404:
-                return None, None
-            raise
-        try:
-            raw = response.data.raw.read(self.maximum_bytes + 1)
-        finally:
-            response.data.close()
-        if len(raw) > self.maximum_bytes:
-            raise RuntimeError('Operational snapshot capacity exceeded')
-        return json.loads(raw), response.headers['etag']
-
-    def write(self, value, etag):
-        raw = encoded(value)
-        if len(raw) > self.maximum_bytes:
-            raise RuntimeError('Operational snapshot capacity exceeded; no paid start admitted')
-        condition = {'if_match': etag} if etag else {'if_none_match': '*'}
-        try:
-            self.storage.put_object(self.namespace, self.bucket, self.key, raw,
-                                    content_type='application/json', **condition)
-        except Exception as error:
-            if getattr(error, 'status', None) == 412:
-                raise Conflict('The scoped state changed concurrently') from None
-            raise
 
 
 class Records:
@@ -192,6 +133,8 @@ class Journal:
             result = change(records, value)
             value['tables'] = records.tables
             value['revision'] += 1
+            if 'projection_receipts' in value and len(encoded(value)) > getattr(self.snapshot, 'maximum_bytes', ObjectSnapshot.maximum_bytes):
+                value.pop('projection_receipts')
             try:
                 self.snapshot.write(value, etag)
                 return result
@@ -213,7 +156,7 @@ class Journal:
     def claim_projection(self, lease):
         def claim(records, state):
             if state.get('projection_lease'):
-                raise RuntimeError('Another projection owns this scope; retry delivery, not capture')
+                raise ProjectionPending('busy')
             state['projection_lease'] = lease
             # Invalidate before SQL so a terminated writer cannot leave reusable receipts.
             return records, state.pop('projection_receipts', [])
@@ -227,21 +170,62 @@ class Journal:
                 raise RuntimeError('Projection ownership changed')
             state['projection_lease'] = None
             unchanged = current.tables == projected.tables
-            if receipts is not None and unchanged:
-                state['projection_receipts'] = receipts
+            # Receipts describe the verified snapshot, never newer journal rows.
+            if receipts is not None:
+                candidate = {**state, 'projection_receipts': receipts, 'revision': state['revision'] + 1}
+                maximum = getattr(self.snapshot, 'maximum_bytes', ObjectSnapshot.maximum_bytes)
+                if len(encoded(candidate)) <= maximum:
+                    state['projection_receipts'] = receipts
             return unchanged
         return self.transact(release)
 
 
-def projection_statements(records: Records, catalog: str, framework_schema: str):
+def projection_delta(records: Records, catalog: str, framework_schema: str, compute_key: str, previous):
+    """Select changed rows using destination-bound receipts of prior exact readbacks."""
+    binding = digest(['projection-rows-v2', records.scope.__dict__, catalog, framework_schema,
+                      compute_key, schema_sha256()])
+    current, row_keys = {}, {}
+    verified = _projection_row_receipts(previous, binding)
+    for spec in records.specs.values():
+        primary = next(column['name'] for column in spec['columns'] if column.get('key') == 'pk')
+        dirty = set()
+        for row in records.rows(spec['name']):
+            key, fingerprint = digest([spec['name'], row[primary]]), digest(row)
+            current[key] = fingerprint
+            if verified.get(key) != fingerprint:
+                dirty.add(row[primary])
+        row_keys[spec['name']] = dirty
+    return row_keys, {'version': 2, 'binding': binding, 'rows': current}
+
+
+def _projection_row_receipts(previous, binding):
+    if (not isinstance(previous, dict) or set(previous) != {'version', 'binding', 'rows'}
+            or previous['version'] != 2 or previous['binding'] != binding
+            or not isinstance(previous['rows'], dict)):
+        return {}
+    for key, fingerprint in previous['rows'].items():
+        if not all(isinstance(value, str) and len(value) == 64 and set(value) <= set('0123456789abcdef')
+                   for value in (key, fingerprint)):
+            return {}
+    return previous['rows']
+
+
+def _projection_rows(records, spec, row_keys):
+    primary = next(column['name'] for column in spec['columns'] if column.get('key') == 'pk')
+    rows = records.rows(spec['name'])
+    if row_keys is not None:
+        rows = [row for row in rows if row[primary] in row_keys.get(spec['name'], set())]
+    return primary, rows
+
+
+def projection_statements(records: Records, catalog: str, framework_schema: str, *, row_keys=None):
     """Typed MERGE statements; no user/model SQL or unscoped overwrites."""
     for table in records.specs.values():
-        rows = records.rows(table['name'])
+        primary, rows = _projection_rows(records, table, row_keys)
         if not rows:
             continue
         target = '.'.join(map(identifier, (catalog, framework_schema, table['name'])))
         columns = table['columns']
-        primary = next(c['name'] for c in columns if c.get('key') == 'pk')
         selects = ['SELECT ' + ', '.join(_sql_value(row[c['name']], c['type']) + ' AS ' + identifier(c['name'])
                                         for c in columns) for row in rows]
         match = ' AND '.join('t.' + identifier(name) + '=s.' + identifier(name)
@@ -262,10 +246,9 @@ def _sql_value(value, sql_type):
 def projection_checks(records: Records, catalog: str, framework_schema: str):
     """Read back exact scoped values; a successful HTTP/tool envelope is insufficient."""
     for spec in records.specs.values():
-        rows = records.rows(spec['name'])
+        primary, rows = _projection_rows(records, spec, None)
         if not rows:
             continue
-        primary = next(column['name'] for column in spec['columns'] if column.get('key') == 'pk')
         target = '.'.join(map(identifier, (catalog, framework_schema, spec['name'])))
         expected = ['(' + ' AND '.join(identifier(column['name']) + ' <=> ' + _sql_value(row[column['name']], column['type'])
                                       for column in spec['columns']) + ')' for row in rows]

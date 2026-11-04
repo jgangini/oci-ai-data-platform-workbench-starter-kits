@@ -26,6 +26,7 @@ from .aidp import (
 from .config import Settings, SettingsStore
 from .social_network_api import mount_social_network
 from .market_intelligence import MarketAidpClient
+from .market_installation.v2_installer import MarketV2AidpClient
 from .market_intelligence_api import LocalMarketClient, mount_market_intelligence
 from .viewer_identity import mount_identity
 from .viewer_auth import _application as viewer_application, mount_viewer_login
@@ -206,7 +207,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 gods_eye_view_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await gods_eye_view_task
-        for client in (app.state.identity_client, app.state.aidp_client, app.state.gods_eye_view_aidp_client, app.state.market_client):
+        for client in (app.state.identity_client, app.state.aidp_client, app.state.gods_eye_view_aidp_client,
+                       app.state.market_client, app.state.market_v2_client):
             if client is not None:
                 await client.close()
 
@@ -226,6 +228,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.aidp_client = None
     app.state.gods_eye_view_aidp_client = None
     app.state.market_client = None
+    app.state.market_v2_client = None
     app.state.release_manager = ApplicationReleaseManager(settings)
     app.state.health_lock = asyncio.Lock()
     app.state.health_expires_at = 0.0
@@ -260,6 +263,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return app.state.market_client
 
     app.state.market_factory = market_factory
+
+    def market_v2_factory():
+        if app.state.market_v2_client is None:
+            if settings.local_development_mode:
+                app.state.market_v2_client = LocalMarketClient(runtime_version='v2')
+            else:
+                app.state.market_v2_client = MarketV2AidpClient(settings)
+                app.state.market_v2_client._locks = market_factory()._locks
+        return app.state.market_v2_client
+
+    app.state.market_v2_factory = market_v2_factory
 
     def gods_eye_view_aidp_factory():
         if not settings.local_development_mode or settings.gods_eye_view_local_mode:

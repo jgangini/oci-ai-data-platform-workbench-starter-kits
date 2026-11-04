@@ -30,6 +30,8 @@ class ScenarioModel:
 
     async def ask(self, name, schema, payload):
         self.calls.append((name, payload))
+        if name == 'review_factual_support':
+            return {'accepted': True, 'issues': []}
         if name == 'understand':
             return {'intent': self.intents.pop(0) if self.intents else 'research', 'canonical_question': payload['question'],
                     'topic': TOPIC, 'window_spec': 'last_7_days', 'missing_fields': [], 'user_question': None}
@@ -41,7 +43,7 @@ class ScenarioModel:
             web = item['profile_id'] == 'website'
             return {'next_action': 'execute', 'source_key': item['source_key'],
                     'target_id': item['targets'][0]['target_id'] if web else None,
-                    'arguments': {'query': '' if web else 'D1 Colombia', 'urls': ['https://example.com/reference'] if web else [], 'max_items': 5, 'sort': 'Latest'},
+                    'arguments': {'query': '' if web else 'D1 Colombia', 'urls': ['https://example.com/reference'] if web else [], 'max_items': 10 if item['profile_id'] == 'web_search_serp' else 5, 'sort': 'Latest'},
                     'purpose': 'Contrastar evidencia sintética', 'expected_contribution': 'Contradicción de la hipótesis', 'user_question': None}
         if name == 'assess_evidence':
             evidence = payload['evidence']
@@ -58,7 +60,7 @@ class ScenarioModel:
                     'cited_evidence_ids': [row['evidence_id'] for row in evidence],
                     'findings': [{'claim': 'Contradicción sintética', 'kind': 'observation',
                         'supports': [evidence[0]['evidence_id']], 'refutes': [row['evidence_id'] for row in evidence[1:]], 'limitations': ['Fixture, no conclusión sobre D1']}],
-                    'limitations': ['Fixture, no dato real'], 'chart_request': None}
+                    'limitations': ['Fixture, no dato real'], 'chart_request': None, 'decision': {'status': 'answered', 'reason': 'Respuesta acotada de fixture.', 'material_gaps': []}}
         if name == 'handle_confirmation':
             return self.confirmations.pop(0)
         if name == 'detect_opportunities':
@@ -203,9 +205,17 @@ def test_t12_followup_answers_the_new_question_without_an_actor_or_another_repor
     assert response['response']['reused'] is True
     assert len(provider.starts) == 2 and len(flow.records().rows('ai_mi_reports')) == 1
     assert len(flow.proposals.recurring_questions(initial['topic_id'])) == 1
+    context = [payload for name, payload in model.calls if name == 'draft_report'][-1]
+    report = flow.records().get('ai_mi_reports', initial['response']['report_id'])
+    coverage = json.loads(report['coverage_json'])
+    assert context['followup'] == 'Resúmelo en dos frases'
+    assert context['requested_publication_window'] == coverage['window']
+    assert context['original_coverage'] == coverage
 
 
-def test_requesting_an_extension_after_capture_publishes_a_cited_partial_report_without_another_actor():
+@pytest.mark.parametrize('question', ['¿Deseas ampliar las fuentes de esta investigación?',
+    '¿Autorizas consultar https://example.org/nueva-fuente?'])
+def test_requesting_an_extension_after_capture_publishes_a_cited_partial_report_without_another_actor(question):
     flow, model, provider, graph = configured()
     sources = flow.records().tables['ai_mi_sources']
     targets = flow.records().tables['ai_mi_source_targets']
@@ -215,7 +225,7 @@ def test_requesting_an_extension_after_capture_publishes_a_cited_partial_report_
             model.calls.append((name, payload))
             return {'next_action': 'request_extension', 'source_key': None, 'target_id': None, 'arguments': None,
                     'purpose': 'The available reference leaves a synthetic gap', 'expected_contribution': 'Independent contrast',
-                    'user_question': '¿Deseas ampliar las fuentes de esta investigación?'}
+                    'user_question': question}
         return await original(name, schema, payload)
     model.ask = request_extension
     result = turn(graph, 'partial-before-extension')
@@ -227,6 +237,9 @@ def test_requesting_an_extension_after_capture_publishes_a_cited_partial_report_
     assert len(evidence) == len(provider.starts) == 1
     assert json.loads(report['cited_evidence_ids_json']) == [evidence[0]['evidence_id']]
     assert evidence[0]['url'] in report['markdown']
+    assert report['markdown'].endswith(question)
+    assert result['response']['markdown'].endswith(question)
+    assert next(payload for name, payload in model.calls if name == 'draft_report')['requested_extension'] == question
     assert records.tables['ai_mi_sources'] == sources and records.tables['ai_mi_source_targets'] == targets
     assert records.rows('ai_mi_source_candidates') == []
 
@@ -250,6 +263,82 @@ def test_requesting_an_extension_without_evidence_keeps_the_question_without_a_r
     assert flow.journal.read()[0]['operations'] == {}
     assert [name for name, _ in model.calls] == ['understand', 'plan_research']
     assert not provider.starts
+
+
+@pytest.mark.parametrize('persistent', [False, True])
+def test_report_repair_reuses_captured_evidence_and_never_publishes_unsupported_findings(persistent):
+    flow, model, provider, graph = configured()
+    original = model.ask
+    drafts = []
+    async def unsupported_finding(name, schema, payload):
+        draft = await original(name, schema, payload)
+        if name == 'draft_report':
+            drafts.append(payload)
+            if len(drafts) == 1 or persistent:
+                draft['findings'][0].update(supports=[], refutes=[])
+        return draft
+    model.ask = unsupported_finding
+    if persistent:
+        with pytest.raises(ValueError, match='requires evidence'):
+            turn(graph, 'unsupported-draft')
+        assert flow.records().rows('ai_mi_reports') == []
+    else:
+        result = turn(graph, 'repaired-draft')
+        report = flow.records().get('ai_mi_reports', result['response']['report_id'])
+        assert json.loads(report['findings_json'])[0]['supports']
+    assert len(drafts) == 2
+    assert 'draft_validation' not in drafts[0] and drafts[1]['draft_validation']
+    assert drafts[0]['evidence'] == drafts[1]['evidence']
+    assert len(provider.starts) == 2
+
+
+def test_metadata_channel_links_are_rejected_and_repair_specifies_the_primary_evidence_url():
+    flow, model, provider, _ = configured()
+    evidence = [{'evidence_id': 'e1', 'url': 'https://www.youtube.com/watch?v=AbCdEfGh_12',
+                 'text': 'Título y descripción de fixture', 'published_at': None,
+                 'provenance': {'channel_url': 'https://www.youtube.com/@example'}}]
+    calls = []
+    async def draft(name, schema, payload):
+        if name == 'review_factual_support':
+            return {'accepted': True, 'issues': []}
+        assert name == 'draft_report'
+        calls.append(payload)
+        if len(calls) == 1:
+            text = '[Video](' + payload['evidence'][0]['url'] + ') del [Canal](https://www.youtube.com/@example).'
+        else:
+            assert 'url principales' in payload['draft_validation']
+            assert 'channel_url' in payload['draft_validation']
+            text = '[Video](' + payload['evidence'][0]['url'] + ') del canal de fixture.'
+        return {'answer_markdown': text, 'cited_evidence_ids': ['e1'], 'findings': [],
+                'limitations': ['Fixture'], 'chart_request': None, 'decision': {'status': 'answered', 'reason': 'Respuesta acotada de fixture.', 'material_gaps': []}}
+    model.ask = draft
+    result, _ = asyncio.run(flow.write_report({'question': 'Lista el video'}, evidence))
+    assert len(calls) == 2 and calls[0]['evidence'] == calls[1]['evidence']
+    assert evidence[0]['url'] in result['answer_markdown']
+    assert calls[0]['evidence'][0]['text'] == evidence[0]['text']
+    assert '@example' not in result['answer_markdown']
+    assert not provider.starts and not flow.records().rows('ai_mi_reports')
+
+
+def test_an_old_invalid_draft_checkpoint_is_repaired_without_repeating_capture():
+    flow, model, provider, _ = configured()
+    draft_report = flow.draft_report
+    async def historical_draft(state):
+        result = await draft_report(state)
+        result['draft']['findings'][0].update(supports=[], refutes=[])
+        result['draft']['chart_request'] = {'kind': 'bar', 'metric': 'observations', 'group_by': 'source'}
+        flow.draft_report = draft_report
+        return result
+    flow.draft_report = historical_draft
+    graph = flow.build(InMemorySaver())
+    result = turn(graph, 'old-invalid-draft')
+    report = flow.records().get('ai_mi_reports', result['response']['report_id'])
+    assert len(provider.starts) == 2
+    assert len([name for name, _ in model.calls if name == 'draft_report']) == 2
+    assert json.loads(report['findings_json'])[0]['supports']
+    assert result['draft']['findings'][0]['supports']
+    assert result['chart'] is None and result['response']['chart'] is None
+    assert report['chart_spec_json'] is None
 
 
 def test_recovery_in_a_new_native_session_preserves_the_admitted_window_without_recapture():
@@ -368,11 +457,12 @@ def test_understand_bounds_registered_topic_context_to_the_twenty_most_recent_ap
 
 def test_an_empty_approved_catalog_closes_without_asking_the_planner_or_starting_capture():
     flow, model, provider, _ = configured()
-    question, _ = flow.research.record_question('no-approved-base', 'Consulta un objetivo sin fuentes aprobadas', TOPIC)
+    question, topic = flow.research.record_question('no-approved-base', 'Consulta un objetivo sin fuentes aprobadas', TOPIC)
     now = datetime.now(timezone.utc)
     run = flow.research.prepare_run(question, {'start': (now - timedelta(days=7)).isoformat(), 'end': now.isoformat()},
                                     'No approved research base', 100000)
-    result = asyncio.run(flow.plan_research({'run_id': run, 'response': {}, 'catalog': []}))
+    result = asyncio.run(flow.plan_research({'run_id': run, 'question_id': question, 'topic_id': topic,
+                                           'response': {}, 'catalog': []}))
     assert result == {'route': 'draft_report', 'reason': 'no_data'}
     assert flow.records().rows('ai_mi_tool_runs') == []
     assert not model.calls and not provider.starts
@@ -400,7 +490,10 @@ def test_a_missing_web_target_is_resolved_only_from_one_unambiguous_approved_url
     now = datetime.now(timezone.utc)
     window = {'start': (now - timedelta(days=7)).isoformat(), 'end': now.isoformat()}
     run = flow.research.prepare_run(question, window, 'Read an approved page', 100000)
-    state = {'question': 'Consulta la página registrada', 'intake': {'topic': TOPIC}, 'topic_id': topic,
+    state = {'request_id': 'missing-target', 'question': 'Consulta la página registrada', 'question_id': question,
+             'intake': {'intent': 'research', 'topic': TOPIC, 'missing_fields': [], 'user_question': None,
+                        'selected_source_key': None, 'canonical_question': 'Consulta la página registrada',
+                        'window_spec': 'last_7_days'}, 'topic_id': topic,
              'run_id': run, 'window': window, 'catalog': flow.catalog.approved_base(flow.records(), topic),
              'response': {}, 'assessment': {}}
     original = model.ask
@@ -419,6 +512,7 @@ def test_a_missing_web_target_is_resolved_only_from_one_unambiguous_approved_url
         assert admitted['call']['input']['startUrls'] == [{'url': 'https://example.com/reference'}]
     else:
         assert result['route'] == 'deliver_and_read' and result['response']['markdown']
+        assert result['pending_clarification']['prepared_run_id'] == run
         assert flow.records().rows('ai_mi_tool_runs') == []
         assert flow.journal.read()[0]['operations'] == {}
     assert not provider.starts
@@ -599,12 +693,18 @@ def test_escaped_markdown_label_cannot_hide_a_fabricated_reference():
                               [{'evidence_id': 'e1', 'url': 'https://example.com/real'}])
 
 
-def test_unregistered_target_and_global_search_permission_cannot_be_invented_by_model():
-    flow, _, _, _ = configured()
+@pytest.mark.parametrize('profile', ['x_search', 'web_search', 'youtube_search'])
+def test_unregistered_target_and_global_search_permission_cannot_be_invented_by_model(profile):
+    flow, _, provider, _ = configured()
     flow.journal.transact(lambda records, state: records.upsert('ai_mi_sources', {
-        **records.get('ai_mi_sources', SCOPE.key('x')), 'allowed_scope_json': json_text({'allow_discovery': False})}))
-    with pytest.raises(ValueError, match='Global X search'):
-        flow.admit_step({'plan': {'source_key': SCOPE.key('x'), 'target_id': SCOPE.key('reference')}, 'topic_id': 'not-relevant'})
+        **records.get('ai_mi_sources', SCOPE.key('x')), 'connector_revision': profile,
+        'allowed_scope_json': json_text({'allow_discovery': False})}))
+    result = flow.admit_step({'plan': {'source_key': SCOPE.key('x'), 'target_id': SCOPE.key('reference')}, 'topic_id': 'not-relevant'})
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.execution import SourceScopeError
+    assert result['route'] == 'draft_report' and result['reason'] == 'unresolved'
+    assert result['connector_issue'] == SourceScopeError.user_message
+    assert not flow.journal.read()[0]['operations']
+    assert not provider.starts
 
 
 @pytest.mark.parametrize('question', ['Comparar una canasta de compras', 'Aclarar margen EBITDA y margen neto'])

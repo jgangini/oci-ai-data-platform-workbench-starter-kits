@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import (
-    Conflict, Journal, ObjectSnapshot, Records, Scope, projection_batch_check, projection_checks, projection_statements)
+    Conflict, Journal, ObjectSnapshot, Records, Scope, projection_batch_check, projection_checks, projection_statements, projection_delta)
 
 
 SCOPE = Scope('tenant-a', 'owner-a', '00000000-0000-4000-8000-000000000001')
@@ -208,3 +208,181 @@ def test_projection_batch_accepts_the_fourteen_table_bound_and_preserves_origina
 def test_projection_batch_rejects_invalid_shape_or_nonpositive_expected_rows(checks):
     with pytest.raises(ValueError):
         projection_batch_check(checks)
+
+
+def test_projection_delta_changes_only_new_or_modified_rows_without_losing_references():
+    records = Records(SCOPE)
+    topic = SCOPE.key('topic')
+    records.upsert('ai_mi_topics', {'topic_id': topic})
+    for key in ('untouched', 'changed'):
+        records.upsert('ai_mi_questions', {'question_id': SCOPE.key(key), 'topic_id': topic, 'question_text': key})
+    _, previous = projection_delta(records, 'catalog', 'oci_artifacts', 'compute', None)
+    records.upsert('ai_mi_questions', {**records.get('ai_mi_questions', SCOPE.key('changed')), 'question_text': 'revised'})
+    records.upsert('ai_mi_questions', {'question_id': SCOPE.key('new'), 'topic_id': topic, 'question_text': 'new'})
+    keys, receipts = projection_delta(records, 'catalog', 'oci_artifacts', 'compute', previous)
+    assert keys['ai_mi_questions'] == {SCOPE.key('changed'), SCOPE.key('new')}
+    assert not keys['ai_mi_topics'] and len(receipts['rows']) == 4
+    sql, = projection_statements(records, 'catalog', 'oci_artifacts', row_keys=keys)
+    assert SCOPE.key('untouched').encode().hex() not in sql
+    checks = list(projection_checks(records, 'catalog', 'oci_artifacts'))
+    assert [expected for _, expected in checks] == [1, 3]
+    assert any(SCOPE.key('untouched').encode().hex() in check for check, _ in checks)
+    unchanged, same = projection_delta(records, 'catalog', 'oci_artifacts', 'compute', receipts)
+    assert not any(unchanged.values()) and same == receipts
+    assert list(projection_statements(records, 'catalog', 'oci_artifacts', row_keys=unchanged)) == []
+    assert list(projection_checks(records, 'catalog', 'oci_artifacts')) == checks
+
+
+@pytest.mark.parametrize('corruption', ['legacy', 'version', 'binding', 'rows', 'bad-key', 'bad-value', 'extra-field'])
+def test_unverifiable_row_receipts_force_full_projection(corruption):
+    records = Records(SCOPE)
+    records.upsert('ai_mi_topics', {'topic_id': SCOPE.key('topic')})
+    _, previous = projection_delta(records, 'catalog', 'oci_artifacts', 'compute', None)
+    if corruption == 'legacy':
+        previous = ['0' * 64]
+    elif corruption in ('version', 'binding', 'rows'):
+        previous[corruption] = {'version': 1, 'binding': 'other-target', 'rows': []}[corruption]
+    elif corruption == 'bad-key':
+        previous['rows']['not-a-fingerprint'] = '0' * 64
+    elif corruption == 'bad-value':
+        previous['rows'][next(iter(previous['rows']))] = None
+    else:
+        previous['unverified'] = True
+    keys, _ = projection_delta(records, 'catalog', 'oci_artifacts', 'compute', previous)
+    assert keys['ai_mi_topics'] == {SCOPE.key('topic')}
+
+
+def test_row_receipts_are_bound_to_scope_and_schema_and_prune_removed_rows():
+    records = Records(SCOPE)
+    records.upsert('ai_mi_topics', {'topic_id': SCOPE.key('removed')})
+    _, previous = projection_delta(records, 'catalog', 'oci_artifacts', 'compute', None)
+    other_scope = Scope(SCOPE.tenant_id, 'other-owner', SCOPE.generation_id)
+    other = Records(other_scope)
+    other.upsert('ai_mi_topics', {'topic_id': other_scope.key('removed')})
+    keys, _ = projection_delta(other, 'catalog', 'oci_artifacts', 'compute', previous)
+    assert keys['ai_mi_topics'] == {other_scope.key('removed')}
+    records.tables['ai_mi_topics'].clear()
+    keys, current = projection_delta(records, 'catalog', 'oci_artifacts', 'compute', previous)
+    assert not any(keys.values()) and current['rows'] == {}
+
+
+@pytest.mark.parametrize('change', ['new', 'modified', 'both'])
+def test_verified_snapshot_receipts_do_not_verify_concurrent_journal_changes(change):
+    journal = Journal(MemorySnapshot(), 0)
+    def seed(records, state):
+        records.upsert('ai_mi_topics', {'topic_id': SCOPE.key('topic')})
+        for key in ('untouched', 'modified'):
+            records.upsert('ai_mi_questions', {'question_id': SCOPE.key(key), 'question_text': key})
+    journal.transact(seed)
+    projected, _ = journal.claim_projection('verified-old-snapshot')
+    _, receipts = projection_delta(projected, 'catalog', 'oci_artifacts', 'compute', None)
+    def concurrent_change(records, state):
+        if change in {'modified', 'both'}:
+            records.upsert('ai_mi_questions', {**records.get('ai_mi_questions', SCOPE.key('modified')),
+                                              'question_text': 'Changed during SQL readback'})
+        if change in {'new', 'both'}:
+            records.upsert('ai_mi_questions', {'question_id': SCOPE.key('new'), 'question_text': 'New request'})
+    journal.transact(concurrent_change)
+    assert journal.finish_projection('verified-old-snapshot', projected, receipts) is False
+    state, _ = journal.read()
+    assert state['projection_lease'] is None and state['projection_receipts'] == receipts
+    current = Records(SCOPE, state['tables'])
+    dirty, _ = projection_delta(current, 'catalog', 'oci_artifacts', 'compute', state['projection_receipts'])
+    expected = {SCOPE.key(key) for key in ('new', 'modified') if change in {key, 'both'}}
+    assert dirty['ai_mi_questions'] == expected and not dirty['ai_mi_topics']
+    writes = list(projection_statements(current, 'catalog', 'oci_artifacts', row_keys=dirty))
+    assert len(writes) == 1 and SCOPE.key('untouched').encode().hex() not in writes[0]
+    checks = list(projection_checks(current, 'catalog', 'oci_artifacts'))
+    assert sorted(count for _, count in checks) == [1, 2 + (change in {'new', 'both'})]
+    assert any(SCOPE.key('untouched').encode().hex() in sql for sql, _ in checks)
+
+
+@pytest.mark.parametrize('damage', ['none', 'missing', 'duplicate', 'wrong-value'])
+def test_full_readback_validates_historical_and_changed_rows_in_sql(damage):
+    records = Records(SCOPE)
+    records.upsert('ai_mi_questions', {'question_id': SCOPE.key('historical'), 'question_text': 'unchanged history'})
+    for key in ('new-one', 'new-two'):
+        records.upsert('ai_mi_questions', {'question_id': SCOPE.key(key), 'question_text': key})
+    statement, expected = next(projection_checks(records, 'catalog', 'oci_artifacts'))
+    assert expected == 3 and SCOPE.key('historical').encode().hex() in statement
+    spec = records.specs['ai_mi_questions']
+    columns = [column['name'] for column in spec['columns']]
+    target = '`catalog`.`oci_artifacts`.`ai_mi_questions`'
+    statement = statement.replace(target, 'questions').replace('<=>', 'IS')
+    rows = records.rows('ai_mi_questions')
+    if damage == 'missing':
+        rows = [row for row in rows if row['question_id'] != SCOPE.key('new-two')]
+    elif damage == 'duplicate':
+        rows.append(dict(records.get('ai_mi_questions', SCOPE.key('new-two'))))
+    elif damage == 'wrong-value':
+        rows = [{**row, 'question_text': 'incorrect'} if row['question_id'] == SCOPE.key('new-two') else row for row in rows]
+    with sqlite3.connect(':memory:') as database:
+        database.create_function('unhex', 1, bytes.fromhex)
+        database.create_function('decode', 2, lambda raw, encoding: raw.decode(encoding))
+        database.execute('CREATE TABLE questions (' + ','.join('"' + name + '" TEXT' for name in columns) + ')')
+        database.executemany('INSERT INTO questions VALUES (' + ','.join('?' for _ in columns) + ')',
+                             [tuple(row[name] for name in columns) for row in rows])
+        actual = database.execute(statement).fetchone()
+    assert (actual == (expected, expected, expected)) is (damage == 'none')
+
+
+class BoundedSnapshot(MemorySnapshot):
+    maximum_bytes = 4 * 1024 * 1024
+
+    def write(self, value, etag):
+        from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import encoded
+        if len(encoded(value)) > self.maximum_bytes:
+            raise RuntimeError('Operational snapshot capacity exceeded')
+        super().write(value, etag)
+
+
+@pytest.fixture
+def journal_with_row_receipts():
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.repository import encoded
+    snapshot = BoundedSnapshot()
+    journal = Journal(snapshot, 0)
+    journal.transact(lambda records, state: records.upsert('ai_mi_questions', {
+        'question_id': SCOPE.key('old'), 'question_text': 'Existing question'}))
+    projected, _ = journal.claim_projection('initial-projector')
+    _, receipt = projection_delta(projected, 'catalog', 'oci_artifacts', 'compute', None)
+    assert journal.finish_projection('initial-projector', projected, receipt)
+    before, _ = journal.read()
+    expected = Records(SCOPE, before['tables'])
+    expected.upsert('ai_mi_questions', {'question_id': SCOPE.key('new'), 'question_text': 'Valid question ' * 20})
+    candidate = {**before, 'tables': expected.tables, 'revision': before['revision'] + 1}
+    candidate.pop('projection_receipts')
+    return journal, before, expected, len(encoded(candidate))
+
+
+def test_authoritative_append_drops_only_optional_receipts_when_they_no_longer_fit(journal_with_row_receipts):
+    journal, before, expected, required = journal_with_row_receipts
+    journal.snapshot.maximum_bytes = required
+    journal.transact(lambda records, state: records.upsert('ai_mi_questions',
+        expected.get('ai_mi_questions', SCOPE.key('new'))))
+    after, _ = journal.read()
+    assert after['tables'] == expected.tables and not after.get('projection_receipts')
+    assert after['operations'] == before['operations'] and after['projection_lease'] == before['projection_lease']
+    assert after['revision'] == before['revision'] + 1
+    assert {key: value for key, value in after.items() if key not in {'tables', 'revision', 'projection_receipts'}} == {
+        key: value for key, value in before.items() if key not in {'tables', 'revision', 'projection_receipts'}}
+
+
+def test_dropping_receipts_does_not_allow_authoritative_state_above_the_limit(journal_with_row_receipts):
+    journal, before, expected, required = journal_with_row_receipts
+    journal.snapshot.maximum_bytes = required - 1
+    with pytest.raises(RuntimeError, match='capacity exceeded'):
+        journal.transact(lambda records, state: records.upsert('ai_mi_questions',
+            expected.get('ai_mi_questions', SCOPE.key('new'))))
+    assert journal.read()[0] == before
+
+
+def test_receipt_eviction_does_not_hide_a_storage_error(journal_with_row_receipts):
+    journal, before, expected, required = journal_with_row_receipts
+    journal.snapshot.maximum_bytes = required
+    def storage_failure(value, etag):
+        raise OSError('Storage write failed')
+    journal.snapshot.write = storage_failure
+    with pytest.raises(OSError, match='Storage write failed'):
+        journal.transact(lambda records, state: records.upsert('ai_mi_questions',
+            expected.get('ai_mi_questions', SCOPE.key('new'))))
+    assert journal.read()[0] == before

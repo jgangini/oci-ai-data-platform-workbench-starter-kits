@@ -148,7 +148,9 @@ def test_financial_graph_routes_mcp_to_persisted_evidence_and_optional_chart(mis
                 'purpose': 'Contexto macro sintético', 'expected_contribution': 'Comparación anual', 'user_question': None}
         if name == 'assess_evidence':
             assert payload['evidence'][-1]['metrics']['points'][-1]['value'] == 0
-            return {'assessments': [], 'continue_research': False, 'reason': 'Fixture completo', 'gap': ''}
+            return {'assessments': [{'evidence_id': row['evidence_id'], 'stance': 'context',
+                'reason': 'Serie financiera sintética', 'independence': 'known'} for row in payload['evidence']],
+                'continue_research': False, 'reason': 'Fixture completo', 'gap': ''}
         result = await ask(name, schema, payload)
         if name == 'draft_report':
             result['chart_request'] = {'kind': 'line', 'metric': metric, 'group_by': 'date'}
@@ -160,8 +162,9 @@ def test_financial_graph_routes_mcp_to_persisted_evidence_and_optional_chart(mis
             self.name = name
         async def ainvoke(self, args):
             calls.append((self.name, args))
-            if self.name == 'call-actor':
-                return {'id': 'synthetic-financial-run', 'status': 'SUCCEEDED', 'defaultDatasetId': 'synthetic-data', 'usageTotalUsd': 0.0069}
+            if self.name in {'call-actor', 'get-actor-run'}:
+                return {'id': 'synthetic-financial-run', 'status': 'SUCCEEDED', 'defaultDatasetId': 'synthetic-data',
+                    'finishedAt': '2026-01-01T00:00:00Z', 'usageTotalUsd': 0.0069}
             if self.name == 'get-dataset-items':
                 if not bank:
                     return [{'symbol': 'WMMVY', 'type': 'candle', 'date': period + 'T13:30:00Z',
@@ -177,7 +180,7 @@ def test_financial_graph_routes_mcp_to_persisted_evidence_and_optional_chart(mis
         assert calls == [] and 'periodo' in result['response']['markdown']
         assert flow.records().rows('ai_mi_tool_runs') == []
         return
-    assert [name for name, _ in calls] == ['call-actor', 'get-dataset-items']
+    assert [name for name, _ in calls] == ['call-actor', 'get-actor-run', 'get-dataset-items']
     if bank:
         assert calls[0][1]['input']['outputFormat'] == 'series'
         assert calls[0][1]['callOptions']['build'] == '1.0.6'
@@ -194,7 +197,7 @@ def test_financial_graph_routes_mcp_to_persisted_evidence_and_optional_chart(mis
     assert followup['response']['chart']['rows'] == expected
     assert followup['response']['reused'] is True
     assert followup['response']['report_id'] == result['response']['report_id']
-    assert len(calls) == 2
+    assert len(calls) == 3
 
 
 def test_evidence_for_models_omits_operational_run_ids_but_persists_them_for_audit():

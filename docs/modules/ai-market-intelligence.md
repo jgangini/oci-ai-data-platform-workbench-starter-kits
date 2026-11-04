@@ -4,6 +4,11 @@
 
 ## Current implementation boundary
 
+The separate [v2 implementation](ai-market-intelligence-v2.md) now has a local
+domain graph and a native metadata bootstrap without the legacy business-table
+dependency. Native research, collector admission and corpus acceptance for v2
+remain pending. The behavior below describes the legacy candidate.
+
 The canonical candidate source is [ai_market_intelligence](../../apps/backend/app/labs/ai_market_intelligence/lab.json).
 It replaces Social Network in the public catalog with an independent research
 graph, not a renamed ingestion pipeline. The package is **planned** pending native installation acceptance. The portal now
@@ -73,6 +78,148 @@ owner. An interrupted checkpoint resumes the same question and paid-operation
 ID. A different question cannot replace pending work. Native progress messages
 stream before the final response, which is delivered after projection checks.
 
+Delivery contention is a resumable state. Another projection holding the owner's
+lease, or records changing during verification, returns an actionable pending
+response with the original request identity. It does not release another writer's
+lease, start another capture, claim persistence succeeded, or hide SQL/readback
+errors. Retry the same question after the other request finishes. Notification
+reads preserve their identity and owned report through the same delivery state.
+
+The delivery node sets `delivery_verified_for` to the exact request ID only after
+projection and readback succeed. Stream completion and an empty checkpoint task
+list alone do not prove delivery: a cancelled child task can leave prepared
+response text in state. The final checkpoint must confirm the same request,
+response and delivery marker. A completed legacy checkpoint with no marker is
+reverified by executing the real delivery node using LangGraph `Command(goto=...)`,
+without manually editing checkpoints or repeating inference/capture. A known
+unfinished delivery keeps its identity across native trace IDs and prevents a
+different question from replacing that pending turn. An interrupted turn with
+no prepared delivery is not automatically restarted as a new paid request.
+
+New candidate research runs store an immutable `brief_json.runtime_binding`
+before planning or extraction. It records the executed standalone file hash,
+its semantic AST hash with only the injected `RUNTIME_CONFIG` value removed,
+and separate hashes of effective configuration, prompts, model settings and
+connector/MCP/schema policies. Relevant installed dependency versions are recorded;
+missing distribution metadata is explicitly unknown. The model settings used
+for the binding are the same object passed to the model constructor. No token,
+key, source code or configuration body is stored in this binding.
+
+The graph checks an active run once per invocation before resuming its nodes;
+prepared clarification and scheduled admission also preserve that binding.
+An unknown or different active revision stops continuation before another model
+or extraction call, retaining evidence, operation identities and checkpoints.
+This includes remaining opportunity/proposal nodes after report publication;
+closed report delivery alone does not require new inference or proposals.
+The operator can restore the original revision or start a separate conversation.
+Closed historical reports remain readable without assigning them a newer
+revision. Published report coverage copies the run binding for provenance;
+legacy reports retain unknown provenance. This adds no tables or columns and
+does not enable an assessment cache. These are local candidate guarantees until
+the exact revision and its source access pass native TEST acceptance.
+
+The candidate graph stores evidence IDs in checkpoints and reloads excerpts from
+the authenticated journal for analysis. Before planning, assessment or drafting,
+the run, topic, question and complete reference set must match that scope.
+Legacy checkpoints without a reference field rebuild it from the journal;
+their embedded excerpts are ignored. Each new node update clears the old
+excerpt field, including when resuming after assessment. Historical checkpoints
+remain historical; this does not delete them. Bounded model inputs and final
+report text can still contain necessary evidence excerpts.
+Synchronous nodes retain executor execution and streaming context; cancellation
+drains an in-flight worker before returning. Native acceptance of this candidate
+is separate from its local persistence/resume regressions.
+[LangGraph's persistence guide](https://docs.langchain.com/oss/python/langgraph/persistence)
+explains thread-scoped checkpoints; the reference-only evidence policy here is
+this project's contract, not a universal prohibition on storing text in state.
+
+Report prompts distinguish requested recency, the content's substantive period,
+verified publication time and actual capture time. Reading a historical report
+today does not make its figures current; a search window does not prove that
+undated pages were published or captured throughout that interval. Followups
+must retain the substantive years without adding an unsupported operational
+date range. This wording remains subject to native factual acceptance.
+
+For current public mentions or news with a clear company and market but no dates,
+the intake uses a rolling seven-day default and discloses the actual window in
+the report. This is a product policy, not an industry standard. Historical,
+financial or ambiguous-period comparisons still ask for missing parameters.
+An unspecified platform does not mean X-only or official-channel-only research.
+
+Assessment batches and drafting receive the selected research sources and their
+attempt counts for this run, within the existing context bounds. A general
+question with only X content should explore a relevant untried authorized
+perspective; an explicitly X-scoped question may be answered from that bounded
+sample. This is not a fixed source quota. Failed sources and hard limits remain
+concrete coverage limitations; search snippets are not full-page corroboration.
+This increment has local real-model node/partial-path evidence; native TEST
+acceptance of the general query remains pending.
+
+Public web planning distinguishes `arguments.search_mode="navigation"` from
+the default `research` mode. Navigation locates a source or company website
+without requiring that its homepage was published in the requested news period.
+Localized research searches retain their admitted publication dates. Both modes
+keep the reviewed Actor/build, locale, result and cost limits, query validation
+and exact organic-URL authorization; navigation cannot change another connector.
+The historical v2 adapter requires echoed filters, including null dates for
+navigation. The current ScraperLink adapter records requested `gl`/`hl`/`tbs`
+separately and leaves effective filters unknown because its output does not
+report them. Navigation omits `tbs`.
+Those results remain search titles and snippets, with unknown publication time,
+until a separately authorized page read supplies content. Navigation receipts are
+bound to their own run and tool record and never register a permanent source.
+This candidate has simulated compiler/provider/graph/replay checks. Real-model
+selection of the new mode and native TEST acceptance remain pending.
+
+The report writer receives captured text, references, dates, provenance and the
+categorical assessment/relevance labels. Earlier model-generated assessment
+reasons and provisional free-text gaps stay in the research audit but are excluded from the drafting context:
+they are interpretations, not an additional source. This applies to new reports
+and follow-up drafting, preserves contradictory evidence during context selection,
+and does not establish factual acceptance without reviewing the resulting answer.
+The drafting view also replaces primary citation URLs with opaque, deterministic
+references and retains the source domain. After validating the draft's selected
+references, the runtime restores their original URLs and validates the final
+links and schema again. URL slugs therefore cannot supply missing source text
+through that field; captured content and the durable evidence remain unchanged.
+The writer's `requested_publication_window` identifies the requested publication
+filter; `captured_observations_at` lists actual capture timestamps from included
+evidence. These are separate from each observation's publication date and from
+the report's publication time, including during a follow-up.
+
+After schema and reference checks, the same drafting node requests a bounded
+factual review from the configured model against the captured evidence. An issue
+must identify a literal draft claim and a nonempty exact excerpt from an available
+observation before it can guide repair. There are at most two draft attempts and
+one review per structurally valid attempt (at most four model calls); repairs do
+not restart research or write a report until validation succeeds. Repeated factual
+rejection remains a failure. This review and opaque references reduce observed
+failure modes; neither guarantees truth or replaces semantic TEST acceptance.
+Only the cited claim and exact captured excerpt guide repair; the review's free
+explanation remains diagnostic, so its own unverified assertions do not become
+new source facts. A platform hostname alone does not establish a post's author.
+Factual repair receives the validated preceding draft separately from captured
+evidence, so it can correct the identified claims while preserving supported
+content. The subsequent reviewer receives only the current draft and original
+evidence context; the preceding draft and repair feedback are excluded. This
+input contract does not itself establish that the model performs a correct repair.
+If the repair would exceed the existing input limit, its view explicitly includes
+only complete observations referenced by the objections, along with the preceding
+draft and separate repair-view coverage metadata; research coverage is unchanged.
+No objection's observation is truncated or
+dropped. The final reviewer, reference validator and returned coverage retain the
+full original admitted context. If the mandatory repair data still cannot fit,
+the runtime fails before another model call rather than relaxing that limit.
+Quotation binding tolerates only ordinary versus nonbreaking/narrow nonbreaking
+spaces and restores the exact source substring before forwarding feedback. Words,
+numbers, dates, punctuation and qualifiers are not normalized or inferred. A
+quotation with changed content still fails binding and cannot supply new facts.
+Drafting preserves numerical qualifiers such as “more than”, “up to”, approximate
+values and ranges for each quantity, together with its entity, unit and period.
+An unnecessary number may be omitted; compressing a lower bound into an exact
+total changes the claim and remains grounds for factual rejection. Prompt
+guidance is not proof that the configured model consistently follows this rule.
+
 Explicit JSON commands with a caller-maintained `request_id` remain supported.
 They are the retry contract for clients that need to replay a completed request:
 a fresh native trace after completion represents a new conversation turn.
@@ -85,7 +232,14 @@ approval; a successful paused MCP check does not validate a research answer.
 
 Actor starts request an immediate receipt (`waitSecs=0`), followed by reads of
 that run's status through Oracle's standard MCP invoker. An unknown outcome
-still blocks another start until reconciled. Website reads explicitly configure
+still blocks another start until reconciled. The graph waits within the admitted
+60-second run limit, or 120 seconds for the reviewed web/YouTube profiles, with at most one status
+read every two seconds. An elapsed-time deadline and a separate read-count bound
+prevent indefinite polling; a slow in-flight read can finish beyond that deadline.
+Runs that remain nonterminal retain their checkpoint and request identity;
+resuming reads the same run and never repeats its start. This does not increase
+the Actor's timeout, spending cap or research step count.
+Website reads explicitly configure
 Apify Proxy, as required by the Actor's [input contract](https://apify.com/apify/website-content-crawler/input-schema).
 Page reads use the Actor's documented 60-second request timeout, inside a
 120-second run limit so startup does not consume the entire page deadline.
@@ -94,6 +248,43 @@ requires a separately verified cost envelope, including proxy usage.
 An empty evidence set cannot close as sufficient. Validated terminal provider
 costs are recorded even when an Actor fails; missing costs keep their reservation
 and are not reported as zero.
+An exact native MCP rejection identifying the admitted Actor and missing pinned
+build is recorded as a failed start with no run and zero start cost. Unknown
+errors and timeouts remain uncertain; they never release the reservation merely
+because the client did not receive a run ID.
+Oracle's uncached MCP adapter can return that exception as a root
+`{"error": "..."}` dictionary instead of raising it. Only an exact dictionary with
+that one key, returned by `call-actor`, and an exact match to the admitted Actor
+and build qualifies. Nested content, extra fields, serialized objects, different
+tools and generic exceptions do not qualify. See the official
+[MCPHTTPClient implementation](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aiwau/_modules/aidputils/agents/tools/mcp/mcp_client.html).
+The installed `aidp-utils 0.1.1364` also rendered a native `ToolException` as a
+root string prefixed exactly `MCP tool 'call-actor' invocation failed: ` in TEST.
+That raw string qualifies only when its complete remaining text exactly matches
+the same admitted Actor/build rejection. A bare message, JSON string, nested
+message, different prefix, extra receipt or generic error does not qualify.
+This is an observed compatibility case for that runtime, not a general rule
+that error-looking strings prove a rejected start.
+After a proven rejection, planning excludes that source for the current run and
+may continue only with remaining authorized sources and existing limits. It
+retains prior evidence and reports the unavailable source separately from an
+empty search. Replaying the recorded rejection does not restart it. If no
+authorized alternative remains, it delivers the evidence or a concrete coverage
+limitation; it never expands an explicit source or URL selection on its own.
+An admission limit reached between reservation and start preserves its actual
+reason, such as elapsed research time, rather than reporting an uncertain start.
+The current elapsed-time limit bounds new captures, not the time to finish
+reconciliation, reporting or verified delivery. These new rejection/fallback
+paths require native TEST acceptance before publication.
+When every attempted capture was rejected before starting and no evidence was
+recovered, the report closes as unresolved, explains source availability and
+offers another source or a dated public publication. It does not imply that
+changing the time window fixes the unavailable source. Recurrence alone does
+not trigger an automatic scheduling suggestion in that failed attempt. Valid
+empty searches and partial reports with verified evidence retain the normal
+proposal rules; explicit scheduling requests still use their separate
+human-confirmed path. Existing proposals are preserved, not deleted to hide
+their history.
 The adapter preserves response-level `com.apify/ActorRun` usage metadata,
 including the `meta` alias serialized by Oracle/Pydantic. Costs must belong to
 the unique run in that same response and agree with any explicit run cost.
@@ -101,12 +292,33 @@ USD values are rounded upward to integer microdollars; invalid or conflicting
 values cannot become a verified receipt. These are observed run costs, not a
 promise that later storage charges or model usage are included. See the
 [upstream metadata issue](https://github.com/apify/apify-mcp-server/issues/1429).
+The initial start response does not settle accounting: even a completed run can
+contain preliminary costs. Its admitted reservation stays held. Before consuming
+the dataset, the adapter reads that same run; for recent completion it waits the
+remaining part of Apify's documented approximately ten-second accounting interval
+and reads again. Already-aged completion metadata avoids that wait. Missing or
+unverifiable accounting remains pending on the same capture. A later discrepancy
+against a recorded cost is persisted as an uncertain operation before reporting
+the error, blocking further captures until operator reconciliation; neither the
+old amount nor the provider identity is overwritten silently. These are later
+observed figures, not an immutable invoice. See
+[Apify's completion/accounting caveat](https://docs.apify.com/api/v2/actor-run-get).
 An ungrounded model source selection asks for a registered name or an exact
 approved URL rather than failing the conversation or widening its scope.
+Requests such as “investiga en la web” or “busca en internet” can select only
+the active, approved, managed public-web capability with its current policy.
+They do not authorize a custom connector, a supplied page URL or another
+platform. Explicit web exclusions and multiple named capabilities require
+clarification; the model's canonical paraphrase never grants permission.
 Intake receives up to twenty recent canonical topics with an active approved
 base in the authenticated owner's journal. It can reuse an unambiguous topic
 without inventing a differently worded objective. This is model-assisted
 selection, not guaranteed semantic identity or an exhaustive catalog search.
+The context distinguishes registered-source topics from previously researched
+topics that still have an authorized discovery capability. Both lists together
+contain at most twenty scopes. Research history never approves a page or a
+schedule. Reusing a scope and detecting recurrence still need native paraphrase
+acceptance.
 Intake distinguishes requests to summarize, graph or explain an existing report
 (`followup`) from reopening it unchanged (`read_report`). Followups reuse the
 published evidence rather than starting another extraction. A requested chart is
@@ -114,14 +326,370 @@ calculated from the same validated, persisted evidence without changing the
 original report; model routing still
 requires native conversation acceptance.
 Sources with neither approved targets nor discovery permission are excluded.
-For a website step, an omitted target ID can be resolved only from a unique
-exact approved URL match; ambiguous or unapproved choices ask for clarification.
+When research is enabled, the native runtime also permits its pinned public X
+and web-search capabilities. The first research request records those connectors in
+the owner's journal; it does not register a discovered website or account, seed
+an installation or approve a schedule. This lets a new topic use public discovery
+without requiring a target to have been registered for that topic. Existing
+registered targets remain the first research step. After a base attempt, the
+planner can consider remaining base targets and public discovery together; it
+does not have to consume an irrelevant registered page before addressing a gap.
+Disabling the managed source
+is respected; a later question does not reactivate it. Catalog reads, followups
+and scheduled runs do not create this capability. Registered-target selections
+must match their approved URLs; a conversational pointed read instead binds
+the exact URLs from the original question to that run, as described below.
+Neither mode can silently fall back to another source. If no
+permitted source remains, the reply explains setup before creating a research
+run or empty report. This does not establish coverage of other social networks.
+The web-search adapter is a candidate pending native factual acceptance.
+Equivalent target-free search entries are presented once per profile and topic, preferring
+the explicit topic approval over the runtime capability. Different catalog keys
+must not be offered as a way to repeat the same discovery step.
+For a registered website step, an omitted target ID can be resolved only from a
+unique exact approved URL match; ambiguous choices ask for clarification. A
+pointed read has no permanent target ID and must pass its separate run-bound
+authorization.
 When evidence exists but the planner needs a broader source scope, the runtime
 publishes a partial report with an unresolved conclusion and the remaining gap;
 it does not start unapproved searches or withhold all recovered findings.
+For questions about characteristics declared by a company, the candidate planner
+separates the seller's product statement from buyer experiences. When public web
+search is permitted and the primary domain is still unknown, it first proposes
+finding the entity's site instead of spending successive steps on product synonyms
+or social mentions. Once a domain is identified, it can narrow the product search;
+an exact retrieved URL still needs the existing run-bound reader authorization.
+This conditional preference does not restrict general opinion research to official
+channels or override an exclusive source requested by the user. Frozen-input OCI
+model checks exercise these proposals; they do not establish native retrieval or
+complete research acceptance.
+
+The planner must request a concrete missing contribution rather than repeat the
+business question. Its `user_question` field is null for execution or closure;
+clarification and extension proposals ask only for a new, specific missing input.
+The pending request appears after the partial report, with
+public-URL validation and escaped presentation separate from factual citations.
+It grants no source or execution approval. Its rendered length is reserved before
+drafting, including when no complete evidence row fits the decision context.
 Reports default to a short executive summary with readable source links;
 technical evidence identifiers stay in the structured findings. Explicit requests
 for detail can receive a longer explanation.
+The configured generic OCI model uses `reasoning_effort=LOW` and a 6,000-token
+output allowance. The installed wrapper forwards both parameters; Oracle's
+[Grok 4.7 guide](https://docs.oracle.com/en-us/iaas/Content/generative-ai/x-ai-grok-4-7.htm)
+documents this effort level and its latency tradeoff. This keeps the same model;
+it does not establish response-time or factual acceptance. Structured output
+remains strictly validated, including a required nullable `chart_request`.
+Draft findings, references and format are checked before publication. One failed
+draft validation permits one correction using the same evidence and a bounded
+validation message; it never repeats extraction. A second invalid draft remains
+an error, with no report published. An older checkpoint at publication with
+unsupported findings is redrafted from its retained evidence under these same
+checks; publication and permission errors are not treated as drafting errors.
+The final drafting call also returns a required `decision`: `answered`, `partial`
+or `unresolved`, with a reason and up to five material gaps. It compares the
+included evidence across assessment batches; batch-level acceptance alone does
+not resolve contradictions, homonyms or republications. Batch material gaps are
+provisional: drafting reassesses them against all included evidence and must not
+request an already included, untruncated document. Documentary questions distinguish
+attributed declarations from independently verified real-world facts; different
+reference dates do not by themselves make a documentary answer impossible. An
+unresolved answer must identify a concrete next step within the authorized scope.
+Brand, manufacturer, seller and commercializer roles must follow explicit source
+claims rather than being used interchangeably. A bounded question may
+be answered despite ordinary market-coverage limitations. A partial/unresolved
+decision, or omitted evidence, downgrades a proposed `sufficient` closure. A direct
+assessment-gap closure is explicitly provisional only when it has evidence, no
+connector error and no mechanical limit. The final contrast may resolve that
+marked `unresolved` closure as `sufficient` only with an `answered` conclusion,
+no material gaps and explicit integer zero omitted observations. The marker is
+reset on each turn; absent legacy markers and unknown coverage never promote
+a closure. Planner/permission/provider closures and budget, time, step, uncertain
+or no-data reasons retain their original reason. Published replay is immutable.
+The versioned conclusion is stored in the existing report `coverage_json`.
+An unpublished legacy draft missing this decision is regenerated from the same
+journal evidence, without another capture. Published replay remains immutable;
+a follow-up does not rewrite the original closure. The contract and routing
+have regression coverage; actual model reasoning remains a native acceptance gate.
+
+Identical content is deduplicated into an immutable document, while each fresh
+run-evidence link stores its own normalized UTC observation clock and provenance
+in `quoted_span_json.capture`. This clock records when the runtime observed the
+result, not a verified download timestamp inside the remote provider. Replaying
+a tool cannot renew the clock. A distinct fresh capture may update the link;
+publication-metadata reuse retains the original clock and excludes old metrics.
+Answers label the requested publication period separately from the actual sample
+capture, including captures after the requested window ends. Retrieved X post
+text is analyzed content; an unread article or external destination within a post
+must not be confused with the cited post itself.
+Legacy links without capture metadata retain the original document fallback.
+No table or column is added, and a new capture alone is not a content change.
+
+Reports must not infer bots or automation from account names, rank themes
+without a reproducible count and denominator, or hide favorable/contradictory
+observations. Poor entity relevance must be explained as a coverage limitation,
+with nearby links for the claims retained in the answer.
+Evidence assessment splits observations into batches of at most eight and
+90,000 UTF-8 payload bytes, without truncating the quoted content. At most two
+model calls run concurrently. Each assessment payload includes the total corpus
+count as `corpus_evidence_count`, counted within the same byte allowance, so a
+model can distinguish the current batch from the entire retrieved set. Every
+batch must return exactly its evidence IDs;
+failure cancels and drains sibling tasks before the node exits. The final
+assessments are committed together with one continuation decision. Up to 500
+observations can be assessed across the ten-step maximum. Planning, drafting,
+followups and source suggestions use a common 90,000-byte view of whole evidence
+rows. When all rows do not fit, selection alternates between supporting,
+contradictory, contextual and unresolved assessments. This preserves a late
+contradiction without implying a representative sample. Exact total/included
+counts by assessment accompany the decision; report coverage persists these
+counts, and a mandatory partial-analysis notice explains omissions. Citations
+must belong to the rows actually shown. A report with omitted evidence cannot
+close as sufficient. If no row fits, the runtime returns no factual findings and
+does not call the drafting model. Mandatory notices reserve space within the
+existing 20,000-character answer limit; output that ignores the smaller body
+allowance remains invalid. No quote, metric or link is silently truncated.
+This is bounded partial analysis, not exhaustive hierarchical summarization.
+
+The current candidate separates discovery from page reading. Its managed web
+search uses [ScraperLink Google Search Results](https://apify.com/scraperlink/google-search-results-serp-scraper)
+build `0.0.92`, through the agent project's existing MCP `call-actor` interface:
+one Google query, one page of up to ten organic results, 128 MB memory and a
+120-second run timeout. `limit="10"`, `include_merged=false` and `page=1`
+override the publisher's unbounded default. No next page or sitelinks are fetched.
+The minimum retrieval unit is one page even when fewer results are of interest;
+the planner requests `max_items=10`. The MCP dataset-item cap is one page, not
+ten separate dataset records. This is independent of the verified monetary cap.
+A plan admitting fewer than ten results is rejected before the provider starts;
+its smaller ceiling is never silently expanded to the minimum page size.
+Country
+and language must come from the accepted research framing; there is no global
+Colombia or US default. The compiler sends country preference as `gl` and UI
+language as `hl`; supported regional language codes use the available base UI
+language. It does not request a Colombian proxy or a country/language exclusion
+filter. The research window supplies a custom date range in `tbs`; navigation
+omits it. The response does not echo effective locale/date filters, so their
+application and geographic representativeness remain unverified. A missing
+framing is clarified before a paid search.
+
+Discovery evidence contains titles and snippets, not page bodies. Its provenance
+records the pinned build, immutable compiled-request hash, requested filters,
+echoed query/page, result position and raw date hint. Effective filters and
+publication time remain unknown. The capture clock is not a provider search
+clock or publication time; even an exact-looking date hint is not a verified
+publication. The model must not reconstruct missing
+claims, municipalities or dates from a URL slug. Relevance is assessed separately
+from support/refutation, so contradictory evidence is not discarded for being
+contradictory.
+
+After approved base targets, the planner may select one to three pertinent
+organic URLs from the same owned research for the managed website reader. This
+ephemeral grant requires successful discovery, matching receipts, unchanged
+source approval/build/framing and no prior read of those URLs in the run.
+ScraperLink proofs bind the echoed query and compiled-call hash to the saved
+operation request hash; they do not manufacture the older provider's filter echo.
+Reservation and start both revalidate it. URLs embedded in snippets, site links,
+other runs or reused evidence do not confer a read grant. It creates no permanent
+target or topic-source approval. Reading is a separate recorded, budgeted
+operation; valid pages remain evidence if another selected page has a verified
+HTTP/content failure. Unsafe or inconsistent crawl metadata rejects the dataset.
+The strict original pointed-page path remains unchanged.
+
+The managed v1/v2 web search sources are retired from new default selection.
+Their rows, pinned profiles, parsers, receipts and explicit operator registrations
+remain available for historical reads and reconciliation. The new source has
+its own `public-web-search-v3` identity. No Codex-wide MCP change is required:
+the agent retains its own Apify endpoint, Credential Store entry and reviewed
+start/status/dataset tools. Publisher pricing is per search page, currently
+US$0.0005; real billing and live payload/native acceptance require their own
+receipts and are not established by synthetic tests.
+
+An empty reader dataset is distinct from a successful page read or a verified
+HTTP failure. The controller compares returned-row counts with the saved requested
+URL set and exposes an unreturned-page count to planning and reporting. Exact
+missing URLs are identified only when the dataset is entirely empty; with a
+partial dataset the summary does not guess which page was absent. Receipts and
+their version remain unchanged. A user-facing notice explains that content and
+cause were not verified, and offers a concrete continuation. A subsequent search
+should seek a materially different usable source instead of repeating an
+unproductive selection. The report receives the configured timezone alongside
+the unchanged UTC window, so it must label or convert displayed calendar dates.
+
+These additions are under local regression and native TEST acceptance; they are
+not accepted production behavior. Scheduling this new two-stage search/read
+profile is currently rejected explicitly because its future reading scope is
+not yet represented in approved schedules. Existing explicitly authorized legacy
+search schedules retain their contract. Automatic dispatch, additional social
+profiles and complete coverage remain separate acceptance requirements.
+
+The reviewed X search profile pins build `0.0.1053`. An independent connector
+check on 2026-11-04 recovered twenty dated public posts using the same compiled
+query after the provider rejected the preceding pin `0.0.1052` as missing.
+This connector check does not itself approve a native research answer. A pinned
+community Actor build can be removed by its publisher; a known missing-build
+rejection closes that source without automatically selecting another revision.
+Its public provider metadata
+sets a minimum run charge limit of US$0.02; the compiler rejects a smaller
+reservation before any provider start. This is an admission threshold, not a
+guaranteed charge or an increase to the generation budget. A new build, schema or
+pricing policy requires a separate compatibility review and bounded connector
+check. See the provider [Actor metadata](https://docs.apify.com/api/v2/actor-get)
+and [build metadata](https://docs.apify.com/api/v2/actor-build-get) contracts.
+
+
+Legacy public web discovery uses [`apify/rag-web-browser`](https://apify.com/apify/rag-web-browser)
+build `1.0.35` through the existing MCP `call-actor` interface. Its
+[input contract](https://apify.com/apify/rag-web-browser/input-schema) accepts a
+search query and retrieves the top pages as Markdown. The controller caps each
+step at three pages, retains the published 8 GB default memory, uses raw HTTP,
+one browsing worker, a 40-second request deadline and a 120-second run timeout.
+Page and search retries are disabled. Pay-per-event charges include separate
+search, fetched-page and memory-based start events; observed costs are reconciled
+against the same reservation and owner/run limits as other profiles. A catalog
+price is not a promised per-question total.
+
+This adapter accepts search terms, not direct-URL retrieval. Direct page requests
+use the website reader and its registered or run-specific authorization below.
+Nonpublic `site:` filters are rejected. Returned
+items require successful crawl metadata, a public effective URL and actual
+Markdown; a SERP description, HTML field or link list is insufficient. Verified
+HTTP failures or empty pages contribute failed-page coverage while valid pages
+remain usable. Unsafe URLs, malformed or inconsistent metadata and excess rows
+still reject the batch; they are never treated as an empty successful search.
+Publication time remains unknown, and retrieval time
+never establishes freshness. The journal's 12,000-character quote limit is
+explicit: affected observations retain a truncation flag and original character
+count, and reports include a mandatory partial-content notice.
+The reviewed build's README specifies US Google Search in English. A query
+mentioning Colombia or using Spanish is not a configurable Colombian geolocation
+or a representative local sample; the planner and report must retain that limit.
+Existing approved/custom legacy sources are preserved. The old managed search
+alias is hidden from new conversational selection; it is not deleted or silently
+repurposed, and explicitly approved historical schedules may still resolve it.
+
+An explicit request to read one to ten public HTTPS pages can use the website
+reader for that run without enrolling those pages as permanent destinations.
+An empty installation may materialize only the reviewed reader capability;
+an existing disabled reader is never reactivated. It does not create targets,
+topic-source links or discovery approval. The question, tool input and retrieved
+evidence still persist as research records; “not registered” does not mean the
+URLs are absent from the research history.
+
+For an unregistered page, the controller constructs the exact read directly;
+the planner cannot replace, add or drop URLs. The compiler requires the entire
+pointed URL set and keeps depth zero, one browsing worker, no retries and the
+verified usage-cost envelope. The catalog view is not an authorization: admission
+resolves the original question from the owned conversational run, validates its
+topic and request kind, and binds run/question/normalized URLs into the hash.
+Reservation and start repeat the check, and the ledger blocks another pointed
+capture in the same run even if arguments change. Scheduled or administrative
+requests, model proposals and retrieved instructions cannot create this grant.
+Registered-page behavior and its prior authorization hashes are retained.
+
+Revocation between framing, reservation and start returns an unresolved report
+with a review message, without starting a capture. A reservation that never
+obtained a start permit is retained with unknown cost rather than falsely marked
+free. Syntax/host checks reject private hosts, literal IPs, embedded credentials,
+HTTP and custom ports. Fetching remains delegated to the reviewed Apify reader;
+these checks do not establish the provider's DNS or redirect isolation.
+Returned website rows must bind to a requested start URL, with no duplicate
+queued page and no rows beyond the admitted limit. Crawl metadata must identify
+a depth-zero load at a public HTTPS destination. Same-origin redirects (such as
+a canonical path or trailing slash) are retained with requested and loaded URLs;
+citations use the loaded URL. A redirect to a different origin invalidates the
+dataset instead of silently extending the evidence scope. This validation occurs
+after the provider's fetch and does not prove that a rejected redirect was never
+requested. Missing pages stay missing; they are not replaced by invented content.
+Text is bounded to 12,000 characters per page, with truncation and original
+length recorded for interpretation.
+
+The provider's [official output example](https://apify.com/apify/website-content-crawler#output)
+documents the queued URL, `crawl.loadedUrl` and crawl depth used by this check.
+Native pointed-read acceptance remains separate from these graph regressions.
+
+YouTube discovery uses [`streamers/youtube-scraper`](https://apify.com/streamers/youtube-scraper)
+build `0.0.322`, one search term, at most three regular videos, 1 GB memory and
+a 120-second run timeout. The [input contract](https://apify.com/streamers/youtube-scraper/input-schema)
+supports date/relevance ordering and a weekly discovery filter. The exact
+research window still filters known publication timestamps afterward. Shorts,
+streams, transcripts and AI-generated summaries/descriptions are disabled;
+model arguments cannot enable those add-ons or select another Actor. Results
+must have matching YouTube watch URLs and video IDs. Only title and description
+are textual evidence; views, likes and comment counts do not mean comments were
+read. Date-only, relative and timezone-free dates retain their uncertainty,
+without inventing a midnight timestamp. A day with no possible overlap in any
+timezone is excluded; overlapping days and unknown dates remain references of
+uncertain time, with a mandatory report notice rather than a verified claim of
+membership in the requested period. Retrieval time is never publication time.
+See the publisher's [output contract](https://apify.com/streamers/youtube-scraper/output-schema).
+The most recent retrieved relevant result is not guaranteed to be the newest
+video on the platform; a seven-day search cannot establish an all-time result.
+Only the primary URL of cited observations may become a report link. Channel
+URLs and links inside retrieved descriptions are metadata, not authorized
+citations; channel names remain plain text. A rejected draft gets one repair
+with that distinction, using the same evidence and no new extraction. Unknown
+author location does not itself invalidate content explicitly about the company
+and market requested, nor does it establish where the author or recording is.
+
+After a successful fresh capture, the candidate can supplement its evidence with
+dated YouTube titles/descriptions from closed research of the same authenticated
+owner, generation and canonical topic. Only sources selected for this run are
+eligible, and their current authorization hash must match the successful original
+operation, including the profile/build. Publication must fall within the current
+window; the original document capture must be no more than 24 hours old and not
+in the future. This 24-hour policy is a product choice, not a research standard
+or proof that a page remains unchanged.
+
+Reuse creates a current-run evidence link with lineage in its existing JSON; it
+does not create a provider operation, duplicate a document or manufacture a cost.
+Previous assessments are discarded and relevance is checked again. Old engagement
+metrics are not passed to the model, and reports must disclose the original
+capture and lack of re-verification. A real capture of the same observation
+replaces the reused link. Up to fifty links can be reused, subject to space within
+the 500-observation assessment limit, reserving capacity for remaining admitted
+capture steps. This keeps a newer known video available when a fresh search
+returns an older sample. It does not establish the platform's newest video,
+implement general cross-source caching or eliminate the fresh capture. The
+planner's separate `reuse` action still needs a broader freshness policy.
+
+Intake can select stable public-capability names on the first question without
+creating source rows during a listing or clarification. Disabled catalog rows
+are never replaced by virtual options. Explicit selection confines planning to
+that source; making several capabilities available does not execute them all.
+This profile is a TEST candidate until native capture, date handling, relevance
+and costs pass acceptance. Other social networks remain unimplemented.
+
+On-demand intake accepts an explicit rolling window of one to thirty-one days
+(`last_N_days`) as well as `calendar_today` and `rolling_24h`. UTC admission
+resolves those values from the configured clock; calendar today still uses the
+user's timezone. A defined thirty-day request does not need another period
+question. Out-of-range windows are rejected rather than silently shortened.
+Connector coverage is narrower where documented: the current YouTube weekly
+profile rejects windows above seven days before reservation or provider start.
+This change does not expand budgets or make unknown publication dates current.
+
+Discovered pages are not automatically registered. Recurring-source proposals
+receive the available website-reader connector keys and remain subject to the
+existing evidence, independence and human-approval checks. The reader is a
+catalog record, not provisioned infrastructure; it cannot discover or fetch an
+unapproved target. Its creation does not claim that a live connection was tested.
+Only that reader can receive a web-page candidate, and its type is rechecked
+when the user accepts. Accepting a page never authorizes an unrestricted search
+connector in its place.
+
+The external-fetch boundary remains AIDP → Apify MCP → public web. Credentials
+are resolved server-side and are not page headers, model context or search
+arguments. The local checks restrict protocols, literal addresses, credentials
+and known nonpublic hostnames; Apify performs DNS resolution and redirects, so
+these checks do not prove provider-side DNS or redirect isolation. Retrieved
+instructions remain untrusted evidence and cannot change permissions, spending
+caps, schedules or source approval. This is the scoped threat assessment for
+the new profile; it does not change the portal's public exposure or user identity.
+Followups receive the original coverage and research window and must preserve
+them while following the user's requested transformation. An initial qualitative
+social search is prompted to request at most ten
+items unless a larger sample has a concrete purpose; this is not a promise of
+complete market coverage or a substitute for the deterministic spending ledger.
 Catalog replies use source names, references and plain availability labels. They
 state that no new information was searched, without exposing Actor, adapter or
 model implementation details. A registered source is not proof of a live
@@ -132,6 +700,28 @@ Replaying an admitted request also preserves its original research window,
 including when its journal is recovered from a new native session.
 
 Projection streams only bounded step counts, never SQL or row contents.
+Independent table MERGEs run with at most two concurrent calls. Each uses a
+stable tool name bound to its owner/generation and table slot; the batch readback
+starts after every write finishes. Failures and repeated caller cancellations
+drain the outstanding writes before releasing the projection lease. No failed
+batch receives verified fingerprints, and a retry retains idempotent MERGEs and
+the complete readback checks. This concurrency is a latency candidate until
+measured in TEST, not a guarantee about Spark scheduling or response time.
+
+Before drafting, the runtime freezes a versioned comparison decision in the
+existing `comparison_context_json` field. It selects the latest closed research
+run for the same topic that finished before this investigation started. The
+comparison reports `no_baseline` or `not_comparable` when it cannot verify the
+reference. A positive comparison requires the same authorized fixed website
+targets, reviewed profile and authority signature, with successful captures.
+It compares complete captured text by URL, so changes to publication metadata or
+metrics alone do not create a text change. Newly observed content, changed text
+and unchanged text are distinct; absence never establishes disappearance.
+Open searches and financial series do not establish comparable captures through
+an opaque request hash. This does not prevent comparing compatible periods
+inside a financial series. The context alone does not explain the semantic
+difference between two texts; that requires both excerpts and their provenance.
+Native temporal-answer acceptance remains pending.
 Completed-node milestones follow their updated state; an event alone does not
 prove native checkpoint persistence. Disconnect/resume remains subject to the
 managed checkpointer and paid-operation journal. Projection failures release their lease
@@ -139,19 +729,56 @@ and cannot produce a verified success response.
 SQL tool registry names are scoped to tenant, owner and generation. This avoids
 concurrent projections replacing another scope's query configuration in Oracle's
 name-based tool registry; per-scope leases still serialize that scope's writes.
-MERGEs remain sequential. Readback retains each table's scoped row, key and value
+MERGEs use the two-call bound described above. Readback retains each table's scoped row, key and value
 checks inside one aggregate SQL request; every table must pass individually, so
 errors cannot cancel each other across tables. Empty snapshots issue no SQL.
-After a complete verified projection, the journal retains hashes of each MERGE
-and its query compute. Later turns omit matching MERGEs but still read back
-all nonempty tables. Claiming the projection lease invalidates saved hashes
-atomically before SQL. They are restored only after successful verification
-and an unchanged snapshot. An interrupted writer, changed destination or failed
+After a complete verified projection, the journal retains versioned hashes of
+each row, bound to tenant, owner, generation, catalog, schema, query compute and
+schema contract. Later turns MERGE only new or changed rows, while still reading
+back every scoped row in all nonempty tables. This avoids repeatedly sending
+historical content in writes without replacing the full integrity check.
+Legacy statement receipts or invalid bindings require full writes and readback
+before producing row receipts. Claiming the projection lease invalidates saved hashes
+atomically before SQL. They are restored only after successful verification of
+that exact snapshot. If the journal changed meanwhile, delivery remains pending;
+the receipts still describe the older verified rows. New or modified rows remain
+dirty on retry, and the complete current snapshot is read back again. A newer
+journal row never inherits a receipt from an older value. An interrupted writer, changed destination or failed
 readback forces complete writes on the next delivery; it never repeats capture.
-External table drift is detected by readback, so that delivery fails before
-the following attempt repairs the projection.
+External row drift or a table recreated empty under the same name is detected
+by readback, so that delivery fails before the following attempt repairs the
+projection. A physically missing table requires installation reconciliation;
+the agent never creates it. Receipt maps are optional: if they would exceed the
+existing journal size limit, they are discarded, leaving the authoritative
+records and storage error handling intact. The next projection writes and
+verifies the full snapshot. Native performance acceptance is separate from
+these persistence guarantees.
 
-The package declares twenty-four hash-checked authoring assets, including its own memory
+A failed MCP status response, including an empty error envelope, is not a run
+receipt. The graph keeps the existing operation, provider identity, reservation
+and evidence, with cost unknown until a verified receipt supplies it. The native
+response distinguishes unavailable status, an unverified receipt and verified
+running work. Resuming the same interrupted request reads that operation again;
+it does not start another capture. Identity and status must still belong to the
+same provider object. Authentication and transport exceptions are not evidence
+that the capture is running. An uncertain start without a recoverable provider
+identity still requires reconciliation; this status-read recovery does not solve
+that separate limitation.
+
+The operational journal remains deliberately bounded to 4 MiB per owner and
+installation generation. Removing optional receipts does not provide retention
+for growing research history. A rejected journal write leaves its prior object
+unchanged; it must not be described as proof that no earlier paid call occurred.
+Capacity tests cover rejection before reservation, retained provider receipt/cost
+when evidence cannot fit, and an uncertain start whose receipt cannot fit. The
+last case keeps its reservation and blocks another start pending reconciliation.
+It does not automatically recover the missing provider ID. Archival/partitioning,
+capacity admission and long-term retention remain acceptance work before
+continuous use; increasing the limit or deleting history is not an implicit
+recovery action.
+
+The package declares thirty-five hash-checked authoring assets, including shared
+primitives, the separate v2 slice and its own memory
 adapter, with no shared dependency on the legacy Social package. During packaging,
 the installer assembles them into one readable `market_intelligence.py` and deploys
 only that entry, `requirements.txt` and `agent-manifest.json`. It resolves local
@@ -159,7 +786,11 @@ imports and embeds prompts, schema, MCP definitions and nonsecret runtime settin
 as visible Python constants. No runtime loader or supplementary source folder is
 required. The loader rejects undeclared paths and changed asset bytes; assembly
 rejects unknown local imports, changed entry-wrapper behavior and global-definition
-collisions. Its fourteen `ai_mi_` framework
+collisions. Table creation SQL and data-dictionary generation live exclusively in
+the portal's `market_installation/model_install.py`; they are not shipped in the
+agent entry. The runtime retains the data contract to validate scoped records and
+read/write existing tables. It never creates tables, compute or credentials.
+Its fourteen `ai_mi_` framework
 tables and 145 documented columns are defined in
 [schema.json](../../apps/backend/app/labs/ai_market_intelligence/notebooks/agent/ai_market_intelligence/schema.json).
 All belong in the configured `oci_artifacts` schema. The installation contract
@@ -194,6 +825,34 @@ Daily candles preserve the calendar date and explicit offset of the provider's
 timestamp. The publisher's ISO examples do not establish a universal exchange
 timezone; provenance records that limit rather than shifting a candle's day
 when converting its observation time to UTC.
+
+RAG web-search retrieval distinguishes ordinary page failures from invalid
+datasets. A verified public page with a 4xx/5xx response, or a successful response
+without usable Markdown, contributes only failed-page coverage. Other valid
+pages from that same bounded dataset remain usable. Unsafe URLs, unknown or
+inconsistent metadata, invalid types and excessive row counts still reject
+the entire dataset; failed rows count toward the limit before filtering.
+Website Content Crawler and YouTube retain their stricter output contracts.
+The typed observation result carries items, measured cost and optional coverage.
+Strict reads of explicit or registered URLs also retain returned and accepted
+row counts. An empty dataset records zero returned rows, allowing the existing
+requested-URL receipt to disclose missing pages without inventing an HTTP error
+or treating Actor completion as successful content retrieval. Strict validation
+still rejects the whole dataset when a returned page violates its URL, crawl or
+content contract; it does not silently enable partial-page acceptance.
+Coverage is bound to the successful provider run in the existing
+`provider_receipt_json.retrieval_coverage`; terminal reconciliation preserves it.
+Planning, assessment and drafting receive bounded summaries. Every assessment
+batch shares one summary snapshot, and human notices aggregate result counts
+without claiming unique pages. A failed page is never a fabricated observation
+or proof that no mentions exist. Another pertinent step still passes the
+current authority, budget, time and step admissions; there is no blind retry.
+
+For questions about public discussion, the answer first describes the observed
+mentions with attribution, then explains what their sample cannot establish.
+An uncorroborated claim can be described as a claim without asserting its truth.
+Authorial irony or humor remains a hypothesis unless explicitly supported.
+A material gap should lead to a concrete next step, not blanket abstention.
 
 Provider failures, interruptions and timeouts are recorded as coverage limits
 in the report, including partial reports. They must not be described as a
@@ -447,6 +1106,38 @@ and references, with charts only when useful. Its
 emits progress milestones; it does not claim token-by-token model streaming.
 The native chat presents those milestones as separate Markdown paragraphs and
 the final answer as readable Markdown, preserving citations and any proposal.
+Report responses resolve their cited evidence IDs through the authenticated
+research run and its documents, then render a separate **Referencias** block.
+Only the primary, public evidence URLs are eligible; URLs embedded in captured
+text or provenance do not grant citation authority. Resolution reads metadata
+without hydrating captured text or invoking a model or provider. Multiple cited
+observations of the same URL produce one reference, in stable citation order.
+Followups use their own validated citation set, while report reads, scheduled
+notifications and current-candidate replay retain the applicable references.
+An older completed checkpoint can recover original-report references only when
+its intent identifies an original report read/research result and its body
+matches that owned report exactly. Legacy followups did not retain their own
+citation selection; their replay explains that limitation and asks for a fresh
+summary or original-report read, without rerunning research or borrowing the
+original report's citations. Unknown or changed cached bodies receive the same
+limitation, and a missing/foreign report fails closed. Recovery does not rewrite
+checkpoints or stored reports.
+Historical report bodies are not rewritten: their saved IDs and documents remain
+the authoritative source for this presentation. Visible references make sources
+accessible; they do not by themselves prove that an attributed claim is correct.
+The raw `ai_mi_reports.markdown` column remains the narrative body. A consumer
+reading that table directly must also resolve its cited IDs/documents or reuse
+the response formatter; the native notification-read path already does so.
+This does not establish that a separate application notification consumer has
+implemented the same presentation.
+
+The existing 20,000-character limit applies to the narrative report body.
+References, chart tables and consent summaries are rendered separately. A response
+may therefore exceed that body limit: at most fifty cited URLs of up to 2,000
+characters each are admitted before Markdown destination encoding. No link or
+historical body is silently shortened. Pagination for unusually large reference
+sets is not implemented and needs separate client acceptance if a strict total
+message limit is required.
 Financial or observation chart specifications also have a bounded two-column
 table fallback: units and data periods are retained, unknown values stay unknown,
 and displayed numbers use at most eight significant digits. Stored evidence and
@@ -454,7 +1145,29 @@ the in-process structured response in `AIMessage.additional_kwargs.ai_mi_respons
 retain their original values. The native SSE gateway omits those extra message
 fields; clients must not assume that metadata is an external API contract.
 Schedule confirmation shows the weekdays, time, timezone,
-lookback, exact USD ceiling and each registered source/target before activation.
+lookback, exact USD ceiling and each selected source/target before activation.
+The candidate also supports public X, web or YouTube search without inventing a
+fixed page or account. A complete scheduling request goes directly to its
+confirmation summary; activation still requires a separate explicit decision.
+Public capabilities are offered only when public discovery is enabled, and the
+summary labels them as topic searches rather than registered destinations.
+
+New schedule plans use version 2 inside the existing JSON column. They bind
+each exact target ID or public source key to the canonical authorization hash,
+including its reviewed connector profile/build. Validation repeats at summary,
+approval, due claim, reservation and start. Equivalent sources do not substitute
+for the confirmed key, and new capabilities are not added to an active schedule.
+YouTube's current weekly profile permits scheduled lookbacks of at most seven
+days. Legacy target-only plans remain target-only and are not silently upgraded;
+unknown plan versions are rejected. No new tables or columns are required.
+
+If authorization changes during a scheduled run, new captures stop. Any verified
+evidence is delivered in an unresolved report with the review limitation and its
+notification. A reserved operation that did not receive a start permit retains
+its unknown-cost hold; the runtime does not manufacture a zero charge. These
+branches have synthetic graph regressions. Native conversational acceptance,
+automatic dispatch with the correct user identity, and editing/pausing active
+schedules remain release gates; manually invoking a due run is not a scheduler.
 
 This does **not** establish a rendered chart in Agent Hub. Oracle's pinned
 [A2UI gallery transport](https://github.com/oracle-samples/oracle-aidp-samples/blob/d006f1eb1843e82278b988366a2d20bd1ba983fc/ai/agent-hub/agent-samples/a2ui-component-gallery/a2ui_sdk/parser.py)
@@ -464,6 +1177,10 @@ uses `OAChart`; neither example demonstrates appending that envelope to multiple
 streamed progress messages. The candidate therefore retains streaming Markdown;
 an optional negotiated A2UI response and actual client rendering require separate
 acceptance. No sample SDK or dependency is copied into this runtime.
+The pinned [component catalog](https://github.com/oracle-samples/oracle-aidp-samples/blob/d006f1eb1843e82278b988366a2d20bd1ba983fc/ai/agent-hub/agent-samples/a2ui-component-gallery/a2ui_sdk/v0_9/complete_catalog.json)
+offers `OAChart` types including line, bar and area, but no dedicated node-and-edge
+graph component. Component availability alone does not prove integration or
+rendering by the deployed client.
 
 Questions such as “Which pages are registered for D1?” use the `list_sources`
 administration intent. The agent resolves the canonical topic or asks for it,
@@ -475,6 +1192,109 @@ does not count towards recurring research questions. This read does not verify
 connectivity, register a source, change approvals or call Apify. A pending approval
 continues through its existing confirmation flow; this change does not add
 side-question handling within that conversation.
+
+## Incomplete research requests
+
+An incomplete research request keeps its original literal question and request
+identity in `pending_clarification`, separately from approval proposals and the
+last completed topic. A continuation adds the user's literal answer to that
+request; the current turn retains its own identity for replay. The binding includes
+tenant, owner and generation. An incompatible, foreign or obsolete checkpoint
+asks for the full question instead of borrowing a previous report's subject.
+
+Intake distinguishes continuing, replacing and cancelling that request. Ambiguous
+answers ask which action the user wants. A concrete topic already established in
+the pending request is retained during continuation; a new topic requires a new
+request. Source names can be clarified in an answer if no concrete source was
+already selected. A different proposed source asks for a full new question and
+keeps the pending request unchanged; it does not silently use the older source.
+Pointed-page URL
+authority remains the URLs in the original request. Adding a URL requires a new
+complete question. Neither a generated canonical question nor a clarification
+answer silently expands those URL permissions.
+
+The agent accepts at most three clarification answers before asking for a full
+question. An incomplete intake creates no research run, capture or
+recurring-question record. Completion records the original question once and
+stores those initial answers in the research brief. Replay must not add another
+answer or change that brief.
+
+If a later planning or financial-selection question occurs after preparing a run,
+the runtime can pause that same run only before any tool reservation, operation,
+evidence or report, and only for an ordinary conversational request. The journal
+atomically binds the pending question and literal answers to the original request,
+owner and generation. It keeps a versioned `prepared_clarification` audit in
+`decision_log_json`; it does not rewrite the initial `brief_json`, admitted window,
+budget or completion policy. These use existing columns, without a DDL migration.
+
+`started_finished_at_json` retains the original start and records the clarification
+pause plus accumulated wait in microseconds. Admission and graph decisions share
+the active elapsed-time calculation. The authenticated turn's received timestamp
+ends the wait before model interpretation; consumed execution time is not reset.
+Reservations, provider starts and publication are forbidden while paused. A new
+admission window or source requires a complete new request; an answer never grants
+broader access. Three still-incomplete answers close the empty run and ask the
+user to reformulate. Cancel and replace also close it, preserving its question and
+audit. None of those endings creates a report or a charge.
+
+Journal commits and managed checkpoints are separate boundaries. Exact pending
+and literal-turn bindings recover an accepted interpretation or ending if the
+journal committed first, without another model interpretation. A previously
+published report is recovered from a run in state `closed`; `published` is the
+report's status. Cancelling a newer prepared objective restores the topic of the
+previous report before subsequent follow-ups. A scheduled or already-effectful
+run cannot use this empty-run pause: the agent closes with its available evidence
+and a concrete unresolved gap. It never reopens a published report.
+
+These are implemented contracts with local lifecycle and real-graph regressions.
+Native TEST acceptance remains required for the prepared-run paths, recovery,
+current permissions and user-facing outcomes; local fixtures do not prove model
+interpretation or cloud concurrency.
+
+## Node evaluation and acceptance evidence
+
+`node-progress.json` maps every executable `MarketWorkflow.build` node and the
+integrated TEST criteria to the existing project checklist. It is an evidence
+map, not another requirements plan. Missing cases, historical receipts and
+unverified native behavior remain pending. The CLI's assertions establish their
+specified properties; reviewers must also assess usefulness, attribution,
+contradictions and limitations. A mechanically passing draft that unnecessarily
+refuses the research question is not functionally accepted.
+
+`test-campaign.json` bounds attempts and model calls. Private receipts, frozen
+inputs and carry-in evidence live under ignored `.aidp-local/`; a new tooling
+ledger does not reset the existing provider ledger or spending authorization.
+Unknown cost stays unknown. Native external-tool limits are enforced separately
+by the agent's durable ledger.
+
+The historical legacy factory is `apps/backend/tests/market_flow_factory.py`.
+Its bridge hash remains bound to its original evaluation revision and does not
+match the current shared bridge. It is not an executable current baseline in a
+fresh checkout; do not rebind it merely to inherit earlier approvals. Use the
+[v2 development workflow](ai-market-intelligence-v2.md#isolated-native-test-operations) for
+current work, with reviewed private inputs and the target's observed runtime.
+The legacy factory was designed to build its graph with a copy of the frozen journal, an in-memory checkpointer and
+a provider that refuses external effects. The structured model bridge retains
+the worker's counted `complete()` call and actual final-response validation,
+while constructing the existing strict JSON Schema request. Identity, endpoint,
+model and guardrail parity must match the protected local binding. Changes to
+the bridge and frozen input require updating their explicit configuration hashes.
+This adapter supports the verified empty guardrail policy, not arbitrary managed
+guardrails or native credential resolution.
+
+Use the existing compatible project interpreter. A CLI installed in a different
+Python environment can put incompatible binary dependencies on the worker's
+import path. In that situation, launch the unmodified, selected plugin source
+with the project interpreter and set `PYTHONPATH` to the plugin's `scripts`
+directory; do not add the tool environment's whole `site-packages`. No native
+library upgrade is required by this local evaluation path. Keep local
+`aidp-agent.toml` identity bindings outside version control.
+
+Direct model-node cases use `scope=node`; partial and whole graph cases use
+`scope=integration`. Neither proves hosted memory, persistence, permissions,
+connector operation or client rendering. Source-folder hashes from local package
+inspection and assembled source/deployment hashes are different boundaries;
+verify the actual served TEST revision before accepting the native integration.
 
 ## Remaining release acceptance
 

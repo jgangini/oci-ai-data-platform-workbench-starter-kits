@@ -8,8 +8,8 @@ import pprint
 import tokenize
 
 
-MODULES = ('__init__', 'contracts', 'schema', 'repository', 'catalog', 'research',
-           'finance', 'connectors', 'execution', 'proposals', 'presentation',
+MODULES = ('__init__', 'runtime_core', 'media', 'actor_profiles', 'contracts', 'schema', 'repository', 'catalog', 'research',
+           'finance', 'serp', 'social', 'social_search', 'connectors', 'execution', 'proposals', 'presentation',
            'workflow_actions', 'workflow', 'model', 'memory', 'mcp_payload',
            'provider', 'streaming', 'native')
 RESOURCES = {
@@ -18,6 +18,9 @@ RESOURCES = {
     'native': ('RUNTIME_CONFIG', "json.loads(Path(__file__).with_name('runtime.json').read_text(encoding='utf-8'))"),
 }
 MCP_READ = "json.loads(Path(__file__).with_name('mcp_tools.json').read_text(encoding='utf-8'))"
+V2_MODULES=('__init__','runtime_core','media','actor_profiles','contracts','finance','serp','social','social_search','connectors',
+            'model','memory','mcp_payload','provider','actor_tools','v2_contracts','v2_effects','v2_passages','v2_documents','v2_collector','v2_state','v2_artifacts','v2_financial','v2_workflow',
+            'runtime_versions','v2_config','v2_services','v2_session','v2_wire','v2_native')
 ENTRY_CONTRACT = '''from ai_market_intelligence.native import AgentRuntime
 class MarketIntelligenceAgent:
     def __init__(self):
@@ -40,7 +43,12 @@ def _span(source, node):
 
 
 def _resource_edits(tree, module):
-    recipes = [RESOURCES[module]] if module in RESOURCES else []
+    if module=='v2_native':
+        recipes=[RESOURCES['native']]
+    elif module=='v2_services':
+        recipes=[('MCP_CONTRACT',MCP_READ),('AGENT_PROMPTS',"json.loads(Path(__file__).with_name('v2_prompts.json').read_text(encoding='utf-8'))")]
+    else:
+        recipes = [RESOURCES[module]] if module in RESOURCES else []
     if module == 'native':
         recipes.append(('MCP_CONTRACT', MCP_READ))
     edits = []
@@ -83,7 +91,8 @@ def _fragment(source, module, exports):
     for start, end, replacement in sorted(spans, reverse=True):
         source = source[:start] + replacement + source[end:]
     renames = {'provider': {'_observation': '_provider_observation'},
-               'native': {'AgentRuntime': 'MarketIntelligenceAgent'}}.get(module, {})
+               'native': {'AgentRuntime': 'MarketIntelligenceAgent'},
+               'v2_native': {'V2AgentRuntime':'MarketIntelligenceAgent'}}.get(module, {})
     if renames:
         tokens = tokenize.generate_tokens(io.StringIO(source).readline)
         source = tokenize.untokenize(token._replace(string=renames[token.string])
@@ -91,9 +100,11 @@ def _fragment(source, module, exports):
     return source.strip()
 
 
-def _definitions(tree):
+def _definitions(tree, *, reexports=False):
     names = set()
     for node in tree.body:
+        if reexports and isinstance(node, ast.ImportFrom) and node.level:
+            names.update(alias.asname or alias.name for alias in node.names)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(node.name)
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -102,14 +113,16 @@ def _definitions(tree):
     return names
 
 
-def assemble_agent(files, entry, config):
+def assemble_agent(files, entry, config, *, version='legacy'):
     """Only this build-time function combines source; the emitted program is ordinary Python."""
     if ast.dump(ast.parse(entry.decode('utf-8'))) != ast.dump(ast.parse(ENTRY_CONTRACT)):
         raise ValueError('Standalone entry wrapper changed; review its behavior before assembly')
-    sources = {module: files[module + '.py'].decode('utf-8') for module in MODULES}
-    exports = {module: _definitions(ast.parse(source)) for module, source in sources.items()}
-    constants = {'SCHEMA_DEFINITION': json.loads(files['schema.json']),
-                 'AGENT_PROMPTS': json.loads(files['prompts.json']),
+    if version not in {'legacy','v2'}:
+        raise ValueError('Unknown Market Intelligence runtime version')
+    sources = {module: files[module + '.py'].decode('utf-8') for module in (V2_MODULES if version=='v2' else MODULES)}
+    exports = {module: _definitions(ast.parse(source), reexports=True) for module, source in sources.items()}
+    constants = {**({'SCHEMA_DEFINITION':json.loads(files['schema.json'])} if version=='legacy' else {}),
+                 'AGENT_PROMPTS': json.loads(files['v2_prompts.json'] if version=='v2' else files['prompts.json']),
                  'MCP_CONTRACT': json.loads(files['mcp_tools.json']),
                  'RUNTIME_CONFIG': json.loads(json.dumps(config, allow_nan=False))}
     parts = ['"""AI Market Intelligence: standalone readable AIDP agent. Secrets stay in Credential Store."""',

@@ -14,7 +14,7 @@ from uuid import UUID
 from .aidp import AidpClient, AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, AidpRequestError, CATALOG_NAME
 from .lab_packs import load_lab_pack
 from .market_installation.agent_package import agent_package
-from .market_installation.compute import prepare_compute
+from .market_installation.compute import COMPUTE_NAME, prepare_compute
 from .market_installation.credentials import ensure_apify_credential, _project_credential, existing_project_reference, created_by_operation
 from .market_installation.model_install import model_script, model_job
 from .market_installation.playground import MarketPlaygroundClient
@@ -25,22 +25,29 @@ MODULE_ID = 'ai_market_intelligence'
 ROOT = '/Workspace/.control/modules/' + MODULE_ID
 PHASES = ('verify', 'credentials', 'model_prepare', 'model_run', 'model_verify', 'cleanup',
           'compute', 'files', 'agent', 'permissions', 'test', 'production', 'ready')
+V2_PHASES = ('verify', 'credentials', 'compute', 'files', 'agent', 'permissions', 'test', 'ready')
 
 
 def installation_phases(state):
+    if state.get('runtime_version') == 'v2':
+        return V2_PHASES
     return retirement.PHASES + PHASES if state.get('mode') == 'reinstall' else PHASES
 
 
 def public_status(manifest=None):
     state = manifest or {}
+    pack = load_lab_pack(MODULE_ID, require_available=False)
     phases = installation_phases(state)
     suffix = state.get('resources', {}).get('apify_token_suffix', '')
     return {'module_id': MODULE_ID, 'display_name': 'AI Market Intelligence',
+            'runtime_version': state.get('runtime_version', 'legacy'),
+            'deployment_surface': 'TEST' if state.get('runtime_version') == 'v2' else 'PROD',
             'status': state.get('status', 'not_installed'), 'installed': state.get('phase') == 'ready',
             'phase': state.get('phase', 'not_installed'), 'enabled': False,
             'operation_id': state.get('operation_id'), 'operation_type': 'redeploy' if state.get('mode') == 'reinstall' else 'install',
             'mode': state.get('mode', 'install'), 'previous_operation_id': state.get('previous_operation_id'),
-            'message': state.get('message', ''), 'bundled_version': load_lab_pack(MODULE_ID, require_available=False).pack_version,
+            'message': state.get('message', ''), 'bundled_version': pack.pack_version,
+            'target_pack_sha256': state.get('pack_sha256'), 'bundled_pack_sha256': pack.pack_sha256,
             'reuse_existing': state.get('reuse_existing', True),
             'completed_phases': list(phases[:phases.index(state['phase'])]) if state.get('phase') in phases else [],
             'apify_credential_status': 'configured' if state.get('resources', {}).get('apify_credential_key') else 'missing',
@@ -92,25 +99,29 @@ def model_receipt(output):
 
 
 class MarketAidpClient(AidpClient):
+    installation_root = ROOT
+    runtime_version = 'legacy'
+    compute_name = COMPUTE_NAME
     _agent_name = MODULE_ID
     _agent_entry_filename = 'market_intelligence.py'
     _agent_description = 'On-demand market research; installed paused without business data'
 
     def _read_installation(self, workspace):
-        state = self._workspace_json(workspace, ROOT + '/installer.json', 'Invalid Market Intelligence installation receipt')
+        state = self._workspace_json(workspace, self.installation_root + '/installer.json', 'Invalid Market Intelligence installation receipt')
         if state is not None and (state.get('module_id') != MODULE_ID or state.get('installer_version') != 1
+                or state.get('runtime_version', 'legacy') != self.runtime_version
                 or state.get('workspace') != workspace or state.get('phase') not in installation_phases(state)):
             raise AidpProvisionConflict('An incompatible installation receipt exists; preserve it for reconciliation.')
         return state
 
     def _save(self, state):
         state['updated_at'] = datetime.now(timezone.utc).isoformat()
-        self._upload_file(state['workspace'], ROOT + '/installer.json', json.dumps(state, sort_keys=True, separators=(',', ':')).encode())
+        self._upload_file(state['workspace'], self.installation_root + '/installer.json', json.dumps(state, sort_keys=True, separators=(',', ':')).encode())
 
     async def status(self):
         def observe():
             state = self._read_installation(str(self._workspace()['key']))
-            result = public_status(state)
+            result = public_status(state or {'runtime_version': self.runtime_version})
             result['administrator_ocid'] = (state or {}).get('owner')
             if state and state['phase'] == 'test' and state['resources'].get('agent_key'):
                 test = MarketPlaygroundClient(self.settings)
@@ -200,15 +211,16 @@ class MarketAidpClient(AidpClient):
         workspace = str(self._workspace()['key'])
         state = self._read_installation(workspace)
         if state is None:
-            self._ensure_workspace_layout(workspace, ('/Workspace/.control', '/Workspace/.control/modules', ROOT, ROOT + '/agent'))
+            self._ensure_workspace_layout(workspace, ('/Workspace/.control', '/Workspace/.control/modules', self.installation_root, self.installation_root + '/agent'))
             state = {'installer_version': 1, 'module_id': MODULE_ID, 'workspace': workspace,
+                     'runtime_version': self.runtime_version,
                      'operation_id': operation, 'owner': user, 'reuse_existing': reuse,
                      'phase': 'verify', 'status': 'installing', 'resources': {},
                      'pack_sha256': load_lab_pack(MODULE_ID, require_available=False).pack_sha256}
             self._save(state)
-        if (state['operation_id'] != operation or state['owner'] != user or state['reuse_existing'] is not reuse
-                or state['pack_sha256'] != load_lab_pack(MODULE_ID, require_available=False).pack_sha256):
+        if state['operation_id'] != operation or state['owner'] != user or state['reuse_existing'] is not reuse:
             raise AidpProvisionConflict('Resume the saved installation with the same administrator and settings.')
+        self._assert_candidate(state)
         if state['phase'] == 'ready':
             return public_status(state)
         pending_status = 'redeploying' if state.get('mode') == 'reinstall' else 'installing'
@@ -243,6 +255,10 @@ class MarketAidpClient(AidpClient):
                 message='This step failed. Its resources were preserved; resume the same operation after reviewing the native service.')
             self._save(state)
         return public_status(state)
+
+    def _assert_candidate(self, state):
+        if state['pack_sha256'] != load_lab_pack(MODULE_ID, require_available=False).pack_sha256:
+            raise AidpProvisionConflict('Resume the installation with its exact saved package; the bundled candidate changed.')
 
     def _step(self, state, token, session):
         workspace, resources, phase = state['workspace'], state['resources'], state['phase']
@@ -378,7 +394,7 @@ class MarketAidpClient(AidpClient):
     def _compute_step(self, state):
         resources, operation = state['resources'], state['operation_id']
         if not resources.get('compute_creation_operation') and state['reuse_existing']:
-            rows = [row for row in self._list(f"/workspaces/{state['workspace']}/clusters") if row.get('displayName') == 'aidp_ai_market_intelligence_compute']
+            rows = [row for row in self._list(f"/workspaces/{state['workspace']}/clusters") if row.get('displayName') == self.compute_name]
             if len(rows) > 1:
                 raise AidpProvisionConflict('Duplicate project compute names require reconciliation.')
             if rows:
@@ -390,7 +406,8 @@ class MarketAidpClient(AidpClient):
                 resources['agent_compute_key'] = rows[0]['key']
         resources.setdefault('compute_creation_operation', operation)
         self._save(state)
-        result = prepare_compute(self, state['workspace'], resources['compute_creation_operation'], expected_key=resources.get('agent_compute_key', ''))
+        result = prepare_compute(self, state['workspace'], resources['compute_creation_operation'],
+                                 expected_key=resources.get('agent_compute_key', ''), name=self.compute_name)
         resources['agent_compute_key'] = result['compute_key']
         self._save(state)
         if result['state'] == 'STOPPED':

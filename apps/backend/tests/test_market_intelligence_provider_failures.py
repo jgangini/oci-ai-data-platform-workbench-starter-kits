@@ -147,9 +147,26 @@ def test_invalid_dataset_closes_with_coverage_limit_without_repeating_or_discard
         raise error
     provider.observations = invalid_result
     result = turn(graph, 'invalid-provider-' + str(retain_verified) + type(error).__name__)
-    assert 'No se pudo validar la salida del proveedor' in result['response']['markdown']
+    assert 'No pude verificar el contenido recibido' in result['response']['markdown']
     assert 'untrusted' not in result['response']['markdown']
     assert len(provider.starts) == (2 if retain_verified else 1)
     assert len(flow.records().rows('ai_mi_documents')) == int(retain_verified)
     assert len(flow.records().rows('ai_mi_reports')) == 1
     assert result['reason'] == 'unresolved'
+def test_rendered_start_diagnostic_keeps_validation_but_omits_credentials_and_arbitrary_payloads():
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.provider import _start_response_diagnostic
+    prefix="MCP tool 'call-actor' invocation failed: "
+    assert _start_response_diagnostic(prefix+'Input is not valid: memory must be 4096 MB')['provider_validation_message'].endswith('4096 MB')
+    for raw in (prefix+'Invalid token abc123',prefix+'Authorization: Bearer value',
+                {'content':[{'text':'PRIVATE'}]},'unrecognised error with private content'):
+        assert 'provider_validation_message' not in _start_response_diagnostic(raw)
+def test_exact_root_input_schema_rejection_is_terminal_but_nested_or_unrelated_text_is_not():
+    from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.provider import _root_start_rejection
+    call={'actor':'apify/facebook-posts-scraper','callOptions':{'build':'0.0.408'}}
+    message=("Failed to call Actor 'apify/facebook-posts-scraper': Input is not valid: Field input.onlyPostsNewerThan must match pattern.\n"
+             "Please ensure the input is correct and matches the Actor's input schema.\nInput schema:\n```json\n{}\n```")
+    assert _root_start_rejection("MCP tool 'call-actor' invocation failed: "+message,call)
+    assert _root_start_rejection({'error':message},call)
+    assert not _root_start_rejection({'content':[{'type':'text','text':message}]},call)
+    assert not _root_start_rejection({'error':message.replace('facebook-posts','other-posts')},call)
+    assert not _root_start_rejection({'error':'Input is not valid'},call)

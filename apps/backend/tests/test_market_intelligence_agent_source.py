@@ -60,13 +60,15 @@ def test_standalone_delivery_is_deterministic_and_contains_no_runtime_loader(sta
                    and item.__module__ == module.__name__ and callable(getattr(item, 'setup', None))
                    and callable(getattr(item, 'invoke', None))]
     assert entrypoints == [module.MarketIntelligenceAgent]
+    assert not any(hasattr(module, name) for name in ('create_statements', 'data_dictionary', 'model_notebook', 'model_job'))
+    assert not any(statement in source.decode() for statement in ('CREATE TABLE ', 'DROP TABLE ', 'ALTER TABLE '))
     assert len(module.definition()['tables']) == 14
     first = module.definition()
     first['tables'].clear()
     assert len(module.definition()['tables']) == 14
     model = module.DecisionModel(object())
     assert set(model.prompts) == {'understand', 'plan_research', 'assess_evidence', 'draft_report',
-                                  'detect_opportunities', 'handle_confirmation'}
+                                  'review_factual_support', 'detect_opportunities', 'handle_confirmation'}
     model.prompts.clear()
     assert module.DecisionModel(object()).prompts
 
@@ -110,16 +112,41 @@ def test_standalone_real_graph_streams_contrasts_persists_and_reopens_without_re
     assert flow.records().rows('ai_mi_research_runs')[0]['termination_reason'] == 'sufficient'
 
 
+def test_standalone_mcp_dispatch_normalizes_ten_scraperlink_results(standalone):
+    from test_market_intelligence_scraperlink import ARGS, LOCALE, WINDOW, RECEIPT, publisher_item, result_row, ACTOR
+    module, _ = standalone
+    call = module.compile_call('web_search_serp', ARGS, WINDOW, 50000, approved_search_context=LOCALE)
+    item = publisher_item()
+    item['results'] = [result_row(i, f'https://example.com/{i}') for i in range(1, 11)]
+    calls = []
+    class Tool:
+        async def ainvoke(self, arguments):
+            calls.append(arguments)
+            return {'structuredContent': {'items': [item]}}
+    tools = {name: Tool() for name in ('call-actor', 'get-actor-run', 'get-dataset-items')}
+    result = asyncio.run(module.ApifyProvider(tools).observations(RECEIPT, call))
+    assert len(result.items) == 10 and len(calls) == 1
+    assert all(row['provenance']['source'] == ACTOR and row['published_at'] is None for row in result.items)
+    assert all(row['provenance']['request_arguments_hash'] == module.digest(call) for row in result.items)
+    assert call['callOptions']['build'] == '0.0.92' and call['callOptions']['maxItems'] == 1
+
+
 def test_standalone_provider_observation_does_not_shadow_persistence_validation(standalone):
     module, _ = standalone
     class Tool:
         async def ainvoke(self, arguments):
-            return {'structuredContent': {'items': [{'url': 'https://example.com/reference', 'text': 'Evidence'}]}}
+            return {'structuredContent': {'items': [{'url': 'https://example.com/reference', 'text': 'Evidence',
+                'crawl': {'loadedUrl': 'https://example.com/reference', 'depth': 0}}]}}
     provider = module.ApifyProvider({name: Tool() for name in ('get-dataset-items', 'get-actor-run', 'call-actor')})
-    observations, cost = asyncio.run(provider.observations(
+    result = asyncio.run(provider.observations(
         {'runId': 'fixture-run', 'datasetId': 'fixture-data', 'status': 'SUCCEEDED'},
-        {'actor': 'apify/website-content-crawler', 'input': {'maxCrawlPages': 1}}))
-    assert observations[0]['text'] == 'Evidence'
+        {'actor': 'apify/website-content-crawler', 'input': {
+            'startUrls': [{'url': 'https://example.com/reference'}], 'maxCrawlPages': 1},
+            'callOptions': {'maxItems': 1}}))
+    assert result.items[0]['text'] == 'Evidence'
+    assert result.items[0]['provenance']['requested_url'] == 'https://example.com/reference'
+    assert result.cost is None
+    assert result.coverage == {'version': 1, 'total_rows': 1, 'accepted_rows': 1, 'failed_pages': []}
     assert module._provider_observation is not module._observation
 
 
@@ -129,6 +156,9 @@ def test_standalone_native_setup_reads_embedded_config_and_contract_not_sibling_
                 'private_key': 'fixture-not-a-key', 'token': 'fixture-not-a-token'}
     module.RUNTIME_CONFIG['identity_sha256'] = hashlib.sha256(json.dumps(
         [identity[key] for key in ('tenancy', 'user', 'fingerprint')], separators=(',', ':')).encode()).hexdigest()
+    # Keep the standalone fixture's source and its effective injected identity aligned.
+    from pathlib import Path
+    Path(module.__file__).write_bytes(agent_package(module.RUNTIME_CONFIG)[0])
     monkeypatch.setitem(sys.modules, 'aidputils', SimpleNamespace(secrets=SimpleNamespace(
         get=lambda name, key: identity[key])))
     cleanup = []
@@ -159,6 +189,11 @@ def test_standalone_native_setup_reads_embedded_config_and_contract_not_sibling_
     assert calls[0]['endpoint'] == module.MCP_CONTRACT['endpoint']
     assert calls[0]['auth'] == {'authType': 'BEARER_TOKEN', 'token': identity['token']}
     assert runtime.model.prompts == module.AGENT_PROMPTS
+    assert runtime.runtime_binding['runtime_config_sha256'] == module.digest(module.RUNTIME_CONFIG)
+    assert runtime.runtime_binding['prompts_sha256'] == module.digest(module.AGENT_PROMPTS)
+    assert identity['token'] not in json.dumps(runtime.runtime_binding)
+    assert runtime.model.llm.options['model_kwargs'] == {
+        'temperature': 0, 'max_tokens': 6000, 'reasoning_effort': 'LOW'}
     async def invoke():
         final = await runtime.invoke('hola', subject_id='fixture-owner', trace_id='fixture-trace')
         assert final['messages'][0].additional_kwargs['ai_mi_response']['mode'] == 'configured_paused'

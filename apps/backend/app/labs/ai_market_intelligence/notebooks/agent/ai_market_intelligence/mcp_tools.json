@@ -4,7 +4,7 @@
   "tools": [
     {
       "name": "call-actor",
-      "description": "Execute one controller-approved Apify Actor request.",
+      "description": "Execute one controller-approved Apify Actor request. Market Intelligence web discovery selects the pinned ScraperLink Google SERP profile; the controller supplies its single-page input, build and limits.",
       "inputSchema": {
         "type": "object",
         "properties": {

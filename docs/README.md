@@ -23,6 +23,7 @@ Every guide contains source data, task dependencies, Gold outputs and reproducib
 ## Shared global modules
 
 - [AI Market Intelligence](modules/ai-market-intelligence.md): candidate research graph, resumable empty installer and pending native acceptance.
+- [AI Market Intelligence v2](modules/ai-market-intelligence-v2.md): bounded domain research, evidence-backed drafts and a separate TEST installer without the legacy business tables; corpus and client acceptance remain separate.
 - [Legacy AI Social Network](modules/ai-social-network.md): retired package; authenticated historical routes report HTTP 410.
 - [AI Data Governance](modules/ai-data-governance.md): catalog synchronization, permissions, agent tools and lifecycle.
 - [God's Eye View](modules/gods-eye-view.md): sources, streaming, map publications, agent queries and synthetic cleanup.

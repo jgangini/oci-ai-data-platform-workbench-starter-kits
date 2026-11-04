@@ -58,6 +58,7 @@ jobs:
           cache-dependency-path: apps/frontend/package-lock.json
       - run: npm ci
       - run: npm test
+      - run: node --test ../../scripts/tests/market-v2-stream.test.mjs
       - run: npm run build
 
   container:
@@ -74,5 +75,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install langgraph==0.6.7 oci==2.189.0 pytest==8.4.1
+      - run: pip install langgraph==0.6.7 oci==2.189.0 pytest==8.4.1 pypdf==6.20.1 jsonschema==4.26.0
       - run: python -m pytest apps/backend/tests/test_market_intelligence_*.py apps/backend/tests/test_market_package.py

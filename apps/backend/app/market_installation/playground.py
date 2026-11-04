@@ -38,9 +38,13 @@ class MarketPlaygroundClient(AidpClient):
                 raise RuntimeError('Duplicate TEST deployments require reconciliation') from None
         return rows
 
-    def refresh(self, workspace, agent_key, compute_key, source, *, assets, expected_workspace, on_submit=None):
+    def refresh(self, workspace, agent_key, compute_key, source, *, assets, expected_workspace, on_submit=None,
+                agent_root='/Workspace/.control/modules/ai_market_intelligence/agent', initialize=False):
         if workspace != expected_workspace:
             raise RuntimeError('Playground workspace identity changed')
+        if agent_root not in {'/Workspace/.control/modules/ai_market_intelligence/agent',
+                              '/Workspace/.control/modules/ai_market_intelligence_v2_installed/agent'}:
+            raise ValueError('Unknown Market Intelligence installation root')
         if not isinstance(source, bytes) or not source:
             raise ValueError('The exact saved candidate is required')
         candidate = _candidate(source, assets)
@@ -50,13 +54,12 @@ class MarketPlaygroundClient(AidpClient):
             if ga._workspace()['key'] != workspace:
                 raise RuntimeError('Playground workspace identity changed')
             detail = ga._request('GET', f'/workspaces/{workspace}/agents/{agent_key}')
-            entry = '/Workspace/.control/modules/ai_market_intelligence/agent/market_intelligence.py'
-            if (detail.get('type') != 'CODE' or detail.get('entryFilePath') != entry
-                    or detail.get('pathInfo') != entry.rsplit('/', 1)[0]
-                    or detail.get('dependenciesFilePath') != entry.rsplit('/', 1)[0] + '/requirements.txt'
-                    or detail.get('computeKey') != compute_key):
+            entry = agent_root + '/market_intelligence.py'
+            expected = {'type': 'CODE', 'entryFilePath': entry, 'pathInfo': agent_root,
+                        'dependenciesFilePath': agent_root + '/requirements.txt', 'computeKey': compute_key}
+            if any(detail.get(key) != value for key, value in expected.items()):
                 raise RuntimeError('Playground candidate binding differs from the project agent')
-            root = '/Workspace/.control/modules/ai_market_intelligence/agent/'
+            root = agent_root + '/'
             for name, content in candidate.items():
                 body, _ = ga._workspace_object(workspace, root + name, phase='content')
                 if not ga._content_matches(body, content):
@@ -64,7 +67,7 @@ class MarketPlaygroundClient(AidpClient):
         finally:
             ga.session.close()
         rows = self.test_deployments(workspace, agent_key)
-        if not rows:
+        if not rows and not initialize:
             raise AidpProvisionConflict('Open this agent in Workbench Playground to initialize TEST, then resume. No deployment record was created by this check.')
         previous = rows[0].get('deploymentVersion') if rows else None
         payload = {'agentFlowKey': agent_key, 'agentFlowComputeKey': compute_key, 'deploymentType': 'TEST'}
@@ -72,13 +75,27 @@ class MarketPlaygroundClient(AidpClient):
         digest = hashlib.sha256(json.dumps(hashes, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         if on_submit:
             on_submit({'package_sha256': digest, 'previous_version': previous})
-        path = f'/workspaces/{workspace}/agentFlows/{agent_key}/deployments/actions/redeploy'
+        path = (f'/workspaces/{workspace}/agentFlows/{agent_key}/deployments/actions/redeploy' if rows
+                else f'/workspaces/{workspace}/actions/redeployAgentFlow')
         result, headers = self._request('POST', path, payload=payload, include_headers=True,
             phase='deployment', retry_scope='market-test:' + agent_key + ':' + compute_key + ':' + digest)
         return {'package_sha256': digest, 'previous_version': previous, 'compute_key': compute_key,
                 'deployment_type': 'TEST', 'operation_key': next((value for key, value in headers.items()
                     if key.lower() == 'aidp-async-operation-key'), None),
                 'accepted_state': result.get('lifecycleState') if isinstance(result, dict) else None}
+
+
+def deployment_identity(row):
+    """Native TEST can omit deploymentVersion; key and creation time still bind it."""
+    if not isinstance(row.get('key'), str) or not row['key']:
+        raise RuntimeError('TEST has no exact deployment identity')
+    try:
+        created = datetime.fromisoformat(row['timeCreated'].replace('Z', '+00:00'))
+        if created.tzinfo is None:
+            raise ValueError('Missing timezone')
+    except (KeyError, AttributeError, TypeError, ValueError):
+        raise RuntimeError('TEST has no unambiguous creation time') from None
+    return {key: row.get(key) for key in ('key', 'timeCreated', 'timeUpdated', 'deploymentVersion')}
 
 
 def _candidate(source, assets):
