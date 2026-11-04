@@ -116,6 +116,23 @@ def test_provider_start_keeps_cost_unsettled_until_reading_existing_run():
     assert tool.calls == [call]
 
 
+@pytest.mark.parametrize('identities', [
+    {'runId': 'existing-run'}, {'actorRunId': 'existing-run'}, {'id': 'existing-run'},
+    {'runId': 'existing-run', 'actorRunId': 'other-alias', 'id': 'another-alias'},
+])
+def test_provider_preserves_run_identity_alias_precedence_and_input(identities):
+    envelope = run_envelope(0.002)
+    del envelope['structuredContent']['runId']
+    envelope['structuredContent'].update(identities)
+    original = copy.deepcopy(envelope)
+    provider, tool = provider_for(envelope)
+    assert asyncio.run(provider.read('existing-run')) == {
+        'runId': 'existing-run', 'status': 'SUCCEEDED',
+        'datasetId': 'evidence', 'spent_microusd': 2000}
+    assert envelope == original
+    assert tool.calls == [{'runId': 'existing-run', 'waitSecs': 0}]
+
+
 def test_provider_missing_metadata_keeps_cost_unknown():
     envelope = run_envelope(None)
     del envelope['_meta']

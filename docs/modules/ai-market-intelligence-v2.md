@@ -200,6 +200,8 @@ decisions and do not establish universal format adherence.
   receipt become pending accounting, including usage metadata bound to a
   different run or multiple runs. Conflicting MCP metadata aliases remain a
   protocol validation error. None of these errors authorizes another start.
+  Run identities are normalized once in a copied record, preserving the
+  `runId`, `actorRunId`, `id` precedence and the original provider response.
 - `actor_tools.py` is the executable application-tool catalogue consumed by both
   planning and execution. Each named tool has a fixed Actor profile, strict
   argument schema, work limit and result kind. The shared MCP's start/status/

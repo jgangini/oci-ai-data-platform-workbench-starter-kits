@@ -129,7 +129,7 @@
     },
     {
       "file": "notebooks/agent/ai_market_intelligence/provider.py",
-      "sha256": "269509089569123fd8878b55ad49f6c1fabdcdda8ca4dc6531a8a93e47fff18c",
+      "sha256": "86bc7479731e3381648ce6f1bf32c3922b3f0f624a3bfa138ffa9d56145b3fb2",
       "workspace_path": "agent/ai_market_intelligence/provider.py"
     },
     {
@@ -344,5 +344,5 @@
       "sha256": "87516a2e0f446f2e32cef8e5b05e99edb545d23fabfe08ed43d704bdf1776d04"
     }
   ],
-  "pack_sha256": "2a3cf85fa247f84baf6a365adabd936e33bb4d771a1ddf5bbfb15b32262fa515"
+  "pack_sha256": "9d66f703151f2c7dcb9855e67c0f0cb3aed8bae40b8689c77706340de8e62bf6"
 }

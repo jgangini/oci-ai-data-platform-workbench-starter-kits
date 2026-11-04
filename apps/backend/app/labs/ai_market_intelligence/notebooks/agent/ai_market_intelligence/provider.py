@@ -136,7 +136,7 @@ def _run_records(value):
         identity = value.get('runId') or value.get('actorRunId') or value.get('id')
         if (isinstance(identity, str) and identity and isinstance(value.get('status'), str)
                 and value['status'] in {'READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT'}):
-            yield value
+            yield {**value, 'runId': identity}
             return
         for child in value.values():
             yield from _run_records(child)
@@ -178,11 +178,11 @@ class ApifyProvider:
         payload = value['payload'] if isinstance(value, dict) and '_meta' in value and 'payload' in value else value
         records = list(_run_records(payload))
         matches = [item for item in records
-                   if expected_id is None or (item.get('runId') or item.get('actorRunId') or item['id']) == expected_id]
+                   if expected_id is None or item['runId'] == expected_id]
         if len(matches) != 1:
             raise ValueError('Provider run identity and status could not be verified together')
         run = matches[0]
-        identity = run.get('runId') or run.get('actorRunId') or run['id']
+        identity = run['runId']
         try:
             cost = _run_cost(run, usage, identity, len(records),settled=verify_cost)
         except ValueError as error:
@@ -329,7 +329,7 @@ def _x_observations(rows,receipt,call):
 def _run_completion(value, run_id):
     payload = value['payload'] if isinstance(value, dict) and '_meta' in value and 'payload' in value else value
     run = next(item for item in _run_records(payload)
-               if (item.get('runId') or item.get('actorRunId') or item.get('id')) == run_id)
+               if item['runId'] == run_id)
     return run.get('finishedAt')
 
 
