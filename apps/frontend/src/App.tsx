@@ -86,6 +86,8 @@ type AdminModule = {
   installed_version?: string | null;
   bundled_version?: string | null;
   update_available?: boolean;
+  runtime_family?: string;
+  validation_stage?: string;
   operation_id?: string | null;
   operation_type?: ModuleOperationKind | null;
   administrator_id?: string;
@@ -1058,10 +1060,11 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
             <p id={descriptionId}>{market ? 'On-demand market research, managed by AI Data Platform administrators.' : 'One shared module for all AIDP developers, managed by AI Data Platform administrators.'}</p>
           </div>
           {governanceModule && <span className={`lab-state ${governanceModule.enabled ? "installed" : "unassigned"}`}>
-            {market ? marketStatus : moduleOperating ? "in progress" : governanceModule.status.replaceAll("_", " ")}
+            {market ? marketStatus : moduleOperating ? "in progress" : governanceModule.runtime_family === 'AI_DG_V2_TEST' && governanceModule.status === 'active' ? 'TEST candidate' : governanceModule.status.replaceAll("_", " ")}
           </span>}
         </header>
         <div className="governance-module-body">
+          {governanceModule?.runtime_family === 'AI_DG_V2_TEST' && <p className="governance-module-note" role="status">Governance V2 is a TEST candidate. Agent behavior acceptance is pending; its production URL is unavailable. Legacy redeploy and deletion are disabled for this candidate.</p>}
           {(moduleOperating || marketShowProgress) && <div className={`registration-result module-install-progress${market ? ' market-install-progress' : ''}`}
             role={market ? 'region' : 'status'} aria-label={market ? 'Installation progress' : undefined}
             aria-live={market ? undefined : 'polite'} aria-busy={moduleOperating || market && transitioning}>
@@ -1134,8 +1137,8 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
             : resumable ? <button type="button" disabled={disabled || credentialBlocked} onClick={() => recoverableKind && void runModuleAction(recoverableKind)}>
               Resume {recoverableKind === "install" ? "installation" : recoverableKind === "redeploy" ? "redeployment" : "deletion"}
             </button> : <>
-              {!market && governanceModule?.installed && <button className="secondary destructive" type="button" disabled={disabled || transitioning} onClick={() => { setConfirmDelete(true); closeRef.current?.focus(); }}>Delete</button>}
-              {!(market && governanceModule?.installed) && <button type="button" disabled={disabled || transitioning || credentialBlocked} onClick={() => void runModuleAction(governanceModule?.installed ? "redeploy" : "install")}>
+              {!market && governanceModule?.runtime_family !== 'AI_DG_V2_TEST' && governanceModule?.installed && <button className="secondary destructive" type="button" disabled={disabled || transitioning} onClick={() => { setConfirmDelete(true); closeRef.current?.focus(); }}>Delete</button>}
+              {!(market && governanceModule?.installed) && !(governanceModule?.runtime_family === 'AI_DG_V2_TEST' && governanceModule?.installed) && <button type="button" disabled={disabled || transitioning || credentialBlocked} onClick={() => void runModuleAction(governanceModule?.installed ? "redeploy" : "install")}>
                 {governanceModule?.installed ? governanceModule.update_available ? "Update" : "Redeploy" : "Deploy"}
               </button>}
             </>}
@@ -3045,7 +3048,7 @@ function AdminSettings() {
     const timer = window.setTimeout(() => setCopiedAgentModule(""), 3000);
     return () => window.clearTimeout(timer);
   }, [copiedAgentModule]);
-  const governanceReady = !governanceState.unverified && !governanceState.busy && governanceState.module?.status === "active";
+  const governanceReady = !governanceState.unverified && !governanceState.busy && governanceState.module?.status === "active" && governanceState.module?.runtime_family !== 'AI_DG_V2_TEST';
   const [confirmGodsEye, setConfirmGodsEye] = useState(false);
   const [godsEyeModule, setGodsEyeModule] = useState<ModuleStatus | null>(null);
   const [moduleUnverified, setModuleUnverified] = useState(false);

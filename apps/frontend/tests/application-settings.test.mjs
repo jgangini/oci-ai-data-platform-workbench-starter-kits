@@ -328,6 +328,24 @@ const text = value => Array.isArray(value) ? value.map(text).join('') : value ==
 const action = (h, label) => h.find('button', props => text(props.children) === label);
 const managerHarness = (t, module = governance, props = {}, initial = {}) => harness(t, release, '/admin/settings', { ...moduleInitial(module), ...initial }, props);
 
+test('Governance TEST candidate reports pending acceptance without legacy maintenance actions', async t => {
+  const h = await managerHarness(t, { ...governance, installed: true, status: 'active',
+    runtime_family: 'AI_DG_V2_TEST', validation_stage: 'TEST_PENDING' }, { initialUserId: 'operator' });
+  assert.match(text(h.nodes()[0]), /TEST candidate/);
+  assert.match(text(h.nodes()[0]), /behavior acceptance is pending/);
+  assert.ok(!h.nodes().some(node => node?.type === 'button' && ['Delete', 'Redeploy', 'Update'].includes(text(node))));
+  assert.equal(h.mutations().length, 0);
+});
+
+test('Governance TEST installation does not enable the production agent link', async t => {
+  const h = await harness(t);
+  const manager = h.find('GovernanceModuleManager');
+  h.act(() => manager.props.onStatusChange({ module: { ...governance, status: 'active', installed: true,
+    runtime_family: 'AI_DG_V2_TEST', validation_stage: 'TEST_PENDING' }, busy: false, unverified: false }));
+  assert.equal(h.find('ApplicationReleaseSettings').props.governanceReady, false);
+  assert.equal(h.mutations().length, 0);
+});
+
 test('Settings Governance icon opens one shared manager without navigation or deployment', async t => {
   const h = await harness(t, { ...release, packages: [{ package_id: governance.module_id, display_name: governance.display_name, bundled_version: '3.0.0', scope: 'global' }] });
   const card = h.find('ApplicationReleaseSettings');

@@ -129,6 +129,8 @@ def _module_payload(manifest: dict[str, Any] | None = None) -> dict[str, Any]:
         "operation_type": str(operation.get("type") or "") or None,
         "phase": str(state.get("phase") or "not_installed"),
         "enabled": bool(state.get("enabled", False)),
+        "runtime_family": state.get("runtime_family", "legacy"),
+        "validation_stage": state.get("validation_stage"),
     }
 
 
@@ -486,6 +488,7 @@ class AidpClient:
         include_headers: bool = False,
         phase: str = "content",
         retry_scope: str = "",
+        legacy: bool = False,
     ) -> Any:
         request_headers = self._request_headers(
             method, path, payload, data, headers, retry_scope
@@ -494,7 +497,7 @@ class AidpClient:
             with self._session_lock:
                 response = self.session.request(
                     method,
-                    f"{self.base}{path}",
+                    f"{self.base.replace('/20260430/aiDataPlatforms/', '/20240831/dataLakes/', 1) if legacy else self.base}{path}",
                     auth=self.signer,
                     json=payload,
                     data=data,
@@ -840,9 +843,13 @@ class AidpClient:
         *,
         repair_drift: bool,
         expected_key: str = "",
+        entry_filename: str | None = None,
     ) -> tuple[str, bool]:
         session_config = {"variables": {}}
-        entry_path = f"{root}/{self._agent_entry_filename}"
+        filename = entry_filename or self._agent_entry_filename
+        if entry_filename is not None and filename not in {"governance_agent.py", "documentation_agent.py"}:
+            raise AidpProvisionError("Unsupported Governance entry filename.")
+        entry_path = f"{root}/{filename}"
         dependencies_path = f"{root}/requirements.txt"
         descriptor_path = f"{root}/agent-manifest.json"
         changed = self._upload_file(
@@ -2894,6 +2901,8 @@ class AidpClient:
             manifest = self._module_manifest(workspace_key)
             if not manifest or manifest.get("status") != "active":
                 raise AidpProvisionConflict("Deploy the module before copying its Agent URL.")
+            if manifest.get("runtime_family") == "AI_DG_V2_TEST":
+                raise AidpProvisionConflict("Governance V2 is a TEST candidate; Agent Hub requires accepted TEST and explicit publication.")
             return self._active_agent_endpoint(workspace_key, manifest.get("resources") or {})
         return await asyncio.to_thread(verified_endpoint)
 
@@ -3699,7 +3708,7 @@ class AidpClient:
         return str(self._workspace()["key"])
 
     def _start_governance_install(
-        self, workspace_key: str, operation_id: str, operation_type: str
+        self, workspace_key: str, operation_id: str, operation_type: str, *, test_candidate: bool = False
     ) -> dict[str, Any]:
         if operation_type != "install":
             raise AidpProvisionConflict("The governance module is not installed")
@@ -3714,6 +3723,8 @@ class AidpClient:
             ),
         )
         manifest = self._new_module_manifest(operation_id, operation_type)
+        if test_candidate:
+            manifest.update(runtime_family="AI_DG_V2_TEST", validation_stage="TEST_PENDING")
         self._write_module_manifest(workspace_key, manifest)
         return manifest
 
@@ -3954,6 +3965,21 @@ class AidpClient:
         self, user_ocid: str, operation_id: str, operation_type: str
     ) -> dict[str, Any]:
         workspace_key = self._governance_workspace()
+        existing = self._module_manifest(workspace_key)
+        if ((existing or {}).get("runtime_family") == "AI_DG_V2_TEST"
+                or existing is None and getattr(self.settings, "governance_runtime_mode", "legacy") == "v2_test"):
+            from .ai_data_governance.deploy_studio_install import GovernanceTestInstaller
+
+            if operation_type != "install":
+                raise AidpProvisionConflict("This V2 TEST candidate supports fresh installation only; preserve it for TEST rather than applying a legacy repair or cleanup.")
+            manifest = existing or self._start_governance_install(
+                workspace_key, operation_id, operation_type, test_candidate=True)
+            self._resume_governance_operation(workspace_key, manifest, operation_id, operation_type)
+            self._assert_governance_operation_available(manifest, operation_id, operation_type)
+            if manifest.get("status") != "active":
+                GovernanceTestInstaller(self, workspace_key, manifest,
+                    pending=AidpProvisionPending, error=AidpProvisionError).reconcile()
+            return _module_payload(manifest)
         manifest, complete = self._prepare_governance_reconciliation(
             workspace_key, operation_id, operation_type
         )
@@ -4251,6 +4277,10 @@ class AidpClient:
         manifest = self._module_manifest(workspace_key)
         if manifest is None:
             return self._completed_governance_deletion(operation_id)
+        if manifest.get("runtime_family") == "AI_DG_V2_TEST":
+            raise AidpProvisionConflict(
+                "Governance V2 TEST requires its own reviewed retirement procedure; legacy deletion is disabled."
+            )
         self._prepare_governance_deletion(workspace_key, manifest, operation_id)
         handlers = {
             "disable": self._delete_governance_disable_phase,

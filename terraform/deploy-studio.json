@@ -42,6 +42,18 @@
   "form": {
     "fields": [
       {
+        "name": "aidp_runtime_mode",
+        "label": "Governance installation",
+        "type": "select",
+        "required": false,
+        "default": "legacy",
+        "group": "application_vm",
+        "options": [
+          {"value": "legacy", "label": "Current stable module"},
+          {"value": "v2_test", "label": "Governance V2 · TEST candidate"}
+        ]
+      },
+      {
         "name": "ssh_allowed_cidr",
         "label": "SSH allowed source CIDR (optional)",
         "type": "text",
@@ -468,6 +480,7 @@
       "apps/backend/app/labs/gods_eye_view/source/social_networks/v2/manifest.json",
       "apps/backend/app/labs/gods_eye_view/source/sensors/colombia/v1/manifest.json",
       "apps/backend/app/labs/ai_data_governance",
+      "apps/backend/app/ai_data_governance",
       "apps/backend/app/__init__.py",
       "apps/backend/app/aidp.py",
       "apps/backend/app/config.py",

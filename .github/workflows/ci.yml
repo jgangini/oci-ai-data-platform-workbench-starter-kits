@@ -43,6 +43,8 @@ jobs:
       - run: python -m pytest apps/backend/tests terraform/tests
         env:
           SESSION_SECRET_FILE: ${{ runner.temp }}/aidp-lab/session.key
+      - run: python scripts/check_ai_dg_documentary_graph.py
+      - run: python scripts/check_ai_dg_governance_graph.py
 
   frontend:
     runs-on: ubuntu-latest
