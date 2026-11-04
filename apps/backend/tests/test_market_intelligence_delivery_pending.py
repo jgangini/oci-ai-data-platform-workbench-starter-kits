@@ -3,6 +3,7 @@ import asyncio
 import copy
 
 import pytest
+from langgraph import errors as graph_errors
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.labs.ai_market_intelligence.notebooks.agent.ai_market_intelligence.native import pending_delivery_response
@@ -110,10 +111,16 @@ def test_cancelled_delivery_is_not_reported_as_a_pending_success(verified_projec
     async def exercise():
         graph, _ = await paused_delivery(p)
         p.phase['failure'] = 'cancelled'
-        events = [event async for event in p.runtime.research_events(p.flow, graph, REQUEST, THREAD)]
-        assert events[-1]['response']['state'] == 'pending'
-        assert events[-1]['response']['pending_reason'] == 'turn_incomplete'
-        assert 'report_id' not in events[-1]['response']
+        events = []
+        try:
+            async for event in p.runtime.research_events(p.flow, graph, REQUEST, THREAD):
+                events.append(event)
+        except getattr(graph_errors, 'NodeCancelledError', ()) as error:
+            assert isinstance(error.__cause__, asyncio.CancelledError)
+        else:
+            assert events[-1]['response']['state'] == 'pending'
+            assert events[-1]['response']['pending_reason'] == 'turn_incomplete'
+        assert not any(event.get('response', {}).get('report_id') for event in events)
         assert (await graph.aget_state(THREAD)).values.get('delivery_verified_for') != REQUEST['request_id']
         assert p.flow.journal.read()[0]['projection_lease'] is None
         before = copy.deepcopy(p.flow.journal.read()[0])

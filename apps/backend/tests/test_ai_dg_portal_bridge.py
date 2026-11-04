@@ -60,6 +60,20 @@ def test_explicit_governance_filename_rejects_unapproved_entries_before_upload(f
     client._upload_file.assert_not_called()
 
 
+@pytest.mark.parametrize('filename', ['governance_agent.py', 'documentation_agent.py'])
+def test_explicit_governance_filename_preserves_owned_agent_without_a_native_update(filename):
+    client = object.__new__(AidpClient)
+    client._upload_file = Mock(return_value=False)
+    client._agents = Mock(return_value=[{'key': 'existing', 'displayName': 'agent'}])
+    client._request = Mock()
+    assert client._ensure_agent('workspace', 'compute', 'agent', '/Workspace/governance', b'code', b'{}',
+        repair_drift=False, expected_key='existing', entry_filename=filename) == ('existing', False)
+    assert [call.args[1] for call in client._upload_file.call_args_list] == [
+        '/Workspace/governance/' + filename, '/Workspace/governance/requirements.txt',
+        '/Workspace/governance/agent-manifest.json']
+    client._request.assert_not_called()
+
+
 @pytest.mark.parametrize('mode', ['legacy', 'v2_test'])
 def test_known_runtime_mode(mode):
     assert _governance_runtime_mode(mode) == mode

@@ -832,6 +832,12 @@ class AidpClient:
             if self._resource_name(item) in names
         ]
 
+    def _agent_entry_path(self, root: str, entry_filename: str | None = None) -> str:
+        filename = entry_filename or self._agent_entry_filename
+        if entry_filename is not None and filename not in {"governance_agent.py", "documentation_agent.py"}:
+            raise AidpProvisionError("Unsupported Governance entry filename.")
+        return f"{root}/{filename}"
+
     def _ensure_agent(
         self,
         workspace_key: str,
@@ -846,10 +852,7 @@ class AidpClient:
         entry_filename: str | None = None,
     ) -> tuple[str, bool]:
         session_config = {"variables": {}}
-        filename = entry_filename or self._agent_entry_filename
-        if entry_filename is not None and filename not in {"governance_agent.py", "documentation_agent.py"}:
-            raise AidpProvisionError("Unsupported Governance entry filename.")
-        entry_path = f"{root}/{filename}"
+        entry_path = self._agent_entry_path(root, entry_filename)
         dependencies_path = f"{root}/requirements.txt"
         descriptor_path = f"{root}/agent-manifest.json"
         changed = self._upload_file(

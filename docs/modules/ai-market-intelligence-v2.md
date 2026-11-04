@@ -645,6 +645,9 @@ not the exactly aligned v2 execution environment. Its graph, LangChain and
 Pydantic pins are shared with Governance's backend tests; they do not replace
 the candidate-bound native runtime profile or authorize changes to AIDP's
 managed libraries.
+Cancellation checks accept either an incomplete turn or the newer framework's
+explicit node-cancellation error, while requiring no completed report and
+recovery of the same checkpoint without another capture.
 
 ## Public streaming contract
 
