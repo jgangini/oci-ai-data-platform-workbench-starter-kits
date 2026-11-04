@@ -20,6 +20,10 @@ class ProviderMCPError(RuntimeError):
     pass
 
 
+class _ReceiptAccountingError(ValueError):
+    pass
+
+
 def _start_response_diagnostic(value):
     diagnostic={'response_type':type(value).__name__}
     prefix="MCP tool 'call-actor' invocation failed: "
@@ -179,7 +183,10 @@ class ApifyProvider:
             raise ValueError('Provider run identity and status could not be verified together')
         run = matches[0]
         identity = run.get('runId') or run.get('actorRunId') or run['id']
-        cost = _run_cost(run, usage, identity, len(records),settled=verify_cost)
+        try:
+            cost = _run_cost(run, usage, identity, len(records),settled=verify_cost)
+        except ValueError as error:
+            raise _ReceiptAccountingError(str(error)) from None
         if cost is not None:
             cost = int((cost * 1000000).to_integral_value(rounding=ROUND_CEILING))
         return {'runId': identity,
@@ -220,12 +227,11 @@ class ApifyProvider:
                     remaining = _cost_settlement_delay(value, run_id)
                     if remaining and _run_completion(value, run_id) is not None:
                         raise ProviderReceiptUnverified('Provider completion changed during accounting verification; resume the same capture')
-                try:
-                    receipt=self.receipt(value,run_id)
-                except ValueError:
-                    raise ProviderReceiptUnverified('The known capture accounting is not yet consistent; resume the same capture') from None
+                receipt=self.receipt(value,run_id)
                 if receipt.get('spent_microusd') is None:
                     raise ProviderReceiptUnverified('The existing capture has no verified cost; its reservation remains held')
+        except _ReceiptAccountingError:
+            raise ProviderReceiptUnverified('The known capture accounting is not yet consistent; resume the same capture') from None
         except ProviderMCPError:
             raise ProviderStatusUnavailable('MCP returned an error envelope; provider status is unavailable and the existing operation remains pending') from None
         return receipt

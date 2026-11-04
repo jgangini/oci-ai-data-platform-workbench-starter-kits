@@ -74,15 +74,18 @@ def test_error_wins_even_with_an_apparently_valid_run_and_usage_metadata(error):
         asyncio.run(client.read('existing-run'))
 
 
+@pytest.mark.parametrize('kind', ['raw', 'structured', 'text'])
 @pytest.mark.parametrize('payload', [{'runId': 'another-run', 'status': 'SUCCEEDED'},
     {'runId': 'existing-run'}, {'runId': 'existing-run', 'status': 'UNKNOWN'},
     {'runId': 'existing-run', 'status': {}}, {'runId': 'existing-run', 'status': []},
     {'runId': 'existing-run', 'status': False},
     [{'runId': 'existing-run'}, {'status': 'SUCCEEDED'}]])
-def test_unverified_identity_or_status_remains_strict_validation_error(payload):
-    client, _ = provider(payload)
+def test_unverified_identity_or_status_remains_strict_validation_error(payload, kind):
+    client, tools = provider(envelope(payload, kind))
     with pytest.raises(ValueError):
         asyncio.run(client.read('existing-run'))
+    assert tools['get-actor-run'].calls == [{'runId': 'existing-run', 'waitSecs': 0}]
+    assert not tools['call-actor'].calls and not tools['get-dataset-items'].calls
 
 
 @pytest.mark.parametrize('error', [ValueError('programming failure'), RuntimeError('transport failure'), PermissionError('authorization failure')])

@@ -197,7 +197,9 @@ decisions and do not establish universal format adherence.
   and cost-verification failures retain their existing pending/uncertain guards.
   Status reads preserve tool exceptions and invalid identity/status validation
   errors. Only completion timestamps and cost verification for an already bound
-  receipt become pending accounting; neither path authorizes another start.
+  receipt become pending accounting, including usage metadata bound to a
+  different run or multiple runs. Conflicting MCP metadata aliases remain a
+  protocol validation error. None of these errors authorizes another start.
 - `actor_tools.py` is the executable application-tool catalogue consumed by both
   planning and execution. Each named tool has a fixed Actor profile, strict
   argument schema, work limit and result kind. The shared MCP's start/status/

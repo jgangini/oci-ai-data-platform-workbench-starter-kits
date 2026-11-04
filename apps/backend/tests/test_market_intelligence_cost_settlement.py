@@ -158,6 +158,19 @@ def test_second_accounting_read_preserves_the_original_tool_exception(monkeypatc
     assert not tools['call-actor'].calls and not tools['get-dataset-items'].calls
 
 
+def test_second_accounting_read_preserves_known_capture_when_usage_metadata_disagrees(monkeypatch):
+    async def wait(delay):
+        pass
+    monkeypatch.setattr(asyncio,'sleep',wait)
+    later={'structuredContent':run(0.00155),
+           '_meta':{'com.apify/ActorRun':{'runId':'another-run','usageTotalUsd':0.00155}}}
+    native,tools=client(reads=[run(0.00005,finishedAt=None),later])
+    with pytest.raises(ProviderReceiptUnverified,match='same capture'):
+        asyncio.run(native.read('existing-run'))
+    assert tools['get-actor-run'].calls==[{'runId':'existing-run','waitSecs':0}]*2
+    assert not tools['call-actor'].calls and not tools['get-dataset-items'].calls
+
+
 def test_missing_cost_keeps_reservation_and_waits_for_same_run():
     native, tools = client(reads=[run(None)])
     with pytest.raises(ProviderReceiptUnverified, match='reservation remains held'):

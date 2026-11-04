@@ -160,11 +160,12 @@ def test_provider_does_not_assign_envelope_cost_to_one_of_multiple_runs():
 
 def test_provider_rejects_envelope_with_unexpected_run_identity():
     envelope=run_envelope(0.002)
-    provider, _ = provider_for(envelope)
+    provider, tool = provider_for(envelope)
     with pytest.raises(ValueError, match='identity and status'):
         ApifyProvider.receipt(unpack_run(envelope),'another-run')
-    with pytest.raises(ProviderReceiptUnverified,match='same capture'):
+    with pytest.raises(ValueError, match='identity and status'):
         asyncio.run(provider.read('another-run'))
+    assert tool.calls == [{'runId': 'another-run', 'waitSecs': 0}]
 
 
 @pytest.mark.parametrize('body_cost', [0.002, '0.00123401'])
@@ -213,11 +214,12 @@ def test_provider_preserves_consistent_metadata_aliases_without_summing_breakdow
 def test_provider_rejects_conflicting_metadata_aliases():
     envelope = run_envelope(0.002)
     envelope['meta'] = {'com.apify/ActorRun': {'usageTotalUsd': 0.003}}
-    provider, _ = provider_for(envelope)
+    provider, tool = provider_for(envelope)
     with pytest.raises(ValueError, match='Conflicting MCP metadata aliases'):
         unpack_run(envelope)
-    with pytest.raises(ProviderReceiptUnverified,match='same capture'):
+    with pytest.raises(ValueError, match='Conflicting MCP metadata aliases'):
         asyncio.run(provider.read('existing-run'))
+    assert tool.calls == [{'runId': 'existing-run', 'waitSecs': 0}]
 
 
 @pytest.mark.parametrize('metadata_key', ['_meta', 'meta'])
