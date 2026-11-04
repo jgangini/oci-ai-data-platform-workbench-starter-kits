@@ -159,6 +159,8 @@ jobs:
         env:
           SESSION_SECRET_FILE: ${{ runner.temp }}/aidp-lab/session.key
       - if: steps.release.outputs.mode != 'immutable'
+        run: python scripts/check_ai_dg_documentary_graph.py && python scripts/check_ai_dg_governance_graph.py
+      - if: steps.release.outputs.mode != 'immutable'
         run: npm ci
         working-directory: apps/frontend
       - if: steps.release.outputs.mode != 'immutable'

@@ -5,6 +5,8 @@ It combines a read-only conversational agent with a scheduled metadata synchroni
 This guide describes the implementation; installation and runtime acceptance must be verified in the target environment.
 Start with [Getting started](../getting-started.md), [Architecture](../architecture.md), and [Operations](../operations.md).
 
+This page describes the default legacy runtime. Fresh deployments can explicitly select the [Governance V2 TEST candidate](ai-data-governance-v2.md); that separate installer does not migrate this module or establish production acceptance.
+
 ## Scope and intended use
 
 - One global installation serves AIDP developers in both laboratory and production modes.

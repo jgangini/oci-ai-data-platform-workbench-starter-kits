@@ -120,6 +120,7 @@ resource "oci_core_instance" "lab" {
       autonomous_database_id         = local.autonomous_database_id
       agent_model_id                 = var.agent_model_id
       artifacts_bucket_name          = local.artifacts_bucket_name
+      aidp_runtime_mode              = var.aidp_runtime_mode
       lab_marker                     = local.name_prefix
       source_repo_url                = var.source_repository_url
       source_commit_sha              = var.source_commit_sha

@@ -171,8 +171,9 @@ def test_probe_requires_current_source_authenticated_session_and_no_effects(faul
     assert closed == [True]
 
 
-def test_admin_api_selects_v2_explicitly_and_preserves_legacy_default(tmp_path):
-    portal = make_client(tmp_path)
+@pytest.mark.parametrize('governance_mode', ['legacy', 'v2_test'])
+def test_admin_api_selects_v2_explicitly_and_preserves_legacy_default(tmp_path, governance_mode):
+    portal = make_client(tmp_path, governance_runtime_mode=governance_mode)
     calls = []
     class Native:
         async def status(self):

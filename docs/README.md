@@ -26,6 +26,7 @@ Every guide contains source data, task dependencies, Gold outputs and reproducib
 - [AI Market Intelligence v2](modules/ai-market-intelligence-v2.md): bounded domain research, evidence-backed drafts and a separate TEST installer without the legacy business tables; corpus and client acceptance remain separate.
 - [Legacy AI Social Network](modules/ai-social-network.md): retired package; authenticated historical routes report HTTP 410.
 - [AI Data Governance](modules/ai-data-governance.md): catalog synchronization, permissions, agent tools and lifecycle.
+- [Governance V2 TEST candidate](modules/ai-data-governance-v2.md): explicit fresh-tenant Deploy Studio installation; functional acceptance pending.
 - [God's Eye View](modules/gods-eye-view.md): sources, streaming, map publications, agent queries and synthetic cleanup.
 
 ## Reference and scope

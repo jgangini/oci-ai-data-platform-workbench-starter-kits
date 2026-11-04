@@ -639,7 +639,10 @@ The additional `pywin32` package is a declared Windows-specific dependency.
 This is target-specific observation, not a
 universal Oracle support matrix. The backend development dependencies also
 include the PDF library for the regression suite; that backend environment is
-not the exactly aligned v2 execution environment.
+not the exactly aligned v2 execution environment. Its graph, LangChain and
+Pydantic pins are shared with Governance's backend tests; they do not replace
+the candidate-bound native runtime profile or authorize changes to AIDP's
+managed libraries.
 
 ## Public streaming contract
 

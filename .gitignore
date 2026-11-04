@@ -24,6 +24,8 @@ coverage/
 .codex/AGENTS.md
 openwiki/
 graphify-out/
+.aidp-local/
+/aidp-agent.toml
 # Generated from the exact release commit before building its image.
 apps/backend/app/labs/package-releases.json
 .aidp-local/

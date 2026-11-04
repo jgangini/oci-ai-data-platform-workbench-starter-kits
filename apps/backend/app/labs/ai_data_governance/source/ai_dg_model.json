@@ -1,0 +1,1939 @@
+{
+  "version": 1,
+  "status": "proposed_not_deployed",
+  "namespace": "oci_medallion.oci_artifacts",
+  "engine": "Spark SQL / Delta; target runtime version pending verification",
+  "title": "AI Data Governance · Delta y operación adaptativa · Revisión 2",
+  "constraint_policy": "PK, FK and UNIQUE are logical contracts checked by writers and reconciliation; not asserted as enforced Delta constraints. NOT NULL and CHECK require runtime/protocol verification.",
+  "tables": [
+    {
+      "name": "AI_DG_SCOPE",
+      "domain": "Ámbito e inventario",
+      "row": 0,
+      "col": 0,
+      "grain": "Un ámbito permitido: plataforma, workspace, catálogo y esquema.",
+      "pk": [
+        "scope_id"
+      ],
+      "unique": [
+        [
+          "platform_key",
+          "workspace_key",
+          "catalog_key",
+          "schema_key"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "scope_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Identidad estable del ámbito; no equivale a autorización IAM."
+        },
+        {
+          "name": "platform_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "Plataforma AIDP propietaria del catálogo."
+        },
+        {
+          "name": "workspace_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "Workspace que ejecuta el proceso; no implica propiedad del catálogo."
+        },
+        {
+          "name": "catalog_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "Catálogo incluido explícitamente."
+        },
+        {
+          "name": "schema_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "Esquema incluido explícitamente; no un comodín implícito."
+        },
+        {
+          "name": "config_version",
+          "type": "BIGINT",
+          "required": true,
+          "comment": "Versión del contrato de ejecución y límites."
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "required": true,
+          "comment": "Habilitación técnica del ámbito."
+        },
+        {
+          "name": "cadence_minutes",
+          "type": "INT",
+          "required": true,
+          "comment": "Cadencia propuesta: 30 minutos; no es SLA de frescura."
+        },
+        {
+          "name": "limits_json",
+          "type": "STRING",
+          "required": true,
+          "comment": "Contrato JSON validado: tiempo, tokens, coste, API, tamaño de lote y profundidad."
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Instante UTC de la configuración."
+        },
+        {
+          "name": "batch_target",
+          "type": "INT",
+          "required": true,
+          "comment": "Tamaño objetivo calculado y acotado por tokens/tiempo; no implica agrupar activos sin relación."
+        },
+        {
+          "name": "api_parallelism",
+          "type": "INT",
+          "required": true,
+          "comment": "Lecturas API concurrentes dentro de límites; no crea ni escala cómputo automáticamente."
+        },
+        {
+          "name": "retry_backoff_seconds",
+          "type": "INT",
+          "required": true,
+          "comment": "Espera vigente ante throttling/fallos transitorios, limitada por política."
+        },
+        {
+          "name": "controller_state_json",
+          "type": "STRING",
+          "required": true,
+          "comment": "EWMAs, muestras, atraso, cooldown, decisión y versión del controlador; no sustituye los eventos históricos."
+        },
+        {
+          "name": "control_updated_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Instante de la última decisión adaptativa, separado de la versión de configuración."
+        }
+      ],
+      "foreign_keys": []
+    },
+    {
+      "name": "AI_DG_ASSET",
+      "domain": "Ámbito e inventario",
+      "row": 0,
+      "col": 1,
+      "grain": "Un activo estable de la plataforma, compartido por todos los ámbitos que lo observan.",
+      "pk": [
+        "asset_id"
+      ],
+      "unique": [
+        [
+          "platform_key",
+          "asset_kind",
+          "native_key"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "asset_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "ID estable; preservar object_id existente para las columnas migradas."
+        },
+        {
+          "name": "platform_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "Plataforma que define la identidad nativa."
+        },
+        {
+          "name": "asset_kind",
+          "type": "STRING",
+          "required": true,
+          "comment": "TABLE, COLUMN, WORKFLOW, TASK, FILE, NOTEBOOK, MODEL o TERM según cobertura verificada."
+        },
+        {
+          "name": "native_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "ID nativo o identidad alternativa explícita; nunca sólo el nombre."
+        },
+        {
+          "name": "parent_asset_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Contenedor estable: columna-tabla, tarea-workflow, etcétera."
+        },
+        {
+          "name": "current_version_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Última versión observada y confirmada; se avanza después de persistir la versión."
+        },
+        {
+          "name": "identity_status",
+          "type": "STRING",
+          "required": true,
+          "comment": "RESOLVED, FALLBACK o AMBIGUOUS; un renombre ambiguo no fusiona activos."
+        },
+        {
+          "name": "lifecycle_state",
+          "type": "STRING",
+          "required": true,
+          "comment": "ACTIVE, NOT_VISIBLE o DELETION_CONFIRMED; ausencia no prueba borrado."
+        },
+        {
+          "name": "first_seen_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Primera observación del activo."
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Actualización de la proyección actual."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "parent_asset_id"
+          ],
+          "table": "AI_DG_ASSET",
+          "target": [
+            "asset_id"
+          ],
+          "optional": true
+        },
+        {
+          "columns": [
+            "current_version_id"
+          ],
+          "table": "AI_DG_ASSET_VERSION",
+          "target": [
+            "version_id"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_ASSET_VERSION",
+      "domain": "Ámbito e inventario",
+      "row": 1,
+      "col": 0,
+      "grain": "Una revisión inmutable y deduplicada de los metadatos de un activo.",
+      "pk": [
+        "version_id"
+      ],
+      "unique": [
+        [
+          "asset_id",
+          "metadata_hash"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "version_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Identidad de la revisión; preserva procedencia de cualquier respuesta histórica."
+        },
+        {
+          "name": "asset_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Activo al que pertenece la revisión."
+        },
+        {
+          "name": "native_version",
+          "type": "STRING",
+          "required": false,
+          "comment": "Versión o ETag nativo; puede pertenecer a toda la tabla, no a cada columna."
+        },
+        {
+          "name": "qualified_name",
+          "type": "STRING",
+          "required": true,
+          "comment": "Nombre completo observado; no sustituye el ID estable."
+        },
+        {
+          "name": "description",
+          "type": "STRING",
+          "required": false,
+          "comment": "Texto exacto leído del catálogo, incluida la marca [IA] cuando existe."
+        },
+        {
+          "name": "description_origin",
+          "type": "STRING",
+          "required": true,
+          "comment": "UNKNOWN, EXTERNAL_UNVERIFIED, GENERATED_VERIFIED o HUMAN_VERIFIED; no se deduce sólo de [IA]."
+        },
+        {
+          "name": "data_type",
+          "type": "STRING",
+          "required": false,
+          "comment": "Tipo completo para columnas; nulo si no aplica."
+        },
+        {
+          "name": "ordinal_position",
+          "type": "INT",
+          "required": false,
+          "comment": "Posición observada de columna; nula para otros tipos."
+        },
+        {
+          "name": "owner_ref",
+          "type": "STRING",
+          "required": false,
+          "comment": "Responsable declarado y su origen; no prueba permiso efectivo."
+        },
+        {
+          "name": "metadata_json",
+          "type": "STRING",
+          "required": true,
+          "comment": "Extensión tipada por asset_kind: código/ruta/revisión, parámetros de tarea, propiedades; sin credenciales ni datos de negocio."
+        },
+        {
+          "name": "metadata_hash",
+          "type": "STRING",
+          "required": true,
+          "comment": "Huella de metadatos canónicos, incluyendo versión fuente y descripción; no cambia por cada lectura."
+        },
+        {
+          "name": "observed_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Primera observación de esta revisión."
+        },
+        {
+          "name": "observed_run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Ejecución que persistió la observación."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "asset_id"
+          ],
+          "table": "AI_DG_ASSET",
+          "target": [
+            "asset_id"
+          ]
+        },
+        {
+          "columns": [
+            "observed_run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_SCOPE_ASSET",
+      "domain": "Ámbito e inventario",
+      "row": 1,
+      "col": 1,
+      "grain": "Una proyección de lectura actual por ámbito y activo: pertenencia, metadatos confirmados y frescura; evita joins históricos en preguntas frecuentes.",
+      "pk": [
+        "scope_id",
+        "asset_id"
+      ],
+      "unique": [],
+      "columns": [
+        {
+          "name": "scope_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Ámbito de la observación autorizada."
+        },
+        {
+          "name": "asset_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Activo compartido; el par completo se valida al acceder."
+        },
+        {
+          "name": "last_seen_run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Última observación satisfactoria del activo en este ámbito."
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Frescura real; una lectura fallida no la renueva."
+        },
+        {
+          "name": "coverage_state",
+          "type": "STRING",
+          "required": true,
+          "comment": "COMPLETE, PARTIAL, NOT_VISIBLE o UNSUPPORTED; sin falsos borrados."
+        },
+        {
+          "name": "consistency_state",
+          "type": "STRING",
+          "required": true,
+          "comment": "VERIFIED, UPDATE_PENDING o REPLICA_PENDING; controla lo que el agente puede afirmar como vigente."
+        },
+        {
+          "name": "verified_version_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Versión confirmada para este ámbito; puede quedar antigua mientras se reconcilia."
+        },
+        {
+          "name": "asset_kind",
+          "type": "STRING",
+          "required": true,
+          "comment": "Copia derivada del tipo para filtrar tablas/columnas/tareas en una lectura."
+        },
+        {
+          "name": "qualified_name",
+          "type": "STRING",
+          "required": true,
+          "comment": "Nombre de la versión confirmada, no una definición independiente."
+        },
+        {
+          "name": "description",
+          "type": "STRING",
+          "required": false,
+          "comment": "Texto exacto confirmado, incluida la marca [IA]; nunca staging del agente documental."
+        },
+        {
+          "name": "description_origin",
+          "type": "STRING",
+          "required": true,
+          "comment": "Procedencia estructurada copiada de la versión confirmada."
+        },
+        {
+          "name": "data_type",
+          "type": "STRING",
+          "required": false,
+          "comment": "Tipo de columna de la versión confirmada, si aplica."
+        },
+        {
+          "name": "owner_ref",
+          "type": "STRING",
+          "required": false,
+          "comment": "Responsable declarado de la versión confirmada; no permiso IAM."
+        },
+        {
+          "name": "projection_hash",
+          "type": "STRING",
+          "required": true,
+          "comment": "Huella de campos derivados y verified_version_id; valida réplica, no atomicidad entre tablas."
+        },
+        {
+          "name": "projected_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Instante de confirmación de esta proyección, distinto de la frescura de la fuente."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "scope_id"
+          ],
+          "table": "AI_DG_SCOPE",
+          "target": [
+            "scope_id"
+          ]
+        },
+        {
+          "columns": [
+            "asset_id"
+          ],
+          "table": "AI_DG_ASSET",
+          "target": [
+            "asset_id"
+          ]
+        },
+        {
+          "columns": [
+            "last_seen_run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ]
+        },
+        {
+          "columns": [
+            "verified_version_id"
+          ],
+          "table": "AI_DG_ASSET_VERSION",
+          "target": [
+            "version_id"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_EVIDENCE",
+      "domain": "Evidencia y relaciones",
+      "row": 0,
+      "col": 2,
+      "grain": "Una evidencia inmutable, acotada y verificable de catálogo, código, linaje o medición.",
+      "pk": [
+        "evidence_id"
+      ],
+      "unique": [
+        [
+          "scope_id",
+          "evidence_hash"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "evidence_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Identidad estable de la evidencia."
+        },
+        {
+          "name": "scope_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Ámbito de lectura y uso permitido."
+        },
+        {
+          "name": "asset_version_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Revisión del activo al que corresponde la evidencia."
+        },
+        {
+          "name": "producer_run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Corrida que obtuvo la evidencia."
+        },
+        {
+          "name": "evidence_kind",
+          "type": "STRING",
+          "required": true,
+          "comment": "CATALOG, STATIC_CODE, RUNTIME_LINEAGE, EXECUTION, QUALITY o OWNER_ATTESTATION."
+        },
+        {
+          "name": "source_ref",
+          "type": "STRING",
+          "required": true,
+          "comment": "Referencia sin secretos a API/recurso/archivo y revisión; sin tokens ni URL firmada."
+        },
+        {
+          "name": "evidence_hash",
+          "type": "STRING",
+          "required": true,
+          "comment": "Huella del contenido y procedencia para deduplicar."
+        },
+        {
+          "name": "facts_json",
+          "type": "STRING",
+          "required": true,
+          "comment": "Hechos estructurados y localizadores de líneas/celdas acotados; no instrucciones ejecutables."
+        },
+        {
+          "name": "coverage_state",
+          "type": "STRING",
+          "required": true,
+          "comment": "COMPLETE, PARTIAL, FAILED o UNSUPPORTED; no equivale a confianza subjetiva."
+        },
+        {
+          "name": "observed_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Momento de observación; no la hora de respuesta del agente."
+        },
+        {
+          "name": "expires_at",
+          "type": "TIMESTAMP",
+          "required": false,
+          "comment": "Vigencia aplicable al uso; una evidencia histórica no se elimina al vencer."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "scope_id"
+          ],
+          "table": "AI_DG_SCOPE",
+          "target": [
+            "scope_id"
+          ]
+        },
+        {
+          "columns": [
+            "asset_version_id"
+          ],
+          "table": "AI_DG_ASSET_VERSION",
+          "target": [
+            "version_id"
+          ],
+          "optional": true
+        },
+        {
+          "columns": [
+            "producer_run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_RELATION",
+      "domain": "Evidencia y relaciones",
+      "row": 1,
+      "col": 2,
+      "grain": "Una afirmación dirigida entre revisiones, sustentada por una evidencia; distintas pruebas no se sobrescriben.",
+      "pk": [
+        "relation_id"
+      ],
+      "unique": [
+        [
+          "scope_id",
+          "from_version_id",
+          "to_version_id",
+          "relation_kind",
+          "evidence_id"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "relation_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "ID deduplicable de la afirmación y su prueba."
+        },
+        {
+          "name": "scope_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Ámbito en el que ambos extremos pueden consultarse."
+        },
+        {
+          "name": "from_version_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Origen: productor, dato anterior o contenedor según relation_kind."
+        },
+        {
+          "name": "to_version_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Destino: consumidor, dato derivado o contenido según relation_kind."
+        },
+        {
+          "name": "relation_kind",
+          "type": "STRING",
+          "required": true,
+          "comment": "CONTAINS, FLOWS_TO, USED_BY, PRODUCES o DEFINES; dirección documentada por tipo."
+        },
+        {
+          "name": "evidence_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Prueba trazable de esta relación, no texto generado como prueba de sí mismo."
+        },
+        {
+          "name": "assertion_basis",
+          "type": "STRING",
+          "required": true,
+          "comment": "OBSERVED, STATIC_INFERRED o CANDIDATE; sólo ejecución/linaje real acredita uso ejecutado."
+        },
+        {
+          "name": "valid_from",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Inicio de validez de la afirmación."
+        },
+        {
+          "name": "valid_to",
+          "type": "TIMESTAMP",
+          "required": false,
+          "comment": "Cierre o sustitución; nulo no demuestra frescura por sí solo."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "scope_id"
+          ],
+          "table": "AI_DG_SCOPE",
+          "target": [
+            "scope_id"
+          ]
+        },
+        {
+          "columns": [
+            "from_version_id"
+          ],
+          "table": "AI_DG_ASSET_VERSION",
+          "target": [
+            "version_id"
+          ]
+        },
+        {
+          "columns": [
+            "to_version_id"
+          ],
+          "table": "AI_DG_ASSET_VERSION",
+          "target": [
+            "version_id"
+          ]
+        },
+        {
+          "columns": [
+            "evidence_id"
+          ],
+          "table": "AI_DG_EVIDENCE",
+          "target": [
+            "evidence_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_AGENT",
+      "domain": "Operación compartida",
+      "row": 0,
+      "col": 3,
+      "grain": "Un agente lógico desplegado y reutilizable; no una fila ni un agente por corrida.",
+      "pk": [
+        "agent_id"
+      ],
+      "unique": [
+        [
+          "platform_key",
+          "workspace_key",
+          "agent_role"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "agent_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Identidad lógica estable del agente."
+        },
+        {
+          "name": "platform_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "Plataforma del despliegue."
+        },
+        {
+          "name": "workspace_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "Workspace del agente; debe coincidir con el ámbito de la ejecución."
+        },
+        {
+          "name": "agent_role",
+          "type": "STRING",
+          "required": true,
+          "comment": "GOVERNANCE_ASSISTANT o DOCUMENTATION; sincronización y publicación son tareas Python."
+        },
+        {
+          "name": "native_agent_key",
+          "type": "STRING",
+          "required": false,
+          "comment": "ID del agente nativo una vez desplegado; nunca una credencial."
+        },
+        {
+          "name": "deployment_version",
+          "type": "STRING",
+          "required": true,
+          "comment": "Versión desplegada, reproducible y registrada también en cada ejecución."
+        },
+        {
+          "name": "code_path",
+          "type": "STRING",
+          "required": true,
+          "comment": "Ruta prevista .artifact/ai_data_governance/agents/<archivo>.py; propuesta aún no implementada."
+        },
+        {
+          "name": "capabilities_json",
+          "type": "STRING",
+          "required": true,
+          "comment": "Herramientas permitidas y versión de contrato; no concede privilegios IAM."
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "required": true,
+          "comment": "Habilitación lógica; la salud nativa se consulta por separado."
+        }
+      ],
+      "foreign_keys": []
+    },
+    {
+      "name": "AI_DG_RUN",
+      "domain": "Operación compartida",
+      "row": 1,
+      "col": 3,
+      "grain": "Un intento de ejecución: workflow, tarea, agente o herramienta. Jerarquía compartida, no tabla por agente.",
+      "pk": [
+        "run_id"
+      ],
+      "unique": [
+        [
+          "scope_id",
+          "execution_key",
+          "attempt_no"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "ID único del intento lógico."
+        },
+        {
+          "name": "scope_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Ámbito de este intento; todos los hijos conservan el ámbito."
+        },
+        {
+          "name": "parent_run_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Padre workflow/tarea/solicitud para reconstruir colaboración y reintentos."
+        },
+        {
+          "name": "agent_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Agente participante; nulo para tareas Python."
+        },
+        {
+          "name": "run_kind",
+          "type": "STRING",
+          "required": true,
+          "comment": "WORKFLOW, TASK, AGENT o TOOL; consultas simples no requieren caso de gobierno."
+        },
+        {
+          "name": "execution_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "Clave del mismo trabajo lógico a través de sus intentos; no deriva de una hora volátil."
+        },
+        {
+          "name": "attempt_no",
+          "type": "INT",
+          "required": true,
+          "comment": "Intento >=1; retry local máximo propuesto 2 intentos en total."
+        },
+        {
+          "name": "component_version",
+          "type": "STRING",
+          "required": true,
+          "comment": "Versión real del código/prompt/contrato ejecutado, no la configuración actual mutable."
+        },
+        {
+          "name": "native_run_ref",
+          "type": "STRING",
+          "required": false,
+          "comment": "Referencia nativa sin secreto, incluidas tareas reparadas."
+        },
+        {
+          "name": "status",
+          "type": "STRING",
+          "required": true,
+          "comment": "RUNNING, SUCCEEDED, PARTIAL, FAILED, CANCELLED o SKIPPED; éxito de réplica no borra fallo previo."
+        },
+        {
+          "name": "manifest_json",
+          "type": "STRING",
+          "required": true,
+          "comment": "Versión de config, cobertura/paginación, lotes, recibos y checkpoint de avance; JSON validado y sin secretos."
+        },
+        {
+          "name": "started_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Inicio UTC del intento."
+        },
+        {
+          "name": "finished_at",
+          "type": "TIMESTAMP",
+          "required": false,
+          "comment": "Fin del intento; nulo mientras está activo."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "scope_id"
+          ],
+          "table": "AI_DG_SCOPE",
+          "target": [
+            "scope_id"
+          ]
+        },
+        {
+          "columns": [
+            "parent_run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ],
+          "optional": true
+        },
+        {
+          "columns": [
+            "agent_id"
+          ],
+          "table": "AI_DG_AGENT",
+          "target": [
+            "agent_id"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_EVENT",
+      "domain": "Operación compartida",
+      "row": 2,
+      "col": 3,
+      "grain": "Un evento operativo idempotente del mismo registro compartido; no razonamiento privado ni conversación completa.",
+      "pk": [
+        "event_id"
+      ],
+      "unique": [
+        [
+          "run_id",
+          "event_key"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "ID deduplicable del evento."
+        },
+        {
+          "name": "run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Intento que emite el evento; ámbito y agente se resuelven por la ejecución."
+        },
+        {
+          "name": "event_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "Clave estable del emisor para evitar duplicar por reenvío."
+        },
+        {
+          "name": "parent_event_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Evento padre local para una acción anidada; mismo run."
+        },
+        {
+          "name": "event_type",
+          "type": "STRING",
+          "required": true,
+          "comment": "START, TOOL_START, TOOL_RESULT, PROGRESS, WARNING, ERROR o END."
+        },
+        {
+          "name": "asset_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Activo afectado si aplica y pertenece al ámbito del run."
+        },
+        {
+          "name": "occurred_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Hora del emisor; no impone orden global entre productores."
+        },
+        {
+          "name": "ingested_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Ingreso para paginar/medir retraso junto a event_id."
+        },
+        {
+          "name": "summary",
+          "type": "STRING",
+          "required": true,
+          "comment": "Acción o resultado breve y saneado para usuarios."
+        },
+        {
+          "name": "metrics_json",
+          "type": "STRING",
+          "required": true,
+          "comment": "Duración, contadores, tokens/coste con moneda y cobertura explícitos; payload acotado, sin secretos."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ]
+        },
+        {
+          "columns": [
+            "parent_event_id"
+          ],
+          "table": "AI_DG_EVENT",
+          "target": [
+            "event_id"
+          ],
+          "optional": true
+        },
+        {
+          "columns": [
+            "asset_id"
+          ],
+          "table": "AI_DG_ASSET",
+          "target": [
+            "asset_id"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_WORK",
+      "domain": "Documentación y réplica",
+      "row": 0,
+      "col": 4,
+      "grain": "Un trabajo vigente por ámbito, activo y campo de metadatos; su estado evita repetir generación.",
+      "pk": [
+        "work_id"
+      ],
+      "unique": [
+        [
+          "scope_id",
+          "asset_id",
+          "field_path"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "work_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Identidad estable del trabajo, reutilizada por reintentos."
+        },
+        {
+          "name": "scope_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Ámbito del trabajo y de sus evidencias."
+        },
+        {
+          "name": "asset_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Activo con campo vacío o publicación pendiente de reconciliación."
+        },
+        {
+          "name": "field_path",
+          "type": "STRING",
+          "required": true,
+          "comment": "Campo de descripción actualizable, no una instrucción SQL ni ruta arbitraria."
+        },
+        {
+          "name": "expected_version_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Versión observada al seleccionar; debe pertenecer al activo."
+        },
+        {
+          "name": "context_hash",
+          "type": "STRING",
+          "required": false,
+          "comment": "Huella de evidencia/contexto relevante; permite reutilizar sin llamar al modelo otra vez."
+        },
+        {
+          "name": "phase",
+          "type": "STRING",
+          "required": true,
+          "comment": "DOCUMENT, PUBLISH o REPLICATE; la recuperación sólo ejecuta la fase pendiente."
+        },
+        {
+          "name": "state",
+          "type": "STRING",
+          "required": true,
+          "comment": "READY, IN_PROGRESS, WAIT_CONTEXT, RETRY, CONFLICT, UNSUPPORTED, PRESERVED o DONE."
+        },
+        {
+          "name": "selected_document_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Documento validado seleccionado; staging explícito, no cola de aprobación humana."
+        },
+        {
+          "name": "reason_code",
+          "type": "STRING",
+          "required": false,
+          "comment": "Motivo estable de abstención, conflicto o recuperación."
+        },
+        {
+          "name": "next_attempt_at",
+          "type": "TIMESTAMP",
+          "required": false,
+          "comment": "Espera limitada; WAIT_CONTEXT sólo se reactiva por evidencia relevante nueva."
+        },
+        {
+          "name": "last_run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Último intento que modificó el estado."
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Edad de la cola para selección justa."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "scope_id",
+            "asset_id"
+          ],
+          "table": "AI_DG_SCOPE_ASSET",
+          "target": [
+            "scope_id",
+            "asset_id"
+          ]
+        },
+        {
+          "columns": [
+            "expected_version_id"
+          ],
+          "table": "AI_DG_ASSET_VERSION",
+          "target": [
+            "version_id"
+          ]
+        },
+        {
+          "columns": [
+            "selected_document_id"
+          ],
+          "table": "AI_DG_DOCUMENT",
+          "target": [
+            "document_id"
+          ],
+          "optional": true
+        },
+        {
+          "columns": [
+            "last_run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_DOCUMENT",
+      "domain": "Documentación y réplica",
+      "row": 0,
+      "col": 5,
+      "grain": "Un resultado documental inmutable por trabajo y contexto/modelo/prompt; separado de publicación.",
+      "pk": [
+        "document_id"
+      ],
+      "unique": [
+        [
+          "work_id",
+          "generation_key"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "document_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Identidad del resultado; se registra antes de publicarlo."
+        },
+        {
+          "name": "work_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Trabajo al que responde."
+        },
+        {
+          "name": "producer_run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Intento del agente documental que lo produjo."
+        },
+        {
+          "name": "generation_key",
+          "type": "STRING",
+          "required": true,
+          "comment": "Huella de activo/revisión/campo/contexto/prompt/modelo; no garantiza exactamente una llamada facturada."
+        },
+        {
+          "name": "description_text",
+          "type": "STRING",
+          "required": true,
+          "comment": "Texto sustentado y listo para publicar, con una única marca final [IA]."
+        },
+        {
+          "name": "text_hash",
+          "type": "STRING",
+          "required": true,
+          "comment": "Huella exacta del texto previsto."
+        },
+        {
+          "name": "evidence_digest",
+          "type": "STRING",
+          "required": true,
+          "comment": "Huella del conjunto ordenado de evidencias vinculadas."
+        },
+        {
+          "name": "model_ref",
+          "type": "STRING",
+          "required": true,
+          "comment": "Modelo/versión usados, sin clave ni token."
+        },
+        {
+          "name": "prompt_version",
+          "type": "STRING",
+          "required": true,
+          "comment": "Versión del contrato de generación y validación."
+        },
+        {
+          "name": "validation_status",
+          "type": "STRING",
+          "required": true,
+          "comment": "VALID, REJECTED o INSUFFICIENT; validez no equivale a publicación."
+        },
+        {
+          "name": "validation_reason",
+          "type": "STRING",
+          "required": false,
+          "comment": "Causa verificable, sin cadena privada de razonamiento."
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Instante de registro durable del resultado."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "work_id"
+          ],
+          "table": "AI_DG_WORK",
+          "target": [
+            "work_id"
+          ]
+        },
+        {
+          "columns": [
+            "producer_run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_DOC_EVIDENCE",
+      "domain": "Documentación y réplica",
+      "row": 1,
+      "col": 4,
+      "grain": "Una evidencia utilizada por un documento; relación muchos-a-muchos sin IDs dentro de texto libre.",
+      "pk": [
+        "document_id",
+        "evidence_id"
+      ],
+      "unique": [],
+      "columns": [
+        {
+          "name": "document_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Documento sustentado."
+        },
+        {
+          "name": "evidence_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Evidencia de la misma pertenencia de ámbito que el trabajo."
+        },
+        {
+          "name": "support_role",
+          "type": "STRING",
+          "required": true,
+          "comment": "ORIGIN, TRANSFORMATION, USAGE o DEFINITION; identifica qué respalda."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "document_id"
+          ],
+          "table": "AI_DG_DOCUMENT",
+          "target": [
+            "document_id"
+          ]
+        },
+        {
+          "columns": [
+            "evidence_id"
+          ],
+          "table": "AI_DG_EVIDENCE",
+          "target": [
+            "evidence_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_PUBLICATION",
+      "domain": "Documentación y réplica",
+      "row": 1,
+      "col": 5,
+      "grain": "Una intención de publicación y su recibo recuperable; no hay transacción distribuida catálogo-Delta.",
+      "pk": [
+        "publication_id"
+      ],
+      "unique": [
+        [
+          "document_id",
+          "expected_native_version"
+        ]
+      ],
+      "columns": [
+        {
+          "name": "publication_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Clave idempotente persistida ANTES de escribir en el catálogo."
+        },
+        {
+          "name": "document_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Texto y evidencias que se pretende publicar."
+        },
+        {
+          "name": "initiating_run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Intento que abrió la intención; debe seguir habilitado antes de escribir."
+        },
+        {
+          "name": "expected_native_version",
+          "type": "STRING",
+          "required": true,
+          "comment": "Versión nativa/CAS esperada; sin protección comprobada no se habilita la escritura automática."
+        },
+        {
+          "name": "catalog_state",
+          "type": "STRING",
+          "required": true,
+          "comment": "PREPARED, UNKNOWN, VERIFIED, CONFLICT o FAILED; timeout de escritura queda UNKNOWN."
+        },
+        {
+          "name": "replica_state",
+          "type": "STRING",
+          "required": true,
+          "comment": "PENDING, VERIFIED o FAILED; independiente del resultado del catálogo."
+        },
+        {
+          "name": "observed_native_version",
+          "type": "STRING",
+          "required": false,
+          "comment": "Versión real después de releer; coordinar escrituras por tabla si su token es compartido."
+        },
+        {
+          "name": "observed_text_hash",
+          "type": "STRING",
+          "required": false,
+          "comment": "Texto realmente leído; nunca asumir que una respuesta HTTP prueba la réplica."
+        },
+        {
+          "name": "catalog_verified_at",
+          "type": "TIMESTAMP",
+          "required": false,
+          "comment": "Confirmación de la lectura real y conciliación del recibo."
+        },
+        {
+          "name": "replica_version_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Versión interna confirmada con texto y procedencia idénticos."
+        },
+        {
+          "name": "replica_verified_at",
+          "type": "TIMESTAMP",
+          "required": false,
+          "comment": "Sólo se completa tras revalidar la copia interna."
+        },
+        {
+          "name": "last_error_code",
+          "type": "STRING",
+          "required": false,
+          "comment": "Fallo seguro para recuperación; no contiene stack ni credenciales."
+        },
+        {
+          "name": "next_attempt_at",
+          "type": "TIMESTAMP",
+          "required": false,
+          "comment": "Próxima conciliación/replicación, sin regenerar el texto."
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Última transición del recibo."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "document_id"
+          ],
+          "table": "AI_DG_DOCUMENT",
+          "target": [
+            "document_id"
+          ]
+        },
+        {
+          "columns": [
+            "initiating_run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ]
+        },
+        {
+          "columns": [
+            "replica_version_id"
+          ],
+          "table": "AI_DG_ASSET_VERSION",
+          "target": [
+            "version_id"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_RULE",
+      "domain": "Reglas y mediciones",
+      "row": 2,
+      "col": 4,
+      "grain": "Una versión inmutable de una regla declarada; no confundir política con medición o permiso efectivo.",
+      "pk": [
+        "rule_id",
+        "rule_version"
+      ],
+      "unique": [],
+      "columns": [
+        {
+          "name": "rule_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Identidad estable de la regla; preservar permission_id en reglas migradas de acceso declarado."
+        },
+        {
+          "name": "rule_version",
+          "type": "INT",
+          "required": true,
+          "comment": "Versión de criterio/umbral/política evaluable."
+        },
+        {
+          "name": "scope_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Ámbito de aplicación."
+        },
+        {
+          "name": "target_asset_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Activo específico; nulo indica ámbito completo, no todos los catálogos."
+        },
+        {
+          "name": "rule_kind",
+          "type": "STRING",
+          "required": true,
+          "comment": "QUALITY, DOCUMENTATION, ACCESS_DECLARATION, RETENTION o AI_RISK; capacidades habilitadas por fases."
+        },
+        {
+          "name": "criteria_json",
+          "type": "STRING",
+          "required": true,
+          "comment": "Contrato tipado por regla; para acceso conserva grupo y has_access originales sin conceder IAM."
+        },
+        {
+          "name": "owner_ref",
+          "type": "STRING",
+          "required": false,
+          "comment": "Responsable declarado de la regla."
+        },
+        {
+          "name": "valid_from",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Comienzo de vigencia."
+        },
+        {
+          "name": "valid_to",
+          "type": "TIMESTAMP",
+          "required": false,
+          "comment": "Cierre; no se solapan versiones activas del mismo rule_id."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "scope_id"
+          ],
+          "table": "AI_DG_SCOPE",
+          "target": [
+            "scope_id"
+          ]
+        },
+        {
+          "columns": [
+            "target_asset_id"
+          ],
+          "table": "AI_DG_ASSET",
+          "target": [
+            "asset_id"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_ASSESSMENT",
+      "domain": "Reglas y mediciones",
+      "row": 2,
+      "col": 5,
+      "grain": "Un resultado de una regla/version sobre una revisión concreta, con evidencia y vigencia.",
+      "pk": [
+        "assessment_id"
+      ],
+      "unique": [],
+      "columns": [
+        {
+          "name": "assessment_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Identidad idempotente de la medición/evaluación."
+        },
+        {
+          "name": "rule_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Regla evaluada junto con rule_version."
+        },
+        {
+          "name": "rule_version",
+          "type": "INT",
+          "required": true,
+          "comment": "Versión exacta de la regla."
+        },
+        {
+          "name": "asset_version_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Revisión evaluada; no se traslada automáticamente un PASS a otra revisión."
+        },
+        {
+          "name": "run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Intento que importa o ejecuta la evaluación autorizada."
+        },
+        {
+          "name": "evidence_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Obligatoria para PASS/FAIL medidos; ausente para NOT_MEASURED."
+        },
+        {
+          "name": "status",
+          "type": "STRING",
+          "required": true,
+          "comment": "PASS, FAIL, UNKNOWN, NOT_MEASURED o ERROR; ausencia de medición nunca es PASS."
+        },
+        {
+          "name": "result_json",
+          "type": "STRING",
+          "required": true,
+          "comment": "Métrica, unidad, denominador, umbral, método y cobertura; sin copia de filas de negocio."
+        },
+        {
+          "name": "measured_at",
+          "type": "TIMESTAMP",
+          "required": false,
+          "comment": "Momento real de medición; nulo si nunca se midió."
+        },
+        {
+          "name": "expires_at",
+          "type": "TIMESTAMP",
+          "required": false,
+          "comment": "Vigencia para respuestas del agente."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "rule_id",
+            "rule_version"
+          ],
+          "table": "AI_DG_RULE",
+          "target": [
+            "rule_id",
+            "rule_version"
+          ]
+        },
+        {
+          "columns": [
+            "asset_version_id"
+          ],
+          "table": "AI_DG_ASSET_VERSION",
+          "target": [
+            "version_id"
+          ]
+        },
+        {
+          "columns": [
+            "run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ]
+        },
+        {
+          "columns": [
+            "evidence_id"
+          ],
+          "table": "AI_DG_EVIDENCE",
+          "target": [
+            "evidence_id"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_CASE",
+      "domain": "Casos y decisiones",
+      "row": 2,
+      "col": 0,
+      "grain": "Un asunto de gobierno que requiere seguimiento; no una copia de cada conversación ni de cada campo documentado.",
+      "pk": [
+        "case_id"
+      ],
+      "unique": [],
+      "columns": [
+        {
+          "name": "case_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Identidad estable del caso."
+        },
+        {
+          "name": "scope_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Ámbito del caso y de los activos relacionados."
+        },
+        {
+          "name": "opened_run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Solicitud o alerta que abrió el caso."
+        },
+        {
+          "name": "summary",
+          "type": "STRING",
+          "required": true,
+          "comment": "Necesidad y diagnóstico breve saneado; sin conversación completa."
+        },
+        {
+          "name": "owner_ref",
+          "type": "STRING",
+          "required": false,
+          "comment": "Responsable del tratamiento, no autoridad automática por existir en esta tabla."
+        },
+        {
+          "name": "status",
+          "type": "STRING",
+          "required": true,
+          "comment": "OPEN, INVESTIGATING, WAIT_DECISION, ASSIGNED, VERIFYING, CLOSED o REOPENED."
+        },
+        {
+          "name": "change_digest",
+          "type": "STRING",
+          "required": false,
+          "comment": "Huella canónica del cambio concreto y alcance; nula si sólo es una consulta."
+        },
+        {
+          "name": "treatment_json",
+          "type": "STRING",
+          "required": false,
+          "comment": "Tratamiento/versiones/evidencias y referencia al responsable o workflow; sin ejecución implícita."
+        },
+        {
+          "name": "closure_evidence_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Prueba necesaria para cerrar como resuelto, no sólo una aprobación."
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Apertura del caso."
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Última transición y prioridad para seguimiento."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "scope_id"
+          ],
+          "table": "AI_DG_SCOPE",
+          "target": [
+            "scope_id"
+          ]
+        },
+        {
+          "columns": [
+            "opened_run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ]
+        },
+        {
+          "columns": [
+            "closure_evidence_id"
+          ],
+          "table": "AI_DG_EVIDENCE",
+          "target": [
+            "evidence_id"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_CASE_ASSET",
+      "domain": "Casos y decisiones",
+      "row": 2,
+      "col": 1,
+      "grain": "Un activo afectado por un caso y la revisión examinada; un caso puede abarcar varias tablas y tareas.",
+      "pk": [
+        "case_id",
+        "asset_id"
+      ],
+      "unique": [],
+      "columns": [
+        {
+          "name": "case_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Caso relacionado."
+        },
+        {
+          "name": "asset_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Activo del mismo ámbito del caso."
+        },
+        {
+          "name": "assessed_version_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Versión examinada; debe pertenecer a asset_id."
+        },
+        {
+          "name": "impact_role",
+          "type": "STRING",
+          "required": true,
+          "comment": "SUBJECT, UPSTREAM, DOWNSTREAM o EXECUTOR; impacto potencial se distingue del observado."
+        },
+        {
+          "name": "evidence_id",
+          "type": "STRING",
+          "required": false,
+          "comment": "Prueba de esa participación; si falta, no se presenta como hecho verificado."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "case_id"
+          ],
+          "table": "AI_DG_CASE",
+          "target": [
+            "case_id"
+          ]
+        },
+        {
+          "columns": [
+            "asset_id"
+          ],
+          "table": "AI_DG_ASSET",
+          "target": [
+            "asset_id"
+          ]
+        },
+        {
+          "columns": [
+            "assessed_version_id"
+          ],
+          "table": "AI_DG_ASSET_VERSION",
+          "target": [
+            "version_id"
+          ]
+        },
+        {
+          "columns": [
+            "evidence_id"
+          ],
+          "table": "AI_DG_EVIDENCE",
+          "target": [
+            "evidence_id"
+          ],
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AI_DG_DECISION",
+      "domain": "Casos y decisiones",
+      "row": 2,
+      "col": 2,
+      "grain": "Una decisión humana inmutable sobre un tratamiento concreto; no participa en la documentación automática.",
+      "pk": [
+        "decision_id"
+      ],
+      "unique": [],
+      "columns": [
+        {
+          "name": "decision_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Identidad auditable de la decisión."
+        },
+        {
+          "name": "case_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Caso al que se limita la decisión."
+        },
+        {
+          "name": "run_id",
+          "type": "STRING",
+          "required": true,
+          "comment": "Intento autenticado que registró la decisión."
+        },
+        {
+          "name": "actor_ref",
+          "type": "STRING",
+          "required": true,
+          "comment": "Principal humano autenticado; la autoridad se verifica fuera de esta tabla."
+        },
+        {
+          "name": "decision",
+          "type": "STRING",
+          "required": true,
+          "comment": "APPROVE, REJECT o REVOKE; una espera no se registra como aprobación."
+        },
+        {
+          "name": "change_digest",
+          "type": "STRING",
+          "required": true,
+          "comment": "Debe coincidir con el cambio vigente del caso."
+        },
+        {
+          "name": "versions_digest",
+          "type": "STRING",
+          "required": true,
+          "comment": "Huella de revisiones y alcance aprobados; cambia si cambian los activos."
+        },
+        {
+          "name": "policy_version",
+          "type": "STRING",
+          "required": true,
+          "comment": "Política de autoridad vigente al decidir."
+        },
+        {
+          "name": "valid_until",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Caducidad; se revalida al derivar el cambio."
+        },
+        {
+          "name": "recorded_at",
+          "type": "TIMESTAMP",
+          "required": true,
+          "comment": "Registro UTC inmutable; revocaciones son nuevas decisiones."
+        }
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "case_id"
+          ],
+          "table": "AI_DG_CASE",
+          "target": [
+            "case_id"
+          ]
+        },
+        {
+          "columns": [
+            "run_id"
+          ],
+          "table": "AI_DG_RUN",
+          "target": [
+            "run_id"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -159,6 +159,7 @@ AUTONOMOUS_DATABASE_ID=${autonomous_database_id}
 AUTONOMOUS_RUNTIME_FILE=/etc/aidp-lab/autonomous/runtime.json
 AGENT_MODEL_ID=${agent_model_id}
 ARTIFACTS_BUCKET_NAME=${artifacts_bucket_name}
+GOVERNANCE_RUNTIME_MODE=${aidp_runtime_mode}
 OCI_CONFIG_FILE=/etc/aidp-lab/oci/config
 OBJECTSTORAGE_NAMESPACE=${objectstorage_namespace}
 BUCKET_NAME=${bucket_name}

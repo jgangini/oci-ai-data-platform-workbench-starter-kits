@@ -28,6 +28,12 @@ def _artifacts_bucket_name(value: str) -> str:
     return normalized
 
 
+def _governance_runtime_mode(value: str) -> str:
+    if value not in {"legacy", "v2_test"}:
+        raise ValueError("GOVERNANCE_RUNTIME_MODE must be legacy or v2_test")
+    return value
+
+
 _RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _RELEASE_SHA = re.compile(r"^[0-9a-f]{40}$")
 _SOURCE_REPOSITORY = "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
@@ -93,12 +99,14 @@ class Settings:
     gods_eye_view_mode: str | None = None
     gods_eye_view_enabled: bool = False
     portal_managed_modules: bool = False
+    governance_runtime_mode: str = "legacy"
     gods_eye_oci_text_model: str = "xai.grok-4.6"
     gods_eye_oci_voice_model: str = "google.gemini-2.5-flash-lite"
     gods_eye_oci_voice: str = "ara"
     local_identity_artifact_dir: str = ""
 
     def __post_init__(self):
+        _governance_runtime_mode(self.governance_runtime_mode)
         if self.gods_eye_view_mode not in {None, "local", "oci"}:
             raise ValueError("GODS_EYE_VIEW_MODE must be local or oci")
 
@@ -137,6 +145,7 @@ class Settings:
                 "/etc/aidp-lab/autonomous/runtime.json",
             ),
             agent_model_id=os.getenv("AGENT_MODEL_ID", ""),
+            governance_runtime_mode=_governance_runtime_mode(os.getenv("GOVERNANCE_RUNTIME_MODE", "legacy")),
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
             objectstorage_namespace=os.getenv("OBJECTSTORAGE_NAMESPACE", ""),
             bucket_name=os.getenv("BUCKET_NAME", ""),

@@ -258,11 +258,14 @@ def make_client(
     tmp_path: Path,
     mode: str = "active",
     deployment_mode: str = "laboratory",
+    *,
+    governance_runtime_mode: str = "legacy",
 ) -> TestClient:
     settings = Settings(
         admin_username="lab-admin",
         admin_password_hash=hash_secret("long-admin-password", iterations=1_000, salt=b"admin-test-salt"),
         deployment_mode=deployment_mode,
+        governance_runtime_mode=governance_runtime_mode,
         registration_code_hash=hash_secret("ABCD-1234", iterations=1_000, salt=b"code-test-salt"),
         operator_username="joel.ganggini@oracle.com",
         identity_domain_url="https://identity.example.test",

@@ -92,6 +92,16 @@ variable "portal_managed_modules" {
   default     = true
 }
 
+variable "aidp_runtime_mode" {
+  description = "Governance installation for a fresh tenant: legacy or the unaccepted V2 TEST candidate. Does not migrate an existing installation."
+  type        = string
+  default     = "legacy"
+  validation {
+    condition     = contains(["legacy", "v2_test"], var.aidp_runtime_mode)
+    error_message = "aidp_runtime_mode must be legacy or v2_test."
+  }
+}
+
 variable "enabled_vm_modules" {
   description = "Internal module state managed by the central portal, not a deployment form input."
   type        = set(string)
