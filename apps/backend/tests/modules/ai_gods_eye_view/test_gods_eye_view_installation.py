@@ -209,7 +209,37 @@ def test_unrelated_update_blocks_apply_and_foreign_active_job_blocks_stack_edit(
     assert not other.updates and not other.creates
 
 
-@pytest.mark.parametrize("field,value", [("application_commit_sha", "b" * 40), ("compartment_id", "other"),
+def test_updated_portal_installs_module_from_original_infrastructure_revision():
+    install, manager = installer(), Manager()
+    install.settings = replace(install.settings, application_commit_sha="b" * 40)
+    install.provision(manager, install.receipt(), time.monotonic() + 10)
+    assert manager.creates == ["PLAN", "APPLY"]
+    assert manager.variables == {"source_commit_sha": "a" * 40, "keep": "unchanged",
+                                 "portal_managed_modules": "true", "enabled_vm_modules": '["gods_eye_view"]'}
+    assert manager.archive == ARCHIVE
+
+
+def test_updated_portal_rejects_changed_infrastructure_revision_before_any_write():
+    install, manager = installer(), Manager()
+    install.settings = replace(install.settings, application_commit_sha="b" * 40)
+    manager.variables["source_commit_sha"] = "b" * 40
+    with pytest.raises(ValueError, match="identity or source"):
+        install.provision(manager, install.receipt(), time.monotonic() + 10)
+    assert not manager.updates and not manager.creates
+
+
+@pytest.mark.parametrize("revision", [None, "", "development", "a" * 39, "a" * 41, "A" * 40, "g" * 40])
+def test_invalid_receipt_source_revision_never_updates_stack(revision):
+    install, manager = installer(), Manager()
+    objects = install.aidp_factory().object_storage
+    objects.put_object("namespace", "artifacts", RECEIPT_KEY,
+                       json.dumps({**RECEIPT, "source_commit_sha": revision}).encode())
+    with pytest.raises(ValueError, match="receipt"):
+        install.provision(manager, install.receipt(), time.monotonic() + 10)
+    assert not manager.updates and not manager.creates
+
+
+@pytest.mark.parametrize("field,value", [("compartment_id", "other"),
                                       ("gods_eye_control_bucket", "other"), ("aidp_platform_id", "other"), ("agent_model_id", "other")])
 def test_receipt_cannot_be_reused_in_another_installation(field, value):
     install = installer()

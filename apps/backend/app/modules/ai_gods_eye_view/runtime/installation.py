@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import re
 import time
 from uuid import uuid4, uuid5, NAMESPACE_URL
 
@@ -100,16 +101,19 @@ class ModuleInstallation:
         client, settings = self.aidp_factory(), self.settings
         response = client.object_storage.get_object(settings.objectstorage_namespace, settings.artifacts_bucket_name, RECEIPT_KEY)
         receipt = json.loads(response.data.content)
-        expected = {"schema_version": 1, "source_commit_sha": settings.application_commit_sha,
+        # Portal updates do not change the original stack source, verified by stack().
+        expected = {"schema_version": 1,
                     "region": settings.aidp_region, "compartment_id": settings.compartment_id,
                     "platform_id": settings.aidp_platform_id, "namespace": settings.objectstorage_namespace,
                     "artifacts_bucket": settings.artifacts_bucket_name, "agent_model_id": settings.agent_model_id}
         if (not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in expected.items())
+                or not isinstance(receipt.get("source_commit_sha"), str)
+                or not re.fullmatch(r"[0-9a-f]{40}", receipt["source_commit_sha"])
                 or receipt.get("buckets", {}).get("gold") != settings.gods_eye_control_bucket
                 or receipt.get("buckets", {}).get("landing") != settings.bucket_name
                 or any(not isinstance(receipt.get(key), str) or not receipt[key] for key in
                        ("stack_id", "project_id", "deployment_id", "workspace_key", "catalog_name", "agent_model_id", "terraform_config_sha256"))):
-            raise ValueError("The installation receipt does not match this portal and release")
+            raise ValueError("The installation receipt does not match this portal installation")
         return receipt
 
     def stack(self, manager, receipt):
