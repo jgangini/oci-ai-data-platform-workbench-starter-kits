@@ -195,7 +195,7 @@ test("application settings report releases and request only the fixed VM update 
   assert.match(source, /\/api\/admin\/application/);
   assert.match(source, /\/api\/admin\/application\/update/);
   assert.match(source, /JSON\.stringify\(\{ operation_id: operationId \}\)/);
-  assert.match(source, /Update from GitHub/);
+  assert.match(source, /confirmLabel="Accept"/);
   assert.match(source, /Installed release/);
   assert.match(source, /<th scope="col">Scope<\/th>\s*<th scope="col">Version<\/th>\s*<th scope="col">Updated<\/th>/);
   assert.match(source, /Existing participant installations remain unchanged/);

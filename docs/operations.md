@@ -37,6 +37,8 @@ Un usuario solo lector no necesita workspace ni permisos developer AIDP. Añadir
 
 ## Actualizar imágenes
 
+En **Settings → Application**, **Update** abre la confirmación y **Accept** inicia la actualización. El panel muestra un único aviso: prioriza el error de la acción actual, después el resultado de la operación y finalmente los avisos de consulta de releases. Un fallo guardado sigue disponible tras recargar; publicar una release nueva no convierte una actualización fallida en exitosa.
+
 El [workflow de release](../.github/workflows/release.yml) y el [updater VM](../scripts/release/vm_release_updater.py) exigen release estable nueva del repositorio confiable, imagen `linux/amd64`, manifiesto/checksum y comprobación del candidato en loopback. Conservar estado persistente y la imagen saludable anterior según el updater. El contenedor de aplicación no recibe Docker socket ni una interfaz general de comandos del host.
 
 Actualizar la aplicación cambia paquetes disponibles para instalaciones/redeploy posteriores; no migra automáticamente kits, jobs o módulos activos. Comparar versiones instaladas/incluidas y ejecutar la operación explícita correspondiente. Usar únicamente assets y rutas canónicos de la versión actual; los clientes y formatos retirados se rechazan. Ver [Contratos vigentes](contracts.md).

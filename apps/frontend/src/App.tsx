@@ -784,7 +784,8 @@ function LabManagerModal({
   );
 }
 
-const governanceServices = ['AIDP Workbench', 'Object Storage', 'Spark Compute', 'Master Catalog', 'AI Compute'];
+const governanceServices = ['AIDP Workbench', 'Object Storage', 'Spark Compute', 'Master Catalog', 'AI Compute', 'Memory', 'Workflow'];
+const marketServices = ['AIDP Workbench', 'Object Storage', 'AI Compute', 'Memory', 'MCP'];
 const governancePhases: Record<string, string> = {
   verify: 'Object Storage', control: 'Object Storage · Spark Compute', sync: 'Spark Compute · Master Catalog',
   agent: 'AI Compute', permissions: 'AIDP Workbench', activation: 'Spark Compute', steady: 'AIDP Workbench', cleanup: 'Removing module resources…',
@@ -1068,9 +1069,9 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
             </div>
             <p className="registration-progress-detail" role={market && marketNeedsAttention && !moduleOperating ? 'alert' : undefined}>
               {market ? marketNotice || moduleProgress?.message || `${marketCompletedSteps} of ${marketStepKeys.length} steps complete.` : moduleProgress?.message || 'Updating the shared module.'}</p>
-            <p className="registration-progress-detail">{market && !moduleOperating
-              ? governanceModule?.installed ? 'Installed with research and schedules paused.' : 'Resume installation continues from this saved step, keeping the same operation and resources.'
-              : 'Close hides this window while the operation continues in Settings. After a page reload or navigation, reopen it and select an administrator to resume the saved operation.'}</p>
+            {market && !moduleOperating && <p className="registration-progress-detail">{governanceModule?.installed
+              ? 'Installed with research and schedules paused.'
+              : 'Resume installation continues from this saved step, keeping the same operation and resources.'}</p>}
           </div>}
           {!moduleOperating && (!usersLoaded || (!governanceModule && !moduleLoadError) ? <LoadingIndicator label="Loading module settings…" /> : <>
             {marketShowProgress && (!governanceModule?.administrator_id || !moduleManagerUser) && <p className="governance-module-note">Select the administrator who started this operation to resume. Its saved resources and settings are retained.</p>}
@@ -1095,7 +1096,7 @@ function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId 
             </div>}
 
             <ul className="module-service-tags" aria-label="Services">
-              {(market ? ['AIDP Workbench', 'Object Storage', 'AI Compute'] : governanceServices).map(service => <li className="badge inactive" key={service}>{service}</li>)}
+              {(market ? marketServices : governanceServices).map(service => <li className="badge inactive" key={service}>{service}</li>)}
             </ul>
           </>)}
           {(usersError || moduleLoadError) && <>
@@ -2844,22 +2845,15 @@ function ApplicationReleaseSettings({
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
   );
-  const statusLabel = operationRunning
-    ? "Updating"
-    : release?.operation?.status === "failed"
-      ? "Update failed"
-      : release?.update_available
-        ? "Update available"
-        : release?.latest_release
-          ? null
-          : "Check unavailable";
+  const operationMessage = showOperationMessage || operationRunning || release?.operation?.status === "failed"
+    ? release?.operation?.message || (operationRunning ? "Updating the application."
+      : release?.operation?.status === "failed" ? "The application update failed." : "")
+    : "";
+  const noticeMessage = error || operationMessage || release?.update_check_error;
+  const noticeFailed = Boolean(error || operationMessage && release?.operation?.status === "failed");
   const packages = [...(release?.packages || [])].sort((a, b) =>
     packageVersionTimestamp(b.updated_at) - packageVersionTimestamp(a.updated_at) ||
     a.display_name.localeCompare(b.display_name, "en") || a.package_id.localeCompare(b.package_id, "en"));
-  const marketInstallationMessage = marketModule?.installed ? 'Installed · Research paused'
-    : marketModule?.status === 'installing' ? 'Installation in progress'
-    : marketModule?.status === 'awaiting_action' ? 'Action required'
-    : marketModule?.status === 'error' ? 'Installation needs attention' : null;
   return (
     <section className="application-release application-version" aria-busy={busy}>
       <header className="application-release-heading">
@@ -2868,9 +2862,6 @@ function ApplicationReleaseSettings({
           <h2>Application version</h2>
           <p>Update the VM in place from the latest immutable release without reinstalling it.</p>
         </div>
-        {statusLabel && <span className={`gods-eye-view-mode release-state ${release?.update_available || operationRunning ? "update" : "current real"}`}>
-          {statusLabel}
-        </span>}
       </header>
       {release ? (
         <>
@@ -2898,19 +2889,15 @@ function ApplicationReleaseSettings({
               <dd><a href={release.repository} target="_blank" rel="noopener noreferrer">Official repository</a></dd>
             </div>
           </dl>
-          {release.update_check_error && (
-            <p className="release-warning" role="status">{release.update_check_error}</p>
-          )}
-          {showOperationMessage && release.operation?.message && (
+          {noticeMessage && (
             <p
-              className={`release-operation ${release.operation.status === "failed" ? "error" : ""}`}
-              role={release.operation.status === "failed" ? "alert" : "status"}
+              className={noticeFailed ? "release-operation error" : operationMessage ? "release-operation" : "release-warning"}
+              role={noticeFailed ? "alert" : "status"}
               aria-live="polite"
             >
-              {release.operation.message}
+              {noticeMessage}
             </p>
           )}
-          {error && <p className="release-operation error" role="alert">{error}</p>}
           {!release.updater_available && (
             <p className="settings-help">In-place updates are enabled only on the deployed application VM.</p>
           )}
@@ -2930,7 +2917,7 @@ function ApplicationReleaseSettings({
               <tbody>
                 {packages.map((item) => (
                   <tr key={item.package_id}>
-                    <td><strong>{item.display_name}</strong>{item.package_id === 'ai_market_intelligence' && marketInstallationMessage && <small className="module-installation-pending">{marketInstallationMessage}</small>}</td>
+                    <td><strong>{item.display_name}</strong></td>
                     <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
                     <td>{item.bundled_version}</td>
                     <td>{item.updated_at ? <time dateTime={item.updated_at} title={`Last change to this package version · ${displayTimeZone}`}>{packageVersionDate(item.updated_at, displayTimeZone)}</time> : "Not available"}</td>
@@ -3458,7 +3445,7 @@ function AdminSettings() {
               {configuringModule && <a className="module-return" href="/admin/settings#application"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>Return</a>}
               {!configuringModule && applicationRelease && (applicationRelease.update_available || (applicationRelease.operation && applicationUpdateStates.has(applicationRelease.operation.status))) &&
                 <button type="button" className="settings-save application-update" disabled={!applicationRelease.updater_available || releaseBusy} onClick={() => setConfirmReleaseUpdate(true)}>
-                  <RefreshIcon />{releaseBusy ? "Updating…" : "Update from GitHub"}
+                  <InstallIcon />{releaseBusy ? "Updating…" : "Update"}
                 </button>}
             </div>
             {configuringModule ? <GodsEyeViewAdmin api={api} timeZone={savedTimeZone} searchIcon={<SearchIcon />} refreshIcon={<RefreshIcon />} viewerUrlControl={
@@ -3553,7 +3540,7 @@ function AdminSettings() {
         kind="question"
         title="Update application?"
         description="Update this VM to the latest published release and its bundled kit versions? Existing participant installations remain unchanged until their Update or Redeploy action is used."
-        confirmLabel="Update application"
+        confirmLabel="Accept"
         onClose={() => setConfirmReleaseUpdate(false)}
         onConfirm={() => void updateApplication()}
       />

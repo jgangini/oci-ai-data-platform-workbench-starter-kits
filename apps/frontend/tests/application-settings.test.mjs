@@ -301,8 +301,10 @@ test('production registration settings expose no code save action', async t => {
 
 test('application updates require confirmation, preserve the warning and cancel without dispatching', async t => {
   const h = await harness(t);
+  assert.equal(text(h.find('button', props => props.className === 'settings-save application-update')), 'Update');
   assert.equal(h.dialog().props.open, false); h.update();
   assert.equal(h.dialog().props.open, true);
+  assert.equal(h.dialog().props.confirmLabel, 'Accept');
   assert.match(h.dialog().props.description, /latest published release/);
   assert.ok(h.dialog().props.description.includes('Existing participant installations remain unchanged until their Update or Redeploy action is used.'));
   assert.equal(h.mutations().length, 0);
@@ -749,7 +751,7 @@ for (const installed of [false, true]) test(`Governance ${installed ? 'redeploy'
   assert.match(text(h.nodes()[0]), /shared OCI credentials are retained/);
   assert.ok(!h.nodes().some(node => node.props?.className === 'governance-module-note kit-version-copy'));
   assert.equal(h.find('SearchableCombobox').props.placeholder, 'Select an administrator');
-  assert.match(text(h.find('ul', props => props['aria-label'] === 'Services')), /AIDP WorkbenchObject StorageSpark ComputeMaster CatalogAI Compute/);
+  assert.match(text(h.find('ul', props => props['aria-label'] === 'Services')), /AIDP WorkbenchObject StorageSpark ComputeMaster CatalogAI ComputeMemoryWorkflow/);
   assert.equal(text(h.find('span', props => props.className.startsWith('lab-state'))), installed ? 'active' : 'not installed');
   assert.equal(action(h, label).props.disabled, true);
   assert.ok(!h.find('SearchableCombobox').props.options.some(option => option.value === 'participant'));
@@ -859,6 +861,7 @@ test('closing Governance hides its monitor without aborting reconciliation and i
   const props = { initialUserId: 'operator', onStatusChange: state => statuses.push(state) };
   const h = await managerHarness(t, governance, props);
   h.act(() => action(h, 'Deploy').props.onClick());
+  assert.ok(!text(h.nodes()[0]).includes('Close hides this window'));
   const request = h.mutations()[0];
   h.act(() => { action(h, 'Close').props.onClick(); props.visible = false; });
   assert.equal(h.closed(), 1); assert.equal(h.appRoot.inert, false);
@@ -1115,12 +1118,31 @@ for (const [state, expected] of [
   [{ update_available: true }, 'Update available'],
   [{ operation: { status: 'failed' } }, 'Update failed'],
   [{ operation: { status: 'building' } }, 'Updating'],
-]) test(`release badge only shows actionable state: ${expected || 'none'}`, async t => {
+]) test(`release state has no redundant badge: ${expected || 'none'}`, async t => {
   const h = await harness(t, { ...release, ...state });
   const card = h.find('ApplicationReleaseSettings');
   const flatten = value => [value, ...[value?.props?.children].flat(Infinity).filter(Boolean).flatMap(child => typeof child === 'object' ? flatten(child) : [])];
   const badge = flatten(card.type(card.props)).find(node => node?.props?.className?.includes('release-state'));
-  assert.equal(badge ? text(badge) : null, expected);
+  assert.equal(badge, undefined);
+});
+
+for (const scenario of [
+  { name: 'the same failure from polling and the saved operation', error: 'Download failed; previous release restored.',
+    operation: { status: 'failed', message: 'Download failed; previous release restored.' }, expected: 'Download failed; previous release restored.' },
+  { name: 'a current request failure alongside an older failure', error: 'Unable to read the current update status.',
+    operation: { status: 'failed', message: 'Earlier update failed.' }, expected: 'Unable to read the current update status.' },
+  { name: 'a saved failure after reload', error: '',
+    operation: { status: 'failed', message: 'Download failed; previous release restored.' }, expected: 'Download failed; previous release restored.' },
+  { name: 'a failed operation with no detail', error: '', operation: { status: 'failed' }, expected: 'The application update failed.' },
+]) test(`one update error is rendered for ${scenario.name}`, async t => {
+  const h = await harness(t);
+  const card = h.find('ApplicationReleaseSettings');
+  const nodes = flattenElements(card.type({ ...card.props, error: scenario.error,
+    release: { ...release, operation: scenario.operation, update_check_error: 'Registry check unavailable.' } }));
+  const alerts = nodes.filter(node => node?.props?.role === 'alert');
+  assert.equal(alerts.length, 1);
+  assert.equal(text(alerts[0]), scenario.expected);
+  assert.equal(nodes.filter(node => ['release-operation error', 'release-warning'].includes(node?.props?.className)).length, 1);
 });
 
 test('application update keeps the tab and reading position when the new version reloads', async t => {
@@ -1391,7 +1413,7 @@ for (const url of ['https://outside.test/workbench', 'http://fixture.datalake.oc
 test('Market setup is explicit, sends a secret only to its own API and updates real phase checks', async t => {
   const h = await marketHarness(t);
   assert.equal(h.mutations().length, 0);
-  assert.equal(text(h.find('ul', props => props['aria-label'] === 'Services')), 'AIDP WorkbenchObject StorageAI Compute');
+  assert.equal(text(h.find('ul', props => props['aria-label'] === 'Services')), 'AIDP WorkbenchObject StorageAI ComputeMemoryMCP');
   const docs = h.find('a', props => props.href === 'https://docs.apify.com/integrations/api#api-token');
   assert.equal(docs.props.rel, 'noopener noreferrer');
   assert.match(text(h.find('label', props => props.className === 'market-bearer-field')), /Settings → API & Integrations/);
@@ -1587,12 +1609,12 @@ for (const url of [undefined, 'https://outside.test/chat/fixture', 'javascript:a
   });
 }
 
-for (const [status, message] of [['installing', 'Installation in progress'], ['awaiting_action', 'Action required'], ['error', 'Installation needs attention']]) {
-  test(`Application keeps the actionable Market status: ${status}`, async t => {
+for (const status of ['installing', 'awaiting_action', 'error']) {
+  test(`Application omits the duplicate Market row label: ${status}`, async t => {
     const h = await harness(t, { ...release, packages: [marketPackage] });
     const card = h.find('ApplicationReleaseSettings');
     const nodes = flattenElements(card.type({ ...card.props, marketModule: { ...marketModule, status } }));
-    assert.equal(text(nodes.find(node => node?.props?.className === 'module-installation-pending')), message);
+    assert.equal(nodes.some(node => node?.props?.className === 'module-installation-pending'), false);
     assert.equal(h.mutations().length, 0);
   });
 }
