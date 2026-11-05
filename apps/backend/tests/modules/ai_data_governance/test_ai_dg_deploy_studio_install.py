@@ -269,6 +269,44 @@ def test_workflow_readback_rejects_nonempty_compute_overrides(target, field, val
     assert not job_matches(actual, expected)
 
 
+def native_full_workflow_readback():
+    from app.modules.ai_data_governance.workflow import governance_workflow
+    expected = governance_workflow(job_name=JOB_NAME, cluster_key=SPARK, documentation_agent_key=DOC)
+    expected['schedule'] = {'quartzCronExpression': '0 0/30 * * * ?', 'timezoneId': 'UTC', 'pauseStatus': 'PAUSED'}
+    actual = deepcopy(expected)
+    actual['jobClusters'][0].update(clusterName=None, newCluster=None)
+    for task in actual['tasks']:
+        if 'cluster' in task:
+            task['cluster'].update(clusterName=None, newCluster=None)
+        for dependency in task['dependsOn']:
+            dependency['outcome'] = None
+    return actual, expected
+
+
+def test_full_workflow_readback_accepts_observed_empty_dependency_outcomes_without_mutation():
+    actual, expected = native_full_workflow_readback()
+    original = deepcopy(actual)
+    assert job_matches(actual, expected)
+    assert actual == original
+
+
+@pytest.mark.parametrize('change', ['outcome', 'empty_outcome', 'unknown_field', 'foreign', 'missing', 'duplicate',
+                                   'task_order', 'run_condition', 'replica_condition'])
+def test_full_workflow_readback_preserves_dependency_and_run_conditions(change):
+    actual, expected = native_full_workflow_readback()
+    dependency = actual['tasks'][1]['dependsOn'][0]
+    if change == 'outcome': dependency['outcome'] = 'SUCCESS'
+    elif change == 'empty_outcome': dependency['outcome'] = ''
+    elif change == 'unknown_field': dependency['unrecognized'] = None
+    elif change == 'foreign': dependency['taskKey'] = 'foreign'
+    elif change == 'missing': actual['tasks'][1]['dependsOn'] = []
+    elif change == 'duplicate': actual['tasks'][1]['dependsOn'].append(deepcopy(dependency))
+    elif change == 'task_order': actual['tasks'][1:3] = reversed(actual['tasks'][1:3])
+    elif change == 'run_condition': actual['tasks'][1]['runIf'] = 'ALL_DONE'
+    else: actual['tasks'][3]['runIf'] = 'ALL_SUCCESS'
+    assert not job_matches(actual, expected)
+
+
 @pytest.mark.parametrize('drift', ['missing', 'key', 'root', 'missing_root', 'duplicate'])
 def test_recorded_agent_drift_does_not_write_sources_or_change_the_installation_receipt(drift):
     from unittest.mock import Mock

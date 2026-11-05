@@ -28,6 +28,13 @@ def _cluster_matches(actual, expected):
             if key not in {'clusterName', 'newCluster'} or value is not None} == expected
 
 
+def _dependencies_match(actual, expected):
+    if not isinstance(actual, list) or not isinstance(expected, list) or len(actual) != len(expected):
+        return False
+    return all(isinstance(a, dict) and {key: value for key, value in a.items()
+               if key != 'outcome' or value is not None} == e for a, e in zip(actual, expected, strict=True))
+
+
 def job_matches(actual, expected):
     if not isinstance(actual, dict):
         return False
@@ -39,8 +46,9 @@ def job_matches(actual, expected):
             or not all(_cluster_matches(a, e) for a, e in zip(clusters, expected['jobClusters'], strict=True))):
         return False
     tasks = actual.get('tasks')
+    field_matchers = {'cluster': _cluster_matches, 'dependsOn': _dependencies_match}
     return bool(isinstance(tasks, list) and len(tasks) == len(expected['tasks']) and all(
-        isinstance(a, dict) and all(_cluster_matches(a.get(k), v) if k == 'cluster' else a.get(k) == v
+        isinstance(a, dict) and all(field_matchers[k](a.get(k), v) if k in field_matchers else a.get(k) == v
                                    for k, v in e.items())
         for a, e in zip(tasks, expected['tasks'], strict=True)))
 

@@ -28,7 +28,7 @@ En Settings → Application se selecciona un administrador AIDP verificado y se 
 
 La preparación de archivos precede al registro de intención de crear cada agente. Una espera de publicación de archivos permite reanudar la misma operación; una respuesta incierta después de enviar el POST mantiene el bloqueo para evitar duplicados. El readback compara código y contenido bruto byte a byte; cuando la API devuelve un objeto JSON ya interpretado, compara su contenido JSON conservando tipos y valores, sin exigir el orden de claves ni los espacios originales.
 
-La verificación del workflow admite únicamente los campos `clusterName` y `newCluster` con valor `null` que AIDP añade a las referencias de compute. Conserva la comparación de claves, número y orden de tareas, dependencias, condiciones de ejecución, reintentos, tiempos y horario. Una configuración de compute adicional no vacía se considera deriva y bloquea la ejecución.
+La verificación del workflow admite los campos `clusterName` y `newCluster` con valor `null` que AIDP añade a las referencias de compute, y `outcome: null` en las dependencias. Conserva la comparación de claves, número y orden de tareas y dependencias, condiciones de ejecución, reintentos, tiempos y horario. Un override no vacío de compute o de resultado de dependencia, o un campo de dependencia desconocido, se considera deriva y bloquea la ejecución.
 
 El agente consultivo requiere `deployment_stage=TEST`. La instalación no acredita calidad semántica, permisos de un segundo usuario ni recuperación real. Los accesos de producción y las operaciones de mantenimiento no aceptadas permanecen bloqueados. Cambiar carpetas locales no adopta ni migra una instalación remota.
 
