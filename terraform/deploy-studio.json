@@ -42,27 +42,6 @@
   "form": {
     "fields": [
       {
-        "name": "aidp_runtime_mode",
-        "label": "Governance installation",
-        "type": "select",
-        "required": false,
-        "default": "legacy",
-        "group": "application_vm",
-        "options": [
-          {"value": "legacy", "label": "Current stable module"},
-          {"value": "v2_test", "label": "Governance V2 · TEST candidate"}
-        ]
-      },
-      {
-        "name": "ssh_allowed_cidr",
-        "label": "SSH allowed source CIDR (optional)",
-        "type": "text",
-        "required": false,
-        "default": "",
-        "max_length": 18,
-        "group": "application_vm"
-      },
-      {
         "name": "admin_username",
         "label": "Username",
         "type": "text",

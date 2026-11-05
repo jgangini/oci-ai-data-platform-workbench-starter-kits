@@ -1,4 +1,4 @@
-"""The Deploy Studio selector reaches the existing application environment."""
+"""Deploy Studio uses the stable default while direct Terraform keeps compatibility."""
 
 import json
 from pathlib import Path
@@ -12,13 +12,12 @@ import pytest
 ROOT = Path(__file__).parents[1]
 
 
-def test_runtime_selector_manifest_and_cloud_init_share_the_declared_input():
+def test_studio_omits_runtime_selector_and_preserves_terraform_default_and_wiring():
     manifest = json.loads((ROOT / "deploy-studio.json").read_text(encoding="utf-8"))
     fields = {field["name"]: field for field in manifest["form"]["fields"]}
-    field = fields["aidp_runtime_mode"]
-    assert field["type"] == "select" and not field["required"]
-    assert field["default"] == "legacy"
-    assert [option["value"] for option in field["options"]] == ["legacy", "v2_test"]
+    assert "aidp_runtime_mode" not in fields
+    variables = (ROOT / "b_variables.tf").read_text(encoding="utf-8")
+    assert re.search(r'variable\s+"aidp_runtime_mode"\s*\{.*?default\s*=\s*"legacy"', variables, re.DOTALL)
     assert "governance_runtime_mode" not in fields
     compute = (ROOT / "g_oci_core_instance.tf").read_text(encoding="utf-8")
     assert re.search(r"\baidp_runtime_mode\s*=\s*var\.aidp_runtime_mode\b", compute)

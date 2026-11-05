@@ -61,8 +61,9 @@ def test_deploy_studio_manifest_contract() -> None:
     assert "preferred_vm_shape" not in fields
     assert "vm_ocpus" not in fields
     assert "vm_memory_gbs" not in fields
-    assert fields["ssh_allowed_cidr"]["required"] is False
-    assert fields["ssh_allowed_cidr"]["default"] == ""
+    assert "ssh_allowed_cidr" not in fields
+    assert "aidp_runtime_mode" not in fields
+    assert re.search(r'variable\s+"ssh_allowed_cidr"\s*\{.*?default\s*=\s*""', variables, re.DOTALL)
     assert "ssh-private-key.pem" in manifest["artifacts"]
     assert "ssh-private-key.pem" in manifest["email"]["attachments"]
     assert fields["admin_password"]["transform"] == "pbkdf2_sha256"
