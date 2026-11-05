@@ -29,13 +29,17 @@ def flow(tmp_path, request):
         "clientType": "public", "allowedGrants": ["authorization_code"], "redirectUris": [REDIRECT]},
         "discovery": {"issuer": DOMAIN, "authorization_endpoint": DOMAIN + "/oauth2/v1/authorize",
                       "token_endpoint": DOMAIN + "/oauth2/v1/token", "jwks_uri": DOMAIN + "/admin/v1/SigningCert/jwk"},
-        "requests": []}
+        "requests": [], "identity_requests": [], "public_jwks_status": 200, "signed_jwks_status": 200}
 
     class Identity:
         async def _gods_eye_view_group(self):
             return state["reader_group"]
 
         async def _request(self, method, path, **kwargs):
+            state["identity_requests"].append((method, path))
+            if method == "GET" and path == "/admin/v1/SigningCert/jwk":
+                return httpx.Response(state["signed_jwks_status"], json={"keys": state["keys"]},
+                                      request=httpx.Request(method, DOMAIN + path))
             assert method == "GET" and path == "/admin/v1/Apps"
             assert kwargs["params"]["filter"] == f'name eq "{CLIENT_ID}"'
             return httpx.Response(200, json={"totalResults": 1, "Resources": [state["app"]]},
@@ -53,7 +57,7 @@ def flow(tmp_path, request):
         if request.url.path == "/.well-known/openid-configuration":
             return httpx.Response(200, json=state["discovery"])
         if request.url.path == "/admin/v1/SigningCert/jwk":
-            return httpx.Response(200, json={"keys": state["keys"]})
+            return httpx.Response(state["public_jwks_status"], json={"keys": state["keys"]})
         assert request.url.path == "/oauth2/v1/token"
         state["exchange"] = parse_qs(request.content.decode())
         claims = {"iss": DOMAIN, "aud": CLIENT_ID, "iat": int(time.time()), "exp": int(time.time()) + 300,
@@ -107,6 +111,44 @@ def test_member_login_reader_permission_revocation_and_replay(flow):
     before = len(state["requests"])
     assert finish(flow, query).headers["location"] == "/viewer/login?error=sign_in_failed"
     assert len(state["requests"]) == before
+
+
+def test_login_uses_authenticated_signing_keys_when_public_access_is_disabled(flow):
+    client, _, state = flow
+    state["public_jwks_status"] = 401
+    query = start(flow)
+    assert finish(flow, query).headers["location"] == "/gods-eye-view/"
+    assert state["identity_requests"].count(("GET", "/admin/v1/SigningCert/jwk")) == 1
+    assert all(request.url.path != "/admin/v1/SigningCert/jwk" for request in state["requests"])
+    assert client.cookies.get("__Host-aidp_lab_admin")
+
+
+@pytest.mark.parametrize("status_code", [401, 403, 500])
+def test_authenticated_signing_key_failure_never_creates_a_session(flow, status_code):
+    client, _, state = flow
+    state.update(public_jwks_status=401, signed_jwks_status=status_code)
+    assert finish(flow, start(flow)).headers["location"] == "/viewer/login?error=sign_in_failed"
+    assert state["identity_requests"].count(("GET", "/admin/v1/SigningCert/jwk")) == 1
+    assert not client.cookies.get("__Host-aidp_lab_admin")
+
+
+def test_discovery_cannot_redirect_authenticated_signing_key_lookup(flow):
+    flow[2]["discovery"]["jwks_uri"] = DOMAIN + "/admin/v1/Users"
+    assert flow[0].get("/api/auth/oci/login").status_code == 503
+    assert flow[2]["identity_requests"] == [("GET", "/admin/v1/Apps")]
+
+
+def test_stale_tab_callback_preserves_the_new_login_cookie_and_transaction(flow):
+    client, _, state = flow
+    old = start(flow)
+    current = start(flow)
+    before = len(state["requests"])
+    rejected = finish(flow, old)
+    assert rejected.headers["location"] == "/viewer/login?error=sign_in_failed"
+    assert "set-cookie" not in rejected.headers
+    assert len(state["requests"]) == before
+    assert finish(flow, current).headers["location"] == "/gods-eye-view/"
+    assert client.cookies.get("__Host-aidp_lab_admin")
 
 
 @pytest.mark.parametrize("flow", [True], indirect=True)

@@ -17,6 +17,7 @@ from app.services.oci.contracts import IdentityPending
 from app.security import issue_session
 
 CALLBACK_PATH = "/api/auth/oci/callback"
+SIGNING_KEYS_PATH = "/admin/v1/SigningCert/jwk"
 LOGIN_TTL = 300
 
 
@@ -97,6 +98,8 @@ def mount_viewer_login(app, cookie_name, client_ip):
                 discovery = response.json()
             endpoints = {name: _domain_endpoint(discovery[name], settings.identity_domain_url)
                          for name in ("authorization_endpoint", "token_endpoint", "jwks_uri")}
+            if endpoints["jwks_uri"] != settings.identity_domain_url.rstrip("/") + SIGNING_KEYS_PATH:
+                raise ValueError("Invalid Identity Domains signing keys endpoint")
             if not isinstance(discovery["issuer"], str) or urlsplit(discovery["issuer"]).scheme != "https":
                 raise ValueError("Invalid issuer")
         except HTTPException:
@@ -144,10 +147,10 @@ def mount_viewer_login(app, cookie_name, client_ip):
                     "redirect_uri": flow["redirect"], "code_verifier": flow["verifier"]})
                 result.raise_for_status()
                 token = result.json()["id_token"]
-                result = await client.get(flow["endpoints"]["jwks_uri"])
+                identity = app.state.identity_factory()
+                result = await identity._request("GET", SIGNING_KEYS_PATH)
                 result.raise_for_status()
                 claims = _identity_claims(token, result.json(), flow["discovery"], flow["client_id"], flow["nonce"])
-            identity = app.state.identity_factory()
             user_id = claims.get("user_id")
             if not user_id:
                 matches = await identity._users_matching(f"userName eq {_scim_literal(claims['sub'])}")
@@ -166,7 +169,8 @@ def mount_viewer_login(app, cookie_name, client_ip):
         except (httpx.HTTPError, requests.exceptions.RequestException, jwt.PyJWTError, ValueError, KeyError, TypeError, AttributeError, OverflowError, IdentityPending):
             pass
         response = RedirectResponse("/gods-eye-view/" if subject else "/viewer/login?error=" + error, status_code=302)
-        response.delete_cookie(flow_cookie, secure=settings.cookie_secure, httponly=True, samesite="lax", path="/")
+        if flow is not None:
+            response.delete_cookie(flow_cookie, secure=settings.cookie_secure, httponly=True, samesite="lax", path="/")
         if subject:
             response.set_cookie(cookie_name, issue_session(app.state.session_key, subject), max_age=28_800,
                                 secure=settings.cookie_secure, httponly=True, samesite="strict", path="/")
