@@ -54,6 +54,8 @@ Se administran en **Settings → Application**, separados de Users:
 - [AI Market Intelligence](modules/ai-market-intelligence.md): agente TEST pausado, sin tablas ni workflows Spark propios; investigación y aceptación nativa pendientes.
 - [God’s Eye View](modules/ai-gods-eye-view.md): visor privado, computes y workflows propios; administración de fuentes/identidad después de instalar.
 
+El agente de God’s Eye View se crea y publica con retención de mensajes activada durante siete días y acción `DELETE_FIFO`. El instalador envía la política completa y comprueba su lectura nativa junto con el endpoint. Fuente: [configuración de retención de Oracle](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aiwap/op-aidataplatforms-aidataplatformid-workspaces-workspacekey-agents-post.html).
+
 ### Instalación de la VM del visor
 
 En una base preparada para módulos, revisar recursos/costos y confirmar Install. El instalador verifica stack original, fuente inmutable, recibo y variables antes de generar el plan. Solo admite creación de VM visor, dynamic group y dos políticas de alcance acotado, además de no-ops existentes. Cualquier escritura ajena, deriva de seguridad/configuración o cambio de variables bloquea APPLY; no crea otro stack ni VM no rastreada. Después sigue bootstrap AIDP y verificación nativa. Fuente: [lista permitida y plan](../apps/backend/app/modules/ai_gods_eye_view/runtime/installation.py).

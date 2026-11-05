@@ -24,7 +24,7 @@ from app.modules.ai_gods_eye_view.runtime.control_store import ObjectControlStor
 from app.modules.ai_gods_eye_view.runtime.scheduling import RUN_FAILED, RUN_SUCCESS, TASK_RUN_QUERY, run_state, task_outcome
 from app.modules.ai_gods_eye_view.runtime.runtime_secrets import SHARED_OCI_CREDENTIAL_NAME, identity_hash, shared_credential
 
-SESSION_RETENTION = {"retentionPeriodInDays": 7}
+SESSION_RETENTION = {"isRetentionPolicyEnabled": True, "breachAction": "DELETE_FIFO", "retentionPeriodInDays": 7}
 AGENT_NAME = "ai_gods_eye_view"
 WORKSPACE_ROOT = "/Workspace/medallion/gods_eye_view"
 AGENT_COMPUTE_NAME = "aidp_gods_eye_view_agent_compute"

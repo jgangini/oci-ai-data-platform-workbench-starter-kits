@@ -59,7 +59,8 @@ class Api:
         if path.endswith("/deployments/deployment"):
             return response({**self.resources[path.rsplit("/", 1)[0]][0], "key": "deployment", "lifecycleState": self.deploy_state,
                 "endpointUrl": "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/managed/chat",
-                "sessionRetentionConfig": {"retentionPeriodInDays": 7, "unused": None}})
+                "sessionRetentionConfig": {"isRetentionPolicyEnabled": True, "breachAction": "DELETE_FIFO",
+                                           "retentionPeriodInDays": 7, "unused": None}})
         if path.endswith("/jobRuns") and method == "POST":
             return response({"key": "run-one"})
         if path.endswith("/jobRuns/run-one"):
@@ -307,6 +308,26 @@ def test_agent_publish_waits_async_and_detail_active_without_deleting_prior_rele
     assert compute["displayName"] == "aidp_gods_eye_view_agent_compute"
 
 
+@pytest.mark.parametrize("surface", ["agent", "deployment"])
+def test_native_agent_retention_requires_explicit_enabled_policy(monkeypatch, surface):
+    api = Api()
+    request = api.request
+    expected = {"isRetentionPolicyEnabled": True, "breachAction": "DELETE_FIFO", "retentionPeriodInDays": 7}
+    checked = []
+
+    def native_request(method, path, *, payload=None, **kwargs):
+        if method == "POST" and (path.endswith("/agents") if surface == "agent" else path.endswith("/actions/deploy")):
+            retention = payload["sessionConfig"]["sessionRetentionConfig"] if surface == "agent" else payload["sessionRetentionConfig"]
+            if retention != expected:
+                raise post_apply.ApiRequestError(method, path, 400, "native-retention-policy-required")
+            checked.append(retention)
+        return request(method, path, payload=payload, **kwargs)
+
+    monkeypatch.setattr(api, "request", native_request)
+    assert publish_agent(api)["state"] == "ACTIVE"
+    assert checked == [expected]
+
+
 def test_failed_agent_deployment_never_returns_ready():
     api = Api()
     api.deploy_state = "FAILED"
@@ -464,12 +485,17 @@ def test_deployment_helpers_reject_duplicates_and_mismatched_endpoint_retention(
     api.resources["/deployments"].append({"key": "duplicate", "state": "ACTIVE"})
     with pytest.raises(RuntimeError, match="Duplicate"):
         bootstrap.agent_deployments(api, "/deployments")
-    detail = {"endpointUrl": "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/managed/", "sessionRetentionConfig": {"retentionPeriodInDays": 7, "unused": None}}
+    detail = {"endpointUrl": "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/managed/",
+              "sessionRetentionConfig": {"isRetentionPolicyEnabled": True, "breachAction": "DELETE_FIFO",
+                                         "retentionPeriodInDays": 7, "unused": None}}
     assert bootstrap.deployment_endpoint(detail, "us-chicago-1").endswith("/managed/chat")
     with pytest.raises(RuntimeError, match="endpoint"):
         bootstrap.deployment_endpoint(detail, "eu-frankfurt-1")
     with pytest.raises(RuntimeError, match="retention"):
         bootstrap.deployment_endpoint({**detail, "sessionRetentionConfig": {"retentionPeriodInDays": 1}}, "us-chicago-1")
+    for retention in ({"retentionPeriodInDays": 7}, {**detail["sessionRetentionConfig"], "isRetentionPolicyEnabled": False}):
+        with pytest.raises(RuntimeError, match="retention"):
+            bootstrap.deployment_endpoint({**detail, "sessionRetentionConfig": retention}, "us-chicago-1")
 
 
 @pytest.mark.parametrize("failed_state", ["FAILED", "INTERNAL_ERROR", "UPSTREAM_FAILED", "UPSTREAM_CANCELED", "EXCLUDED", "BLOCKED"])
