@@ -62,6 +62,8 @@ En el bucket de artefactos se conservan `.control/modules/installation.json` y `
 
 La revisión del recibo pertenece a la infraestructura original, no a la imagen actual del portal. **Update** puede cambiar el commit de la aplicación sin impedir una instalación posterior del visor. El instalador conserva y comprueba la revisión original contra las variables del stack, junto con el SHA-256 de su archivo Terraform; una revisión distinta en el stack o un archivo modificado bloquean la operación antes de escribir.
 
+Resource Manager puede omitir variables que heredan sus defaults: `portal_managed_modules = true` y `enabled_vm_modules = []` corresponden a una base preparada sin visor instalado. El instalador respeta esos valores del contrato vigente después de verificar el archivo inmutable, y modifica únicamente `enabled_vm_modules` al instalar el visor. Un `portal_managed_modules = false` explícito o flags retirados siguen bloqueando la operación.
+
 GET solo observa. Close/Escape no cancelan; Resume confirma continuación del mismo ID, Retry confirma recuperación revisada y Verify comprueba sin reprovisionar. Reconciliar una respuesta perdida por GET antes de otro POST. Un timeout puede dejar OCI trabajando: seguir el job existente. Revisar primero Resource Manager y después salidas AIDP, publicación y visor; una VM saludable no acredita conversación. Bases sin red o recibo actuales se rechazan, sin vía de activación antigua.
 
 El registro `enabled_vm_modules` implementa únicamente `gods_eye_view`. Otro módulo exige código, packaging, lista Terraform y aceptación explícitos; añadir un nombre no habilita carga arbitraria de VMs. Ver [contrato de plan](../terraform/tests/check_module_plan.py).

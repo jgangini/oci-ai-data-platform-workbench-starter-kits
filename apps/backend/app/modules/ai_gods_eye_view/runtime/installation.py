@@ -124,8 +124,8 @@ class ModuleInstallation:
                 or stack.lifecycle_state != "ACTIVE" or tags.get("deployment") != receipt["deployment_id"]
                 or tags.get("catalog_item") != receipt["project_id"]
                 or variables.get("source_commit_sha") != receipt["source_commit_sha"]
-                or str(variables.get("portal_managed_modules")).lower() != "true"
-                or "enabled_vm_modules" not in variables or RETIRED_VARIABLES & variables.keys()):
+                or str(variables.get("portal_managed_modules", "true")).lower() != "true"
+                or RETIRED_VARIABLES & variables.keys()):
             raise ValueError("The infrastructure stack identity or source has changed")
         archive = manager.get_stack_tf_config(stack.id).data.content
         if hashlib.sha256(archive).hexdigest() != receipt["terraform_config_sha256"]:
@@ -209,7 +209,8 @@ class ModuleInstallation:
     def provision(self, manager, receipt, deadline):
         response = self.stack(manager, receipt)
         variables = dict(response.data.variables or {})
-        modules = json.loads(variables["enabled_vm_modules"])
+        # Resource Manager omits variables inherited from b_variables.tf defaults.
+        modules = json.loads(variables.get("enabled_vm_modules", "[]"))
         if not isinstance(modules, list) or any(value != MODULE_ID for value in modules) or len(modules) != len(set(modules)):
             raise ValueError("Invalid enabled module configuration")
         if MODULE_ID not in modules:

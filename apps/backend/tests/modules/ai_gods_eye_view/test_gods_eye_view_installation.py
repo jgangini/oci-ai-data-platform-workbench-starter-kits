@@ -228,6 +228,19 @@ def test_updated_portal_rejects_changed_infrastructure_revision_before_any_write
     assert not manager.updates and not manager.creates
 
 
+@pytest.mark.parametrize("omitted", [("portal_managed_modules",), ("enabled_vm_modules",),
+                                    ("portal_managed_modules", "enabled_vm_modules")])
+def test_stack_inherits_current_terraform_module_defaults(omitted):
+    install, manager = installer(), Manager()
+    for field in omitted:
+        manager.variables.pop(field)
+    before = dict(manager.variables)
+    install.provision(manager, install.receipt(), time.monotonic() + 10)
+    assert manager.variables == {**before, "enabled_vm_modules": '["gods_eye_view"]'}
+    assert manager.creates == ["PLAN", "APPLY"] and len(manager.updates) == 1
+    assert manager.archive == ARCHIVE
+
+
 @pytest.mark.parametrize("revision", [None, "", "development", "a" * 39, "a" * 41, "A" * 40, "g" * 40])
 def test_invalid_receipt_source_revision_never_updates_stack(revision):
     install, manager = installer(), Manager()
@@ -346,8 +359,8 @@ def test_native_transport_failure_preserves_attempt_and_recovers_job_on_resume(m
 
 
 
-@pytest.mark.parametrize("field,value", [("portal_managed_modules", None), ("portal_managed_modules", "false"),
-    ("enabled_vm_modules", None), ("enable_gods_eye_view", "false"), ("enable_prisma_viewer", "false"),
+@pytest.mark.parametrize("field,value", [("portal_managed_modules", "false"),
+    ("enable_gods_eye_view", "false"), ("enable_prisma_viewer", "false"),
     ("enable_territorial_viewer", "false"), ("enable_territorial_sources", "false")])
 def test_obsolete_stack_contract_never_updates_source_variables_or_jobs(field, value):
     install, manager = installer(), Manager()
