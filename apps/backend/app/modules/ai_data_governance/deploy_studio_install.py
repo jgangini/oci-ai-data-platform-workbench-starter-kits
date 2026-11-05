@@ -19,15 +19,27 @@ DOCUMENTARY_NAME = 'ai_data_governance_sync_master_catalog'
 SCHEDULE = {'quartzCronExpression': '0 0/30 * * * ?', 'timezoneId': 'UTC'}
 
 
+def _cluster_matches(actual, expected):
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    return {key: value for key, value in actual.items()
+            if key not in {'clusterName', 'newCluster'} or value is not None} == expected
+
+
 def job_matches(actual, expected):
     if not isinstance(actual, dict):
         return False
-    fields = ('name', 'path', 'maxConcurrentRuns', 'queue', 'jobClusters', 'schedule')
+    fields = ('name', 'path', 'maxConcurrentRuns', 'queue', 'schedule')
     if any(actual.get(k) != expected.get(k) for k in fields):
+        return False
+    clusters = actual.get('jobClusters')
+    if (not isinstance(clusters, list) or len(clusters) != len(expected['jobClusters'])
+            or not all(_cluster_matches(a, e) for a, e in zip(clusters, expected['jobClusters'], strict=True))):
         return False
     tasks = actual.get('tasks')
     return bool(isinstance(tasks, list) and len(tasks) == len(expected['tasks']) and all(
-        isinstance(a, dict) and all(a.get(k) == v for k, v in e.items())
+        isinstance(a, dict) and all(_cluster_matches(a.get(k), v) if k == 'cluster' else a.get(k) == v
+                                   for k, v in e.items())
         for a, e in zip(tasks, expected['tasks'], strict=True)))
 
 

@@ -228,6 +228,33 @@ def test_workflow_readback_rejects_material_drift(change):
     assert not job_matches(actual,expected)
 
 
+def native_bootstrap_readback():
+    _, _, installer = fixture()
+    installer.resources['cluster_key'] = SPARK
+    expected = installer.bootstrap_job()
+    actual = deepcopy(expected)
+    actual['jobClusters'][0].update(clusterName=None, newCluster=None)
+    actual['tasks'][0]['cluster'].update(clusterName=None, newCluster=None)
+    actual['tasks'][0].update(minRetryIntervalMillis=None, source=None, gitConfig=None, isStreaming=None)
+    return actual, expected
+
+
+def test_workflow_readback_accepts_observed_native_empty_cluster_metadata_without_mutation():
+    actual, expected = native_bootstrap_readback()
+    original = deepcopy(actual)
+    assert job_matches(actual, expected)
+    assert actual == original
+
+
+@pytest.mark.parametrize('target', ['job', 'task'])
+@pytest.mark.parametrize('field,value', [('clusterName', 'foreign'), ('newCluster', {'driverShape': 'foreign'})])
+def test_workflow_readback_rejects_nonempty_compute_overrides(target, field, value):
+    actual, expected = native_bootstrap_readback()
+    cluster = actual['jobClusters'][0] if target == 'job' else actual['tasks'][0]['cluster']
+    cluster[field] = value
+    assert not job_matches(actual, expected)
+
+
 @pytest.mark.parametrize('drift', ['missing', 'key', 'root', 'missing_root', 'duplicate'])
 def test_recorded_agent_drift_does_not_write_sources_or_change_the_installation_receipt(drift):
     from unittest.mock import Mock
