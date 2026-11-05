@@ -241,6 +241,13 @@ def select_inputs(
     if not region or not tenancy_id or not operator_user_ocid.startswith("ocid1.user."):
         raise ValueError("preflight requires deployment region, tenancy OCID, and operator user OCID")
 
+    inputs = context.get("inputs") if isinstance(context.get("inputs"), dict) else {}
+    if {"enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer"} & inputs.keys():
+        raise ValueError("Unsupported VM module flags; use enabled_vm_modules")
+    enabled_modules = inputs.get("enabled_vm_modules", [])
+    if not isinstance(enabled_modules, list) or any(module != "gods_eye_view" for module in enabled_modules):
+        raise ValueError("enabled_vm_modules must be a list containing only gods_eye_view")
+
     candidates = _candidate_shapes(E5_SHAPE)
     ocpus = 2.0
     memory = 16.0
@@ -249,7 +256,6 @@ def select_inputs(
     identity = identity_factory(regional_config)
     _require_ready_region(identity, tenancy_id, region)
     operator_username = _operator_username(identity, operator_user_ocid)
-    inputs = context.get("inputs") if isinstance(context.get("inputs"), dict) else {}
     artifacts_mode = str(inputs.get("artifacts_bucket_mode") or "new").strip().lower()
     artifacts_bucket_message = (
         _require_new_bucket_available(
@@ -292,7 +298,7 @@ def select_inputs(
             ],
         )
         report = compute.create_compute_capacity_report(details).data
-        required_count = 2 if str(inputs.get("enable_gods_eye_view") if inputs.get("enable_gods_eye_view") is not None else (inputs.get("enable_territorial_viewer") if inputs.get("enable_territorial_viewer") is not None else inputs.get("enable_prisma_viewer", False))).lower() == "true" else 1
+        required_count = 2 if "gods_eye_view" in enabled_modules else 1
         selected = _available_shape(report, candidates, required_count)
         if selected:
             return {

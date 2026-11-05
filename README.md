@@ -1,65 +1,54 @@
 # Oracle AI Data Platform Workbench Starter Kits
 
-Five reproducible data engineering labs and two shared modules for Oracle AI Data Platform (AIDP) Workbench. Deploy a common environment, onboard participants, and follow data from Landing through Gold with quality checks and catalog lineage.
+Cinco laboratorios de ingeniería de datos y tres módulos compartidos para Oracle AI Data Platform (AIDP) Workbench. El proyecto incluye portal React, API FastAPI, Terraform, datasets/notebooks versionados y workflows/agentes nativos. Los módulos candidatos señalan su aceptación pendiente.
 
-The project includes a React administration portal, a FastAPI service, Terraform infrastructure, versioned datasets and notebooks, and native AIDP workflows and agents.
+## Empezar
 
-## Start here
+- [Primeros pasos](docs/getting-started.md): preparar el entorno y ejecutar kits.
+- [Operación y recuperación](docs/operations.md): usuarios, instalación y actualizaciones.
+- [Desarrollo local y validación](docs/development.md): modificar el repositorio.
+- [Índice de documentación](docs/README.md): guías vigentes y distribución del código.
 
-- **Deploy or run a lab:** [Getting started](docs/getting-started.md).
-- **Understand the system:** [Architecture and data flows](docs/architecture.md).
-- **Administer an installation:** [Operations and recovery](docs/operations.md).
-- **Develop or contribute:** [Local setup and validation](docs/development.md) and the [repository instructions](AGENTS.md).
-- **Browse all guides:** [Documentation index](docs/README.md).
+Para desplegar, utilizar una [release inmutable validada](https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits/releases). Una rama de desarrollo no es una release; revisar los [límites actuales](docs/getting-started.md#current-implementation-limits).
 
-Use a validated [immutable release](https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits/releases) for deployment. A development branch is not a release; review the [current implementation limits](docs/getting-started.md#current-implementation-limits) before testing it.
+## Kits de participantes
 
-## Participant starter kits
+Cada participante recibe su workflow y nombres de tablas propios dentro del catálogo y esquemas compartidos, con los mismos assets versionados. Las rutas de notebooks mantienen un [límite nativo pendiente](docs/getting-started.md#current-implementation-limits).
 
-Each participant receives a separate workflow and table namespace, using the same checked and versioned source assets.
-
-| Starter kit | What you build |
+| Kit | Resultado |
 | --- | --- |
-| [Banking](docs/kits/banking.md) | Customer value and branch transaction analytics |
-| [Telecommunications](docs/kits/telecommunications.md) | Subscriber usage and network-site analytics |
-| [Telco Customer 360 Lineage](docs/kits/telco-lineage.md) | A 14-task pipeline combining prepaid, postpaid and home services |
-| [Retail](docs/kits/retail.md) | Customer value and product sales analytics |
-| [Healthcare](docs/kits/healthcare.md) | Patient utilization and provider activity analytics |
+| [Banking](docs/kits/banking.md) | Analítica de clientes, sucursales y transacciones. |
+| [Telecommunications](docs/kits/telecommunications.md) | Consumo de suscriptores y sitios de red. |
+| [Telco Customer 360 Lineage](docs/kits/telco-lineage.md) | Pipeline de catorce tareas para prepago, pospago y hogar. |
+| [Retail](docs/kits/retail.md) | Valor de clientes y ventas por producto. |
+| [Healthcare](docs/kits/healthcare.md) | Utilización por paciente y actividad de proveedores. |
 
-## Shared global modules
+## Módulos compartidos
 
-Administrators manage these once for the installation, separately from participant kit selection.
-Deploy Studio prepares the central HTTPS portal and shared infrastructure. Install modules from **Settings → Application**; God's Eye View adds its private VM through the same Resource Manager stack after confirmation. See the [installation and recovery flow](docs/operations.md#global-module-lifecycle).
+Se administran en **Settings → Application**, independientemente de asignar kits. La base prepara portal HTTPS y red compartida; God’s Eye View incorpora su VM privada mediante el mismo stack Resource Manager, previa confirmación. Ver [instalación y recuperación](docs/operations.md#global-module-lifecycle).
 
-| Module | Purpose |
+| Módulo | Alcance |
 | --- | --- |
-| [AI Data Governance](docs/modules/ai-data-governance.md) | Master Catalog inventory, lineage and metadata synchronization |
-| [God's Eye View](docs/modules/gods-eye-view.md) | Map-based social reports, sensor readings and evidence-grounded AI queries |
+| [AI Data Governance](docs/modules/ai-data-governance.md) | Dos agentes, dieciocho tablas y workflow documental; aceptación funcional en TEST pendiente. |
+| [AI Market Intelligence](docs/modules/ai-market-intelligence.md) | Agente de investigación e instalación TEST; aceptación nativa y de calidad pendiente. |
+| [God’s Eye View](docs/modules/ai-gods-eye-view.md) | Reportes sociales/sensores en mapa, evidencia y consultas Gold. |
 
-## How it fits together
+## Código fuente
 
-```mermaid
-flowchart LR
-    Users[Participants and administrators] --> Portal[Registration and administration portal]
-    Portal --> AIDP[AIDP Workbench]
-    AIDP --> Pipeline[Landing → Bronze → Silver → Gold]
-    Pipeline --> Catalog[Governed tables and lineage]
-    Catalog --> Modules[Shared agents and viewer]
-```
-
-See [architecture](docs/architecture.md) for deployment boundaries, storage responsibilities and the differences between the two agents.
-
-## Source map
-
-| Directory | Contents |
+| Directorio | Contenido |
 | --- | --- |
-| [`apps/backend`](apps/backend) | API, provisioning, module lifecycle and canonical [kit packages](apps/backend/app/labs) |
-| [`apps/frontend`](apps/frontend) | Registration and administration UI |
-| [`apps/gods-eye-view`](apps/gods-eye-view) | God's Eye View integration and its upstream asset contract |
-| [`terraform`](terraform) | Deploy Studio manifest, infrastructure and post-apply hooks |
-| [`docker`](docker) / [`scripts`](scripts) | Images, local profiles, release and validation tools |
-| [`docs`](docs/README.md) | User guides, architecture, operations and compatibility reference |
+| [`apps/backend`](apps/backend) | API, identidad, aprovisionamiento y servicios compartidos. |
+| [`app/kits`](apps/backend/app/kits) | Los cinco kits de participantes y sus assets versionados. |
+| [`app/modules`](apps/backend/app/modules) | Tres módulos del backend, cada uno con su paquete AIDP en `package/`. |
+| [`app/packages/catalog.py`](apps/backend/app/packages/catalog.py) | Registro explícito y validación común de paquetes. |
+| [`apps/frontend`](apps/frontend) | Portal de registro y administración. |
+| [`modules/ai-gods-eye-view`](modules/ai-gods-eye-view) | Aplicación del visor, build/imagen independientes y contrato upstream. |
+| [`terraform`](terraform) | Infraestructura, manifiesto Deploy Studio y hooks. |
+| [`docker`](docker) / [`scripts`](scripts) | Entornos, imágenes, releases y checks. |
+| [`docs`](docs/README.md) | Guías de uso, desarrollo, operación y contratos vigentes. |
 
-## License
+Las instrucciones para contributors están en [AGENTS.md](AGENTS.md).
 
-[MIT](LICENSE). Upstream components and datasets retain their own licenses; see the [viewer integration](apps/gods-eye-view/README.md). This is an independent project, not an official Oracle product. Oracle and other third-party marks belong to their respective owners.
+## Licencia
+
+[MIT](LICENSE). Los componentes upstream y datasets conservan sus licencias; consultar la [integración del visor](modules/ai-gods-eye-view/README.md). Proyecto independiente, no producto oficial de Oracle. Las marcas pertenecen a sus titulares.

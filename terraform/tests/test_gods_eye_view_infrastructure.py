@@ -11,37 +11,32 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).parents[2]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "scripts/release"))
 import load_release_image as bootstrap
 import vm_release_updater as updater
 import gods_eye_view_release_update as viewer_updater
 
 
-def test_terraform_preserves_both_prior_state_addresses_without_resource_recreation():
+def test_terraform_exposes_only_the_current_vm_module_contract():
     source = (ROOT / "terraform/h_gods_eye_view.tf").read_text(encoding="utf-8")
-    resources = set(re.findall(r'resource "([^"]+)" "(gods_eye_view[^"]*)"', source))
-    moves = dict(re.findall(r'from = ([\w.]+)\s+to\s+= ([\w.]+)', source))
-    assert len(moves) == len(resources) * 2
-    for kind, name in resources:
-        current = f"{kind}.{name}"
-        intermediate = f"{kind}.{name.replace('gods_eye_view', 'territorial', 1)}"
-        original = f"{kind}.{name.replace('gods_eye_view', 'prisma', 1)}"
-        assert moves[original] == intermediate and moves[intermediate] == current
-    assert 'var.portal_managed_modules ? "gods-eye-view" : "prisma"' in source and '04_gold/prisma/*' in source
-    assert 'coalesce(var.enable_gods_eye_view, var.enable_territorial_viewer, var.enable_prisma_viewer)' in source
+    variables = (ROOT / "terraform/b_variables.tf").read_text(encoding="utf-8")
+    assert 'contains(var.enabled_vm_modules, "gods_eye_view")' in source
+    assert 'moved {' not in source
+    assert re.findall(r'output "([^"]+)"', source) == ["gods_eye_view_enabled", "gods_eye_view_url", "gods_eye_view_private_url", "gods_eye_view_instance_id", "gods_eye_view_principal_group"]
+    assert not re.search(r'variable "enable_(?:gods_eye_view|territorial_viewer|prisma_viewer)"', variables)
+    assert '"${local.name_prefix}-gods-eye-view"' in source
+    assert '04_gold/prisma/*' in source
 
 
-@pytest.mark.parametrize("template, keys", [
-    ("user_data.sh", {"VIEWER_URL", "VIEWER_ENABLED", "ADMIN_BIND"}),
-    ("gods_eye_view_user_data.sh", {"MODE", "ADMIN_URL", "BUCKET", "NAMESPACE", "SNAPSHOT_KEY", "AGENT_ENDPOINT_KEY"}),
+@pytest.mark.parametrize("template,keys", [
+    ("user_data.sh", {"GODS_EYE_VIEW_URL", "GODS_EYE_VIEW_ENABLED", "GODS_EYE_VIEW_ADMIN_BIND"}),
+    ("gods_eye_view_user_data.sh", {"GODS_EYE_VIEW_MODE", "GODS_EYE_VIEW_ADMIN_URL", "GODS_EYE_VIEW_BUCKET", "GODS_EYE_VIEW_NAMESPACE", "GODS_EYE_VIEW_SNAPSHOT_KEY", "GODS_EYE_VIEW_AGENT_ENDPOINT_KEY"}),
 ])
-def test_cloud_init_retains_equal_legacy_environment_values_for_image_rollback(template, keys):
+def test_cloud_init_only_emits_canonical_viewer_environment(template, keys):
     source = (ROOT / "terraform/templatefile" / template).read_text()
-    values = dict(re.findall(r"^((?:GODS_EYE_VIEW|TERRITORIAL|PRISMA)_[A-Z_]+)=(.+)$", source, re.MULTILINE))
-    assert {name.removeprefix("TERRITORIAL_") for name in values if name.startswith("TERRITORIAL_")} == keys
-    for key in keys:
-        canonical = key.removeprefix("VIEWER_") if key in {"VIEWER_URL", "VIEWER_ENABLED"} else key
-        assert values[f"GODS_EYE_VIEW_{canonical}"] == values[f"TERRITORIAL_{key}"] == values[f"PRISMA_{key}"]
+    values = dict(re.findall(r"^([A-Z_]+)=(.+)$", source, re.MULTILINE))
+    assert keys <= values.keys()
+    assert not any(name.startswith(("TERRITORIAL_", "PRISMA_")) for name in values)
 
 
 def test_portal_control_bucket_is_explicit_gold_not_bootstrap_landing():
@@ -55,8 +50,8 @@ def test_portal_control_bucket_is_explicit_gold_not_bootstrap_landing():
 
 def test_vm2_bootstrap_installs_the_patched_upstream_release_without_rebuilding_it():
     template = (ROOT / "terraform/templatefile/gods_eye_view_user_data.sh").read_text()
-    dockerfile = (ROOT / "apps/gods-eye-view/Dockerfile").read_text()
-    upstream = json.loads((ROOT / "apps/gods-eye-view/upstream.json").read_text())
+    dockerfile = (ROOT / "modules/ai-gods-eye-view/Dockerfile").read_text()
+    upstream = json.loads((ROOT / "modules/ai-gods-eye-view/upstream.json").read_text())
     assert upstream["repository"] == "https://github.com/bilawalsidhu/gods-eye-view"
     assert re.fullmatch(r"[a-f0-9]{40}", upstream["commit"])
     assert re.fullmatch(r"[a-f0-9]{64}", upstream["archive_sha256"])
@@ -66,11 +61,11 @@ def test_vm2_bootstrap_installs_the_patched_upstream_release_without_rebuilding_
     assert "--component aidp-lab" in (ROOT / "terraform/templatefile/user_data.sh").read_text()
     assert "--component gods-eye-view" in template and "verified local patches" in template
     assert "docker build" not in template and "prepare_upstream.py" not in template
-    assert 'git -C /opt/prisma/source checkout --detach' in template
-    assert 'prisma-release-update' in template  # Installed update command remains compatible.
+    assert 'git -C /opt/gods-eye-view/source checkout --detach' in template
+    assert 'gods-eye-view-release-update' in template
 
 
-def release(component="prisma-viewer"):
+def release(component="gods-eye-view"):
     return {
         "tag_name": "v2.3.0", "immutable": True, "draft": False, "prerelease": False,
         "assets": [{
@@ -103,10 +98,10 @@ def test_bootstrap_manifest_freezes_component_sha_platform_and_digest():
     manifest = {
         "schema_version": 1, "updater_protocol": 1, "release": "v2.3.0",
         "commit_sha": "b" * 40, "repository": bootstrap.REPOSITORY.removesuffix(".git"),
-        "image": {"asset_name": "prisma-viewer-image-amd64.tar.gz", "sha256": "a" * 64,
-                  "platform": "linux/amd64", "image_tag": "prisma-viewer:" + "b" * 40},
+        "image": {"asset_name": "gods-eye-view-image-amd64.tar.gz", "sha256": "a" * 64,
+                  "platform": "linux/amd64", "image_tag": "gods-eye-view:" + "b" * 40},
     }
-    arguments = dict(tag="v2.3.0", commit="b" * 40, component="prisma-viewer", digest="a" * 64)
+    arguments = dict(tag="v2.3.0", commit="b" * 40, component="gods-eye-view", digest="a" * 64)
     assert bootstrap.validate_manifest(manifest, **arguments) == manifest["image"]["image_tag"]
     for key, value in (("platform", "linux/arm64"), ("sha256", "c" * 64), ("image_tag", "latest")):
         invalid = copy.deepcopy(manifest)
@@ -117,13 +112,16 @@ def test_bootstrap_manifest_freezes_component_sha_platform_and_digest():
         bootstrap.validate_manifest(manifest, **{**arguments, "commit": "c" * 40})
 
 
-@pytest.mark.parametrize("published", ["gods-eye-view", "territorial-viewer", "prisma-viewer", "partial", "partial-legacy"])
-def test_canonical_viewer_loader_accepts_frozen_legacy_releases_but_never_partial_aliases(monkeypatch, capsys, published):
-    component = "prisma-viewer" if published.startswith("partial") else published
+@pytest.mark.parametrize("published", ["gods-eye-view", "territorial-viewer", "prisma-viewer", "partial"])
+def test_viewer_loader_requires_the_complete_canonical_asset_pair(monkeypatch, capsys, published):
+    component = "gods-eye-view"
     document = release(component)
-    if published.startswith("partial"):
-        incomplete = "gods-eye-view" if published == "partial" else "territorial-viewer"
-        document["assets"].append(release(incomplete)["assets"][0])
+    if published == "partial":
+        document["assets"].pop()
+    elif published != component:
+        names = ("territorial-viewer-image-amd64.tar.gz", "territorial-release.json") if published == "territorial-viewer" else ("prisma-viewer-image-amd64.tar.gz", "prisma-release.json")
+        for asset, name in zip(document["assets"], names):
+            asset.update(name=name, browser_download_url=f"{bootstrap.REPOSITORY.removesuffix('.git')}/releases/download/v2.3.0/{name}")
     monkeypatch.setattr(bootstrap.urllib.request, "urlopen", lambda *_args, **_kwargs: io.BytesIO(json.dumps(document).encode()))
     downloaded = []
     def download(_url, destination, digest, _limit):
@@ -137,12 +135,12 @@ def test_canonical_viewer_loader_accepts_frozen_legacy_releases_but_never_partia
         print("Loaded image: " + component + ":" + "b" * 40, file=kwargs.get("stdout", sys.stdout))
     monkeypatch.setattr(bootstrap.subprocess, "run", docker_load)
     monkeypatch.setattr(bootstrap.subprocess, "check_output", lambda *_args, **_kwargs: "linux/amd64")
-    if published.startswith("partial"):
+    if published != component:
         with pytest.raises(ValueError, match="missing or ambiguous"):
-            bootstrap.load("v2.3.0", "b" * 40, "gods-eye-view")
+            bootstrap.load("v2.3.0", "b" * 40, component)
         assert downloaded == []
     else:
-        assert bootstrap.load("v2.3.0", "b" * 40, "gods-eye-view") == component + ":" + "b" * 40
+        assert bootstrap.load("v2.3.0", "b" * 40, component) == component + ":" + "b" * 40
         assert set(downloaded) == set(bootstrap.COMPONENTS[component])
         output = capsys.readouterr()
         assert output.out == "" and "Loaded image:" in output.err
@@ -155,9 +153,9 @@ def test_updater_preserves_private_bridge_only_on_active_container(monkeypatch, 
     monkeypatch.setattr(updater, "_run", lambda args: calls.append(args))
     updater._run_container(tmp_path, "active", "image", candidate=False)
     updater._run_container(tmp_path, "candidate", "image", candidate=True)
-    assert "10.10.0.10:8000:8000" in calls[0]
+    assert ("10.10.0.10:8000:8000" in calls[0]) is (variable == "GODS_EYE_VIEW_ADMIN_BIND")
     assert all(":8000" not in value for value in calls[1])
-    (tmp_path / ".env").write_text("PRISMA_ADMIN_BIND=0.0.0.0\n")
+    (tmp_path / ".env").write_text("GODS_EYE_VIEW_ADMIN_BIND=0.0.0.0\n")
     with pytest.raises(RuntimeError, match="invalid_gods_eye_view_admin_bind"):
         updater._run_container(tmp_path, "active", "image", candidate=False)
 
@@ -191,7 +189,7 @@ def test_active_updater_preserves_acme_webroot_and_shared_certificates(monkeypat
     updater._run_container(tmp_path, "active", "image", candidate=False)
     assert "/var/lib/letsencrypt:/var/lib/letsencrypt:ro,z" in calls[0]
     assert any(value.endswith(":/etc/aidp-lab/tls:ro,z") for value in calls[0])
-    source = (ROOT / "scripts" / "ensure_public_ip_tls.sh").read_text()
+    source = (ROOT / "scripts/deployment" / "ensure_public_ip_tls.sh").read_text()
     assert "--preferred-profile shortlived" in source and '--ip-address "$PUBLIC_IP"' in source
     assert source.index("openssl verify") < source.index('mv -f "$TLS/tls.crt.next"') < source.index("nginx -s reload")
     cloud_init = (ROOT / "terraform/templatefile/user_data.sh").read_text()
@@ -212,9 +210,6 @@ def test_both_reverse_proxies_authenticate_and_overwrite_viewer_identity():
             assert "proxy_set_header X-Gods-Eye-View-User $gods_eye_view_user;" in block
             assert "auth_request_set $gods_eye_view_role $upstream_http_x_gods_eye_view_role;" in block
             assert "proxy_set_header X-Gods-Eye-View-Role $gods_eye_view_role;" in block
-            assert "auth_request_set $gods_eye_view_legacy_user $upstream_http_x_territorial_user;" in block
-            assert "proxy_set_header X-Territorial-User $gods_eye_view_legacy_user;" in block
-            assert "proxy_set_header X-PRISMA-User $gods_eye_view_legacy_user;" in block
             assert 'proxy_set_header X-GEV-Origin "$scheme://$http_host";' in block
             assert ("error_page 401 = @gods_eye_view_login;" in block) == block.startswith("= /gods-eye-view/ {")
             if not block.startswith("= /gods-eye-view/ {"):
@@ -231,21 +226,18 @@ def test_both_reverse_proxies_authenticate_and_overwrite_viewer_identity():
         unauthorized = next(block for block in proxy.split("location ") if block.startswith("@gods_eye_view_unauthorized"))
         assert "default_type application/json;" in unauthorized
         assert 'return 401 \'{"detail":"Viewer session required"}\';' in unauthorized
-        audio = next(block for block in blocks if "~ ^/api/(gods-eye-view|territorial|prisma)/oci-voice/turn" in block)
+        audio = next(block for block in blocks if "~ ^/api/gods-eye-view/oci-voice/turn" in block)
         assert "client_max_body_size 3m;" in audio
-        ordinary = next(block for block in blocks if block.startswith("~ ^/api/(gods-eye-view|territorial|prisma)/ {"))
+        ordinary = next(block for block in blocks if block.startswith("~ ^/api/gods-eye-view/ {"))
         assert "client_max_body_size 1m;" in ordinary
-        rewrite = "rewrite ^/api/(gods-eye-view|territorial)/(.*)$ /api/prisma/$2 break;"
-        assert proxy.count(rewrite) == 2
-        # Both URL generations retain their exact endpoint suffix for the frozen old viewer.
-        rule = rewrite.split()[1]
-        for prefix in ("gods-eye-view", "territorial"):
-            match = re.fullmatch(rule, f"/api/{prefix}/sensors/station-1/location")
-            assert match and match[2] == "sensors/station-1/location"
-        for block in (audio, ordinary):
-            # Preserve this authenticated location while using the old viewer's wire contract.
-            assert block.index(rewrite) < block.index("proxy_pass http://127.0.0.1:8081;")
-            assert "rewrite ^/api/prisma/" not in block
+        assert "X-Territorial-User" not in proxy and "X-PRISMA-User" not in proxy
+        assert "/api/prisma/" not in proxy and "rewrite ^/api/" not in proxy
+        retired = re.search(r"location ~ (\S+) \{ return 404; \}", proxy)
+        assert retired
+        for path in ("/prisma", "/prisma/", "/territorial/", "/admin/prisma", "/local/prisma/login", "/api/prisma/identity", "/api/admin/territorial/sources"):
+            assert re.match(retired[1], path)
+        for path in ("/gods-eye-view/", "/admin/gods-eye-view", "/api/gods-eye-view/identity", "/api/admin/gods-eye-view/sources"):
+            assert re.match(retired[1], path) is None
 
 
 @pytest.mark.parametrize("candidate_ready", [False, True])
@@ -294,14 +286,14 @@ def test_viewer_candidate_and_active_share_persistent_nonroot_cache(monkeypatch,
     assert "127.0.0.1:18081:8081" in calls[1]
     assert "8081:8081" in calls[3]
     template = (ROOT / "terraform/templatefile/gods_eye_view_user_data.sh").read_text()
-    assert "-v /opt/prisma/native-cache:/app/.upstream/.gev-cache:rw,z" in template
+    assert "-v /opt/gods-eye-view/native-cache:/app/.upstream/.gev-cache:rw,z" in template
 
 
 @pytest.mark.parametrize("spawn_fails", [False, True])
 def test_native_supervisor_stops_sibling_when_runtime_exits_or_cannot_start(monkeypatch, tmp_path, spawn_fails):
-    monkeypatch.syspath_prepend(str(ROOT / "apps/gods-eye-view/native"))
+    monkeypatch.syspath_prepend(str(ROOT / "modules/ai-gods-eye-view/native"))
     monkeypatch.setenv("GEV_PROVIDER_SETTINGS_DIR", str(tmp_path / "provider-settings"))
-    spec = importlib.util.spec_from_file_location("native_entrypoint", ROOT / "apps/gods-eye-view/native/entrypoint.py")
+    spec = importlib.util.spec_from_file_location("native_entrypoint", ROOT / "modules/ai-gods-eye-view/native/entrypoint.py")
     supervisor = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(supervisor)
     child = SimpleNamespace(poll=lambda: None, terminate=lambda: stopped.append("terminate"),
@@ -326,3 +318,10 @@ def test_native_supervisor_stops_sibling_when_runtime_exits_or_cannot_start(monk
     else:
         assert supervisor.supervise([["node"], ["python"]]) == 1
     assert stopped == ["terminate", "wait"]
+
+
+@pytest.mark.parametrize("component", ["prisma-viewer", "territorial-viewer"])
+def test_retired_release_components_are_rejected_before_network(monkeypatch, component):
+    monkeypatch.setattr(bootstrap.urllib.request, "urlopen", lambda *_args, **_kwargs: pytest.fail("No network for a retired component"))
+    with pytest.raises(ValueError, match="Unsupported release component"):
+        bootstrap.load("v2.3.0", "b" * 40, component)

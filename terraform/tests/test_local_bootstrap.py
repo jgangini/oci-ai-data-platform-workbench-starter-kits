@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.bootstrap_local_oci_env import (
+from scripts.development.bootstrap_local_oci_env import (
     access_email_credentials,
     one_named,
     parse_args,
@@ -12,7 +12,7 @@ from scripts.bootstrap_local_oci_env import (
     platform_workspace_name,
 )
 from apps.backend.app.security import verify_secret
-from scripts import bootstrap_local_oci_env as bootstrap
+from scripts.development import bootstrap_local_oci_env as bootstrap
 
 
 def test_compose_local_profile_defaults_and_overrides_are_parameterized() -> None:
@@ -88,7 +88,7 @@ def test_local_bootstrap_renders_explicit_control_bucket_without_activation(monk
     def check(values):
         assert "GODS_EYE_CONTROL_BUCKET" not in render_env(values)
         assert "GODS_EYE_CONTROL_BUCKET=custom-gold\n" in render_env({**values, "GODS_EYE_CONTROL_BUCKET": "custom-gold"})
-        for invalid in ("", "gold\nTERRITORIAL_VIEWER_ENABLED=true"):
+        for invalid in ("", "gold\nGODS_EYE_VIEW_ENABLED=true"):
             with pytest.raises(RuntimeError, match="GODS_EYE_CONTROL_BUCKET"):
                 render_env({**values, "GODS_EYE_CONTROL_BUCKET": invalid})
         return render_env(values)
@@ -96,7 +96,7 @@ def test_local_bootstrap_renders_explicit_control_bucket_without_activation(monk
     bootstrap.self_check()
 
 
-def test_local_bootstrap_uses_alias_and_deterministic_workspace_fallbacks() -> None:
+def test_local_bootstrap_uses_native_aidp_alias_key_and_deterministic_workspace() -> None:
     platform = SimpleNamespace(
         alias_key="workbench-alias",
         default_workspace_name=None,

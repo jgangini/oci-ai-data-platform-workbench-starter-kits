@@ -70,22 +70,15 @@ jobs:
           verify_dir="$RUNNER_TEMP/immutable-release"
           mkdir -p "$verify_dir"
           asset_names="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz" || test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz,territorial-release.json,territorial-viewer-image-amd64.tar.gz" || test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,gods-eye-view-image-amd64.tar.gz,gods-eye-view-release.json,prisma-release.json,prisma-viewer-image-amd64.tar.gz,territorial-release.json,territorial-viewer-image-amd64.tar.gz"
+          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,gods-eye-view-image-amd64.tar.gz,gods-eye-view-release.json"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$verify_dir" \
             --pattern "$RELEASE_IMAGE_ASSET" \
             --pattern "$RELEASE_MANIFEST_ASSET" \
-            --pattern prisma-release.json \
-            --pattern prisma-viewer-image-amd64.tar.gz
-          if [[ "$asset_names" == *territorial-release.json* ]]; then
-            gh release download "$GITHUB_REF_NAME" --dir "$verify_dir" \
-              --pattern territorial-release.json --pattern territorial-viewer-image-amd64.tar.gz
-          fi
-          if [[ "$asset_names" == *gods-eye-view-release.json* ]]; then
-            gh release download "$GITHUB_REF_NAME" --dir "$verify_dir" \
-              --pattern gods-eye-view-release.json --pattern gods-eye-view-image-amd64.tar.gz
-          fi
+            --pattern gods-eye-view-release.json \
+            --pattern gods-eye-view-image-amd64.tar.gz
           gzip -t "$verify_dir/$RELEASE_IMAGE_ASSET"
+          gzip -t "$verify_dir/gods-eye-view-image-amd64.tar.gz"
           RELEASE_VERIFY_DIR="$verify_dir" python - <<'PY'
           import hashlib
           import json
@@ -93,52 +86,27 @@ jobs:
           from pathlib import Path
 
           root = Path(os.environ["RELEASE_VERIFY_DIR"])
-          image_path = root / os.environ["RELEASE_IMAGE_ASSET"]
-          manifest_path = root / os.environ["RELEASE_MANIFEST_ASSET"]
-          digest = hashlib.sha256()
-          with image_path.open("rb") as stream:
-              for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                  digest.update(chunk)
-          expected = {
-              "schema_version": 1,
-              "updater_protocol": 1,
-              "release": os.environ["GITHUB_REF_NAME"],
-              "commit_sha": os.environ["RELEASE_COMMIT_SHA"],
-              "repository": os.environ["RELEASE_REPOSITORY"],
-              "image": {
-                  "asset_name": os.environ["RELEASE_IMAGE_ASSET"],
-                  "sha256": digest.hexdigest(),
-                  "platform": "linux/amd64",
-                  "image_tag": f'aidp-lab:{os.environ["RELEASE_COMMIT_SHA"]}',
-              },
-          }
-          if json.loads(manifest_path.read_text(encoding="utf-8")) != expected:
-              raise SystemExit("immutable release asset manifest mismatch")
-          image_path = root / "prisma-viewer-image-amd64.tar.gz"
-          digest = hashlib.sha256()
-          with image_path.open("rb") as stream:
-              for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                  digest.update(chunk)
-          expected["image"] = {
-              "asset_name": image_path.name,
-              "sha256": digest.hexdigest(),
-              "platform": "linux/amd64",
-              "image_tag": f'prisma-viewer:{os.environ["RELEASE_COMMIT_SHA"]}',
-          }
-          if json.loads((root / "prisma-release.json").read_text()) != expected:
-              raise SystemExit("immutable legacy viewer release manifest mismatch")
-          for component, manifest_name in (("territorial-viewer", "territorial-release.json"),
-                                            ("gods-eye-view", "gods-eye-view-release.json")):
-              if not (root / manifest_name).exists():
-                  continue
-              alias = root / (component + "-image-amd64.tar.gz")
-              with alias.open("rb") as stream:
-                  if hashlib.file_digest(stream, "sha256").hexdigest() != digest.hexdigest():
-                      raise SystemExit("viewer release aliases differ")
-              expected["image"].update(asset_name=alias.name,
-                  image_tag=f'{component}:{os.environ["RELEASE_COMMIT_SHA"]}')
-              if json.loads((root / manifest_name).read_text()) != expected:
-                  raise SystemExit("immutable viewer release manifest mismatch")
+          for image_name, manifest_name, component in (
+              (os.environ["RELEASE_IMAGE_ASSET"], os.environ["RELEASE_MANIFEST_ASSET"], "aidp-lab"),
+              ("gods-eye-view-image-amd64.tar.gz", "gods-eye-view-release.json", "gods-eye-view"),
+          ):
+              with (root / image_name).open("rb") as stream:
+                  digest = hashlib.file_digest(stream, "sha256").hexdigest()
+              expected = {
+                  "schema_version": 1,
+                  "updater_protocol": 1,
+                  "release": os.environ["GITHUB_REF_NAME"],
+                  "commit_sha": os.environ["RELEASE_COMMIT_SHA"],
+                  "repository": os.environ["RELEASE_REPOSITORY"],
+                  "image": {
+                      "asset_name": image_name,
+                      "sha256": digest,
+                      "platform": "linux/amd64",
+                      "image_tag": f'{component}:{os.environ["RELEASE_COMMIT_SHA"]}',
+                  },
+              }
+              if json.loads((root / manifest_name).read_text(encoding="utf-8")) != expected:
+                  raise SystemExit("immutable release asset manifest mismatch")
           PY
         env:
           GH_TOKEN: ${{ github.token }}
@@ -159,7 +127,7 @@ jobs:
         env:
           SESSION_SECRET_FILE: ${{ runner.temp }}/aidp-lab/session.key
       - if: steps.release.outputs.mode != 'immutable'
-        run: python scripts/check_ai_dg_documentary_graph.py && python scripts/check_ai_dg_governance_graph.py
+        run: python scripts/modules/ai_data_governance/check_ai_dg_documentary_graph.py && python scripts/modules/ai_data_governance/check_ai_dg_governance_graph.py
       - if: steps.release.outputs.mode != 'immutable'
         run: npm ci
         working-directory: apps/frontend
@@ -178,7 +146,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$RELEASE_DIST"
           image_tag="aidp-lab:$RELEASE_COMMIT_SHA"
-          python scripts/write_package_versions.py
+          python scripts/release/write_package_versions.py
           docker build --platform linux/amd64 \
             --build-arg APP_RELEASE_TAG="$GITHUB_REF_NAME" \
             --build-arg APP_RELEASE_SHA="$RELEASE_COMMIT_SHA" \
@@ -223,11 +191,9 @@ jobs:
           set -euo pipefail
           image_tag="gods-eye-view:$RELEASE_COMMIT_SHA"
           docker build --platform linux/amd64 \
-            --file apps/gods-eye-view/Dockerfile --tag "$image_tag" --tag "territorial-viewer:$RELEASE_COMMIT_SHA" --tag "prisma-viewer:$RELEASE_COMMIT_SHA" .
+            --file modules/ai-gods-eye-view/Dockerfile --tag "$image_tag" .
           test "$(docker image inspect "$image_tag" --format '{{.Os}}/{{.Architecture}}')" = "linux/amd64"
-          docker save "$image_tag" "territorial-viewer:$RELEASE_COMMIT_SHA" "prisma-viewer:$RELEASE_COMMIT_SHA" | gzip -n -9 > "$RELEASE_DIST/gods-eye-view-image-amd64.tar.gz"
-          cp "$RELEASE_DIST/gods-eye-view-image-amd64.tar.gz" "$RELEASE_DIST/territorial-viewer-image-amd64.tar.gz"
-          cp "$RELEASE_DIST/territorial-viewer-image-amd64.tar.gz" "$RELEASE_DIST/prisma-viewer-image-amd64.tar.gz"
+          docker save "$image_tag" | gzip -n -9 > "$RELEASE_DIST/gods-eye-view-image-amd64.tar.gz"
           python - <<'PY'
           import hashlib
           import json
@@ -236,19 +202,13 @@ jobs:
 
           root = Path(os.environ["RELEASE_DIST"])
           manifest = json.loads((root / os.environ["RELEASE_MANIFEST_ASSET"]).read_text())
-          image = root / "prisma-viewer-image-amd64.tar.gz"
+          image = root / "gods-eye-view-image-amd64.tar.gz"
           with image.open("rb") as stream:
               digest = hashlib.file_digest(stream, "sha256").hexdigest()
           manifest["image"] = {
               "asset_name": image.name, "sha256": digest, "platform": "linux/amd64",
-              "image_tag": f'prisma-viewer:{os.environ["RELEASE_COMMIT_SHA"]}',
+              "image_tag": f'gods-eye-view:{os.environ["RELEASE_COMMIT_SHA"]}',
           }
-          (root / "prisma-release.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-          manifest["image"].update(asset_name="territorial-viewer-image-amd64.tar.gz",
-              image_tag=f'territorial-viewer:{os.environ["RELEASE_COMMIT_SHA"]}')
-          (root / "territorial-release.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-          manifest["image"].update(asset_name="gods-eye-view-image-amd64.tar.gz",
-              image_tag=f'gods-eye-view:{os.environ["RELEASE_COMMIT_SHA"]}')
           (root / "gods-eye-view-release.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
           PY
       - name: Create or reuse draft GitHub release
@@ -272,10 +232,6 @@ jobs:
             "$RELEASE_DIST/$RELEASE_MANIFEST_ASSET" \
             "$RELEASE_DIST/gods-eye-view-release.json" \
             "$RELEASE_DIST/gods-eye-view-image-amd64.tar.gz" \
-            "$RELEASE_DIST/prisma-release.json" \
-            "$RELEASE_DIST/prisma-viewer-image-amd64.tar.gz" \
-            "$RELEASE_DIST/territorial-release.json" \
-            "$RELEASE_DIST/territorial-viewer-image-amd64.tar.gz" \
             --clobber
         env:
           GH_TOKEN: ${{ github.token }}
@@ -286,27 +242,17 @@ jobs:
           verify_dir="$RUNNER_TEMP/uploaded-release"
           mkdir -p "$verify_dir"
           asset_names="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,gods-eye-view-image-amd64.tar.gz,gods-eye-view-release.json,prisma-release.json,prisma-viewer-image-amd64.tar.gz,territorial-release.json,territorial-viewer-image-amd64.tar.gz"
+          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,gods-eye-view-image-amd64.tar.gz,gods-eye-view-release.json"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$verify_dir" \
             --pattern "$RELEASE_IMAGE_ASSET" \
             --pattern "$RELEASE_MANIFEST_ASSET" \
             --pattern gods-eye-view-release.json \
-            --pattern gods-eye-view-image-amd64.tar.gz \
-            --pattern prisma-release.json \
-            --pattern prisma-viewer-image-amd64.tar.gz
-          if [[ "$asset_names" == *territorial-release.json* ]]; then
-            gh release download "$GITHUB_REF_NAME" --dir "$verify_dir" \
-              --pattern territorial-release.json --pattern territorial-viewer-image-amd64.tar.gz
-          fi
+            --pattern gods-eye-view-image-amd64.tar.gz
           cmp "$RELEASE_DIST/$RELEASE_IMAGE_ASSET" "$verify_dir/$RELEASE_IMAGE_ASSET"
           cmp "$RELEASE_DIST/$RELEASE_MANIFEST_ASSET" "$verify_dir/$RELEASE_MANIFEST_ASSET"
           cmp "$RELEASE_DIST/gods-eye-view-release.json" "$verify_dir/gods-eye-view-release.json"
           cmp "$RELEASE_DIST/gods-eye-view-image-amd64.tar.gz" "$verify_dir/gods-eye-view-image-amd64.tar.gz"
-          cmp "$RELEASE_DIST/prisma-release.json" "$verify_dir/prisma-release.json"
-          cmp "$RELEASE_DIST/prisma-viewer-image-amd64.tar.gz" "$verify_dir/prisma-viewer-image-amd64.tar.gz"
-          cmp "$RELEASE_DIST/territorial-release.json" "$verify_dir/territorial-release.json"
-          cmp "$RELEASE_DIST/territorial-viewer-image-amd64.tar.gz" "$verify_dir/territorial-viewer-image-amd64.tar.gz"
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Publish GitHub release

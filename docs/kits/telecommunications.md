@@ -1,88 +1,41 @@
-# Telecommunications
+# Telecomunicaciones · Telecommunications
 
-[Documentation](../README.md) · [Getting started](../getting-started.md)
+[Documentación](../README.md) · [Primeros pasos](../getting-started.md)
 
-Relate subscriber usage to plans and network sites, then build monthly subscriber
-and daily site metrics. This participant lab uses deterministic training CSVs;
-it does not connect to a live charging or network-management system.
-The current [package contract](../../apps/backend/app/labs/telecommunications/lab.json) is version `2.0.0`.
+El [paquete `2.0.0`](../../apps/backend/app/kits/telecommunications/lab.json) relaciona consumo, planes y sitios de red para producir métricas mensuales y diarias. Usa CSV deterministas de entrenamiento; no se conecta a facturación ni a gestión de red reales. Antes de ejecutarlo, revise la [incompatibilidad actual entre notebooks y aprovisionador](../getting-started.md#current-implementation-limits).
 
-## Inputs
+## Entradas y flujo
 
-The [source directory](../../apps/backend/app/labs/telecommunications/source) contains the actual files.
-Provisioning copies them to the participant workspace's `source/` directory.
+El aprovisionamiento copia los [archivos fuente](../../apps/backend/app/kits/telecommunications/source) a `source/` del participante. El manifiesto fija sus filas y hashes.
 
-| CSV | Rows | Business role |
+| CSV | Filas | Contenido |
 | --- | ---: | --- |
-| `plans.csv` | 12 | Plan type, monthly fee, included usage and overage rate |
-| `network_sites.csv` | 30 | Site region, technology and daily data capacity |
-| `subscribers.csv` | 250 | Subscriber plan, home site, segment and activation |
-| `usage_events.csv` | 6,000 | Data, voice and SMS usage with site and charge |
+| `plans.csv` | 12 | Tipo, mensualidad, consumo incluido y tarifa adicional |
+| `network_sites.csv` | 30 | Región, tecnología y capacidad diaria |
+| `subscribers.csv` | 250 | Plan, sitio habitual, segmento y activación |
+| `usage_events.csv` | 6,000 | Consumo de datos, voz y SMS, sitio y cargo |
 
-The raw `usage_events.charge_amount` sum is **15,026.56**.
-This reconciles the fixture, not the final filtered Gold output.
-Row counts and file hashes are pinned in the manifest.
+La suma original de `usage_events.charge_amount` es **15,026.56**. Reconcilia la entrada, no la salida Gold filtrada.
 
-## Workflow
+El trabajo `wf_<participant_key>_telecommunications` ejecuta `01_landing_telecommunications` → `02_bronze_telecommunications` → `03_silver_telecommunications` → `04_gold_telecommunications` → `05_lineage_telecommunications`. Los [notebooks](../../apps/backend/app/kits/telecommunications/notebooks) usan tablas Delta administradas en las cuatro capas. Landing carga los CSV e identidad; Bronze conserva valores; Silver convierte tipos, normaliza, elimina duplicados y valida relaciones; Gold agrega el consumo aceptado con abonados o sitios. Los rechazos quedan en `quality_issues`.
 
-The deployed job is `wf_<participant_key>_telecommunications`.
-These are the exact manifest task names and dependencies.
+## Resultados y aceptación
 
-```mermaid
-flowchart LR
-    L["01_landing_telecommunications"] --> B["02_bronze_telecommunications"]
-    B --> S["03_silver_telecommunications"]
-    S --> G["04_gold_telecommunications"]
-    G --> V["05_lineage_telecommunications"]
-```
+Los nombres físicos añaden `<participant_key>_` a estas tablas de `<catalog_name>.oci_gold`.
 
-1. Landing loads participant-scoped CSV records into managed Delta tables.
-2. Bronze retains source values and their identity in managed Delta tables.
-3. Silver casts types, normalizes strings, deduplicates business keys,
-   validates relationships and separates rejected records into `quality_issues`.
-4. Gold joins accepted usage with subscribers or network sites to calculate metrics.
-5. Validation checks the table formats, storage types, non-empty outputs and lineage setting.
-
-The [notebooks](../../apps/backend/app/labs/telecommunications/notebooks) are the executable reference.
-All four catalog layers are managed Delta; the input files themselves are CSV.
-
-## Gold outputs
-
-Physical names prefix these table names with `<participant_key>_` in `<catalog_name>.oci_gold`.
-
-| Table | Grain | Metrics |
+| Tabla | Agrupación | Métricas |
 | --- | --- | --- |
-| `telecommunications_subscriber_monthly` | Subscriber, plan and month | Data MB, voice minutes, SMS count, usage charge and overage flag |
-| `telecommunications_site_daily` | Site and event date | Unique subscribers, data MB, voice minutes and utilization percentage |
+| `telecommunications_subscriber_monthly` | Abonado, plan y mes | MB, minutos, SMS, cargos e indicador de exceso |
+| `telecommunications_site_daily` | Sitio y fecha | Abonados distintos, MB, minutos y utilización porcentual |
 
-`overage_flag` means the aggregated `usage_charge` is greater than zero.
-It does not recompute a bill using plan allowances or the overage-rate field.
-Site utilization is data MB divided by daily site capacity, multiplied by 100 and rounded.
+`overage_flag` indica que el `usage_charge` agregado supera cero; no recalcula una factura con las franquicias del plan. La utilización divide MB entre capacidad diaria del sitio, multiplica por 100 y redondea.
 
-## Checks and expected results
+- Landing y Bronze deben reconciliar las cuatro entradas. Silver valida campos obligatorios, tipos, enumeraciones, claves e identidad del participante.
+- Capacidad y valores de consumo deben ser positivos; referencias inválidas y claves duplicadas se envían a cuarentena.
+- `<participant_key>_telecommunications_quality_issues`, en `oci_silver`, y ambas salidas Gold deben contener datos.
+- El [notebook final](../../apps/backend/app/kits/telecommunications/notebooks/05_lineage_telecommunications.ipynb) comprueba 15 tablas Delta administradas y la configuración de linaje.
+- Revise el grafo nativo de ambas anclas Gold a nivel de entidad y columna, en ambas direcciones, con profundidad 8. Siga la identidad del abonado hasta el resumen mensual y `usage_events.usage_value` → `telecommunications_site_daily.data_mb`. El éxito del notebook no demuestra por sí solo la cobertura del grafo.
 
-- Landing/Bronze counts must reconcile with all four source counts.
-- Silver validates required values, data types, enumerations, keys and participant scope.
-- Site capacity and usage values must be positive.
-- Invalid references and duplicate business keys are quarantined.
-- `<participant_key>_telecommunications_quality_issues` in `oci_silver` must be non-empty.
-- Both Gold outputs must be non-empty; all 15 declared tables must be managed Delta.
+## Ejecución del participante
 
-Inspect native lineage for both Gold anchors at entity and column level,
-with both directions and depth 8. Follow subscriber identity into the monthly table
-and `usage_events.usage_value` into `telecommunications_site_daily.data_mb`.
-The final notebook checks lineage is enabled; graph coverage is a separate Master Catalog check.
-
-## Run as a participant
-
-1. Complete [Getting started](../getting-started.md) and read its package/provisioner compatibility notes.
-2. Open your assigned Telecommunications workflow with its supplied parameters.
-3. Run the complete five-task job in its declared order.
-4. Inspect Silver quarantine reasons before comparing subscriber and site metrics.
-5. Rerun with unchanged inputs and confirm that overwrite writes keep counts stable.
-
-Keep your deployed `catalog_name` and participant table prefix when exploring the results.
-A useful exercise is to compare site utilization by event date and identify which sites
-have the largest data volume in this fixture.
-See the [Gold notebook](../../apps/backend/app/labs/telecommunications/notebooks/04_gold_telecommunications.ipynb)
-and [validation notebook](../../apps/backend/app/labs/telecommunications/notebooks/05_lineage_telecommunications.ipynb).
+Siga [Primeros pasos](../getting-started.md), abra el flujo asignado y conserve sus parámetros. Ejecute las cinco tareas, revise las causas de cuarentena antes de comparar métricas y repita con entradas idénticas para comprobar conteos estables bajo sobrescritura. Explore con su `catalog_name` y prefijo; por ejemplo, compare la utilización por sitio y fecha. El [notebook Gold](../../apps/backend/app/kits/telecommunications/notebooks/04_gold_telecommunications.ipynb) define las métricas.

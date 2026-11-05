@@ -1,0 +1,114 @@
+{
+  "name": "AI_DG_ASSESSMENT",
+  "domain": "Reglas y mediciones",
+  "row": 2,
+  "col": 5,
+  "grain": "Un resultado de una regla/version sobre una revisión concreta, con evidencia y vigencia.",
+  "pk": [
+    "assessment_id"
+  ],
+  "unique": [],
+  "columns": [
+    {
+      "name": "assessment_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Identidad idempotente de la medición/evaluación."
+    },
+    {
+      "name": "rule_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Regla evaluada junto con rule_version."
+    },
+    {
+      "name": "rule_version",
+      "type": "INT",
+      "required": true,
+      "comment": "Versión exacta de la regla."
+    },
+    {
+      "name": "asset_version_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Revisión evaluada; no se traslada automáticamente un PASS a otra revisión."
+    },
+    {
+      "name": "run_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Intento que importa o ejecuta la evaluación autorizada."
+    },
+    {
+      "name": "evidence_id",
+      "type": "STRING",
+      "required": false,
+      "comment": "Obligatoria para PASS/FAIL medidos; ausente para NOT_MEASURED."
+    },
+    {
+      "name": "status",
+      "type": "STRING",
+      "required": true,
+      "comment": "PASS, FAIL, UNKNOWN, NOT_MEASURED o ERROR; ausencia de medición nunca es PASS."
+    },
+    {
+      "name": "result_json",
+      "type": "STRING",
+      "required": true,
+      "comment": "Métrica, unidad, denominador, umbral, método y cobertura; sin copia de filas de negocio."
+    },
+    {
+      "name": "measured_at",
+      "type": "TIMESTAMP",
+      "required": false,
+      "comment": "Momento real de medición; nulo si nunca se midió."
+    },
+    {
+      "name": "expires_at",
+      "type": "TIMESTAMP",
+      "required": false,
+      "comment": "Vigencia para respuestas del agente."
+    }
+  ],
+  "foreign_keys": [
+    {
+      "columns": [
+        "rule_id",
+        "rule_version"
+      ],
+      "table": "AI_DG_RULE",
+      "target": [
+        "rule_id",
+        "rule_version"
+      ]
+    },
+    {
+      "columns": [
+        "asset_version_id"
+      ],
+      "table": "AI_DG_ASSET_VERSION",
+      "target": [
+        "version_id"
+      ]
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "table": "AI_DG_RUN",
+      "target": [
+        "run_id"
+      ]
+    },
+    {
+      "columns": [
+        "evidence_id"
+      ],
+      "table": "AI_DG_EVIDENCE",
+      "target": [
+        "evidence_id"
+      ],
+      "optional": true
+    }
+  ]
+}

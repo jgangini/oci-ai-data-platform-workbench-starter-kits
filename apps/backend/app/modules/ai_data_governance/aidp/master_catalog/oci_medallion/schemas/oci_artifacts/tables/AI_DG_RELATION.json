@@ -1,0 +1,113 @@
+{
+  "name": "AI_DG_RELATION",
+  "domain": "Evidencia y relaciones",
+  "row": 1,
+  "col": 2,
+  "grain": "Una afirmación dirigida entre revisiones, sustentada por una evidencia; distintas pruebas no se sobrescriben.",
+  "pk": [
+    "relation_id"
+  ],
+  "unique": [
+    [
+      "scope_id",
+      "from_version_id",
+      "to_version_id",
+      "relation_kind",
+      "evidence_id"
+    ]
+  ],
+  "columns": [
+    {
+      "name": "relation_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "ID deduplicable de la afirmación y su prueba."
+    },
+    {
+      "name": "scope_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Ámbito en el que ambos extremos pueden consultarse."
+    },
+    {
+      "name": "from_version_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Origen: productor, dato anterior o contenedor según relation_kind."
+    },
+    {
+      "name": "to_version_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Destino: consumidor, dato derivado o contenido según relation_kind."
+    },
+    {
+      "name": "relation_kind",
+      "type": "STRING",
+      "required": true,
+      "comment": "CONTAINS, FLOWS_TO, USED_BY, PRODUCES o DEFINES; dirección documentada por tipo."
+    },
+    {
+      "name": "evidence_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Prueba trazable de esta relación, no texto generado como prueba de sí mismo."
+    },
+    {
+      "name": "assertion_basis",
+      "type": "STRING",
+      "required": true,
+      "comment": "OBSERVED, STATIC_INFERRED o CANDIDATE; sólo ejecución/linaje real acredita uso ejecutado."
+    },
+    {
+      "name": "valid_from",
+      "type": "TIMESTAMP",
+      "required": true,
+      "comment": "Inicio de validez de la afirmación."
+    },
+    {
+      "name": "valid_to",
+      "type": "TIMESTAMP",
+      "required": false,
+      "comment": "Cierre o sustitución; nulo no demuestra frescura por sí solo."
+    }
+  ],
+  "foreign_keys": [
+    {
+      "columns": [
+        "scope_id"
+      ],
+      "table": "AI_DG_SCOPE",
+      "target": [
+        "scope_id"
+      ]
+    },
+    {
+      "columns": [
+        "from_version_id"
+      ],
+      "table": "AI_DG_ASSET_VERSION",
+      "target": [
+        "version_id"
+      ]
+    },
+    {
+      "columns": [
+        "to_version_id"
+      ],
+      "table": "AI_DG_ASSET_VERSION",
+      "target": [
+        "version_id"
+      ]
+    },
+    {
+      "columns": [
+        "evidence_id"
+      ],
+      "table": "AI_DG_EVIDENCE",
+      "target": [
+        "evidence_id"
+      ]
+    }
+  ]
+}

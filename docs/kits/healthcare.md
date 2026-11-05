@@ -1,88 +1,41 @@
-# Healthcare
+# Salud · Healthcare
 
-[Documentation](../README.md) · [Getting started](../getting-started.md)
+[Documentación](../README.md) · [Primeros pasos](../getting-started.md)
 
-Build patient-utilization and provider-day summaries from appointment and encounter data.
-The input is deterministic training data, not patient records from a clinical system.
-This participant lab teaches data quality, temporal validation and medallion lineage.
-The current [package contract](../../apps/backend/app/labs/healthcare/lab.json) is version `2.0.0`.
+El [paquete `2.0.0`](../../apps/backend/app/kits/healthcare/lab.json) produce resúmenes de utilización por paciente y actividad diaria por profesional. Los CSV son datos deterministas de entrenamiento, no registros clínicos reales. Antes de ejecutarlo, revise la [incompatibilidad actual entre notebooks y aprovisionador](../getting-started.md#current-implementation-limits).
 
-## Inputs
+## Entradas y flujo
 
-The [source files](../../apps/backend/app/labs/healthcare/source) are the actual inputs.
-Provisioning copies them into the participant workspace's `source/` directory.
+El aprovisionamiento copia los [archivos fuente](../../apps/backend/app/kits/healthcare/source) a `source/` del participante. El manifiesto fija sus hashes y filas.
 
-| CSV | Rows | Business role |
+| CSV | Filas | Contenido |
 | --- | ---: | --- |
-| `patients.csv` | 240 | Age band, region, coverage and risk band |
-| `providers.csv` | 48 | Specialty, region, facility and capacity |
-| `appointments.csv` | 900 | Booking, scheduled time, patient/provider references and status |
-| `encounters.csv` | 700 | Actual encounter times, diagnosis/procedure groups and cost |
+| `patients.csv` | 240 | Edad agrupada, región, cobertura y riesgo |
+| `providers.csv` | 48 | Especialidad, región, centro y capacidad |
+| `appointments.csv` | 900 | Reserva, horario, paciente, profesional y estado |
+| `encounters.csv` | 700 | Atención efectiva, horarios, diagnóstico/procedimiento y coste |
 
-The raw `encounters.cost_amount` sum is **557,597.00**.
-This reconciles the CSV fixture, not a Gold total after invalid records are removed.
-Each source's hash and row count are pinned by the manifest.
+La suma original de `encounters.cost_amount` es **557,597.00**. Reconcilia la entrada, no un total Gold posterior a la eliminación de registros inválidos.
 
-## Workflow
+El trabajo `wf_<participant_key>_healthcare` ejecuta `01_landing_healthcare` → `02_bronze_healthcare` → `03_silver_healthcare` → `04_gold_healthcare` → `05_lineage_healthcare`. Los [notebooks](../../apps/backend/app/kits/healthcare/notebooks) usan tablas Delta administradas en las cuatro capas. Landing añade identidad; Bronze conserva valores; Silver normaliza tipos, ordena duplicados, valida referencias y horarios y registra rechazos con su causa; Gold agrega las citas y atenciones aceptadas.
 
-The deployed job is `wf_<participant_key>_healthcare`.
-Its five tasks have the following manifest dependencies.
+## Resultados y aceptación
 
-```mermaid
-flowchart LR
-    L["01_landing_healthcare"] --> B["02_bronze_healthcare"]
-    B --> S["03_silver_healthcare"]
-    S --> G["04_gold_healthcare"]
-    G --> V["05_lineage_healthcare"]
-```
+Los nombres físicos añaden `<participant_key>_` a estas tablas de `<catalog_name>.oci_gold`.
 
-1. Landing reads CSV inputs, adds participant identity and writes managed Delta tables.
-2. Bronze retains the original source values in managed Delta tables.
-3. Silver normalizes types, ranks duplicates, checks references and time ordering,
-   and records rejected rows with reason codes.
-4. Gold aggregates accepted appointments and encounters.
-5. Validation checks table presence, format, storage type and the lineage setting.
-
-The executable [notebooks](../../apps/backend/app/labs/healthcare/notebooks) define these steps.
-All catalog layers use managed Delta tables; CSV is the input-file format.
-
-## Gold outputs
-
-Physical names prefix these names with `<participant_key>_` in `<catalog_name>.oci_gold`.
-
-| Table | Grain | Metrics |
+| Tabla | Agrupación | Métricas |
 | --- | --- | --- |
-| `healthcare_patient_utilization` | Patient | Appointments, no-shows, encounters, total cost and last encounter |
-| `healthcare_provider_daily` | Provider and service date | Scheduled/completed appointments, no-show rate, encounters, average duration and cost |
+| `healthcare_patient_utilization` | Paciente | Citas, ausencias, atenciones, coste total y última atención |
+| `healthcare_provider_daily` | Profesional y fecha | Citas programadas/completadas, ausencias, atenciones, duración promedio y coste |
 
-Patient output starts from accepted patients and left-joins their activity.
-Provider output starts from scheduled appointment dates and left-joins performed encounters.
-Encounter duration is calculated from the accepted start and end timestamps in minutes.
+La salida de pacientes parte de los pacientes aceptados y une su actividad con `left join`. La de profesionales parte de las fechas de citas y une las atenciones realizadas. La duración se calcula en minutos entre inicio y fin aceptados.
 
-## Checks and expected results
+- Landing y Bronze deben reconciliar las entradas. Silver valida campos obligatorios, conversiones, enumeraciones, identidad y referencias.
+- Costes de atención y capacidad diaria deben ser positivos. El fin de cada cita o atención debe ser estrictamente posterior al inicio.
+- `<participant_key>_healthcare_quality_issues`, en `oci_silver`, y ambas salidas Gold deben contener datos.
+- El [notebook final](../../apps/backend/app/kits/healthcare/notebooks/05_lineage_healthcare.ipynb) comprueba las 15 tablas Delta administradas y la configuración de linaje.
+- En Master Catalog, revise entidad y columna en ambas direcciones con profundidad 8. Siga identidad del paciente → `healthcare_patient_utilization` y coste de atención → `healthcare_provider_daily.total_cost` a través de Landing, Bronze y Silver. El éxito del notebook no acredita todas las aristas del grafo nativo.
 
-- Landing/Bronze row counts must match the source counts above.
-- Silver validates required fields, casts, enumerations, participant scope and references.
-- Encounter costs and provider daily capacity must be positive.
-- Appointment and encounter end times must be strictly later than their start times.
-- `<participant_key>_healthcare_quality_issues` in `oci_silver` must be non-empty.
-- Both Gold tables must be non-empty; all 15 declared tables must be managed Delta.
+## Ejecución del participante
 
-Inspect entity and column lineage in both directions with depth 8.
-Follow patient identity into `healthcare_patient_utilization` and encounter cost into
-`healthcare_provider_daily.total_cost`, through the governed Landing/Bronze/Silver schemas.
-Notebook success confirms the lineage setting, not every edge in the native graph.
-
-## Run as a participant
-
-1. Complete [Getting started](../getting-started.md) and its package/provisioner compatibility checks.
-2. Open your assigned Healthcare workflow with its supplied parameters.
-3. Run all five tasks, then inspect Silver `quality_issues` for time-order and reference failures.
-4. Review both Gold outputs and their native lineage in Master Catalog.
-5. Rerun unchanged inputs and confirm that overwrite writes keep counts stable.
-
-Retain the deployed `catalog_name` and your participant table prefix.
-As an exercise, compare provider-day no-show rates with encounter duration;
-these describe different stages of the fixture's appointment-to-encounter flow.
-See the [Gold notebook](../../apps/backend/app/labs/healthcare/notebooks/04_gold_healthcare.ipynb)
-and [validation notebook](../../apps/backend/app/labs/healthcare/notebooks/05_lineage_healthcare.ipynb).
+Siga [Primeros pasos](../getting-started.md), abra el flujo asignado con sus parámetros y ejecute las cinco tareas. Revise rechazos de horarios y referencias en `quality_issues`, ambas salidas Gold y su linaje. Repita con entradas idénticas para comprobar conteos estables bajo sobrescritura. Conserve su `catalog_name` y prefijo. Compare ausencias y duración de atención por profesional y día: representan fases diferentes, definidas por el [notebook Gold](../../apps/backend/app/kits/healthcare/notebooks/04_gold_healthcare.ipynb).

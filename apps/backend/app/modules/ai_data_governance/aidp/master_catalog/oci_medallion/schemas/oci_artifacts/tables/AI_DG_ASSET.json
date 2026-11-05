@@ -1,0 +1,101 @@
+{
+  "name": "AI_DG_ASSET",
+  "domain": "Ámbito e inventario",
+  "row": 0,
+  "col": 1,
+  "grain": "Un activo estable de la plataforma, compartido por todos los ámbitos que lo observan.",
+  "pk": [
+    "asset_id"
+  ],
+  "unique": [
+    [
+      "platform_key",
+      "asset_kind",
+      "native_key"
+    ]
+  ],
+  "columns": [
+    {
+      "name": "asset_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "ID estable; preservar object_id existente para las columnas migradas."
+    },
+    {
+      "name": "platform_key",
+      "type": "STRING",
+      "required": true,
+      "comment": "Plataforma que define la identidad nativa."
+    },
+    {
+      "name": "asset_kind",
+      "type": "STRING",
+      "required": true,
+      "comment": "TABLE, COLUMN, WORKFLOW, TASK, FILE, NOTEBOOK, MODEL o TERM según cobertura verificada."
+    },
+    {
+      "name": "native_key",
+      "type": "STRING",
+      "required": true,
+      "comment": "ID nativo o identidad alternativa explícita; nunca sólo el nombre."
+    },
+    {
+      "name": "parent_asset_id",
+      "type": "STRING",
+      "required": false,
+      "comment": "Contenedor estable: columna-tabla, tarea-workflow, etcétera."
+    },
+    {
+      "name": "current_version_id",
+      "type": "STRING",
+      "required": false,
+      "comment": "Última versión observada y confirmada; se avanza después de persistir la versión."
+    },
+    {
+      "name": "identity_status",
+      "type": "STRING",
+      "required": true,
+      "comment": "RESOLVED, FALLBACK o AMBIGUOUS; un renombre ambiguo no fusiona activos."
+    },
+    {
+      "name": "lifecycle_state",
+      "type": "STRING",
+      "required": true,
+      "comment": "ACTIVE, NOT_VISIBLE o DELETION_CONFIRMED; ausencia no prueba borrado."
+    },
+    {
+      "name": "first_seen_at",
+      "type": "TIMESTAMP",
+      "required": true,
+      "comment": "Primera observación del activo."
+    },
+    {
+      "name": "updated_at",
+      "type": "TIMESTAMP",
+      "required": true,
+      "comment": "Actualización de la proyección actual."
+    }
+  ],
+  "foreign_keys": [
+    {
+      "columns": [
+        "parent_asset_id"
+      ],
+      "table": "AI_DG_ASSET",
+      "target": [
+        "asset_id"
+      ],
+      "optional": true
+    },
+    {
+      "columns": [
+        "current_version_id"
+      ],
+      "table": "AI_DG_ASSET_VERSION",
+      "target": [
+        "version_id"
+      ],
+      "optional": true
+    }
+  ]
+}

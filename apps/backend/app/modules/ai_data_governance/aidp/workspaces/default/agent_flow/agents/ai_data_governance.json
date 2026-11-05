@@ -1,0 +1,9 @@
+{
+  "name": "ai_data_governance",
+  "type": "CODE",
+  "pathInfo": "/Workspace/.artifact/ai_data_governance/agents/governance",
+  "entry_file": "governance_agent.py",
+  "compute_binding": "agent_compute_key",
+  "deployment_stage": "TEST",
+  "acceptance": "TEST_PENDING"
+}

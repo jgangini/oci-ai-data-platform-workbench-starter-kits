@@ -120,12 +120,11 @@ resource "oci_core_instance" "lab" {
       autonomous_database_id         = local.autonomous_database_id
       agent_model_id                 = var.agent_model_id
       artifacts_bucket_name          = local.artifacts_bucket_name
-      aidp_runtime_mode              = var.aidp_runtime_mode
       lab_marker                     = local.name_prefix
       source_repo_url                = var.source_repository_url
       source_commit_sha              = var.source_commit_sha
       gods_eye_view_url              = local.gods_eye_view_upstream
-      enable_gods_eye_view           = local.module_network_enabled
+      gods_eye_view_enabled          = local.module_network_enabled
       portal_managed_modules         = var.portal_managed_modules
       enable_public_ip_tls           = var.enable_public_ip_tls
       gods_eye_view_admin_private_ip = local.gods_eye_view_admin_private_ip

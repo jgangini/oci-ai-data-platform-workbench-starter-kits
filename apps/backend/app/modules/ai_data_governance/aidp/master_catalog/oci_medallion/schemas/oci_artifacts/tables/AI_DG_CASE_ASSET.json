@@ -1,0 +1,83 @@
+{
+  "name": "AI_DG_CASE_ASSET",
+  "domain": "Casos y decisiones",
+  "row": 2,
+  "col": 1,
+  "grain": "Un activo afectado por un caso y la revisión examinada; un caso puede abarcar varias tablas y tareas.",
+  "pk": [
+    "case_id",
+    "asset_id"
+  ],
+  "unique": [],
+  "columns": [
+    {
+      "name": "case_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Caso relacionado."
+    },
+    {
+      "name": "asset_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Activo del mismo ámbito del caso."
+    },
+    {
+      "name": "assessed_version_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Versión examinada; debe pertenecer a asset_id."
+    },
+    {
+      "name": "impact_role",
+      "type": "STRING",
+      "required": true,
+      "comment": "SUBJECT, UPSTREAM, DOWNSTREAM o EXECUTOR; impacto potencial se distingue del observado."
+    },
+    {
+      "name": "evidence_id",
+      "type": "STRING",
+      "required": false,
+      "comment": "Prueba de esa participación; si falta, no se presenta como hecho verificado."
+    }
+  ],
+  "foreign_keys": [
+    {
+      "columns": [
+        "case_id"
+      ],
+      "table": "AI_DG_CASE",
+      "target": [
+        "case_id"
+      ]
+    },
+    {
+      "columns": [
+        "asset_id"
+      ],
+      "table": "AI_DG_ASSET",
+      "target": [
+        "asset_id"
+      ]
+    },
+    {
+      "columns": [
+        "assessed_version_id"
+      ],
+      "table": "AI_DG_ASSET_VERSION",
+      "target": [
+        "version_id"
+      ]
+    },
+    {
+      "columns": [
+        "evidence_id"
+      ],
+      "table": "AI_DG_EVIDENCE",
+      "target": [
+        "evidence_id"
+      ],
+      "optional": true
+    }
+  ]
+}

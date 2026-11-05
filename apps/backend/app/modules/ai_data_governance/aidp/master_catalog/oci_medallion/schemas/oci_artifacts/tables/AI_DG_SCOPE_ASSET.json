@@ -1,0 +1,143 @@
+{
+  "name": "AI_DG_SCOPE_ASSET",
+  "domain": "Ámbito e inventario",
+  "row": 1,
+  "col": 1,
+  "grain": "Una proyección de lectura actual por ámbito y activo: pertenencia, metadatos confirmados y frescura; evita joins históricos en preguntas frecuentes.",
+  "pk": [
+    "scope_id",
+    "asset_id"
+  ],
+  "unique": [],
+  "columns": [
+    {
+      "name": "scope_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Ámbito de la observación autorizada."
+    },
+    {
+      "name": "asset_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Activo compartido; el par completo se valida al acceder."
+    },
+    {
+      "name": "last_seen_run_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Última observación satisfactoria del activo en este ámbito."
+    },
+    {
+      "name": "last_seen_at",
+      "type": "TIMESTAMP",
+      "required": true,
+      "comment": "Frescura real; una lectura fallida no la renueva."
+    },
+    {
+      "name": "coverage_state",
+      "type": "STRING",
+      "required": true,
+      "comment": "COMPLETE, PARTIAL, NOT_VISIBLE o UNSUPPORTED; sin falsos borrados."
+    },
+    {
+      "name": "consistency_state",
+      "type": "STRING",
+      "required": true,
+      "comment": "VERIFIED, UPDATE_PENDING o REPLICA_PENDING; controla lo que el agente puede afirmar como vigente."
+    },
+    {
+      "name": "verified_version_id",
+      "type": "STRING",
+      "required": false,
+      "comment": "Versión confirmada para este ámbito; puede quedar antigua mientras se reconcilia."
+    },
+    {
+      "name": "asset_kind",
+      "type": "STRING",
+      "required": true,
+      "comment": "Copia derivada del tipo para filtrar tablas/columnas/tareas en una lectura."
+    },
+    {
+      "name": "qualified_name",
+      "type": "STRING",
+      "required": true,
+      "comment": "Nombre de la versión confirmada, no una definición independiente."
+    },
+    {
+      "name": "description",
+      "type": "STRING",
+      "required": false,
+      "comment": "Texto exacto confirmado, incluida la marca [IA]; nunca staging del agente documental."
+    },
+    {
+      "name": "description_origin",
+      "type": "STRING",
+      "required": true,
+      "comment": "Procedencia estructurada copiada de la versión confirmada."
+    },
+    {
+      "name": "data_type",
+      "type": "STRING",
+      "required": false,
+      "comment": "Tipo de columna de la versión confirmada, si aplica."
+    },
+    {
+      "name": "owner_ref",
+      "type": "STRING",
+      "required": false,
+      "comment": "Responsable declarado de la versión confirmada; no permiso IAM."
+    },
+    {
+      "name": "projection_hash",
+      "type": "STRING",
+      "required": true,
+      "comment": "Huella de campos derivados y verified_version_id; valida réplica, no atomicidad entre tablas."
+    },
+    {
+      "name": "projected_at",
+      "type": "TIMESTAMP",
+      "required": true,
+      "comment": "Instante de confirmación de esta proyección, distinto de la frescura de la fuente."
+    }
+  ],
+  "foreign_keys": [
+    {
+      "columns": [
+        "scope_id"
+      ],
+      "table": "AI_DG_SCOPE",
+      "target": [
+        "scope_id"
+      ]
+    },
+    {
+      "columns": [
+        "asset_id"
+      ],
+      "table": "AI_DG_ASSET",
+      "target": [
+        "asset_id"
+      ]
+    },
+    {
+      "columns": [
+        "last_seen_run_id"
+      ],
+      "table": "AI_DG_RUN",
+      "target": [
+        "run_id"
+      ]
+    },
+    {
+      "columns": [
+        "verified_version_id"
+      ],
+      "table": "AI_DG_ASSET_VERSION",
+      "target": [
+        "version_id"
+      ],
+      "optional": true
+    }
+  ]
+}

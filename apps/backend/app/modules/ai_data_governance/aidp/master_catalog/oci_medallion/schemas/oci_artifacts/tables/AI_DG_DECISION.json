@@ -1,0 +1,93 @@
+{
+  "name": "AI_DG_DECISION",
+  "domain": "Casos y decisiones",
+  "row": 2,
+  "col": 2,
+  "grain": "Una decisión humana inmutable sobre un tratamiento concreto; no participa en la documentación automática.",
+  "pk": [
+    "decision_id"
+  ],
+  "unique": [],
+  "columns": [
+    {
+      "name": "decision_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Identidad auditable de la decisión."
+    },
+    {
+      "name": "case_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Caso al que se limita la decisión."
+    },
+    {
+      "name": "run_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Intento autenticado que registró la decisión."
+    },
+    {
+      "name": "actor_ref",
+      "type": "STRING",
+      "required": true,
+      "comment": "Principal humano autenticado; la autoridad se verifica fuera de esta tabla."
+    },
+    {
+      "name": "decision",
+      "type": "STRING",
+      "required": true,
+      "comment": "APPROVE, REJECT o REVOKE; una espera no se registra como aprobación."
+    },
+    {
+      "name": "change_digest",
+      "type": "STRING",
+      "required": true,
+      "comment": "Debe coincidir con el cambio vigente del caso."
+    },
+    {
+      "name": "versions_digest",
+      "type": "STRING",
+      "required": true,
+      "comment": "Huella de revisiones y alcance aprobados; cambia si cambian los activos."
+    },
+    {
+      "name": "policy_version",
+      "type": "STRING",
+      "required": true,
+      "comment": "Política de autoridad vigente al decidir."
+    },
+    {
+      "name": "valid_until",
+      "type": "TIMESTAMP",
+      "required": true,
+      "comment": "Caducidad; se revalida al derivar el cambio."
+    },
+    {
+      "name": "recorded_at",
+      "type": "TIMESTAMP",
+      "required": true,
+      "comment": "Registro UTC inmutable; revocaciones son nuevas decisiones."
+    }
+  ],
+  "foreign_keys": [
+    {
+      "columns": [
+        "case_id"
+      ],
+      "table": "AI_DG_CASE",
+      "target": [
+        "case_id"
+      ]
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "table": "AI_DG_RUN",
+      "target": [
+        "run_id"
+      ]
+    }
+  ]
+}

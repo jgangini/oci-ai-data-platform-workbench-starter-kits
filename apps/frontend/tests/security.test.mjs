@@ -8,7 +8,7 @@ const source = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8"
 const pollingSource = await readFile(new URL("../src/registrationPoll.ts", import.meta.url), "utf8");
 const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 const viteConfig = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
-const labCatalog = JSON.parse(await readFile(new URL("../../backend/app/labs/catalog.json", import.meta.url), "utf8"));
+const labCatalog = JSON.parse(await readFile(new URL("../../backend/app/packages/catalog.json", import.meta.url), "utf8"));
 
 test("browser storage is limited to non-secret operation keys", () => {
   const positionWrite = 'window.sessionStorage.setItem(settingsUpdatePositionKey, JSON.stringify({ release: refreshed.current_release, y: window.scrollY }));';
@@ -230,7 +230,8 @@ test("administrators manage one shared governance module from Settings outside p
   assert.match(manager, /moduleOperationsRef\.current\.set/);
   assert.match(manager, /shared OCI credentials are retained/);
   assert.doesNotMatch(manager, /type="checkbox"|<ConfirmModal|dedicated AI Compute, credential, notebook/);
-  assert.match(manager, /reuse_existing: reinstall \? false : reuseExisting/);
+  assert.match(manager, /reuse_existing: reuseExisting/);
+  assert.doesNotMatch(manager, /confirmReinstall|previous_operation_id|\/reinstall/);
   assert.doesNotMatch(source, /production && user\.is_aidp_admin|lab_id: "agent"/);
   assert.match(source, /function participantLabCatalog/);
   assert.match(source, /\["agent", "ai_data_governance"\]\.includes\(lab_id\)/);

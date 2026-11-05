@@ -1,21 +1,53 @@
-# Deliberately bounded, code-only graph of AI Market Intelligence and its installer.
-# Other modules remain covered by the repository-wide Sentrux workflow.
+# Code-only map of the three module runtimes and the UI/deployment boundaries.
+# Sentrux covers the full repository source scope.
 /*
 !/apps/
 /apps/*
 !/apps/backend/
+!/apps/frontend/
+/apps/frontend/*
+!/apps/frontend/src/
 /apps/backend/*
 !/apps/backend/app/
 !/apps/backend/tests/
 /apps/backend/app/*
-!/apps/backend/app/labs/
-!/apps/backend/app/market_installation/
-!/apps/backend/app/market_intelligence.py
-!/apps/backend/app/market_intelligence_api.py
-/apps/backend/app/labs/*
-!/apps/backend/app/labs/ai_market_intelligence/
+!/apps/backend/app/modules/
+!/apps/backend/app/packages/
+!/apps/backend/app/services/
+!/apps/backend/app/api/
+!/apps/backend/app/kits/
+/apps/backend/app/kits/*
+!/apps/backend/app/kits/naming.py
+!/apps/backend/app/main.py
 /apps/backend/tests/*
-!/apps/backend/tests/test_market*.py
+!/apps/backend/tests/modules/
+!/apps/backend/tests/packages/
+!/apps/backend/tests/api/
+!/apps/backend/tests/services/
+!/apps/backend/tests/support/
+
+!/modules/
+/modules/*
+!/modules/ai-gods-eye-view/
+/modules/ai-gods-eye-view/*
+!/modules/ai-gods-eye-view/src/
+!/modules/ai-gods-eye-view/native/
+!/modules/ai-gods-eye-view/server.py
+!/modules/ai-gods-eye-view/context_layers.py
+!/modules/ai-gods-eye-view/provider_probes.py
+
+!/terraform/
+/terraform/*
+!/terraform/hooks/
+
+!/scripts/
+/scripts/*
+!/scripts/validation/
+!/scripts/development/
+!/scripts/deployment/
+!/scripts/release/
+!/scripts/kits/
+!/scripts/modules/
 
 # Never follow generated, private, vendor or nested-repository content.
 .git/
@@ -25,6 +57,7 @@
 .oci/
 .aws/
 .tmp/
+.local/
 .venv/
 .upstream/
 graphify-out/
@@ -39,3 +72,4 @@ __pycache__/
 *.tfstate*
 *.md
 *.txt
+*.ipynb

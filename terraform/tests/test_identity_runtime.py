@@ -89,7 +89,7 @@ def test_vm_receives_operator_credentials_through_one_use_encrypted_bootstrap() 
     assert 'BOOTSTRAP_DIR="/opt/aidp-lab/bootstrap"' in cloud_init
     assert 'install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$UPDATE_DIR" "$UPDATE_INBOX_DIR" "$UPDATE_STATUS_DIR" "$RELEASES_DIR" "$OCI_DIR" "$AUTONOMOUS_DIR" "$BOOTSTRAP_DIR"' in cloud_init
     assert 'openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072' in cloud_init
-    assert '-m app.credential_bootstrap' in cloud_init
+    assert '-m app.services.oci.credential_bootstrap' in cloud_init
     assert 'OCI_EXPECTED_USER_OCID=${operator_user_ocid}' in cloud_init
     assert '"$OCI_DIR:/etc/aidp-lab/oci:rw,Z"' in cloud_init
     assert 'OCI_CONFIG_FILE=/etc/aidp-lab/oci/config' in cloud_init

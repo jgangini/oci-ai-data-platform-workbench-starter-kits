@@ -6,6 +6,7 @@ import hmac
 import json
 import math
 import os
+import re
 import secrets
 import threading
 import time
@@ -84,9 +85,14 @@ def verify_session(token: str, key: bytes, *, now: int | None = None) -> str | N
         if not hmac.compare_digest(expected, _b64decode(signature_text)):
             return None
         payload = json.loads(_b64decode(body))
-        if int(payload["exp"]) <= (now or int(time.time())):
+        if (not isinstance(payload, dict) or set(payload) != {"sub", "exp", "sid"}
+                or not isinstance(payload["sub"], str) or not payload["sub"]
+                or type(payload["exp"]) is not int
+                or not isinstance(payload["sid"], str) or re.fullmatch(r"[A-Za-z0-9_-]{32}", payload["sid"]) is None):
             return None
-        return str(payload["sub"])
+        if payload["exp"] <= (now or int(time.time())):
+            return None
+        return payload["sub"]
     except (ValueError, KeyError, TypeError, json.JSONDecodeError):
         return None
 

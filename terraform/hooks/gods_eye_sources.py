@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 
 
-NOTEBOOK_ROOT = Path(__file__).resolve().parents[2] / "apps/backend/app/labs/gods_eye_view/notebooks"
+NOTEBOOK_ROOT = Path(__file__).resolve().parents[2] / "apps/backend/app/modules/ai_gods_eye_view/package/notebooks"
 CONFIG_ASSIGNMENT = "\nRUNTIME_CONFIG = {}\n"
 WORKFLOW_FILES = {"pipeline": "10_bronze/social_network.py", "sensor_pipeline": "10_bronze/sensor_stream.py"}
 
@@ -27,13 +27,13 @@ SOCIAL_EXPORTS = {
     "correlation": "timestamp identity nearby distance_km expanded_claims retained_memberships nearest_group group_events activity relations jurisdiction same_jurisdiction social_context sensor_context sensor_index add_context",
     "classification": "PROMPT_VERSION _NON_LITERAL_QUOTE _DUPLICATE_RISK _LABEL_PROPERTIES _CLASSIFICATION_SCHEMA _labels _claims classify",
     "control_store": "DOCUMENT_NAME ControlConflict ObjectControlStore _valid_name read_document write_document mutate_document publish reset_version sensor_reset_version publications validate_replacement replace_synthetic_publication replace_sensor_publication upsert_posts",
-    "post_index": "POST_HEAD POST_RANK published_time _post_json _post_hash _post_integer _post_head _post_append _post_document upsert_posts append_purge",
+    "post_index": "POST_HEAD POST_RANK published_time _post_json _post_hash _post_integer _post_head _post_append _post_document _post_validate_event upsert_posts append_purge",
     "landing": "ensure_volumes stream_progress page decode_record records write_objects",
     "runtime_secrets": "SHARED_OCI_CREDENTIAL_NAME OCI_CREDENTIALS identity_hash values signer _oci_values _signer runtime_auth",
     "capture": "schedule schedule_at query_lines",
     "x": "THIRD_PARTY XFailure retry_time fetch_page _post_event query_checkpoint poll_queries _poll_status",
     "sensors": "SENSOR_TYPES validate_record apply_locations",
-    "sensor_capture": "_family_change",
+    "sensor_capture": "_current_state _family_change",
     "sensor_pipeline": "MAX_BATCH_RECORDS MAX_VISIBLE_SENSORS SENSOR_SCHEMA decode_batch SensorLake",
     "synthetic_reset": "HISTORY_PREFIX VERSION HISTORY_BATCH_BYTES encoded _synthetic_ids prune_publication _versioned_replacement object_keys object_body delete_object clean_landing _clean_controls _save_clean_history _history_batches _delete_history_object _history_objects clean_history execute",
     "sensor_reset": "family _validate_rows _remaining_body _clear_controls clean_landing execute",
@@ -47,7 +47,8 @@ RENAMES = {
     "synthetic_reset": {"encoded": "encode_reset_publication", "clean_landing": "clean_social_landing", "execute": "execute_social_reset"},
     "sensor_reset": {"clean_landing": "clean_sensor_landing", "execute": "execute_sensor_reset"},
 }
-MODULE_ALIASES = {"synthetic_reset": {"database", "landing"},
+MODULE_ALIASES = {"sensor_capture": {"sensors"},
+                  "synthetic_reset": {"database", "landing"},
                   "sensor_reset": {"database", "sensor_capture", "sensors", "synthetic_reset"}}
 RUNTIME_FIELDS = frozenset("namespace bucket catalog region model_id compartment_id streaming_mode pipeline_revision analytics_store oci_credential_name oci_identity_sha256 workbench_base landing_bucket landing_prefix landing_volume_path checkpoint_volume_path sensor_landing_prefix sensor_landing_volume_path sensor_checkpoint_volume_path workspace_key job_key sensor_job_key gold_query_compute_id agent_compute_id".split())
 
@@ -88,8 +89,7 @@ def _standalone_fragment(bundle, module, names, exports):
     tree = ast.parse(source)
     targets = {(origin, name): RENAMES.get(origin, {}).get(name, name)
                for origin, selected in exports.items() for name in selected.split()}
-    # The installed package keeps a legacy database facade; native programs print
-    # only its Object Storage implementation, never the Oracle migration branch.
+    # Reset executors bind the Object Storage module locally as database.
     targets.update({("database", name): target for (origin, name), target in list(targets.items()) if origin == "control_store"})
     if "post_index" in exports:
         targets["database", "purge_synthetic_posts"] = "purge_synthetic_posts"
@@ -151,7 +151,7 @@ def workflow_source(module, config, bundle):
     required = ("namespace", "bucket", "pipeline_revision", "oci_credential_name", "oci_identity_sha256")
     if not isinstance(config, dict) or any(not isinstance(config.get(key), str) or not config[key] for key in required):
         raise ValueError("Standalone workflow requires explicit deployment configuration")
-    from app.lab_packs import module_runtime_source
+    from app.packages.catalog import module_runtime_source
     source = module_runtime_source("gods_eye_view", "notebooks/" + WORKFLOW_FILES[module]).decode("utf-8")
     return configured_source(source, {key: value for key, value in config.items() if key in RUNTIME_FIELDS})
 

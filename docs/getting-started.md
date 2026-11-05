@@ -1,89 +1,88 @@
-# Getting started
+# Primeros pasos
 
-[Documentation](README.md) · [Architecture](architecture.md) · [Operations](operations.md)
+[Documentación](README.md) · [Operaciones](operations.md) · [Contratos vigentes](contracts.md)
 
-## Current implementation limits
+Esta guía describe el despliegue compartido y el acceso de participantes. Para ejecutar el portal en Docker, consulte [Desarrollo y validación](development.md). Compruebe el contrato del paquete seleccionado y la aceptación de su instalación antes de ejecutar un laboratorio: una etiqueta o pruebas unitarias correctas no demuestran que funcione en OCI/AIDP.
 
-Check the selected release's package contracts and deployment acceptance before running a lab. A tag or passing unit tests alone does not establish native readiness.
+<a id="current-implementation-limits"></a>
+## Límites de la implementación
 
-| Area | Checked-in behavior and limitation |
+| Área | Comportamiento del código y limitación |
 | --- | --- |
-| Participant layout | The provisioner supplies `/Workspace/<lab_id>/<participant_key>_<email>` and catalog `oci_medallion`. The bundled 2.0.0 notebooks still validate `/Workspace/medallon/` and `<participant_key>_aidp`. New jobs using the current provisioner can fail those guards before ingestion. This contract must be reconciled and accepted before treating new participant runs as ready. |
-| God's Eye View upgrades | Standalone workflows and the Object-control runtime require an explicit migration for existing installations. Verify Gold-agent behavior, activate migrated controls, switch consumers and retire unused credentials as separate steps. Existing installations retain their legacy dependencies until those steps finish. See the [migration procedure](operations.md#migrate-gods-eye-view-controls). |
-| Portal-managed installation | New environments reserve module networking and record the original Resource Manager stack. Existing bases without that receipt/topology cannot gain this capability by updating the application image alone. Mock plans and local tests do not establish live installation acceptance. |
-| Historical evidence | The Telco lineage validation report describes package 1.1.2. Its results do not certify the current 2.0.0 package or a new installation. |
+| Rutas de participantes | El aprovisionador entrega `/Workspace/<lab_id>/<participant_key>_<email>` y el catálogo `oci_medallion`. Los notebooks incluidos en los paquetes `2.0.0` aún validan `/Workspace/medallon/` y `<participant_key>_aidp`. Las ejecuciones nuevas pueden fallar en esas comprobaciones antes de ingerir datos. Es necesario reconciliar y aceptar este contrato antes de considerar listos los trabajos de participantes. |
+| Contratos de AI God’s Eye View | Esta versión exige sesiones, configuración, recibos y controles Object actuales. No adopta ni migra formatos de instalaciones anteriores. La disponibilidad de fuentes no acredita aceptación nativa; consulte los [contratos vigentes](contracts.md). |
+| Instalación desde el portal | Las bases nuevas reservan la red de módulos y registran la pila Resource Manager original. Una base existente sin ese registro o topología no adquiere esta capacidad con una actualización de la imagen. Los planes simulados y las pruebas locales no acreditan una instalación real. |
+| Evidencia de Telco Customer 360 | El informe de validación disponible corresponde al paquete `1.1.2`; no certifica el paquete actual `2.0.0` ni una instalación nueva. |
 
-The layout discrepancy is visible in [naming](../apps/backend/app/notebooks.py), [job provisioning](../apps/backend/app/aidp.py), and the [Banking notebook](../apps/backend/app/labs/banking/notebooks/01_landing_banking.ipynb). Do not bypass notebook guards or substitute another participant's catalog to make a run appear successful.
+La discrepancia de rutas puede comprobarse en las [funciones de nombres](../apps/backend/app/kits/naming.py), el [aprovisionamiento de trabajos](../apps/backend/app/services/oci/aidp.py) y el [notebook de Banking](../apps/backend/app/kits/banking/notebooks/01_landing_banking.ipynb). No omita las comprobaciones del notebook ni use el catálogo de otro participante para aparentar una ejecución correcta.
 
-## Deploy a shared environment
+## Desplegar un entorno compartido
 
-Use the [Deploy Studio package](../terraform/deploy-studio.json) from a validated [immutable release](https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits/releases). Local development is described separately in [Development](development.md).
+Use el [paquete de Deploy Studio](../terraform/deploy-studio.json) de una [versión inmutable](https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits/releases) validada. Necesita un perfil de operador OCI, una clave API RSA, un compartimento de destino y permisos para los recursos declarados en Terraform. Entregue las credenciales por la carga protegida de Deploy Studio; no las añada al repositorio ni a las fuentes o al estado de Terraform. Seleccione una región suscrita con las capacidades AIDP, base de datos y modelo de chat que ofrece el formulario.
 
-Before deployment, have an OCI operator profile and RSA API key, a target compartment choice, and sufficient permissions for the resources declared in Terraform. Supply credentials through Deploy Studio's protected upload flow; they must not be committed or included in Terraform source/state. Select a subscribed region with the required AIDP, database and Chat-model capabilities offered by the form.
+1. Seleccione un compartimento nuevo o existente y el modo de despliegue.
+2. Seleccione o cree los cuatro buckets de medallón y otro de artefactos de Governance, cuyo nombre predeterminado es `oci_artifacts`. Los cinco deben ser distintos; los existentes deben pertenecer al compartimento seleccionado.
+3. Elija la base de datos y el modelo regional ofrecidos. La plataforma mantiene Autonomous para sus contratos actuales.
+4. Despliegue el portal central. La base prepara la red privada compartida y HTTPS automático con IP pública y mantiene cerrado SSH público. Governance, Market Intelligence y God's Eye View se instalan después desde Settings → Application, con sus respectivos controles de aceptación.
+5. Revise las fases de comprobación previa, plan, aplicación y comprobación posterior. Un `terraform apply` correcto no certifica espacios de trabajo, modelos, flujos ni participantes.
+6. Conserve el resumen protegido de acceso y las salidas `application_url`, `admin_url` y `aidp_workbench_url`.
 
-1. Select a new or existing compartment and the deployment mode.
-2. Select or create the four medallion buckets and a separate artifacts bucket for Governance (default `oci_artifacts`). All five buckets must be distinct; existing buckets must belong to the selected compartment.
-3. Choose the database and regional model offered by the deployment form. The current platform still provisions Autonomous for its existing contracts.
-4. Deploy the central portal. The current form has no per-module VM or TLS checkbox: the base prepares shared private networking and configures automatic public-IP HTTPS. God's Eye View is installed later from the portal.
-5. Follow preflight, plan, apply and post-apply progress. A successful Terraform apply alone does not certify workspace, model, workflow or participant readiness.
-6. Retain the protected access summary and the `application_url`, `admin_url` and `aidp_workbench_url` outputs.
-
-| Mode | Registration behavior |
+| Modo del formulario | Registro |
 | --- | --- |
-| Laboratory | Participants can self-register with the instructor's code; administrators can also create users. |
-| Production | Public registration is disabled; administrators provision participants from Users. |
+| `Laboratory` | Los participantes pueden registrarse con el código del instructor; los administradores también pueden crear usuarios. |
+| `Production` | El registro público está deshabilitado; los administradores crean participantes desde Users. |
 
-The deployment package and discovery contract are defined in [`terraform/deploy-studio.json`](../terraform/deploy-studio.json); resolved endpoints and bucket names are defined in [`l_outputs.tf`](../terraform/l_outputs.tf).
+El [manifiesto de despliegue](../terraform/deploy-studio.json) define el formulario y el contrato de descubrimiento; [`l_outputs.tf`](../terraform/l_outputs.tf) define los endpoints y nombres de buckets resueltos.
 
-To add God's Eye View, open **Settings → Application → Install**, review and confirm its private VM and AIDP compute requirements, then follow the installation phases. The portal applies a restricted module plan in the original stack and bootstraps its workflows and agent. Closing the dialog does not cancel installation. See [module lifecycle](operations.md#global-module-lifecycle) for retries, acceptance and legacy bases. AI Data Governance retains its separate administrator-selected installation flow.
+Para añadir AI God's Eye View, abra **Settings → Application → Install**, revise y confirme los recursos de su VM privada y cómputo AIDP y siga las fases de instalación. El portal aplica un plan restringido en la pila original e inicializa sus flujos y agente. Cerrar el diálogo no cancela la instalación. Consulte el [ciclo de vida de módulos](operations.md#global-module-lifecycle) para reintentos, aceptación y requisitos vigentes. AI Data Governance conserva su flujo separado de instalación con administrador seleccionado.
 
-## Register and activate a participant
+## Registrar y activar un participante
 
-1. Open the application URL. In Laboratory mode, enter a name, email, registration code and one or more starter kits. In Production mode, use **Users → Add user** as an administrator.
-2. Wait for the progress dialog to finish the Identity, workspace, content and permissions phases. If a retry is offered, resume the same operation.
-3. Activate the OCI Identity Domains account from its standard welcome email.
-4. Sign in to the supplied AIDP Workbench URL with that email.
+1. Abra la URL de la aplicación. En modo `Laboratory`, indique nombre, correo, código de registro y uno o más kits. En modo `Production`, use **Users → Add user** con una cuenta administradora.
+2. Espere las fases de identidad, espacio de trabajo, contenido y permisos. Si se ofrece un reintento, continúe la misma operación.
+3. Active la cuenta OCI Identity Domains desde su correo de bienvenida estándar.
+4. Acceda a AIDP Workbench con ese correo y la URL suministrada.
 
-Administrators can instead select only God's Eye View in **Users → Add user** once its shared installation is ready. These readers activate their OCI Identity Domains account and use **Sign in with OCI** at `/gods-eye-view/`; no participant workspace is created. Existing viewer access is managed through **Manage starter kits**. See [individual viewer access](modules/gods-eye-view.md#individual-access-to-the-shared-viewer).
+Cuando la instalación compartida esté lista, los administradores pueden seleccionar únicamente AI God's Eye View en **Users → Add user**. Estos lectores activan su cuenta OCI Identity Domains y usan **Sign in with OCI** en `/gods-eye-view/`; no se crea un espacio de trabajo de participante. El acceso de lectores existentes se administra desde **Manage starter kits**. Consulte la [guía del módulo](modules/ai-gods-eye-view.md).
 
 ```mermaid
 sequenceDiagram
-    actor User as Participant or administrator
+    actor User as Participante o administrador
     participant Portal
     participant Identity as OCI Identity Domains
     participant AIDP as AIDP Workbench
-    User->>Portal: Choose starter kits and submit registration
-    Portal->>Identity: Provision or reconcile account
-    Portal->>AIDP: Reconcile workspace, assets, workflow and grants
-    AIDP-->>Portal: Resource visibility and permissions
-    Portal-->>User: Active or resumable operation status
-    Identity-->>User: Account activation email
-    User->>AIDP: Sign in and run assigned workflow
+    User->>Portal: Seleccionar kits y enviar registro
+    Portal->>Identity: Crear o reconciliar cuenta
+    Portal->>AIDP: Reconciliar espacio, recursos, flujo y permisos
+    AIDP-->>Portal: Visibilidad de recursos y permisos
+    Portal-->>User: Estado activo u operación reanudable
+    Identity-->>User: Correo de activación
+    User->>AIDP: Acceder y ejecutar el flujo asignado
 ```
 
-## Run a starter kit
+## Ejecutar un kit
 
-After the release's layout contract has passed acceptance:
+Cuando el contrato de rutas de la versión haya superado su aceptación:
 
-1. Open the participant's kit folder and inspect its `lab-manifest.json`, `source/` files and notebooks.
-2. Open `wf_<participant_key>_<lab_id>`. Confirm the shared compute is available.
-3. Run the workflow and inspect each task's outputs, including quality and lineage checks.
-4. Compare results with the selected kit guide and the installed package's `lab.json`.
-5. In Master Catalog, open the participant's Gold tables and inspect entity and column lineage back through the earlier layers.
+1. Abra la carpeta del kit del participante y revise `lab-manifest.json`, los archivos `source/` y los notebooks.
+2. Abra `wf_<participant_key>_<lab_id>` y confirme que el cómputo compartido esté disponible.
+3. Ejecute el flujo y revise las salidas de cada tarea, incluidas calidad y linaje.
+4. Compare los resultados con la guía del kit y el `lab.json` del paquete instalado.
+5. Abra las tablas Gold del participante en Master Catalog y revise el linaje de entidades y columnas hacia las capas anteriores.
 
-| Resource | Current provisioner convention |
+| Recurso | Convención del aprovisionador actual |
 | --- | --- |
-| Participant key | `u101`, `u102`, … |
-| Workspace | `/Workspace/<lab_id>/<participant_key>_<normalized_email>` |
-| Source assets | `<workspace>/source/` |
-| Workflow | `wf_<participant_key>_<lab_id>` |
-| Catalog and schemas | `oci_medallion.oci_landing`, `oci_bronze`, `oci_silver`, `oci_gold` |
-| Table | `<participant_key>_<lab_id>_<logical_table>`; an existing lab prefix is not duplicated |
+| Clave de participante | `u101`, `u102`, … |
+| Espacio de trabajo | `/Workspace/<lab_id>/<participant_key>_<normalized_email>` |
+| Archivos de entrada | `<workspace>/source/` |
+| Flujo | `wf_<participant_key>_<lab_id>` |
+| Catálogo y esquemas | `oci_medallion.oci_landing`, `oci_bronze`, `oci_silver`, `oci_gold` |
+| Tabla | `<participant_key>_<lab_id>_<logical_table>`; no se duplica un prefijo de kit ya presente |
 
-The workflow supplies `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, `objectstorage_namespace` and `catalog_name`. Do not edit source CSVs to insert participant-specific values. Managed table locations are determined by the catalog; a path helper in a notebook is not proof that its writes use that path.
+El flujo suministra `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, `objectstorage_namespace` y `catalog_name`. No edite los CSV para incorporar valores personales. El catálogo determina las ubicaciones de tablas administradas; una función de rutas del notebook no demuestra por sí sola dónde se escriben los datos.
 
-## Choose the next exercise
+## Elegir el siguiente ejercicio
 
-Start with [Banking](kits/banking.md), [Telecommunications](kits/telecommunications.md), [Retail](kits/retail.md) or [Healthcare](kits/healthcare.md) for a five-task medallion pipeline. Use [Telco Customer 360 Lineage](kits/telco-lineage.md) for branching and convergence across 14 tasks.
+Para una canalización de medallón de cinco tareas, use [Banking](kits/banking.md), [Telecommunications](kits/telecommunications.md), [Retail](kits/retail.md) o [Healthcare](kits/healthcare.md). [Telco Customer 360 Lineage](kits/telco-lineage.md) incluye ramificación y convergencia en 14 tareas.
 
-Administrators install [AI Data Governance](modules/ai-data-governance.md) and [God's Eye View](modules/gods-eye-view.md) from **Settings → Application**. These modules are shared; adding them is not a participant starter-kit assignment.
+Consulte [AI Data Governance](modules/ai-data-governance.md), [AI Market Intelligence](modules/ai-market-intelligence.md) y [AI God's Eye View](modules/ai-gods-eye-view.md) para conocer su disponibilidad, controles de **Settings → Application** y aceptación pendiente. Son módulos compartidos; su instalación no equivale a asignar un kit a un participante.

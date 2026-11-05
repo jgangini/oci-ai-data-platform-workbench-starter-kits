@@ -318,7 +318,7 @@ test('application updates require confirmation, preserve the warning and cancel 
   assert.equal(h.find('button', props => props.className === 'settings-save application-update').props.disabled, true);
 });
 
-const governance = { module_id: 'ai_data_governance', display_name: 'AI Data Governance', installed: false, status: 'not_installed', enabled: false, bundled_version: '3.0.0' };
+const governance = { validation_stage: 'ACCEPTED', module_id: 'ai_data_governance', display_name: 'AI Data Governance', installed: false, status: 'not_installed', enabled: false, bundled_version: '3.0.0' };
 const administrators = [
   { id: 'participant', email: 'student@example.test', name: 'Student', is_aidp_admin: false, active: true, labs: [] },
   { id: 'operator', email: 'operator@example.test', name: 'Operator', is_aidp_admin: true, active: true, managed: false, labs: [] },
@@ -328,11 +328,11 @@ const text = value => Array.isArray(value) ? value.map(text).join('') : value ==
 const action = (h, label) => h.find('button', props => text(props.children) === label);
 const managerHarness = (t, module = governance, props = {}, initial = {}) => harness(t, release, '/admin/settings', { ...moduleInitial(module), ...initial }, props);
 
-test('Governance TEST candidate reports pending acceptance without legacy maintenance actions', async t => {
+test('Governance reports pending TEST acceptance without production maintenance actions', async t => {
   const h = await managerHarness(t, { ...governance, installed: true, status: 'active',
-    runtime_family: 'AI_DG_V2_TEST', validation_stage: 'TEST_PENDING' }, { initialUserId: 'operator' });
+    validation_stage: 'TEST_PENDING' }, { initialUserId: 'operator' });
   assert.match(text(h.nodes()[0]), /TEST candidate/);
-  assert.match(text(h.nodes()[0]), /behavior acceptance is pending/);
+  assert.match(text(h.nodes()[0]), /acceptance in AIDP TEST is pending/);
   assert.ok(!h.nodes().some(node => node?.type === 'button' && ['Delete', 'Redeploy', 'Update'].includes(text(node))));
   assert.equal(h.mutations().length, 0);
 });
@@ -341,7 +341,7 @@ test('Governance TEST installation does not enable the production agent link', a
   const h = await harness(t);
   const manager = h.find('GovernanceModuleManager');
   h.act(() => manager.props.onStatusChange({ module: { ...governance, status: 'active', installed: true,
-    runtime_family: 'AI_DG_V2_TEST', validation_stage: 'TEST_PENDING' }, busy: false, unverified: false }));
+    validation_stage: 'TEST_PENDING' }, busy: false, unverified: false }));
   assert.equal(h.find('ApplicationReleaseSettings').props.governanceReady, false);
   assert.equal(h.mutations().length, 0);
 });
@@ -401,6 +401,15 @@ test('A viewer-only user shows shared access without claiming participant kits a
   assert.match(text(summary), /0 starter kits/);
   assert.match(text(summary), /God’s Eye View · Custom layers.*Shared module access/);
   assert.doesNotMatch(text(summary), /All active|\d+ active/);
+});
+
+test('Add user omits the local delivery implementation note', async t => {
+  const h = await harness(t, release, '/admin/users', { ...membershipInitial(),
+    '/api/config': { labs: [banking, retail], local_participant_access: true } });
+  openCreate(h);
+  assert.doesNotMatch(text(subnodes(create(h))[0]), /Local mode:|welcome file|no email is sent/);
+  assert.equal(modalControl(h, 'CreateUserModal', 'button', props => props.type === 'submit').props.disabled, true);
+  assert.equal(h.mutations().length, 0);
 });
 
 for (const mixed of [false, true]) test(`Add user starts unchecked and sends ${mixed ? 'mixed kit and shared access' : 'God-only access'} separately`, async t => {
@@ -1225,109 +1234,17 @@ const marketHarness = (t, module = marketModule, initial = {}) => managerHarness
   { moduleId: marketModule.module_id, initialUserId: 'operator' },
   { '/api/admin/modules/ai_market_intelligence': module, ...initial });
 
-test('Market reinstall requires explicit removal confirmation and a new token, then keeps one operation through cleanup', async t => {
-  const previous = '00000000-0000-4000-8000-000000000001';
-  const old = { ...marketModule, operation_id: previous, operation_type: 'install', administrator_id: 'operator',
-    status: 'error', phase: 'model_verify', apify_credential_status: 'configured', apify_credential_owned_by_operation: true, apify_token_suffix: 'AB12' };
-  const h = await marketHarness(t, old);
-  h.act(() => action(h, 'Reinstall').props.onClick());
+for (const status of ['error', 'active', 'awaiting_action']) test(`Market preserves the current TEST installation without destructive reinstall: ${status}`, async t => {
+  const module = { ...marketModule, status, phase: status === 'active' ? 'ready' : 'test',
+    installed: status === 'active', operation_id: '00000000-0000-4000-8000-000000000001',
+    operation_type: 'install', administrator_id: 'operator', apify_credential_status: 'configured' };
+  const h = await marketHarness(t, module);
+  const buttons = h.nodes().filter(node => node?.type === 'button').map(node => text(node));
+  assert.equal(buttons.some(label => /reinstall|delete/i.test(label)), false);
+  assert.doesNotMatch(text(h.nodes()[0]), /fourteen|145 column|Publish the TEST-verified endpoint/);
   assert.equal(h.mutations().length, 0);
-  assert.equal(action(h, 'Delete and reinstall').props.disabled, true);
-  assert.match(text(h.nodes()[0]), /fourteen tables and their contents/);
-  assert.match(text(h.nodes()[0]), /shared OCI credentials/);
-  assert.match(text(h.nodes()[0]), /concurrent changes cannot be protected atomically/);
-  assert.match(text(h.find('div', props => props['aria-label'] === 'Installation progress')), /Paused at step 5 of 12/);
-  const field = () => h.find('input', props => props['aria-label'] === 'Apify Bearer token');
-  assert.equal(field().props.readOnly, false);
-  h.act(() => field().props.onChange({ target: { value: 'synthetic-fresh-apify-token' } }));
-  h.act(() => { const start = action(h, 'Delete and reinstall').props.onClick; start(); start(); });
-  const first = h.mutations()[0];
-  const body = JSON.parse(first.options.body);
-  assert.equal(h.mutations().length, 1);
-  assert.notEqual(body.operation_id, previous);
-  assert.equal(body.previous_operation_id, previous);
-  assert.equal(body.confirmation, 'ai_market_intelligence');
-  assert.equal(body.reuse_existing, false);
-  assert.equal(first.path, '/api/admin/users/operator/modules/ai_market_intelligence/reinstall');
-  const current = { ...old, operation_id: body.operation_id, previous_operation_id: previous, operation_type: 'redeploy', mode: 'reinstall', status: 'redeploying',
-    apify_credential_owned_by_operation: false, apify_credential_status: 'missing', apify_token_suffix: '' };
-  first.resolve({ ...current, phase: 'reinstall_stop', completed_phases: ['reinstall_inventory'] }, 202);
-  await h.settle();
-  assert.match(text(h.find('div', props => props['aria-label'] === 'Installation progress')), /Step 2 of 19/);
-  assert.equal(JSON.parse(h.mutations()[1].options.body).apify_token, body.apify_token);
-  h.mutations()[1].resolve({ ...current, phase: 'model_prepare', completed_phases: ['credentials'] }, 202);
-  await h.settle();
-  const third = JSON.parse(h.mutations()[2].options.body);
-  assert.equal(third.operation_id, body.operation_id);
-  assert.equal(third.previous_operation_id, previous);
-  assert.equal('apify_token' in third, false);
-  assert.equal(JSON.stringify([...h.sessionState]).includes(body.apify_token), false);
-  h.mutations()[2].resolve({ ...current, phase: 'test', status: 'awaiting_action', completed_phases: ['credentials'] });
-  await h.settle();
-  h.requests.at(-1).resolve({ ...current, phase: 'test', status: 'awaiting_action', completed_phases: ['credentials'] });
-  await h.settle();
-});
-
-test('Market resumes reinstall after reload with the same operation and asks again for an unpersisted token', async t => {
-  const operation = '00000000-0000-4000-8000-000000000002';
-  const previous = '00000000-0000-4000-8000-000000000001';
-  const module = { ...marketModule, operation_id: operation, previous_operation_id: previous, mode: 'reinstall',
-    operation_type: 'redeploy', administrator_id: 'operator', status: 'error', phase: 'reinstall_tables', apify_credential_status: 'configured' };
-  const h = await marketHarness(t, module);
-  assert.equal(action(h, 'Resume redeployment').props.disabled, true);
-  const field = h.find('input', props => props['aria-label'] === 'Apify Bearer token');
-  assert.equal(field.props.type, 'password');
-  assert.doesNotMatch(text(h.nodes()[0]), /does not permit reusing this credential/);
-  h.act(() => field.props.onChange({ target: { value: 'synthetic-fresh-apify-token' } }));
-  h.act(() => action(h, 'Resume redeployment').props.onClick());
-  const body = JSON.parse(h.mutations()[0].options.body);
-  assert.equal(body.operation_id, operation);
-  assert.equal(body.previous_operation_id, previous);
-  assert.match(h.mutations()[0].path, /\/reinstall$/);
-  h.mutations()[0].resolve({ ...module, status: 'awaiting_action' });
-  await h.settle(); h.requests.at(-1).resolve(module); await h.settle();
-});
-
-test('Reinstall on an earlier failed reinstall starts a new operation rather than silently resuming it', async t => {
-  const previous = '00000000-0000-4000-8000-000000000001';
-  const current = '00000000-0000-4000-8000-000000000002';
-  const module = { ...marketModule, operation_id: current, previous_operation_id: previous, mode: 'reinstall',
-    operation_type: 'redeploy', administrator_id: 'operator', status: 'error', phase: 'reinstall_tables' };
-  const h = await marketHarness(t, module);
-  h.act(() => action(h, 'Reinstall').props.onClick());
-  h.act(() => h.find('input', props => props['aria-label'] === 'Apify Bearer token').props.onChange({ target: { value: 'synthetic-fresh-apify-token' } }));
-  h.act(() => action(h, 'Delete and reinstall').props.onClick());
-  const body = JSON.parse(h.mutations()[0].options.body);
-  assert.notEqual(body.operation_id, current);
-  assert.equal(body.previous_operation_id, current);
-  h.mutations()[0].resolve({ ...module, operation_id: body.operation_id, previous_operation_id: current, status: 'awaiting_action' });
-  await h.settle(); h.requests.at(-1).resolve(module); await h.settle();
-});
-
-test('An admitted reinstall error exits confirmation and resumes its existing generation', async t => {
-  const previous = '00000000-0000-4000-8000-000000000001';
-  const old = { ...marketModule, operation_id: previous, operation_type: 'install', administrator_id: 'operator',
-    status: 'error', phase: 'model_verify', apify_credential_status: 'configured', apify_credential_owned_by_operation: true, apify_token_suffix: 'AB12' };
-  const h = await marketHarness(t, old);
-  h.act(() => action(h, 'Reinstall').props.onClick());
-  h.act(() => h.find('input', props => props['aria-label'] === 'Apify Bearer token').props.onChange({ target: { value: 'synthetic-fresh-apify-token' } }));
-  h.act(() => action(h, 'Delete and reinstall').props.onClick());
-  const first = JSON.parse(h.mutations()[0].options.body);
-  const failed = { ...old, mode: 'reinstall', operation_type: 'redeploy', operation_id: first.operation_id,
-    previous_operation_id: previous, phase: 'reinstall_tables', status: 'error', message: 'Native check failed.',
-    apify_credential_status: 'missing', apify_credential_owned_by_operation: false, apify_token_suffix: '' };
-  h.mutations()[0].resolve(failed);
-  await h.settle(); h.requests.at(-1).resolve(failed); await h.settle();
-  assert.equal(h.nodes().some(node => node?.type === 'button' && text(node) === 'Delete and reinstall'), false);
-  const field = h.find('input', props => props['aria-label'] === 'Apify Bearer token');
-  assert.equal(field.props.value, 'synthetic-fresh-apify-token');
-  assert.equal(field.props.readOnly, false);
-  h.act(() => action(h, 'Resume redeployment').props.onClick());
-  const resumed = JSON.parse(h.mutations()[1].options.body);
-  assert.equal(resumed.operation_id, first.operation_id);
-  assert.equal(resumed.previous_operation_id, previous);
-  h.mutations()[1].resolve({ ...failed, status: 'awaiting_action' });
-  await h.settle(); h.requests.at(-1).resolve(failed); await h.settle();
+  if (status === 'active') assert.equal(buttons.includes('Redeploy'), false);
+  else assert.ok(buttons.includes('Resume installation'));
 });
 
 test('Market places its Bearer field directly after the administrator and validates without a request', async t => {
@@ -1358,7 +1275,11 @@ test('Market shows a saved Bearer reference without accepting or silently ignori
   assert.equal(input.props.readOnly, true);
   assert.equal(input.props.type, 'text');
   assert.equal(input.props.value, 'apify_api_...7Q2k');
-  assert.match(text(h.find('label', props => props.className === 'market-bearer-field')), /connection is checked in TEST/);
+  const help = text(h.find('label', props => props.className === 'market-bearer-field'));
+  assert.match(help, /saved in AIDP Credential Store/);
+  assert.match(help, /Apify access needs a separate test/);
+  assert.match(help, /paused TEST check only verifies the agent setup/);
+  assert.doesNotMatch(help, /connection is checked in TEST/);
   assert.equal(action(h, 'Deploy').props.disabled, false);
   assert.equal(h.nodes().some(node => node?.type === 'input' && node.props.type === 'checkbox'), false);
   assert.equal(text(h.nodes()[0]).includes('Installation options'), false);
@@ -1370,14 +1291,14 @@ for (const credential of ['unknown', 'conflict', 'missing']) {
   test(`Market resume cannot collect an unusable token after credentials: ${credential}`, async t => {
     const h = await marketHarness(t, { ...marketModule, apify_credential_status: credential,
       operation_id: 'saved-operation', operation_type: 'install', reuse_existing: true,
-      phase: 'model_verify', status: 'error', completed_phases: ['verify', 'credentials'], message: 'Review the native task.' });
+      phase: 'files', status: 'error', completed_phases: ['verify', 'credentials'], message: 'Review the native task.' });
     assert.equal(h.find('input', props => props['aria-label'] === 'Apify Bearer token').props.disabled, true);
     assert.equal(action(h, 'Resume installation').props.disabled, true);
     assert.equal(h.nodes().filter(node => node?.props?.role === 'alert').length, 1);
     assert.equal(text(h.nodes()[0]).split('Review the native task.').length - 1, 1);
     const progress = h.find('div', props => props['aria-label'] === 'Installation progress');
-    assert.match(text(progress), /Paused at step 5 of 12/);
-    assert.match(text(progress), /Verify 145 column descriptions and zero rows/);
+    assert.match(text(progress), /Paused at step 4 of 7/);
+    assert.match(text(progress), /Publish the reviewed runtime/);
     assert.equal(h.nodes().some(node => node?.type === 'details'), false);
     assert.equal(h.nodes().some(node => node?.type === 'button' && text(node) === 'Refresh installation status'), false);
     assert.equal(h.mutations().length, 0);
@@ -1387,6 +1308,7 @@ for (const credential of ['unknown', 'conflict', 'missing']) {
 test('Agent Hub opens separately with only public tenant context and no installation request', async t => {
   const h = await harness(t, release, '/admin/settings', { '/api/admin/settings': { ...settings,
     aidp_url: 'https://fixture.datalake.oci.oraclecloud.com/?pageid=homePage#?tenant=fixture&domain=Default&id_token=discard&security_token=discard' } });
+  h.act(() => h.find('GovernanceModuleManager', props => props.moduleId === 'ai_market_intelligence').props.onStatusChange({ module: { ...marketModule, installed: true, status: 'active' }, busy: false, unverified: false }));
   const card = h.find('ApplicationReleaseSettings');
   const nodes = flattenElements(card.type({ ...card.props, release: { ...release, packages: [marketPackage] } }));
   const link = nodes.find(node => node?.type === 'a' && node.props['aria-label'] === 'Open Agent Hub');
@@ -1399,11 +1321,69 @@ test('Agent Hub opens separately with only public tenant context and no installa
   assert.equal(h.mutations().length, 0);
 });
 
+test('Governance places Agent Hub immediately after Copy and before installation', async t => {
+  const h = await harness(t, { ...release, packages: [{ package_id: 'ai_data_governance',
+    display_name: 'AI Data Governance', scope: 'global', bundled_version: '3.0.4' }] }, '/admin/settings', {
+    '/api/admin/settings': { ...settings, aidp_url: 'https://fixture.datalake.oci.oraclecloud.com/#?tenant=fixture&domain=Default' },
+  });
+  h.act(() => h.find('GovernanceModuleManager', props => !props.moduleId).props.onStatusChange({ module: { ...governance, installed: true, status: 'active' }, busy: false, unverified: false }));
+  const card = h.find('ApplicationReleaseSettings');
+  const nodes = flattenElements(card.type(card.props));
+  const actions = nodes.filter(node => ['button', 'a'].includes(node?.type) && node.props.className?.includes('module-configure'));
+  assert.deepEqual(actions.map(node => node.props['aria-label']), [
+    'Copy AI Data Governance agent URL', 'Open Agent Hub', card.props.governanceAction,
+  ]);
+  const hub = actions[1];
+  assert.equal(hub.props.href, 'https://fixtureagenthub.datalake.oci.oraclecloud.com/static/ah/#?tenant=fixture&domain=Default');
+  assert.equal(hub.props.target, '_blank');
+  assert.equal(hub.props.rel, 'noopener noreferrer');
+  assert.equal(hub.props.children.props.src, '/icons/agent-link/lucide-bot-message-square.svg');
+  assert.equal(h.mutations().length, 0);
+});
+
+for (const moduleId of ['ai_data_governance', 'ai_market_intelligence']) {
+  for (const [status, busy, unverified, enabled, installed = status === 'active'] of [
+    ['not_installed', false, false, false], ['installing', false, false, false],
+    ['error', false, false, false], ['active', true, false, false],
+    ['active', false, true, false], ['active', false, false, true],
+    ...(moduleId === 'ai_market_intelligence' ? [['active', false, false, false, false]] : []),
+  ]) test(`Agent Hub requires verified deployment for ${moduleId}: ${status}, busy=${busy}, unverified=${unverified}, installed=${installed}`, async t => {
+    const h = await harness(t, { ...release, packages: [{ package_id: moduleId, display_name: moduleId,
+      scope: 'global', bundled_version: '1.0.0' }] }, '/admin/settings', {
+      '/api/admin/settings': { ...settings, aidp_url: 'https://fixture.datalake.oci.oraclecloud.com/#?tenant=fixture&domain=Default' },
+    });
+    h.act(() => h.find('GovernanceModuleManager', props => moduleId === 'ai_data_governance' ? !props.moduleId : props.moduleId === moduleId)
+      .props.onStatusChange({ module: { ...(moduleId === 'ai_data_governance' ? governance : marketModule),
+        installed, status }, busy, unverified }));
+    const card = h.find('ApplicationReleaseSettings');
+    const actions = flattenElements(card.type(card.props)).filter(node => ['button', 'a'].includes(node?.type) && node.props.className?.includes('module-configure'));
+    assert.equal(actions.length, 3);
+    const hub = actions[1];
+    assert.match(actions[0].props['aria-label'], /^Copy .* agent URL$/);
+    assert.equal(hub.props['aria-label'], 'Open Agent Hub');
+    assert.equal(hub.props.children.props.src, '/icons/agent-link/lucide-bot-message-square.svg');
+    assert.equal(hub.type, enabled ? 'a' : 'button');
+    if (enabled) {
+      assert.equal(hub.props.href, 'https://fixtureagenthub.datalake.oci.oraclecloud.com/static/ah/#?tenant=fixture&domain=Default');
+      assert.equal(hub.props.target, '_blank');
+      assert.equal(hub.props.rel, 'noopener noreferrer');
+    } else {
+      assert.equal(hub.props.disabled, true);
+      assert.equal(hub.props.href, undefined);
+      assert.equal(hub.props.onClick, undefined);
+    }
+    assert.equal(h.mutations().length, 0);
+  });
+}
+
 for (const url of ['https://outside.test/workbench', 'http://fixture.datalake.oci.oraclecloud.com', 'https://fixture.datalake.oci.oraclecloud.com:8443/', 'https://user:pass@fixture.datalake.oci.oraclecloud.com/']) {
   test(`Agent Hub navigation refuses an untrusted Workbench origin: ${url}`, async t => {
     const h = await harness(t, release, '/admin/settings', { '/api/admin/settings': { ...settings, aidp_url: url } });
+    h.act(() => h.find('GovernanceModuleManager', props => !props.moduleId).props.onStatusChange({ module: { ...governance, installed: true, status: 'active' }, busy: false, unverified: false }));
+    h.act(() => h.find('GovernanceModuleManager', props => props.moduleId === 'ai_market_intelligence').props.onStatusChange({ module: { ...marketModule, installed: true, status: 'active' }, busy: false, unverified: false }));
     const card = h.find('ApplicationReleaseSettings');
-    const nodes = flattenElements(card.type({ ...card.props, release: { ...release, packages: [marketPackage] } }));
+    const nodes = flattenElements(card.type({ ...card.props, release: { ...release, packages: [marketPackage,
+      { package_id: 'ai_data_governance', display_name: 'AI Data Governance', scope: 'global', bundled_version: '3.0.4' }] } }));
     assert.equal(nodes.some(node => node?.props?.['aria-label'] === 'Open Agent Hub'), false);
   });
 }
@@ -1411,7 +1391,7 @@ for (const url of ['https://outside.test/workbench', 'http://fixture.datalake.oc
 test('Market setup is explicit, sends a secret only to its own API and updates real phase checks', async t => {
   const h = await marketHarness(t);
   assert.equal(h.mutations().length, 0);
-  assert.equal(text(h.find('ul', props => props['aria-label'] === 'Services')), 'AIDP WorkbenchObject StorageSpark ComputeMaster CatalogAI Compute');
+  assert.equal(text(h.find('ul', props => props['aria-label'] === 'Services')), 'AIDP WorkbenchObject StorageAI Compute');
   const docs = h.find('a', props => props.href === 'https://docs.apify.com/integrations/api#api-token');
   assert.equal(docs.props.rel, 'noopener noreferrer');
   assert.match(text(h.find('label', props => props.className === 'market-bearer-field')), /Settings → API & Integrations/);
@@ -1426,10 +1406,10 @@ test('Market setup is explicit, sends a secret only to its own API and updates r
   assert.equal(body.apify_token, 'synthetic-test-secret');
   assert.equal(body.reuse_existing, true);
   assert.equal(JSON.stringify([...h.sessionState]).includes('synthetic-test-secret'), false);
-  request.resolve({ ...marketModule, apify_credential_status: 'configured', operation_id: body.operation_id, status: 'installing', phase: 'model_prepare', completed_phases: ['verify', 'credentials'] }, 202);
+  request.resolve({ ...marketModule, apify_credential_status: 'configured', operation_id: body.operation_id, status: 'installing', phase: 'compute', completed_phases: ['verify', 'credentials'] }, 202);
   await h.settle();
   const progress = h.find('div', props => props['aria-label'] === 'Installation progress');
-  assert.match(text(progress), /Step 3 of 12Prepare fourteen empty tables/);
+  assert.match(text(progress), /Step 3 of 7Prepare dedicated AI Compute/);
   assert.equal(progress.props['aria-busy'], true);
   assert.equal(h.find('div', props => props.role === 'progressbar').props['aria-valuenow'], undefined);
   const next = h.mutations()[1];
@@ -1440,34 +1420,34 @@ test('Market setup is explicit, sends a secret only to its own API and updates r
   h.requests.at(-1).resolve({ ...marketModule, apify_credential_status: 'configured', operation_id: body.operation_id, status: 'awaiting_action', phase: 'test', message: 'Create TEST session.' });
   await h.settle();
   assert.equal(h.nodes().some(node => node?.props?.['aria-label'] === 'Apify Bearer token'), false);
-  assert.match(text(h.find('div', props => props['aria-label'] === 'Installation progress')), /Paused at step 11 of 12/);
+  assert.match(text(h.find('div', props => props['aria-label'] === 'Installation progress')), /Paused at step 7 of 7/);
 });
 
 test('Market keeps the saved step visible before and during resume, then follows the server phase', async t => {
-  const module = { ...marketModule, administrator_id: 'operator', apify_credential_status: 'configured', status: 'awaiting_action', phase: 'model_verify', reuse_existing: true,
-    operation_id: 'saved-operation', operation_type: 'install', completed_phases: ['verify', 'credentials', 'model_prepare', 'model_run'], message: 'Review table storage.' };
+  const module = { ...marketModule, administrator_id: 'operator', apify_credential_status: 'configured', status: 'awaiting_action', phase: 'files', reuse_existing: true,
+    operation_id: 'saved-operation', operation_type: 'install', completed_phases: ['verify', 'credentials', 'compute'], message: 'Review published files.' };
   const h = await marketHarness(t, module);
   const progress = () => h.find('div', props => props['aria-label'] === 'Installation progress');
-  assert.match(text(progress()), /Paused at step 5 of 12Verify 145 column descriptions and zero rows/);
+  assert.match(text(progress()), /Paused at step 4 of 7Publish the reviewed runtime/);
   const bar = h.find('div', props => props.role === 'progressbar');
-  assert.equal(bar.props['aria-valuenow'], 4);
-  assert.equal(bar.props['aria-valuemax'], 12);
-  assert.match(bar.props['aria-valuetext'], /4 of 12 steps complete/);
+  assert.equal(bar.props['aria-valuenow'], 3);
+  assert.equal(bar.props['aria-valuemax'], 7);
+  assert.match(bar.props['aria-valuetext'], /3 of 7 steps complete/);
   assert.equal(progress().props['aria-busy'], false);
   assert.equal(h.nodes().some(node => node?.props?.label === 'AI Data Platform administrator'), false);
   assert.equal(h.nodes().some(node => node?.props?.['aria-label'] === 'Apify Bearer token'), false);
   h.act(() => action(h, 'Resume installation').props.onClick());
-  assert.match(text(progress()), /Step 5 of 12Verify 145 column descriptions and zero rows/);
-  assert.equal(text(progress()).includes('Review table storage.'), false);
+  assert.match(text(progress()), /Step 4 of 7Publish the reviewed runtime/);
+  assert.equal(text(progress()).includes('Review published files.'), false);
   assert.equal(JSON.parse(h.mutations()[0].options.body).operation_id, module.operation_id);
-  h.mutations()[0].resolve({ ...module, status: 'installing', phase: 'compute', completed_phases: [...module.completed_phases, 'model_verify', 'cleanup'] }, 202);
+  h.mutations()[0].resolve({ ...module, status: 'installing', phase: 'agent', completed_phases: [...module.completed_phases, 'files'] }, 202);
   await h.settle();
-  assert.match(text(progress()), /Step 7 of 12Prepare dedicated AI Compute/);
+  assert.match(text(progress()), /Step 5 of 7Configure the agent/);
   assert.equal(progress().props['aria-busy'], true);
 });
 
 test('Market recovers the original administrator after reload and replaces configuration with progress', async t => {
-  const module = { ...marketModule, administrator_id: 'operator', apify_credential_status: 'configured', status: 'error', phase: 'model_verify',
+  const module = { ...marketModule, administrator_id: 'operator', apify_credential_status: 'configured', status: 'error', phase: 'files',
     operation_id: 'saved-operation', operation_type: 'install', reuse_existing: true };
   const h = await managerHarness(t, module, { moduleId: marketModule.module_id }, { '/api/admin/modules/ai_market_intelligence': module });
   assert.equal(action(h, 'Resume installation').props.disabled, false);
@@ -1479,7 +1459,7 @@ test('Market recovers the original administrator after reload and replaces confi
 });
 
 test('Market cannot resume as a saved administrator absent from the current administrator inventory', async t => {
-  const module = { ...marketModule, administrator_id: 'participant', apify_credential_status: 'configured', status: 'error', phase: 'model_verify',
+  const module = { ...marketModule, administrator_id: 'participant', apify_credential_status: 'configured', status: 'error', phase: 'files',
     operation_id: 'saved-operation', operation_type: 'install', reuse_existing: true };
   const h = await marketHarness(t, module);
   assert.equal(action(h, 'Resume installation').props.disabled, true);
@@ -1488,7 +1468,7 @@ test('Market cannot resume as a saved administrator absent from the current admi
 });
 
 test('Market keeps administrator recovery editable when the saved identity cannot be resolved', async t => {
-  const module = { ...marketModule, apify_credential_status: 'configured', status: 'error', phase: 'model_verify',
+  const module = { ...marketModule, apify_credential_status: 'configured', status: 'error', phase: 'files',
     operation_id: 'saved-operation', operation_type: 'install', reuse_existing: true };
   const other = { ...administrators[1], id: 'other-operator' };
   const h = await marketHarness(t, module, { '/api/admin/users': { users: [...administrators, other] } });
@@ -1504,15 +1484,24 @@ test('Market keeps administrator recovery editable when the saved identity canno
   assert.equal(action(h, 'Resume installation').props.disabled, false);
 });
 
-for (const credential of ['configured', 'missing', 'conflict', 'unknown']) test(`Market shows credential recovery below progress for failed TEST: ${credential}`, async t => {
+for (const credential of ['configured', 'missing', 'conflict', 'unknown']) test(`Market preserves credential status and reports the setup error for failed TEST: ${credential}`, async t => {
   const module = { ...marketModule, apify_credential_status: credential, status: 'error', phase: 'test',
-    operation_id: 'saved-operation', operation_type: 'install', reuse_existing: true };
+    operation_id: 'saved-operation', operation_type: 'install', reuse_existing: true,
+    message: 'The TEST compute differs from this installation.' };
   const h = await marketHarness(t, module);
   const nodes = h.nodes();
   const progress = h.find('div', props => props['aria-label'] === 'Installation progress');
   const field = h.find('label', props => props.className === 'market-bearer-field');
   assert.ok(nodes.indexOf(field) > nodes.indexOf(progress));
-  assert.match(text(field), /TEST could not verify the connection/);
+  const help = text(field);
+  assert.match(help, /TEST setup check did not complete/);
+  assert.match(help, /Review the installation error above before resuming/);
+  assert.doesNotMatch(help, /could not verify the connection|Review this credential/);
+  const credentialHelp = { configured: /Apify access needs a separate test/,
+    missing: /saved credential is missing/, conflict: /existing credential needs review/,
+    unknown: /Checking the saved credential/ };
+  assert.match(help, credentialHelp[credential]);
+  assert.equal(text(progress).split(module.message).length - 1, 1);
   assert.equal(h.find('input', props => props['aria-label'] === 'Apify Bearer token').props.readOnly, credential === 'configured');
   assert.equal(h.mutations().length, 0);
 });
@@ -1591,9 +1580,19 @@ for (const url of [undefined, 'https://outside.test/chat/fixture', 'javascript:a
     assert.equal(nodes.some(node => /Agent Hub/.test(node?.props?.['aria-label'] || '')), false);
     const install = nodes.find(node => node?.props?.['aria-label'] === 'Install AI Market Intelligence');
     assert.ok(install && !install.props.disabled);
-    assert.match(text(nodes.find(node => node?.props?.className === 'module-installation-pending')), /Not installed/);
+    assert.equal(nodes.some(node => node?.props?.className === 'module-installation-pending'), false);
     h.act(() => install.props.onClick());
     assert.equal(h.find('GovernanceModuleManager', props => props.moduleId === 'ai_market_intelligence').props.visible, true);
+    assert.equal(h.mutations().length, 0);
+  });
+}
+
+for (const [status, message] of [['installing', 'Installation in progress'], ['awaiting_action', 'Action required'], ['error', 'Installation needs attention']]) {
+  test(`Application keeps the actionable Market status: ${status}`, async t => {
+    const h = await harness(t, { ...release, packages: [marketPackage] });
+    const card = h.find('ApplicationReleaseSettings');
+    const nodes = flattenElements(card.type({ ...card.props, marketModule: { ...marketModule, status } }));
+    assert.equal(text(nodes.find(node => node?.props?.className === 'module-installation-pending')), message);
     assert.equal(h.mutations().length, 0);
   });
 }

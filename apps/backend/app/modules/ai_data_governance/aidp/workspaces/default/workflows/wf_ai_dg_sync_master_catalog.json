@@ -1,0 +1,85 @@
+{
+  "name": "wf_ai_dg_sync_master_catalog",
+  "path": "/Workspace/jobs",
+  "maxConcurrentRuns": 1,
+  "description": "AI Data Governance: inventario, agente documental, descripciones vacías y réplica. Cuatro tareas recuperables.",
+  "queue": {
+    "isEnabled": false
+  },
+  "jobClusters": [
+    {
+      "clusterKey": "${cluster_key}"
+    }
+  ],
+  "tasks": [
+    {
+      "type": "PYTHON_TASK",
+      "taskKey": "sync_inventory",
+      "filePath": "/Workspace/.artifact/ai_data_governance/tasks/sync_inventory.py",
+      "commandLineArguments": "[\"/Workspace/.artifact/ai_data_governance/tasks/sync_inventory.py\", \"--job-run-id\", \"{{job.run_id}}\", \"--task-run-id\", \"{{task.run_id}}\", \"--task-key\", \"sync_inventory\", \"--execution-count\", \"{{task.execution_count}}\", \"--repair-count\", \"{{job.repair_count}}\"]",
+      "cluster": {
+        "clusterKey": "${cluster_key}"
+      },
+      "dependsOn": [],
+      "runIf": "ALL_SUCCESS",
+      "maxRetries": 1,
+      "minRetryIntervalMillis": 30000,
+      "isRetryOnTimeout": false,
+      "timeoutSeconds": 1800
+    },
+    {
+      "type": "AGENT_TASK",
+      "taskKey": "document_metadata",
+      "agentKey": "${documentation_agent_key}",
+      "prompt": "{{job.run_id}}:{{job.repair_count}}",
+      "parameters": [],
+      "dependsOn": [
+        {
+          "taskKey": "sync_inventory"
+        }
+      ],
+      "runIf": "ALL_SUCCESS",
+      "maxRetries": 1,
+      "minRetryIntervalMillis": 30000,
+      "isRetryOnTimeout": false
+    },
+    {
+      "type": "PYTHON_TASK",
+      "taskKey": "publish_metadata",
+      "filePath": "/Workspace/.artifact/ai_data_governance/tasks/publish_metadata.py",
+      "commandLineArguments": "[\"/Workspace/.artifact/ai_data_governance/tasks/publish_metadata.py\", \"--job-run-id\", \"{{job.run_id}}\", \"--task-run-id\", \"{{task.run_id}}\", \"--task-key\", \"publish_metadata\", \"--execution-count\", \"{{task.execution_count}}\", \"--repair-count\", \"{{job.repair_count}}\"]",
+      "cluster": {
+        "clusterKey": "${cluster_key}"
+      },
+      "dependsOn": [
+        {
+          "taskKey": "document_metadata"
+        }
+      ],
+      "runIf": "ALL_SUCCESS",
+      "maxRetries": 1,
+      "minRetryIntervalMillis": 30000,
+      "isRetryOnTimeout": false,
+      "timeoutSeconds": 1800
+    },
+    {
+      "type": "PYTHON_TASK",
+      "taskKey": "replicate_model",
+      "filePath": "/Workspace/.artifact/ai_data_governance/tasks/replicate_model.py",
+      "commandLineArguments": "[\"/Workspace/.artifact/ai_data_governance/tasks/replicate_model.py\", \"--job-run-id\", \"{{job.run_id}}\", \"--task-run-id\", \"{{task.run_id}}\", \"--task-key\", \"replicate_model\", \"--execution-count\", \"{{task.execution_count}}\", \"--repair-count\", \"{{job.repair_count}}\"]",
+      "cluster": {
+        "clusterKey": "${cluster_key}"
+      },
+      "dependsOn": [
+        {
+          "taskKey": "publish_metadata"
+        }
+      ],
+      "runIf": "ALL_DONE",
+      "maxRetries": 1,
+      "minRetryIntervalMillis": 30000,
+      "isRetryOnTimeout": false,
+      "timeoutSeconds": 1800
+    }
+  ]
+}

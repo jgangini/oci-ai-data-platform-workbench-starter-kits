@@ -1,0 +1,128 @@
+{
+  "name": "AI_DG_RUN",
+  "domain": "Operación compartida",
+  "row": 1,
+  "col": 3,
+  "grain": "Un intento de ejecución: workflow, tarea, agente o herramienta. Jerarquía compartida, no tabla por agente.",
+  "pk": [
+    "run_id"
+  ],
+  "unique": [
+    [
+      "scope_id",
+      "execution_key",
+      "attempt_no"
+    ]
+  ],
+  "columns": [
+    {
+      "name": "run_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "ID único del intento lógico."
+    },
+    {
+      "name": "scope_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Ámbito de este intento; todos los hijos conservan el ámbito."
+    },
+    {
+      "name": "parent_run_id",
+      "type": "STRING",
+      "required": false,
+      "comment": "Padre workflow/tarea/solicitud para reconstruir colaboración y reintentos."
+    },
+    {
+      "name": "agent_id",
+      "type": "STRING",
+      "required": false,
+      "comment": "Agente participante; nulo para tareas Python."
+    },
+    {
+      "name": "run_kind",
+      "type": "STRING",
+      "required": true,
+      "comment": "WORKFLOW, TASK, AGENT o TOOL; consultas simples no requieren caso de gobierno."
+    },
+    {
+      "name": "execution_key",
+      "type": "STRING",
+      "required": true,
+      "comment": "Clave del mismo trabajo lógico a través de sus intentos; no deriva de una hora volátil."
+    },
+    {
+      "name": "attempt_no",
+      "type": "INT",
+      "required": true,
+      "comment": "Intento >=1; retry local máximo propuesto 2 intentos en total."
+    },
+    {
+      "name": "component_version",
+      "type": "STRING",
+      "required": true,
+      "comment": "Versión real del código/prompt/contrato ejecutado, no la configuración actual mutable."
+    },
+    {
+      "name": "native_run_ref",
+      "type": "STRING",
+      "required": false,
+      "comment": "Referencia nativa sin secreto, incluidas tareas reparadas."
+    },
+    {
+      "name": "status",
+      "type": "STRING",
+      "required": true,
+      "comment": "RUNNING, SUCCEEDED, PARTIAL, FAILED, CANCELLED o SKIPPED; éxito de réplica no borra fallo previo."
+    },
+    {
+      "name": "manifest_json",
+      "type": "STRING",
+      "required": true,
+      "comment": "Versión de config, cobertura/paginación, lotes, recibos y checkpoint de avance; JSON validado y sin secretos."
+    },
+    {
+      "name": "started_at",
+      "type": "TIMESTAMP",
+      "required": true,
+      "comment": "Inicio UTC del intento."
+    },
+    {
+      "name": "finished_at",
+      "type": "TIMESTAMP",
+      "required": false,
+      "comment": "Fin del intento; nulo mientras está activo."
+    }
+  ],
+  "foreign_keys": [
+    {
+      "columns": [
+        "scope_id"
+      ],
+      "table": "AI_DG_SCOPE",
+      "target": [
+        "scope_id"
+      ]
+    },
+    {
+      "columns": [
+        "parent_run_id"
+      ],
+      "table": "AI_DG_RUN",
+      "target": [
+        "run_id"
+      ],
+      "optional": true
+    },
+    {
+      "columns": [
+        "agent_id"
+      ],
+      "table": "AI_DG_AGENT",
+      "target": [
+        "agent_id"
+      ],
+      "optional": true
+    }
+  ]
+}

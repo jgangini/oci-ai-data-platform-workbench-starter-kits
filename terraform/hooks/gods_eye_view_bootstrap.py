@@ -19,22 +19,15 @@ from gods_eye_agent_source import agent_source
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "apps/backend"))
-from app.gods_eye_view.database import install_schema, read_document, write_document
-from app.gods_eye_view.control_store import ObjectControlStore
-from app.gods_eye_view.scheduling import RUN_FAILED, RUN_SUCCESS, TASK_RUN_QUERY, run_state, task_outcome
-from app.gods_eye_view.runtime_secrets import CONTROL_CREDENTIAL_NAME, SHARED_OCI_CREDENTIAL_NAME, identity_hash, shared_credential
+from app.modules.ai_gods_eye_view.runtime.control_store import read_document, write_document
+from app.modules.ai_gods_eye_view.runtime.control_store import ObjectControlStore
+from app.modules.ai_gods_eye_view.runtime.scheduling import RUN_FAILED, RUN_SUCCESS, TASK_RUN_QUERY, run_state, task_outcome
+from app.modules.ai_gods_eye_view.runtime.runtime_secrets import SHARED_OCI_CREDENTIAL_NAME, identity_hash, shared_credential
 
 SESSION_RETENTION = {"retentionPeriodInDays": 7}
 AGENT_NAME = "ai_gods_eye_view"
 WORKSPACE_ROOT = "/Workspace/medallion/gods_eye_view"
 AGENT_COMPUTE_NAME = "aidp_gods_eye_view_agent_compute"
-RESOURCE_ALIASES = {
-    AGENT_NAME: ("territorial_assistant",),
-    AGENT_COMPUTE_NAME: ("territorial_agent_compute", "prisma_agent_compute"),
-    "aidp_gods_eye_view_social_compute": ("social_stream_compute",),
-    "aidp_gods_eye_view_sensor_compute": ("sensor_stream_compute",),
-    "aidp_gods_eye_view_query_compute": ("territorial_query_compute",),
-}
 PIPELINE_REQUIREMENTS = "httpx==0.28.1\n"
 _deadline = 0.0
 
@@ -71,8 +64,7 @@ def items(api, path, params=None):
 
 
 def named(api, path, name, params=None):
-    names = {name, *RESOURCE_ALIASES.get(name, ())} if path.endswith(("/clusters", "/agents")) else {name}
-    matches = [item for item in items(api, path, params) if (item.get("displayName") or item.get("name")) in names
+    matches = [item for item in items(api, path, params) if (item.get("displayName") or item.get("name")) == name
                and (item.get("lifecycleState") or item.get("lifeCycleState") or item.get("state")) != "DELETED"]
     if len(matches) > 1:
         raise RuntimeError("Duplicate managed God’s Eye View resource")
@@ -86,9 +78,8 @@ def named(api, path, name, params=None):
 def hidden_compute(api, path, name):
     # AIDP can expose new AI Compute only by key before it appears in the cluster list.
     workspace_prefix = path.split("/")[2] + "."
-    names = {name, *RESOURCE_ALIASES.get(name, ())}
     operations = [item for item in items(api, "/asyncOperations", {"resourceType": "AI_COMPUTE"})
-                  if item.get("resourceDisplayName") in names
+                  if item.get("resourceDisplayName") == name
                   and item.get("actionType") in {"CREATE_CLUSTER", "DELETE_CLUSTER"}
                   and str(item.get("resourceName", "")).startswith(workspace_prefix)]
     if not operations:
@@ -111,8 +102,7 @@ def hidden_compute_detail(api, path, name, key, status):
         if status in {"FAILED", "ERROR", "CANCELED", "CANCELLED"}:
             raise RuntimeError("God’s Eye View compute creation failed without a resource") from None
         return {"key": key, "displayName": name, "type": "AI_COMPUTE", "state": "CREATING"}
-    names = {name, *RESOURCE_ALIASES.get(name, ())}
-    if ((detail.get("displayName") or detail.get("name")) not in names
+    if ((detail.get("displayName") or detail.get("name")) != name
             or (detail.get("type") or detail.get("sourceApi")) != "AI_COMPUTE"):
         raise RuntimeError("God’s Eye View compute operation points to an incompatible resource")
     return detail
@@ -148,31 +138,6 @@ def credential(api, name, values):
     return current
 
 
-def database_users(api, wallet, wallet_password, admin_password, config, outputs, *, wallet_dsn, validate_wallet, generate_password):
-    import oracledb
-    with tempfile.TemporaryDirectory(prefix="gods-eye-view-bootstrap-") as directory:
-        with zipfile.ZipFile(io.BytesIO(validate_wallet(wallet))) as archive:
-            archive.extractall(directory)
-        dsn = wallet_dsn(Path(directory))
-        with oracledb.connect(user="ADMIN", password=admin_password, dsn=dsn, config_dir=directory,
-                             wallet_location=directory, wallet_password=wallet_password) as connection:
-            install_schema(connection)
-            cursor = connection.cursor()
-            user, name = "PRISMA_WRITER", database_credential_name(api)
-            if named(api, "/credentials", name):
-                credential(api, name, None)
-            else:
-                generated_password = generate_password()
-                cursor.execute("SELECT COUNT(*) FROM ALL_USERS WHERE USERNAME=:name", name=user)
-                verb = "ALTER" if cursor.fetchone()[0] else "CREATE"
-                cursor.execute(f'{verb} USER {user} IDENTIFIED BY "{generated_password}"')
-                cursor.execute(f"GRANT CREATE SESSION TO {user}")
-                cursor.execute(f"GRANT EXECUTE ON ADMIN.PRISMA_CONTROL TO {user}")
-                values = {"db_user": user, "db_password": generated_password, "dsn": dsn,
-                    "wallet": base64.b64encode(wallet).decode(), "wallet_password": wallet_password,
-                    "region": config["region"], "compartment_id": outputs["compartment_ocid"], "model_id": outputs["agent_model_id"]}
-                credential(api, name, values)
-            connection.commit()
 
 
 def ensure_oci_credential(api, config):
@@ -188,25 +153,15 @@ def ensure_oci_credential(api, config):
     return credential(api, SHARED_OCI_CREDENTIAL_NAME, values)
 
 
-def database_credential_name(api, *, reader=False):
-    """Adopt legacy secrets without recreating them or rotating their database users."""
-    role = "Reader" if reader else "Writer"
-    names = (f"Territorial{role}Runtime", f"Prisma{role}Runtime")
-    if not reader:
-        names = (CONTROL_CREDENTIAL_NAME, *names)
-    matches = [name for name in names if named(api, "/credentials", name)]
-    if len(matches) > 1:
-        raise RuntimeError("Ambiguous God’s Eye View database credentials; reconcile the existing identities")
-    return matches[0] if matches else names[0]
 
 
 def runtime_archive():
     buffer = io.BytesIO()
-    names = ("__init__.py", "core.py", "correlation.py", "corpus.py", "media.py", "area.py", "x.py", "database.py", "control_store.py", "post_index.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "sensor_capture.py", "landing.py", "pipeline.py", "sensors.py", "sensor_pipeline.py", "sensor_reset.py", "synthetic_reset.py", "gold_reader.py", "agent.py")
+    names = ("__init__.py", "core.py", "correlation.py", "corpus.py", "media.py", "area.py", "x.py", "control_store.py", "post_index.py", "runtime_secrets.py", "classification.py", "scheduling.py", "capture.py", "sensor_capture.py", "landing.py", "pipeline.py", "sensors.py", "sensor_pipeline.py", "sensor_reset.py", "synthetic_reset.py", "gold_reader.py", "agent.py")
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in names:
             info = zipfile.ZipInfo("gods_eye_view/" + name, date_time=(2026, 1, 1, 0, 0, 0))
-            source = (ROOT / "apps/backend/app/gods_eye_view" / name).read_bytes()
+            source = (ROOT / "apps/backend/app/modules/ai_gods_eye_view/runtime" / name).read_bytes()
             compile(source, name, "exec")
             archive.writestr(info, source)
     return buffer.getvalue()
@@ -248,8 +203,7 @@ def publish_runtime_sources(api, workspace, config, bundle, *, ensure_folder):
                 break
     if changed:
         for job in items(api, f"/workspaces/{workspace}/jobs"):
-            if job.get("name") not in {"wf_ai_gods_eye_view_social_network", "wf_ai_gods_eye_view_sensor_stream",
-                    "territorial_social_network", "territorial_sensor_stream", "prisma_bogota_tick", "prisma_colombia_sensors"}:
+            if job.get("name") not in {"wf_ai_gods_eye_view_social_network", "wf_ai_gods_eye_view_sensor_stream"}:
                 continue
             if not job.get("key"):
                 raise RuntimeError("Managed God’s Eye View workflow identity is incomplete")
@@ -269,7 +223,7 @@ def publish_runtime_sources(api, workspace, config, bundle, *, ensure_folder):
 
 def upload(api, workspace, path, content, kind="file", *, replace=False):
     if kind == "notebook":
-        from app.aidp import AidpClient
+        from app.services.oci.aidp import AidpClient
     endpoint = f"/workspaces/{workspace}/notebook/api/contents/{quote(path, safe='')}"
     try:
         existing = api.request("GET", endpoint, params={"content": "1"}).body
@@ -356,14 +310,12 @@ def install_cluster_libraries(api, workspace, compute, *, ensure_folder):
     digest = hashlib.sha256(PIPELINE_REQUIREMENTS.encode()).hexdigest()[:12]
     base = f"/workspaces/{workspace}/clusters/{quote(compute, safe='')}"
     path = WORKSPACE_ROOT + "/dependencies_" + digest + "/requirements.txt"
-    legacy = "/Workspace/medallon/prisma/dependencies_" + digest + "/requirements.txt"
-    matches = [item for item in items(api, base + "/libraries")
-               if item.get("path") in {path, legacy} and item.get("status") != "DELETED"]
+    libraries = items(api, base + "/libraries")
+    if any(str(item.get("path", "")).startswith("/Workspace/medallon/prisma/") and item.get("status") != "DELETED" for item in libraries):
+        raise RuntimeError("Unsupported cluster library path")
+    matches = [item for item in libraries if item.get("path") == path and item.get("status") != "DELETED"]
     if len(matches) > 1:
         raise RuntimeError("Duplicate God’s Eye View cluster library")
-    # Adopt the same installed requirement hash; do not attach a second library on rename.
-    if matches:
-        path = matches[0]["path"]
     directory = path.rsplit("/", 1)[0]
     ensure_folder(api, workspace, directory.rsplit("/", 1)[0])
     ensure_folder(api, workspace, directory)
@@ -400,8 +352,7 @@ def install_cluster_libraries(api, workspace, compute, *, ensure_folder):
 
 def install_stream_compute(api, workspace, name, key=""):
     """Dedicated small USER cluster; omission of autoTerminationMinutes keeps it always on."""
-    from app.aidp import AidpClient
-    name = next((canonical for canonical, aliases in RESOURCE_ALIASES.items() if name in aliases), name)
+    from app.services.oci.aidp import AidpClient
     if name not in {"aidp_gods_eye_view_social_compute", "aidp_gods_eye_view_sensor_compute", "aidp_gods_eye_view_query_compute"}:
         raise ValueError("Invalid dedicated streaming compute")
     payload = {"type": "USER", "displayName": name,
@@ -426,7 +377,7 @@ def install_stream_compute(api, workspace, name, key=""):
     while True:
         response = api.request("GET", path)
         detail = response.body
-        if ((detail.get("displayName") or detail.get("name")) not in {name, *RESOURCE_ALIASES[name]}
+        if ((detail.get("displayName") or detail.get("name")) != name
                 or not AidpClient._notebook_matches(detail, expected) or detail.get("autoTerminationMinutes") not in (None, 0)):
             raise RuntimeError("Dedicated streaming compute differs from its always-on fixed-size contract")
         state = str(detail.get("state") or detail.get("lifecycleState") or "").upper()
@@ -442,16 +393,15 @@ def install_stream_compute(api, workspace, name, key=""):
         pause()
 
 
-def managed_workflow(api, workspace, name, legacy_name, key=None):
+def managed_workflow(api, workspace, name, key=None):
     base = f"/workspaces/{workspace}/jobs"
-    names = {name, *(legacy_name if isinstance(legacy_name, tuple) else (legacy_name,))}
-    matches = [job for job in items(api, base) if job.get("name") in names
+    matches = [job for job in items(api, base) if job.get("name") == name
                and (job.get("lifecycleState") or job.get("state")) != "DELETED"]
     if len(matches) > 1 or (key and matches and matches[0].get("key") != key):
         raise RuntimeError("Duplicate or mismatched managed God’s Eye View workflow")
     if key:
         current = api.request("GET", base + "/" + quote(key, safe="")).body
-        if (current.get("name") not in names or current.get("key") != key
+        if (current.get("name") != name or current.get("key") != key
                 or (current.get("lifecycleState") or current.get("state")) in {"DELETING", "DELETED"}):
             raise RuntimeError("Configured God’s Eye View workflow identity does not match")
         return current
@@ -461,7 +411,7 @@ def managed_workflow(api, workspace, name, legacy_name, key=None):
 
 
 def install_job(api, workspace, compute, config, bundle, *, ensure_folder, workflow="social"):
-    from app.aidp import AidpClient
+    from app.services.oci.aidp import AidpClient
     if config.get("streaming_mode", "finite") not in {"finite", "persistent"}:
         raise ValueError("Invalid God’s Eye View streaming mode")
     persistent = config.get("streaming_mode") == "persistent"
@@ -469,8 +419,7 @@ def install_job(api, workspace, compute, config, bundle, *, ensure_folder, workf
         raise ValueError("Invalid God’s Eye View workflow")
     task = "sensor_stream" if workflow == "sensors" else "social_network"
     name = "wf_ai_gods_eye_view_" + task
-    legacy_name = ("territorial_" + task, "prisma_colombia_sensors" if workflow == "sensors" else "prisma_bogota_tick")
-    current = managed_workflow(api, workspace, name, legacy_name, config.get("sensor_job_key" if workflow == "sensors" else "job_key"))
+    current = managed_workflow(api, workspace, name, config.get("sensor_job_key" if workflow == "sensors" else "job_key"))
     root = publish_runtime_sources(api, workspace, config, bundle, ensure_folder=ensure_folder)
     path = root + "/10_bronze/" + task + ".py"
     payload = {"name": name, "path": WORKSPACE_ROOT, "description": "God's Eye View collection and publication tick",
@@ -561,14 +510,14 @@ def install_agent_compute(api, workspace, key=""):
             "driverConfig": {"driverShapeConfig": {"ocpus": 1, "memoryInGBs": 16}},
             "replicaConfig": {"minReplica": 1, "maxReplica": 1}}, ready=True)
     if ((compute.get("type") or compute.get("sourceApi")) != "AI_COMPUTE"
-            or (compute.get("displayName") or compute.get("name")) not in {AGENT_COMPUTE_NAME, *RESOURCE_ALIASES[AGENT_COMPUTE_NAME]}
+            or (compute.get("displayName") or compute.get("name")) != AGENT_COMPUTE_NAME
             or (compute.get("lifecycleState") or compute.get("state")) not in {"ACTIVE", "STOPPED"}):
         raise RuntimeError("Existing God’s Eye View agent compute is incompatible or not ready")
     return compute
 
 
 def publish_agent(api, workspace, bundle, region, runtime=None):
-    from app.aidp import AidpClient
+    from app.services.oci.aidp import AidpClient
     root = WORKSPACE_ROOT
     fields = ("region", "model_id", "compartment_id", "oci_credential_name", "oci_identity_sha256", "catalog", "gold_query_compute_id")
     if not runtime or any(not isinstance(runtime.get(key), str) or not runtime[key] for key in fields):
@@ -594,7 +543,7 @@ def publish_agent(api, workspace, bundle, region, runtime=None):
         if not isinstance(key, str) or not key.strip():
             raise RuntimeError("Configured God's Eye View agent identity is invalid")
         agent = api.request("GET", f"/workspaces/{workspace}/agents/{quote(key, safe='')}").body
-        if (agent.get("key") != key or agent.get("displayName") not in {name, *RESOURCE_ALIASES[name]}
+        if (agent.get("key") != key or agent.get("displayName") != name
                 or (agent.get("lifecycleState") or agent.get("state")) in {"DELETED", "DELETING"}):
             raise RuntimeError("Configured God's Eye View agent identity differs")
     else:
@@ -632,15 +581,14 @@ def run_initial_job(api, workspace, job, revision):
         raise RuntimeError("Initial acceptance requires the finite job; persistent task readiness is a separate check")
     tasks = detail.get("tasks", [])
     task = tasks[0] if len(tasks) == 1 else {}
-    path = task.get("filePath", "") if task.get("type") == "PYTHON_TASK" else task.get("notebookPath", "")
+    path = task.get("filePath", "")
     try:
         arguments = json.loads(task.get("commandLineArguments") or "[]")
     except (ValueError, TypeError):
         arguments = []
     python = (task.get("type") == "PYTHON_TASK" and task.get("taskKey") == "social_network" and task.get("source") == "WORKSPACE"
               and path == WORKSPACE_ROOT + "/10_bronze/social_network.py" and arguments == [path])
-    legacy = task.get("type") == "NOTEBOOK_TASK" and re.fullmatch(r"/Workspace/medallon/prisma/prisma_tick_[a-f0-9]{12}\.ipynb", path)
-    if not python and not legacy:
+    if not python:
         raise RuntimeError("God’s Eye View initial job must reference one managed source")
     source_revision = revision
     if python:
@@ -742,18 +690,18 @@ def initialize_controls(api, agent_api, storage, runtime, workspace):
         return connection
     job_names = {"wf_ai_gods_eye_view_social_network", "wf_ai_gods_eye_view_sensor_stream", "territorial_social_network",
                  "territorial_sensor_stream", "prisma_bogota_tick", "prisma_colombia_sensors"}
-    agent_names = {AGENT_NAME, *RESOURCE_ALIASES.get(AGENT_NAME, ())}
+    agent_names = {AGENT_NAME, "territorial_assistant"}
     if (any(item.get("name") in job_names for item in items(api, f"/workspaces/{workspace}/jobs"))
             or any(item.get("displayName") in agent_names or str(item.get("displayName", "")).startswith("prisma_bogota")
                    for item in items(agent_api, f"/workspaces/{workspace}/agents"))
             or any(item.get("displayName") in {"AidpControlStore", "TerritorialWriterRuntime", "PrismaWriterRuntime", "PrismaReaderRuntime"}
                    for item in items(agent_api, "/credentials"))):
-        raise RuntimeError("God’s Eye View existing controls require a verified Object Storage migration")
+        raise RuntimeError("God’s Eye View existing controls use an unsupported control format; no resources were changed")
     for bucket, prefix in ((runtime["bucket"], ".control/"), (runtime["bucket"], "04_gold/prisma/"),
                            (runtime["landing_bucket"], runtime["landing_prefix"])):
         result = storage.list_objects(runtime["namespace"], bucket, prefix=prefix, limit=1).data
         if result.objects or result.next_start_with:
-            raise RuntimeError("God’s Eye View existing data requires a verified Object Storage migration")
+            raise RuntimeError("God’s Eye View existing data uses an unsupported control format; no resources were changed")
     write_document(connection, "runtime", {**runtime, "control_new_install": True}, 0)
     return connection
 
@@ -802,8 +750,7 @@ def bootstrap_gods_eye_view(api, context, outputs, config, signer, storage, reco
     agent = publish_agent(agent_api, workspace, bundle, context["region"], runtime)
     runtime["agent_id"] = agent["agent_key"]
     current = read_document(connection, "runtime")
-    desired = {key: value for key, value in {**current, **runtime}.items()
-               if key not in {"writer_credential_name", "reader_credential_name"}}
+    desired = {**current, **runtime}
     if current != desired:
         write_document(connection, "runtime", desired, current["revision"])
     report("streaming", "Starting the two managed workflows for native acceptance")
@@ -814,6 +761,4 @@ def bootstrap_gods_eye_view(api, context, outputs, config, signer, storage, reco
     storage.put_object(runtime["namespace"], runtime["bucket"], ".control/prisma/agent.json", json.dumps(agent).encode(), content_type="application/json")
     result = {"job_ready": True, "agent_ready": True, "revision": agent["revision"],
               "acceptance_run": run_key, "sensor_run": sensor_run, "snapshot_version": version}
-    return {**{"gods_eye_view_" + key: value for key, value in result.items()},
-            **{"territorial_" + key: value for key, value in result.items()},
-            **{"prisma_" + key: value for key, value in result.items()}, "external_volume_count": 1}
+    return {**{"gods_eye_view_" + key: value for key, value in result.items()}, "external_volume_count": 1}

@@ -1,4 +1,5 @@
 .tmp/
+.local/
 .source/
 .aidp/
 .aidp-local/
@@ -8,6 +9,6 @@ aidp-agent.toml
 .venv/
 node_modules/
 dist/
-apps/gods-eye-view/.upstream/
+modules/ai-gods-eye-view/.upstream/
 openwiki/
 graphify-out/

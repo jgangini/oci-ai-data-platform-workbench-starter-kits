@@ -1,197 +1,98 @@
-# Operations and recovery
+# Operación y recuperación
 
-## VM SSH access package
+[Documentación](README.md) · [Primeros pasos](getting-started.md) · [Contratos vigentes](contracts.md)
 
-New deployments install a dedicated RSA SSH public key for `opc`. Deploy Studio collects its private key as the declared `ssh-private-key.pem` artifact and emails it inside `vm-ssh-access.zip` with connection instructions; the email's Attachments list names that ZIP. Keep the package as an administrative credential. It is separate from the OCI API profile.
+## Identificar la instalación
 
-Deploy Studio keeps public SSH closed and does not expose a source-CIDR field. Direct Terraform deployments retain the optional `ssh_allowed_cidr` variable for an explicitly authorized administrator IPv4 source (preferably `/32`); its empty default keeps TCP 22 closed. The installed key can later be used after an authorized OCI network-rule update, without resetting VM access. Existing VMs without this installed key require a separate migration; an image update or a changed email template cannot invent their private key.
+En **Settings → Application** comprobar release instalada, commit y versiones de paquetes. Un push actualiza Git, no una VM. Un build `development` no es una release inmutable. Conservar la release resuelta, outputs y resumen privado de acceso con los registros operativos del entorno.
 
-The generated SSH private key is sensitive Terraform resource state, collected through the existing Deploy Studio artifact path. Restrict access to Resource Manager state and deployment artifacts. Private key contents are not Terraform outputs, VM metadata, email HTML, execution logs or source archives; only the public key enters VM metadata.
+La tabla presenta kit, alcance, versión, fecha y configuración. La fecha corresponde al último commit del manifiesto exacto del paquete, representada en la zona guardada. Los metadatos generados se vinculan a commit, versión y SHA-256; si faltan o no coinciden no se inventa una fecha desde el filesystem. Los builds locales deben generar esa metadata mediante el [flujo de desarrollo](development.md). Ordenar o mostrar fecha no acredita que una versión haya sido instalada en AIDP. Fuente: [Settings](../apps/frontend/src/App.tsx).
 
-[Documentation](README.md) · [Architecture](architecture.md) · [Compatibility](reference/compatibility.md)
+Copiar un endpoint solo obtiene la dirección nativa verificada. **Open Agent Hub**, junto a Copy URL en Governance/Market Intelligence, permanece deshabilitado hasta que el módulo esté desplegado y exista una dirección Workbench verificada. Abre el hub general; no registra, activa ni concede acceso al agente. El cliente anuncia éxito al copiar y ofrece copia manual si el navegador la rechaza.
 
-## Install and identify a deployment
+## Despliegue y acceso administrativo
 
-Follow [Getting started](getting-started.md) for deployment inputs and current limitations. A fresh compartment is a separate environment, not an upgrade of a deployed VM. Keep the selected release/commit, resolved outputs and protected access summary with the deployment's operational records.
+Usar [Primeros pasos](getting-started.md) para entradas y límites. El [manifiesto Deploy Studio](../terraform/deploy-studio.json) utiliza schema v1 y su [gate](../terraform/release_gate.py) verifica el contrato. PLAN, APPLY y post-apply son fases distintas; no presumir una aprobación adicional introducida por este repositorio entre plan y apply.
 
-Use **Settings → Application** to distinguish the installed application release, its source commit and bundled kit versions. A Git push updates source; it does not update a VM. A branch build marked `development` is not an immutable release.
+El preflight verifica defaults heredados de tags: los buckets internos de AIDP no pueden responder valores de tags que exigen entrada del usuario. Configurar defaults automáticos antes; el despliegue no elimina defaults de la tenancy. Terraform crea la política del compartimento en home region y espera cinco minutos para propagación IAM antes de crear AIDP. La espera acotada no sustituye verificar el primer APPLY y work request nativo.
 
-The package table lists **Starter kit → Scope → Version → Updated → Configuration**, newest package changes first. Updated uses **YYYY-MM-DD** in the saved time zone and comes from the last Git commit date of that exact package manifest. Release builds include metadata bound to the image commit, package version and SHA-256; missing or mismatched metadata shows **Not available**, never a build or filesystem timestamp. Local builds without generated release metadata can therefore omit dates. The table scrolls horizontally on narrow screens and is keyboard accessible. Successful application-update notices disappear after eight seconds; progress and failure messages remain visible, and dismissing a notice does not clear the operation record. No status badge appears when the installed version is current. Updating keeps **Application** selected through the reload; the browser restores the prior vertical position once the new version's settings load, when session storage is available.
+Los despliegues nuevos instalan una clave SSH pública RSA para `opc`; Deploy Studio recoge el artefacto privado `ssh-private-key.pem` y lo entrega en `vm-ssh-access.zip` con instrucciones. Es una credencial administrativa distinta del perfil API OCI. Restringir state Resource Manager y artefactos: la clave privada es estado Terraform sensible y no debe aparecer en logs, outputs públicos ni metadata VM.
 
-**AI Market Intelligence** replaces Social Network in the public package list. Its checked-in runtime is a candidate, marked **Installation pending** until the new installer and native acceptance are complete. It does not invoke the legacy Social installer. The chat icon immediately to the right of Copy URL opens Agent Hub, using the verified Workbench hostname. Copying the native agent endpoint becomes available only after installation completes; opening Agent Hub does not activate or register it. Successful copying announces **Copied** for three seconds; a denied clipboard write exposes the URL for manual copying. See the [module status and acceptance boundaries](modules/ai-market-intelligence.md).
+Deploy Studio mantiene SSH público cerrado y no ofrece campo CIDR. Terraform directo conserva `ssh_allowed_cidr`, por defecto vacío; una apertura posterior requiere una regla OCI autorizada y un origen acotado, preferentemente `/32`. Una VM sin esa clave instalada requiere migración explícita; cambiar la imagen/correo no recupera su clave.
 
-The [Deploy Studio manifest](../terraform/deploy-studio.json) uses schema version 1. The [release gate](../terraform/release_gate.py) validates that contract. Terraform plan/apply and post-apply are separate phases; review the plan in the deployment process rather than assuming this repository inserts an approval hook between them.
+El correo de finalización presenta accesos y artefactos declarados por el runner, con credenciales aplicación/base de datos y código de laboratorio cuando corresponde. No incluye claves API OCI. Wallet, ZIP SSH y resumen de acceso son privados. El runner debe soportar la sección `email` del manifiesto; revisar sus artefactos y log saneado, no sustituirlos por diagnósticos privados sin filtrar.
 
-Preflight checks inherited tag defaults before provisioning: AIDP's internal buckets cannot supply a value for a tag marked as requiring user input. Configure automatic defaults first; deployment never removes tenancy defaults. Terraform creates the compartment-scoped service policy in the home region and waits five minutes before creating AIDP, because IAM replication is asynchronous. The wait runs again when that policy is replaced or its statements change. This is a bounded propagation window, not a native permission-readiness probe; verify the first APPLY and AIDP work request in each new environment. See [Oracle's IAM replication guidance](https://docs.oracle.com/en-us/iaas/Content/Identity/regions/managingregions.htm).
+## Usuarios y kits
 
-The completion email uses the manifest's project title and description, with one compact service-access block for the portal, Database Actions and AIDP Workbench. Only the declared application/database credentials are included; OCI API keys and operator credentials are excluded. AIDP uses the configured identity domain. Laboratory deployments additionally include their registration code.
-
-The email attaches only `wallet.zip`, `terraform-source.zip` and one sanitized `deployment.log` covering validation, PLAN, APPLY and final configuration. The runner generates the wallet from the selected database, preserves plaintext access values only in its encrypted temporary credential envelope, and purges that envelope after completion. Keep the received email and wallet private. Internal reports remain in deployment history rather than appearing as extra email attachments. This contract requires a Deploy Studio runner that supports the manifest's `email` section.
-
-## Manage users and kits
-
-| Action in Users | Effect |
+| Acción en Users | Efecto |
 | --- | --- |
-| Add user | Select initial starter kits and/or God's Eye View access; nothing is preselected. Provision Identity access and only the selected kit resources through one resumable operation. |
-| Manage starter kits → God's Eye View | Grant or revoke membership in the installed shared viewer's reader group. The checkbox is disabled for new grants until installation is ready. |
-| Add a kit | Install its versioned assets, workflow, tables and grants for that participant. |
-| Update / Redeploy | Reconcile the selected kit with the bundled version. Other kits remain assigned. |
-| Remove a kit | Remove only that kit's owned workflow, tables, objects, content and grants. |
-| Delete participant | Clean up assigned kits and then remove the Identity account. |
+| Add user | Seleccionar kits y/o lector God’s Eye View, sin selección inicial; aprovisionamiento reanudable. |
+| Manage starter kits → God’s Eye View | Conceder/revocar grupo lector de una instalación lista; no instala el módulo. |
+| Añadir kit | Assets, workflow, tablas y permisos propios del participante. |
+| Update / Redeploy | Reconciliar el kit seleccionado con su versión incluida. |
+| Retirar kit | Retirar solo workflow, tablas, objetos, contenido y permisos propios. |
+| Eliminar participante | Limpiar kits asignados y después retirar la cuenta Identity. |
 
-A new user can have only God's Eye View access, without kit resources or AIDP developer permissions. Adding their first kit provisions those resources and permissions through the existing kit flow. For users with assigned kits, at least one kit must remain assigned; deleting the participant is the action for removing the last assignment. Provisioning and cleanup use manifests and operation IDs. Resume a failed operation from its reported state instead of creating duplicate users, jobs or folders manually.
+Un usuario solo lector no necesita workspace ni permisos developer AIDP. Añadir su primer kit provisiona esos recursos por el flujo normal. Con kits asignados debe quedar al menos uno; eliminar la última asignación corresponde a eliminar al participante. Conservar manifiestos e IDs y reanudar operaciones fallidas en lugar de crear cuentas/jobs/carpetas duplicados. Fuentes: [aprovisionamiento](../apps/backend/app/services/oci/aidp.py), [identidad](../apps/backend/app/services/oci/identity.py).
 
-## Update application and viewer images
+## Actualizar imágenes
 
-```mermaid
-flowchart LR
-    Main[Validated commit on main] --> Tag[Stable release tag]
-    Tag --> Build[CI validates and builds frozen images]
-    Build --> Release[Immutable GitHub release and SHA-256 manifests]
-    Release --> Candidate[VM updater verifies and health-checks candidate]
-    Candidate --> Decision{Healthy?}
-    Decision -->|Yes| Activate[Activate candidate; retain persistent state]
-    Decision -->|No| Restore[Retain or restore previous healthy image]
-```
+El [workflow de release](../.github/workflows/release.yml) y el [updater VM](../scripts/release/vm_release_updater.py) exigen release estable nueva del repositorio confiable, imagen `linux/amd64`, manifiesto/checksum y comprobación del candidato en loopback. Conservar estado persistente y la imagen saludable anterior según el updater. El contenedor de aplicación no recibe Docker socket ni una interfaz general de comandos del host.
 
-The updater accepts the trusted repository's newer stable immutable releases, checks the `linux/amd64` image and checksum manifest, and validates a candidate on loopback. The application container has no Docker socket or general host-command interface. The [release workflow](../.github/workflows/release.yml) and [VM updater](../scripts/vm_release_updater.py) define this contract.
+Actualizar la aplicación cambia paquetes disponibles para instalaciones/redeploy posteriores; no migra automáticamente kits, jobs o módulos activos. Comparar versiones instaladas/incluidas y ejecutar la operación explícita correspondiente. Usar únicamente assets y rutas canónicos de la versión actual; los clientes y formatos retirados se rechazan. Ver [Contratos vigentes](contracts.md).
 
-An application update changes the packages available for future installation/redeployment. It does not automatically upgrade every participant kit or migrate all live AIDP jobs. Check installed versus bundled versions and perform the appropriate explicit kit/module update. Preserve compatible viewer assets and wire paths during rolling updates; see [Compatibility](reference/compatibility.md).
+Después comprobar `/api/health`, acceso administrador, release/commit, un ciclo representativo de kit, acceso al visor habilitado y comportamiento nativo de módulos. Salud del contenedor no valida procesamiento Spark ni inferencia.
 
-After an update, verify `/api/health`, administrator access, installed release/commit, one representative kit lifecycle operation, viewer access when enabled, and native module behavior. A container health response alone does not validate Spark processing or agent inference.
+<a id="global-module-lifecycle"></a>
+## Ciclo de vida de módulos compartidos
 
-## Global-module lifecycle
+Se administran en **Settings → Application**, separados de Users:
 
-Manage both modules from **Settings → Application**, separately from Users:
+- [AI Data Governance](modules/ai-data-governance.md): dos agentes, cuatro tareas y 18 tablas compartidas; instalación TEST y aceptación nativa pendiente.
+- [AI Market Intelligence](modules/ai-market-intelligence.md): agente TEST pausado, sin tablas ni workflows Spark propios; investigación y aceptación nativa pendientes.
+- [God’s Eye View](modules/ai-gods-eye-view.md): visor privado, computes y workflows propios; administración de fuentes/identidad después de instalar.
 
-- **AI Data Governance:** select a verified platform administrator, install/redeploy the singleton, and confirm metadata synchronization plus agent authorization. [Lifecycle and deletion scope](modules/ai-data-governance.md).
-- **God's Eye View:** install its private viewer and AIDP resources, then configure identity, source modes, schedules and providers. [Processing, cleanup and migration](modules/gods-eye-view.md).
+### Instalación de la VM del visor
 
-For a new portal-managed base, use **Install module** and confirm the resource/cost explanation:
+En una base preparada para módulos, revisar recursos/costos y confirmar Install. El instalador verifica stack original, fuente inmutable, recibo y variables antes de generar el plan. Solo admite creación de VM visor, dynamic group y dos políticas de alcance acotado, además de no-ops existentes. Cualquier escritura ajena, deriva de seguridad/configuración o cambio de variables bloquea APPLY; no crea otro stack ni VM no rastreada. Después sigue bootstrap AIDP y verificación nativa. Fuente: [lista permitida y plan](../apps/backend/app/modules/ai_gods_eye_view/runtime/installation.py).
 
-```mermaid
-flowchart LR
-    Confirm[Administrator confirms installation] --> Identity[Verify original stack and source receipt]
-    Identity --> Plan[Plan module in the same Resource Manager stack]
-    Plan --> Guard{Only allowed module creates or no-ops?}
-    Guard -->|No| Stop[Stop and report the conflict]
-    Guard -->|Yes| Apply[Apply the checked plan]
-    Apply --> Bootstrap[Prepare AIDP controls, streams, compute and agent]
-    Bootstrap --> Verify[Verify native workflows, publication and private viewer]
-    Verify --> Ready[Installation ready; conversation acceptance remains separate]
-```
+En el bucket de artefactos se conservan `.control/modules/installation.json` y `.control/gods_eye_view/install/operation.json`, que vinculan entorno/fuente y operación/intento/jobs/fases. No editar recibos para saltar conflictos. Los controles y publicaciones del módulo están en Gold, separados de estos recibos.
 
-The base reserves networking and the private endpoint before installation, keeping the portal VM stable. The installer only adds the viewer VM, its dynamic group and two scoped IAM policies; any other infrastructure write or configuration drift stops the operation. Known provider observations (usage counters, service timestamps and empty/default field normalization) are accepted only when the same resource has a no-op plan. Network, identity, permissions and configuration drift remain blocked. The source archive and commit must match the receipt, and stack variables must remain unchanged between plan and apply. It does not create another stack or an untracked VM.
+GET solo observa. Close/Escape no cancelan; Resume confirma continuación del mismo ID, Retry confirma recuperación revisada y Verify comprueba sin reprovisionar. Reconciliar una respuesta perdida por GET antes de otro POST. Un timeout puede dejar OCI trabajando: seguir el job existente. Revisar primero Resource Manager y después salidas AIDP, publicación y visor; una VM saludable no acredita conversación. Bases sin red o recibo actuales se rechazan, sin vía de activación antigua.
 
-The selected artifacts bucket holds `.control/modules/installation.json` and `.control/gods_eye_view/install/operation.json`. The first binds the environment and immutable source; the second retains operation/attempt IDs, Resource Manager jobs and phases through restarts. They are separate from the module's data controls in Gold. Preserve both; do not edit them to bypass a mismatch.
+El registro `enabled_vm_modules` implementa únicamente `gods_eye_view`. Otro módulo exige código, packaging, lista Terraform y aceptación explícitos; añadir un nombre no habilita carga arbitraria de VMs. Ver [contrato de plan](../terraform/tests/check_module_plan.py).
 
-Both OCI providers preserve `Oracle-Tags.CreatedBy` and `Oracle-Tags.CreatedOn`. For an existing original archive whose failed module plan proposes only removing those automatic portal tags, run `scripts/migrate_module_default_tags.py` in the configured backend environment to preview the explicit migration, then add `--apply` to migrate. It verifies the failed job, exact stack/source identity and variables, backs up the original archive and receipt in `.control/gods_eye_view/install/provider-tags-migration.json`, and changes only the two provider blocks. It conditionally updates the archive binding after verifying the migrated bytes; it never applies Terraform or clears the failed operation. Rerunning reconciles an interrupted receipt update. Generate and validate a new module plan before apply. Any other portal write, active job or source mismatch blocks migration.
+Una base sin recibo, red o recursos de identidad actuales no se adopta ni se migra desde el portal. Corregir el contrato del entorno fuera de esta operación antes de volver a intentarla; una imagen nueva no lo crea automáticamente.
 
-Existing deployments whose original Terraform predates viewer sign-in need the tracked reader group and public authorization-code application. Preview `python scripts/migrate_viewer_identity.py` in the configured backend environment, then use `--apply` to migrate only the verified stack archive and receipt. The migration copies the two canonical identity resource blocks, backs up the original archive/receipt under `.control/gods_eye_view/install/viewer-identity-migration.json`, and retains all variables, the original infrastructure commit and VM metadata. It resumes a receipt write interrupted after the conditional stack update; it never creates resources or starts Terraform jobs.
+## Destrucción y retención
 
-Generate a new plan from that migrated archive and pass its JSON, verified receipt, deployment `lab_marker` and HTTPS portal origin to `migrate_viewer_identity.validate_plan`. Only creates of `oci_identity_domains_group.gods_eye_view_readers` and `oci_identity_domains_app.viewer` are allowed; existing resources must be unchanged. The app must remain public, use only `authorization_code`, and register the portal's `/api/auth/oci/callback`. Recheck stack identity, archive hash and unchanged variables immediately before applying that exact saved plan with `FROM_PLAN_JOB_ID`; retain job identifiers for recovery. Do not replace the source archive with a newer complete release, change `source_commit_sha`, or recreate either VM. Confirm the native OCI sign-in redirect and current reader membership after migrating. An application image update alone does not create these tracked Identity Domains resources.
+La VM visor, grupo y políticas pertenecen al stack original. Un Destroy debe incluir sus recursos rastreados; comprobar plan e inventario final. El instalador no incorpora teardown general de AIDP. Limpieza de participantes/Governance, borrado sintético y retención son operaciones separadas.
 
-The dialog polls status without starting work. **Close** or Escape leaves installation running. Reopen to follow progress; if the worker stopped, **Resume installation** confirms continuation of the same operation. **Retry installation** confirms another attempt using its managed resources; **Verify installation** checks an installed module without reprovisioning it. A lost response is reconciled by GET before another POST is allowed.
+Antes de destruir, revisar escritores activos y buckets retenidos/reutilizados. Quitar una VM no demuestra que hayan desaparecido workflows, tablas u objetos. Revisar las fuentes actuales: [Terraform del visor](../terraform/h_gods_eye_view.tf), [almacenamiento](../terraform/f_oci_objectstorage_bucket.tf), [bootstrap](../terraform/hooks/gods_eye_view_bootstrap.py) y [ciclo de vida AIDP](../apps/backend/app/services/oci/aidp.py).
 
-Check Resource Manager plan/apply status for infrastructure failures, then AIDP task outputs, agent deployment and publication/viewer readiness for later failures. A timeout can leave OCI work running: resume tracking rather than creating a second job. Resolve drift, foreign resource identities or changed source before retrying. Local fixtures create no cloud resources. Existing bases without portal-managed networking and a matching receipt retain the older activation/verification path and may require deployment separately.
+## Limpieza sintética
 
-The VM-module registry (`enabled_vm_modules`) currently supports only `gods_eye_view`. Another module requires implementation, packaging, a Terraform resource allowlist and acceptance checks; adding a name does not permit arbitrary VM or code uploads. Sources: [installer](../apps/backend/app/gods_eye_view/installation.py), [status API](../apps/backend/app/gods_eye_view/module.py), [mock plan contract](../terraform/tests/check_module_plan.py).
+Es una operación de datos, no desinstalación. Confirmar alcance social o sensores. Reintentar una falla conserva ID/diario después de diagnosticar; un ID cancelado es terminal y requiere nueva confirmación/ID. Parcial/cancelado no equivale a completado. No borrar checkpoints ni estado de diálogo para forzar éxito. La [guía del visor](modules/ai-gods-eye-view.md) detalla datos reales, controles e historial que deben conservarse.
 
-Changing a schedule, name or registration code requires the portal's confirmation. Saving a schedule preserves paused/completed capture state. Installing a global module does not grant participants administrator rights.
+## Controles Object del visor
 
-## Destroy and retention boundaries
+Las instalaciones actuales inicializan controles Object y diario inmutable en el bucket Gold seleccionado. Verificar configuración, ETags, publicación y contenido del diario antes de declarar el runtime listo. No existe un camino alternativo de controles Oracle ni un migrador de instalaciones antiguas. No borrar estado para pasar una comprobación; mantener la operación y resolver el conflicto de ownership o contenido. Ver [contratos de datos](contracts.md#datos-y-evidencia) y [guía del visor](modules/ai-gods-eye-view.md).
 
-The private viewer remains owned by the original Terraform stack, including its dynamic group and policies. A completed stack Destroy includes those tracked resources; installation does not create a separate VM outside Terraform state. Verify the actual destroy plan and final resource inventory before declaring removal complete.
+## Diagnóstico y recuperación
 
-This installer adds no general AIDP teardown hook. Participant/Governance cleanup, synthetic deletion and data-retention policies remain separate operations. Review their scope, active writers and retained or reused buckets before destroying an environment; removing a VM is not evidence that every workflow, table or stored object has been cleaned. See [resource ownership](../terraform/FUNCTION_AUDIT.md#module-resource-ownership).
+| Síntoma | Comprobar primero |
+| --- | --- |
+| Participante pendiente | Fase/operación, visibilidad y permisos exactos; no duplicar usuario. |
+| Guard de workspace/catálogo | Paquete instalado frente a parámetros; [límite conocido](getting-started.md#current-implementation-limits), sin deshabilitar guards. |
+| Workflow no inicia | Estado y referencia exacta del compute. |
+| Linaje ausente | Tareas completas, escrituras y configuración; no sustituir evidencia por prosa. |
+| Agente 502/timeout | Despliegue exacto, compute, modelo y herramienta/log nativo. |
+| Captura completa, tabla vieja | Durabilidad Landing, backlog, publicación y proyección. |
+| Reset incompleto | ID, error/cancelación, writer y diario de reemplazo; no borrar originales prematuramente. |
+| HTTP 409 al editar | Revisión/ETag actual y cambio concurrente; no sobrescribir a ciegas. |
+| Índice local no disponible | Integridad del diario Object y proyección SQLite; no borrar fuente autoritativa. |
+| Governance pendiente | Snapshot actual, compute agente, modelo y RBAC. |
 
-## Synthetic cleanup
+Mantener privados logs, IDs de petición y recibos; sanear secretos/datos personales al compartir. Estado persistente, referencias de release y backups deben conservar sus controles. Restaurar un snapshot anterior después de nuevas escrituras puede perder capturas o cancelaciones: reconciliar primero. No existe garantía general de recuperación entre todos los almacenes; validar restauración aislada antes de depender de ella.
 
-Synthetic deletion is a data operation, not an uninstall. Social deletion covers synthetic social data; sensor deletion covers synthetic sensor families. Confirm the displayed scope before starting. Cancelling, retrying and completing are different states: a cancelled or partial operation must never be reported as a completed reset.
-
-When a cleanup fails or is interrupted, retry its existing operation ID and preserved journal after checking the cause. A cancelled ID is terminal and requires a newly confirmed operation. Do not clear a checkpoint or remove a dialog's state directly to force completion. The [God's Eye View guide](modules/gods-eye-view.md) explains which controls, real data and histories must survive.
-
-## Migrate God's Eye View controls
-
-Use this procedure when upgrading an existing module from Oracle controls to Object Storage and its immutable post journal. Fresh installations initialize the Object runtime during deployment. The [migration module](../apps/backend/app/gods_eye_view/control_migration.py) provides explicit export, staging and activation functions; it does not pause consumers, switch application configuration or remove resources automatically. Record each gate for the target installation; candidate-agent acceptance alone does not establish migration completion.
-
-1. **Freeze and record.** Block portal writes, stop both native stream writers and verify their tasks are terminal. Record source/resource identities and preserve the current application settings, publication pointer and cancelled-reset receipt. `writers_frozen=True` asserts these checks; the function does not perform them.
-2. **Export a consistent source.** Call `export_snapshot` on a fresh dedicated Oracle connection with autocommit disabled and a required `publication_sink(version, payload)` callback. It opens a read-only transaction and exports every control document and post row. Publication bodies pass to the sink one at a time; the returned snapshot retains only their canonical hashes, avoiding an in-memory copy of the full analytical history. Write each publication to a private, exclusively created JSONL file. Flush, synchronize and close that file before saving the snapshot receipt or staging anything; a failed sink/export leaves an incomplete artifact, never an accepted export. Revisions, sequences, timestamps and cancellation history are preserved. Keep both export files unchanged for retries and recovery of missing historical copies.
-3. **Inspect runtime metadata.** Export allowlists runtime fields, omits obsolete writer/reader credential names and refuses unknown fields before copying them. Passwords, wallets and private keys are not migration data. Unsupported or unbackfilled post rows must be reconciled explicitly; migration does not invent revisions.
-4. **Stage controls and index.** `stage_snapshot` creates destination objects only when absent and otherwise requires exact equality. A partial copy can resume from the same snapshot; conflicting content aborts instead of merging. `seed_posts` retains source sequence gaps and reserved upper bounds. Staging does not enable the runtime.
-5. **Verify all analytical history.** Compare each exported version and canonical payload hash with both its Object snapshot and the actual Delta Gold row. Copy any missing historical version through a reviewed operation and recheck it. Also verify the current publication pointer and its snapshot. A Gold payload may include a redundant `id`; validate it against the row ID and `version` before removing only that field for comparison.
-6. **Activate explicitly.** Supply the verified Gold version-to-hash map to `activate_snapshot`. It rechecks destination documents, the exact seeded journal, every historical Object copy and the current pointer before its final runtime ETag CAS. Only then does it set `control_migration_complete` and increment the runtime revision.
-7. **Accept the new consumers.** Configure the application with `GODS_EYE_CONTROL_BUCKET` set to the verified Gold bucket, and switch the installed workflows to that Object runtime. Validate native stream output, stable paging, publication/evidence agreement and a grounded Gold-agent conversation before resuming the recorded capture configuration. Preserve job and compute IDs; changing names does not authorize duplicate resources.
-8. **Retire unused dependencies.** Inspect all job, agent and library references, then remove only the old module database credentials and artifacts that have no remaining consumers. Shared platform databases, catalog connections and native agent-memory services are outside this module's cleanup scope.
-
-The callable sequence is:
-
-```python
-import json
-import os
-from app.gods_eye_view.control_migration import export_snapshot, stage_snapshot, activate_snapshot
-
-with open(private_history_path, "x", encoding="utf-8") as history:
-    def save_publication(version, payload):
-        json.dump({"version": version, "payload": payload}, history,
-                  ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-        history.write("\n")
-    snapshot = export_snapshot(
-        legacy_connection, publication_sink=save_publication, writers_frozen=True
-    )
-    history.flush()
-    os.fsync(history.fileno())
-# Persist the small snapshot and receipt privately before staging.
-staged = stage_snapshot(target_store, snapshot)
-# Independently verify every exported publication and the current pointer in Gold.
-activated = activate_snapshot(
-    target_store, snapshot, gold_publications=verified_gold_hashes, writers_frozen=True
-)
-```
-
-Oracle `LAST_NUMBER` is a reserved sequence-cache upper bound, not the last number consumed. The export records both that bound and the maximum surviving row value; the seed preserves the larger bound without calling `NEXTVAL`. Canonical hashes use UTF-8 JSON with sorted keys, compact separators and no nonfinite numbers.
-
-Before activation, keep the original runtime selected to abandon a staged copy. After Object writers resume, an old Oracle snapshot is no longer a safe rollback: reconcile the new journal and documents first. Retain the export, verification results and original resource references under deployment access controls. A source update or local test does not prove that this procedure ran on an installation.
-
-## Diagnose by boundary
-
-| Symptom | First check | Avoid |
-| --- | --- | --- |
-| Participant stays Pending | Current operation phase, resource visibility and assigned permissions | Recreating the same account |
-| `Invalid workspace_root` / `Invalid participant catalog` | Installed notebook guards versus job parameters; [known mismatch](getting-started.md#current-implementation-limits) | Disabling validation or borrowing another catalog |
-| Workflow cannot start compute | Compute state and the job's exact compute reference | Starting unrelated computes |
-| Missing lineage | Task completion, managed-table writes and lineage configuration | Treating notebook prose or a fabricated lineage table as evidence |
-| Agent 502 / timeout | Exact deployment, compute, model availability and native tool execution/logs | Reporting an empty result or repeatedly deploying another agent |
-| Capture completed but table is stale | Landing durability, ingestion/enrichment status and publication version | Regenerating already captured records |
-| Reset stays incomplete | Operation ID, cancellation/error state, worker acknowledgement and replacement journal | Removing historical objects before replacement is durable |
-| Control change returns 409 | Reload the current document revision and review the concurrent change | Blind retry or overwriting the current ETag |
-| Post table index is unavailable | Object journal integrity and VM SQLite projection path | Deleting the authoritative journal to clear a local cache error |
-| Governance stays Pending | First metadata snapshot, dedicated agent compute, model and RBAC | New global-module copies |
-| Browser rejects TLS | Deployment certificate mode and certificate validity | Disabling browser security on a public environment |
-
-Keep investigation logs private and remove tokens, credentials and personal data before sharing a report. Local fixtures validate UI/API behavior only; they do not certify OCI permissions, model access or native Spark/agent execution.
-
-## Protect recovery material
-
-Keep application persistent state, module operation manifests, installed release references and data/checkpoint backups under the deployment's access controls. Before a migration, record which consumers write to each store and when writes are paused. After writes resume, rollback must reconcile new state; restoring an old snapshot alone can discard later captures or cancellations.
-
-The current repository does not provide a general cross-store disaster-recovery guarantee. Validate restoration in an isolated environment before relying on a backup procedure for production.
-
-
-## Retired AI Social Network
-
-The [retirement boundary](modules/ai-social-network.md) returns authenticated HTTP
-410 responses. Its source installer and exclusive checks are removed. A portal
-image update neither cleans up existing cloud resources nor migrates legacy data.
-God's Eye View retains its independent social pipeline.
-
-## AI Market Intelligence installation
-
-Use the dedicated [empty-installation workflow](modules/ai-market-intelligence.md#empty-installation-and-recovery)
-from Settings → Application. GET status never starts installation; explicit Deploy
-or Resume advances the durable operation. Its temporary bootstrap must verify all
-fourteen empty framework tables in the selected artifacts bucket before cleanup.
-TEST verifies the current paused revision and MCP connectivity before the native
-production endpoint is published. Agent Hub is a separate navigation link and is
-not activated or registered by this operation. Failed or uncertain writes retain
-resources and the same operation; do not clear its receipt to force a new start.
+Las rutas Social Network retiradas devuelven HTTP 404 y la imagen no elimina sus recursos remotos. Market Intelligence tiene su [instalación y recuperación](modules/ai-market-intelligence.md#installation-and-recovery) independiente y aceptación pendiente; ni Agent Hub ni un estado activo sustituyen sus gates.

@@ -6,38 +6,100 @@
     "package_oci_credentials": false
   },
   "capabilities": {
-    "compartment_modes": ["new", "existing"],
+    "compartment_modes": [
+      "new",
+      "existing"
+    ],
     "default_compartment_name": "oracle-ai-data-platform",
     "requires_genai_region": false,
     "database_profile": "new_or_existing",
     "region_selection": "subscribed_compatible",
-    "regional_requirements": ["aidp", "autonomous_26ai_dw", "genai_chat"]
+    "regional_requirements": [
+      "aidp",
+      "autonomous_26ai_dw",
+      "genai_chat"
+    ]
   },
   "presentation": {
     "title": "Oracle AI Data Platform Workbench Starter Kits",
     "summary": "Deploys reusable Oracle AI Data Platform Workbench starter kits with governed medallion data layers, Autonomous AI Database agent memory, and native OCI governance extension support.",
-    "tags": ["VM", "VCN", "AI Data Platform Workbench", "Data Governance", "Object Storage", "IAM"],
+    "tags": [
+      "VM",
+      "VCN",
+      "AI Data Platform Workbench",
+      "Data Governance",
+      "Object Storage",
+      "IAM"
+    ],
     "image": "/assets/oci-aidp-cloud-migration-lab.png",
     "image_alt": "Oracle AI Data Platform Workbench Starter Kits architecture",
     "href": "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
   },
   "run_steps": [
-    {"key": "queue", "label": "Queue"},
-    {"key": "credentials", "label": "OCI credentials"},
-    {"key": "compartment", "label": "Starter kit compartment"},
-    {"key": "policies", "label": "Identity and IAM"},
-    {"key": "stack", "label": "Resource Manager stack"},
-    {"key": "plan", "label": "Terraform plan"},
-    {"key": "apply", "label": "Terraform apply"},
-    {"key": "network", "label": "VCN and public subnet"},
-    {"key": "bucket", "label": "Medallion Object Storage"},
-    {"key": "compute", "label": "Starter Kit Application VM"},
-    {"key": "database", "label": "Autonomous AI Database 26ai"},
-    {"key": "wallet", "label": "Agent memory and governance runtime"},
-    {"key": "application", "label": "AIDP workspace, catalog and RBAC"},
-    {"key": "artifacts", "label": "Starter kit access summary"},
-    {"key": "email", "label": "Access email"},
-    {"key": "complete", "label": "Starter kit ready"}
+    {
+      "key": "queue",
+      "label": "Queue"
+    },
+    {
+      "key": "credentials",
+      "label": "OCI credentials"
+    },
+    {
+      "key": "compartment",
+      "label": "Starter kit compartment"
+    },
+    {
+      "key": "policies",
+      "label": "Identity and IAM"
+    },
+    {
+      "key": "stack",
+      "label": "Resource Manager stack"
+    },
+    {
+      "key": "plan",
+      "label": "Terraform plan"
+    },
+    {
+      "key": "apply",
+      "label": "Terraform apply"
+    },
+    {
+      "key": "network",
+      "label": "VCN and public subnet"
+    },
+    {
+      "key": "bucket",
+      "label": "Medallion Object Storage"
+    },
+    {
+      "key": "compute",
+      "label": "Starter Kit Application VM"
+    },
+    {
+      "key": "database",
+      "label": "Autonomous AI Database 26ai"
+    },
+    {
+      "key": "wallet",
+      "label": "Agent memory and governance runtime"
+    },
+    {
+      "key": "application",
+      "label": "AIDP workspace, catalog and RBAC"
+    },
+    {
+      "key": "artifacts",
+      "label": "Starter kit access summary"
+    },
+    {
+      "key": "email",
+      "label": "Access email"
+    },
+    {
+      "key": "complete",
+      "label": "Starter kit ready"
+    }
   ],
   "form": {
     "fields": [
@@ -70,8 +132,14 @@
         "default": "laboratory",
         "group": "application_vm",
         "options": [
-          {"value": "laboratory", "label": "Laboratory"},
-          {"value": "production", "label": "Production"}
+          {
+            "value": "laboratory",
+            "label": "Laboratory"
+          },
+          {
+            "value": "production",
+            "label": "Production"
+          }
         ]
       },
       {
@@ -84,7 +152,10 @@
         "min_length": 9,
         "max_length": 9,
         "transform": "uppercase_pbkdf2_sha256",
-        "visible_when": {"field": "deployment_mode", "equals": "laboratory"},
+        "visible_when": {
+          "field": "deployment_mode",
+          "equals": "laboratory"
+        },
         "group": "application_vm"
       },
       {
@@ -103,8 +174,14 @@
         "default": "new",
         "group": "database",
         "options": [
-          {"value": "new", "label": "Create new database"},
-          {"value": "existing", "label": "Use existing database"}
+          {
+            "value": "new",
+            "label": "Create new database"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing database"
+          }
         ]
       },
       {
@@ -115,9 +192,15 @@
         "default": "26ai:DW",
         "transform": "database_profile",
         "group": "database",
-        "visible_when": {"field": "autonomous_database_mode", "equals": "new"},
+        "visible_when": {
+          "field": "autonomous_database_mode",
+          "equals": "new"
+        },
         "options": [
-          {"value": "26ai:DW", "label": "Oracle AI Database 26ai — Data Warehouse"}
+          {
+            "value": "26ai:DW",
+            "label": "Oracle AI Database 26ai — Data Warehouse"
+          }
         ]
       },
       {
@@ -128,7 +211,10 @@
         "pattern": "^ocid1\\.autonomousdatabase\\..+$",
         "min_length": 30,
         "max_length": 255,
-        "visible_when": {"field": "autonomous_database_mode", "equals": "existing"},
+        "visible_when": {
+          "field": "autonomous_database_mode",
+          "equals": "existing"
+        },
         "span": 2,
         "group": "database"
       },
@@ -162,8 +248,14 @@
         "default": "new",
         "group": "medallion",
         "options": [
-          {"value": "new", "label": "Create new bucket"},
-          {"value": "existing", "label": "Use existing bucket"}
+          {
+            "value": "new",
+            "label": "Create new bucket"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing bucket"
+          }
         ]
       },
       {
@@ -173,7 +265,10 @@
         "required": true,
         "default": "oci_landing",
         "group": "medallion",
-        "visible_when": {"field": "landing_bucket_mode", "equals": "new"}
+        "visible_when": {
+          "field": "landing_bucket_mode",
+          "equals": "new"
+        }
       },
       {
         "name": "landing_existing_bucket_name",
@@ -182,7 +277,10 @@
         "required": true,
         "options_source": "oci_active_buckets",
         "group": "medallion",
-        "visible_when": {"field": "landing_bucket_mode", "equals": "existing"}
+        "visible_when": {
+          "field": "landing_bucket_mode",
+          "equals": "existing"
+        }
       },
       {
         "name": "bronze_bucket_mode",
@@ -192,8 +290,14 @@
         "default": "new",
         "group": "medallion",
         "options": [
-          {"value": "new", "label": "Create new bucket"},
-          {"value": "existing", "label": "Use existing bucket"}
+          {
+            "value": "new",
+            "label": "Create new bucket"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing bucket"
+          }
         ]
       },
       {
@@ -203,7 +307,10 @@
         "required": true,
         "default": "oci_bronze",
         "group": "medallion",
-        "visible_when": {"field": "bronze_bucket_mode", "equals": "new"}
+        "visible_when": {
+          "field": "bronze_bucket_mode",
+          "equals": "new"
+        }
       },
       {
         "name": "bronze_existing_bucket_name",
@@ -212,7 +319,10 @@
         "required": true,
         "options_source": "oci_active_buckets",
         "group": "medallion",
-        "visible_when": {"field": "bronze_bucket_mode", "equals": "existing"}
+        "visible_when": {
+          "field": "bronze_bucket_mode",
+          "equals": "existing"
+        }
       },
       {
         "name": "silver_bucket_mode",
@@ -222,8 +332,14 @@
         "default": "new",
         "group": "medallion",
         "options": [
-          {"value": "new", "label": "Create new bucket"},
-          {"value": "existing", "label": "Use existing bucket"}
+          {
+            "value": "new",
+            "label": "Create new bucket"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing bucket"
+          }
         ]
       },
       {
@@ -233,7 +349,10 @@
         "required": true,
         "default": "oci_silver",
         "group": "medallion",
-        "visible_when": {"field": "silver_bucket_mode", "equals": "new"}
+        "visible_when": {
+          "field": "silver_bucket_mode",
+          "equals": "new"
+        }
       },
       {
         "name": "silver_existing_bucket_name",
@@ -242,7 +361,10 @@
         "required": true,
         "options_source": "oci_active_buckets",
         "group": "medallion",
-        "visible_when": {"field": "silver_bucket_mode", "equals": "existing"}
+        "visible_when": {
+          "field": "silver_bucket_mode",
+          "equals": "existing"
+        }
       },
       {
         "name": "gold_bucket_mode",
@@ -252,8 +374,14 @@
         "default": "new",
         "group": "medallion",
         "options": [
-          {"value": "new", "label": "Create new bucket"},
-          {"value": "existing", "label": "Use existing bucket"}
+          {
+            "value": "new",
+            "label": "Create new bucket"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing bucket"
+          }
         ]
       },
       {
@@ -263,7 +391,10 @@
         "required": true,
         "default": "oci_gold",
         "group": "medallion",
-        "visible_when": {"field": "gold_bucket_mode", "equals": "new"}
+        "visible_when": {
+          "field": "gold_bucket_mode",
+          "equals": "new"
+        }
       },
       {
         "name": "gold_existing_bucket_name",
@@ -272,7 +403,10 @@
         "required": true,
         "options_source": "oci_active_buckets",
         "group": "medallion",
-        "visible_when": {"field": "gold_bucket_mode", "equals": "existing"}
+        "visible_when": {
+          "field": "gold_bucket_mode",
+          "equals": "existing"
+        }
       },
       {
         "name": "artifacts_bucket_mode",
@@ -282,8 +416,14 @@
         "default": "new",
         "group": "medallion",
         "options": [
-          {"value": "new", "label": "Create new bucket"},
-          {"value": "existing", "label": "Use existing bucket"}
+          {
+            "value": "new",
+            "label": "Create new bucket"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing bucket"
+          }
         ]
       },
       {
@@ -294,7 +434,10 @@
         "default": "oci_artifacts",
         "pattern": "^[A-Za-z0-9._-]{1,128}$",
         "group": "medallion",
-        "visible_when": {"field": "artifacts_bucket_mode", "equals": "new"}
+        "visible_when": {
+          "field": "artifacts_bucket_mode",
+          "equals": "new"
+        }
       },
       {
         "name": "artifacts_existing_bucket_name",
@@ -303,41 +446,93 @@
         "required": true,
         "options_source": "oci_active_buckets",
         "group": "medallion",
-        "visible_when": {"field": "artifacts_bucket_mode", "equals": "existing"}
+        "visible_when": {
+          "field": "artifacts_bucket_mode",
+          "equals": "existing"
+        }
       }
     ],
-    "email_access_fields": ["deployment_mode", "admin_username", "admin_password", "registration_code", "autonomous_database_admin_password", "autonomous_database_wallet_password"]
+    "email_access_fields": [
+      "deployment_mode",
+      "admin_username",
+      "admin_password",
+      "registration_code",
+      "autonomous_database_admin_password",
+      "autonomous_database_wallet_password"
+    ]
   },
   "email": {
     "services": [
       {
         "title": "Application: Starter Kits Portal",
         "fields": [
-          {"label": "Access URL", "output": "application_login_url", "link": true},
-          {"label": "Username", "input": "admin_username"},
-          {"label": "Password", "input": "admin_password"},
-          {"label": "Registration code", "input": "registration_code", "required": false}
+          {
+            "label": "Access URL",
+            "output": "application_login_url",
+            "link": true
+          },
+          {
+            "label": "Username",
+            "input": "admin_username"
+          },
+          {
+            "label": "Password",
+            "input": "admin_password"
+          },
+          {
+            "label": "Registration code",
+            "input": "registration_code",
+            "required": false
+          }
         ]
       },
       {
         "title": "Database: Oracle Autonomous AI Database",
         "fields": [
-          {"label": "Access URL", "output": "database_actions_url", "link": true},
-          {"label": "Username", "value": "ADMIN"},
-          {"label": "Password", "input": "autonomous_database_admin_password"},
-          {"label": "Wallet password", "input": "autonomous_database_wallet_password"}
+          {
+            "label": "Access URL",
+            "output": "database_actions_url",
+            "link": true
+          },
+          {
+            "label": "Username",
+            "value": "ADMIN"
+          },
+          {
+            "label": "Password",
+            "input": "autonomous_database_admin_password"
+          },
+          {
+            "label": "Wallet password",
+            "input": "autonomous_database_wallet_password"
+          }
         ]
       },
       {
         "title": "Data platform: Oracle AI Data Platform Workbench",
         "fields": [
-          {"label": "Access URL", "output": "aidp_workbench_url", "link": true},
-          {"label": "Workspace", "output": "default_workspace_name"},
-          {"label": "Authentication", "value": "Sign in through the configured identity domain."}
+          {
+            "label": "Access URL",
+            "output": "aidp_workbench_url",
+            "link": true
+          },
+          {
+            "label": "Workspace",
+            "output": "default_workspace_name"
+          },
+          {
+            "label": "Authentication",
+            "value": "Sign in through the configured identity domain."
+          }
         ]
       }
     ],
-    "attachments": ["adb_wallet.zip", "resource-manager-terraform-source.zip", "deployment.log", "ssh-private-key.pem"]
+    "attachments": [
+      "adb_wallet.zip",
+      "resource-manager-terraform-source.zip",
+      "deployment.log",
+      "ssh-private-key.pem"
+    ]
   },
   "outputs": [
     "portal_managed_modules",
@@ -394,13 +589,26 @@
     "ssh_username",
     "vm_shape"
   ],
-  "artifacts": ["aidp_lab_summary.json", "adb_wallet.zip", "ssh-private-key.pem"],
+  "artifacts": [
+    "aidp_lab_summary.json",
+    "adb_wallet.zip",
+    "ssh-private-key.pem"
+  ],
   "preflight": {
     "entrypoint": "terraform/m_preflight.py",
     "timeout_seconds": 300,
     "requires_oci_credentials": true,
-    "secret_inputs": ["autonomous_database_admin_password", "autonomous_database_wallet_password"],
-    "output_inputs": ["home_region", "operator_user_ocid", "operator_username", "preferred_vm_shape", "availability_domain_index"],
+    "secret_inputs": [
+      "autonomous_database_admin_password",
+      "autonomous_database_wallet_password"
+    ],
+    "output_inputs": [
+      "home_region",
+      "operator_user_ocid",
+      "operator_username",
+      "preferred_vm_shape",
+      "availability_domain_index"
+    ],
     "runtime_fields": [
       {
         "name": "home_region",
@@ -434,9 +642,18 @@
         "type": "select",
         "required": true,
         "options": [
-          {"value": "VM.Standard.E5.Flex", "label": "E5 Flex"},
-          {"value": "VM.Standard.E4.Flex", "label": "E4 Flex"},
-          {"value": "VM.Standard.E3.Flex", "label": "E3 Flex (authorized fallback)"}
+          {
+            "value": "VM.Standard.E5.Flex",
+            "label": "E5 Flex"
+          },
+          {
+            "value": "VM.Standard.E4.Flex",
+            "label": "E4 Flex"
+          },
+          {
+            "value": "VM.Standard.E3.Flex",
+            "label": "E3 Flex (authorized fallback)"
+          }
         ]
       },
       {
@@ -452,25 +669,28 @@
   "post_apply": {
     "entrypoint": "terraform/hooks/post_apply.py",
     "include_paths": [
-      "apps/backend/app/gods_eye_view",
-      "apps/backend/app/labs/gods_eye_view/lab.json",
-      "apps/backend/app/labs/gods_eye_view/notebooks",
-      "apps/backend/app/labs/gods_eye_view/source/social_networks/v1/manifest.json",
-      "apps/backend/app/labs/gods_eye_view/source/social_networks/v2/manifest.json",
-      "apps/backend/app/labs/gods_eye_view/source/sensors/colombia/v1/manifest.json",
-      "apps/backend/app/labs/ai_data_governance",
-      "apps/backend/app/ai_data_governance",
+      "apps/backend/app/modules/ai_gods_eye_view/runtime",
+      "apps/backend/app/modules/ai_gods_eye_view/package/lab.json",
+      "apps/backend/app/modules/ai_gods_eye_view/package/notebooks",
+      "apps/backend/app/modules/ai_gods_eye_view/package/source/social_networks/v1/manifest.json",
+      "apps/backend/app/modules/ai_gods_eye_view/package/source/social_networks/v2/manifest.json",
+      "apps/backend/app/modules/ai_gods_eye_view/package/source/sensors/colombia/v1/manifest.json",
+      "apps/backend/app/modules/ai_data_governance",
       "apps/backend/app/__init__.py",
-      "apps/backend/app/aidp.py",
+      "apps/backend/app/services/oci/aidp.py",
+      "apps/backend/app/services/oci/contracts.py",
       "apps/backend/app/config.py",
-      "apps/backend/app/viewer_identity.py",
+      "apps/backend/app/api/viewer_identity.py",
       "apps/backend/app/security.py",
-      "apps/backend/app/governance.py",
-      "apps/backend/app/lab_packs.py",
-      "apps/backend/app/notebooks.py"
+      "apps/backend/app/packages/catalog.py",
+      "apps/backend/app/packages/aidp.py",
+      "apps/backend/app/kits/naming.py"
     ],
     "timeout_seconds": 3600,
     "requires_oci_credentials": true,
-    "secret_inputs": ["autonomous_database_admin_password", "autonomous_database_wallet_password"]
+    "secret_inputs": [
+      "autonomous_database_admin_password",
+      "autonomous_database_wallet_password"
+    ]
   }
 }

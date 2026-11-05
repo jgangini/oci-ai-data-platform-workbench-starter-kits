@@ -1,87 +1,41 @@
-# Banking
+# Banca · Banking
 
-[Documentation](../README.md) · [Getting started](../getting-started.md)
+[Documentación](../README.md) · [Primeros pasos](../getting-started.md)
 
-Build customer and branch activity summaries from a small banking dataset.
-This participant lab demonstrates typed medallion tables, relationship checks,
-quarantine and lineage using deterministic training data rather than a live bank feed.
-The current [package contract](../../apps/backend/app/labs/banking/lab.json) is version `2.0.0`.
+El [paquete `2.0.0`](../../apps/backend/app/kits/banking/lab.json) construye resúmenes de clientes y sucursales con CSV de entrenamiento deterministas. No consume operaciones de un banco real. Antes de ejecutarlo, revise la [incompatibilidad actual entre notebooks y aprovisionador](../getting-started.md#current-implementation-limits).
 
-## Inputs
+## Entradas y flujo
 
-The checked-in [source files](../../apps/backend/app/labs/banking/source) are the actual inputs.
-Provisioning copies them to the participant workspace's `source/` directory.
+El aprovisionamiento copia los [archivos fuente](../../apps/backend/app/kits/banking/source) a `source/` del participante. El manifiesto fija sus filas y SHA-256.
 
-| CSV | Rows | Business role |
+| CSV | Filas | Contenido |
 | --- | ---: | --- |
-| `branches.csv` | 20 | Branch type, region and opening date |
-| `customers.csv` | 200 | Customer segment, region and risk band |
-| `accounts.csv` | 320 | Customer/branch ownership, balances and account type |
-| `transactions.csv` | 4,000 | Account activity, time, channel, currency and amount |
+| `branches.csv` | 20 | Tipo de sucursal, región y apertura |
+| `customers.csv` | 200 | Segmento, región y riesgo |
+| `accounts.csv` | 320 | Titularidad, sucursal, saldo y tipo |
+| `transactions.csv` | 4,000 | Cuenta, fecha, canal, moneda e importe |
 
-The raw `transactions.amount` sum is **600,066.50**.
-This is a source reconciliation value; it is not an expected Gold total after quarantine.
-The manifest pins each CSV's row count and SHA-256.
+La suma original de `transactions.amount` es **600,066.50**. Reconcilia la entrada; no es el total Gold después de la cuarentena.
 
-## Workflow
+El trabajo `wf_<participant_key>_banking` ejecuta, en orden, `01_landing_banking` → `02_bronze_banking` → `03_silver_banking` → `04_gold_banking` → `05_lineage_banking`. Los [notebooks](../../apps/backend/app/kits/banking/notebooks) escriben tablas Delta administradas en las cuatro capas. Landing añade la identidad del participante; Bronze conserva los registros; Silver normaliza tipos, conserva la versión más reciente por clave de negocio, valida relaciones y separa rechazos; Gold agrega los registros aceptados.
 
-The deployed job is `wf_<participant_key>_banking`.
-The task names and dependencies below match the manifest.
+## Resultados y aceptación
 
-```mermaid
-flowchart LR
-    L["01_landing_banking"] --> B["02_bronze_banking"]
-    B --> S["03_silver_banking"]
-    S --> G["04_gold_banking"]
-    G --> V["05_lineage_banking"]
-```
+Los nombres físicos añaden `<participant_key>_` a estas tablas de `<catalog_name>.oci_gold`.
 
-1. Landing reads the four workspace CSVs, adds participant identity and writes managed Delta tables.
-2. Bronze preserves source records in managed Delta tables for downstream processing.
-3. Silver normalizes strings and types, keeps the newest business-key record,
-   validates customer/branch/account relationships, and quarantines rejected rows.
-4. Gold calculates metrics from accepted Silver records.
-5. The final notebook checks all declared tables and the lineage configuration.
-
-The [notebook sources](../../apps/backend/app/labs/banking/notebooks) contain the executable transformations.
-All four catalog layers use managed Delta tables written with `saveAsTable`.
-
-## Gold outputs
-
-Physical table names prefix each name below with `<participant_key>_` in `<catalog_name>.oci_gold`.
-
-| Table | Grain | Metrics |
+| Tabla | Agrupación | Métricas |
 | --- | --- | --- |
-| `banking_customer_value` | Customer | Account count, current balance, recent transaction count, debit/credit amounts, last transaction |
-| `banking_branch_daily` | Branch and business date | Active accounts, transaction count, total amount and average amount |
+| `banking_customer_value` | Cliente | Cuentas, saldo, transacciones recientes, débitos/créditos y última transacción |
+| `banking_branch_daily` | Sucursal y fecha | Cuentas activas, transacciones, importe total y promedio |
 
-The customer transaction window is 30 days relative to the latest accepted transaction,
-not the machine's current date. Credit totals include transactions marked `credit` or `refund`.
-The branch summary uses all accepted transactions.
+La ventana de cliente comprende 30 días respecto de la última transacción aceptada; no depende del reloj del equipo. Los créditos incluyen `credit` y `refund`. El resumen de sucursal usa todas las transacciones aceptadas.
 
-## Checks and expected results
+- Landing y Bronze deben reconciliar las filas de entrada. Silver valida campos obligatorios, conversiones, enumeraciones, identidad y claves foráneas; sus filas no pueden superar las de Bronze.
+- Los importes deben ser positivos. Los duplicados se ordenan por actualización antes de enviar los descartados a cuarentena.
+- `<participant_key>_banking_quality_issues`, en `oci_silver`, debe contener al menos una fila; ambas salidas Gold deben contener datos.
+- El [notebook final](../../apps/backend/app/kits/banking/notebooks/05_lineage_banking.ipynb) comprueba las 15 tablas declaradas, su contenido y el formato Delta administrado.
+- En Master Catalog, revise ambas anclas Gold a nivel de entidad y columna, en ambas direcciones y con profundidad 8. Incluya `transactions.amount` → `banking_branch_daily.transaction_amount` a través de Landing, Bronze y Silver. La comprobación de configuración del notebook no acredita por sí sola todas las aristas del grafo nativo.
 
-- Landing/Bronze source counts must reconcile with the input table above.
-- Silver checks required values, casts, enumerations, participant scope and foreign keys.
-- Transaction amounts must be positive; duplicate business keys are quarantined after ranking by update time.
-- `<participant_key>_banking_quality_issues` in `oci_silver` must contain at least one row.
-- Silver row counts cannot exceed their Bronze inputs; both Gold tables must be non-empty.
-- The final notebook checks all 15 declared tables are non-empty, managed and Delta.
+## Ejecución del participante
 
-For lineage, inspect both Gold anchors in Master Catalog with upstream/downstream depth 8.
-Check entity and column paths through Landing, Bronze and Silver, including
-`transactions.amount` to `banking_branch_daily.transaction_amount`.
-The final notebook enables/checks lineage; its success alone does not assert every API lineage edge.
-
-## Run as a participant
-
-1. Follow [Getting started](../getting-started.md), including its package/provisioner compatibility notes.
-2. Open your assigned Banking workflow and retain its supplied participant, workspace and catalog parameters.
-3. Run the full five-task job; inspect the first failed task before rerunning it.
-4. Review Silver `quality_issues`, then compare the two Gold tables and their native lineage.
-5. Rerun the job with unchanged inputs: overwrite writes should keep counts stable.
-
-Use the deployed `catalog_name`, not a copied catalog or another participant's table prefix.
-For a small exploration, group the branch output by business date and compare total transaction amounts.
-The [Gold notebook](../../apps/backend/app/labs/banking/notebooks/04_gold_banking.ipynb)
-and [validation notebook](../../apps/backend/app/labs/banking/notebooks/05_lineage_banking.ipynb) define the result.
+Siga [Primeros pasos](../getting-started.md), conserve los parámetros suministrados de participante, espacio de trabajo y catálogo, y ejecute las cinco tareas. Revise el primer fallo y `quality_issues` antes de aceptar agregados. Compare las salidas y su linaje nativo; repita con entradas idénticas para comprobar que la sobrescritura mantiene los conteos. Use su `catalog_name` y su prefijo de tablas, nunca los de otro participante. El [notebook Gold](../../apps/backend/app/kits/banking/notebooks/04_gold_banking.ipynb) define las métricas ejecutables.

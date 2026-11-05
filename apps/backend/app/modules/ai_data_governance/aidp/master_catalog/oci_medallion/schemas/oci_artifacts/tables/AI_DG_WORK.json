@@ -1,0 +1,138 @@
+{
+  "name": "AI_DG_WORK",
+  "domain": "Documentación y réplica",
+  "row": 0,
+  "col": 4,
+  "grain": "Un trabajo vigente por ámbito, activo y campo de metadatos; su estado evita repetir generación.",
+  "pk": [
+    "work_id"
+  ],
+  "unique": [
+    [
+      "scope_id",
+      "asset_id",
+      "field_path"
+    ]
+  ],
+  "columns": [
+    {
+      "name": "work_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Identidad estable del trabajo, reutilizada por reintentos."
+    },
+    {
+      "name": "scope_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Ámbito del trabajo y de sus evidencias."
+    },
+    {
+      "name": "asset_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Activo con campo vacío o publicación pendiente de reconciliación."
+    },
+    {
+      "name": "field_path",
+      "type": "STRING",
+      "required": true,
+      "comment": "Campo de descripción actualizable, no una instrucción SQL ni ruta arbitraria."
+    },
+    {
+      "name": "expected_version_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Versión observada al seleccionar; debe pertenecer al activo."
+    },
+    {
+      "name": "context_hash",
+      "type": "STRING",
+      "required": false,
+      "comment": "Huella de evidencia/contexto relevante; permite reutilizar sin llamar al modelo otra vez."
+    },
+    {
+      "name": "phase",
+      "type": "STRING",
+      "required": true,
+      "comment": "DOCUMENT, PUBLISH o REPLICATE; la recuperación sólo ejecuta la fase pendiente."
+    },
+    {
+      "name": "state",
+      "type": "STRING",
+      "required": true,
+      "comment": "READY, IN_PROGRESS, WAIT_CONTEXT, RETRY, CONFLICT, UNSUPPORTED, PRESERVED o DONE."
+    },
+    {
+      "name": "selected_document_id",
+      "type": "STRING",
+      "required": false,
+      "comment": "Documento validado seleccionado; staging explícito, no cola de aprobación humana."
+    },
+    {
+      "name": "reason_code",
+      "type": "STRING",
+      "required": false,
+      "comment": "Motivo estable de abstención, conflicto o recuperación."
+    },
+    {
+      "name": "next_attempt_at",
+      "type": "TIMESTAMP",
+      "required": false,
+      "comment": "Espera limitada; WAIT_CONTEXT sólo se reactiva por evidencia relevante nueva."
+    },
+    {
+      "name": "last_run_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Último intento que modificó el estado."
+    },
+    {
+      "name": "updated_at",
+      "type": "TIMESTAMP",
+      "required": true,
+      "comment": "Edad de la cola para selección justa."
+    }
+  ],
+  "foreign_keys": [
+    {
+      "columns": [
+        "scope_id",
+        "asset_id"
+      ],
+      "table": "AI_DG_SCOPE_ASSET",
+      "target": [
+        "scope_id",
+        "asset_id"
+      ]
+    },
+    {
+      "columns": [
+        "expected_version_id"
+      ],
+      "table": "AI_DG_ASSET_VERSION",
+      "target": [
+        "version_id"
+      ]
+    },
+    {
+      "columns": [
+        "selected_document_id"
+      ],
+      "table": "AI_DG_DOCUMENT",
+      "target": [
+        "document_id"
+      ],
+      "optional": true
+    },
+    {
+      "columns": [
+        "last_run_id"
+      ],
+      "table": "AI_DG_RUN",
+      "target": [
+        "run_id"
+      ]
+    }
+  ]
+}

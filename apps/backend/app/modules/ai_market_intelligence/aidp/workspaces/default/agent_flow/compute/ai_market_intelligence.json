@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "name": "aidp_ai_market_intelligence_compute",
+  "type": "AI_COMPUTE",
+  "driverConfig": {
+    "driverShapeConfig": {
+      "ocpus": 1,
+      "memoryInGBs": 16
+    }
+  },
+  "replicaConfig": {
+    "minReplica": 1,
+    "maxReplica": 1
+  }
+}

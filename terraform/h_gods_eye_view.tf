@@ -1,14 +1,13 @@
 locals {
-  gods_eye_view_enabled       = contains(var.enabled_vm_modules, "gods_eye_view") || coalesce(var.enable_gods_eye_view, var.enable_territorial_viewer, var.enable_prisma_viewer)
+  gods_eye_view_enabled       = contains(var.enabled_vm_modules, "gods_eye_view")
   module_network_enabled      = var.portal_managed_modules || local.gods_eye_view_enabled
-  gods_eye_view_resource_name = "${local.name_prefix}-${var.portal_managed_modules ? "gods-eye-view" : "prisma"}"
+  gods_eye_view_resource_name = "${local.name_prefix}-gods-eye-view"
   # Reserved endpoints keep VM1 metadata and networking unchanged when a module is installed.
   gods_eye_view_admin_private_ip    = cidrhost(cidrsubnet(var._oci_vcn.cidr_block, 1, 0), 10)
   gods_eye_view_reserved_private_ip = cidrhost(cidrsubnet(var._oci_vcn.cidr_block, 1, 1), 10)
-  gods_eye_view_upstream            = var.portal_managed_modules ? "http://${local.gods_eye_view_reserved_private_ip}:8081" : (local.gods_eye_view_enabled ? "http://${oci_core_instance.gods_eye_view[0].private_ip}:8081" : "http://127.0.0.1:8081")
+  gods_eye_view_upstream            = "http://${local.gods_eye_view_reserved_private_ip}:8081"
 }
 
-# Legacy deployments retain their physical names; portal-managed resources use the current module name.
 resource "oci_core_nat_gateway" "gods_eye_view" {
   count          = local.module_network_enabled ? 1 : 0
   compartment_id = local.target_compartment
@@ -104,7 +103,7 @@ resource "oci_core_instance" "gods_eye_view" {
   create_vnic_details {
     subnet_id        = oci_core_subnet.gods_eye_view[0].id
     assign_public_ip = false
-    private_ip       = var.portal_managed_modules ? local.gods_eye_view_reserved_private_ip : null
+    private_ip       = local.gods_eye_view_reserved_private_ip
     nsg_ids          = [oci_core_network_security_group.gods_eye_view[0].id]
   }
   source_details {
@@ -197,160 +196,6 @@ resource "oci_identity_policy" "gods_eye_view_run_command" {
   ]
 }
 
-output "prisma_viewer_enabled" {
-  value = local.gods_eye_view_enabled
-}
-
-output "prisma_viewer_url" {
-  value = local.gods_eye_view_enabled ? "https://${data.oci_core_vnic.lab.public_ip_address}/gods-eye-view/" : null
-}
-
-output "prisma_viewer_private_url" {
-  description = "Server-side viewer upstream; browsers use prisma_viewer_url through VM1 authentication."
-  sensitive   = true
-  value       = local.gods_eye_view_enabled ? "http://${oci_core_instance.gods_eye_view[0].private_ip}:8081" : null
-}
-
-output "prisma_viewer_instance_id" {
-  value = local.gods_eye_view_enabled ? oci_core_instance.gods_eye_view[0].id : null
-}
-
-output "prisma_viewer_principal_group" {
-  value = local.gods_eye_view_enabled ? oci_identity_dynamic_group.gods_eye_view[0].id : null
-}
-
-# Existing state addresses move without replacing their OCI resources or data.
-moved {
-  from = oci_core_nat_gateway.prisma
-  to   = oci_core_nat_gateway.territorial
-}
-
-moved {
-  from = oci_core_route_table.prisma
-  to   = oci_core_route_table.territorial
-}
-
-moved {
-  from = oci_core_security_list.prisma
-  to   = oci_core_security_list.territorial
-}
-
-moved {
-  from = oci_core_subnet.prisma
-  to   = oci_core_subnet.territorial
-}
-
-moved {
-  from = oci_core_network_security_group.prisma_proxy
-  to   = oci_core_network_security_group.territorial_proxy
-}
-
-moved {
-  from = oci_core_network_security_group.prisma
-  to   = oci_core_network_security_group.territorial
-}
-
-moved {
-  from = oci_core_network_security_group_security_rule.prisma
-  to   = oci_core_network_security_group_security_rule.territorial
-}
-
-moved {
-  from = oci_core_instance.prisma
-  to   = oci_core_instance.territorial
-}
-
-moved {
-  from = oci_core_network_security_group_security_rule.prisma_admin
-  to   = oci_core_network_security_group_security_rule.territorial_admin
-}
-
-moved {
-  from = oci_core_network_security_group_security_rule.prisma_admin_egress
-  to   = oci_core_network_security_group_security_rule.territorial_admin_egress
-}
-
-moved {
-  from = oci_identity_dynamic_group.prisma
-  to   = oci_identity_dynamic_group.territorial
-}
-
-moved {
-  from = oci_identity_policy.prisma
-  to   = oci_identity_policy.territorial
-}
-
-moved {
-  from = oci_identity_policy.prisma_run_command
-  to   = oci_identity_policy.territorial_run_command
-}
-
-
-moved {
-  from = oci_core_nat_gateway.territorial
-  to   = oci_core_nat_gateway.gods_eye_view
-}
-
-moved {
-  from = oci_core_route_table.territorial
-  to   = oci_core_route_table.gods_eye_view
-}
-
-moved {
-  from = oci_core_security_list.territorial
-  to   = oci_core_security_list.gods_eye_view
-}
-
-moved {
-  from = oci_core_subnet.territorial
-  to   = oci_core_subnet.gods_eye_view
-}
-
-moved {
-  from = oci_core_network_security_group.territorial_proxy
-  to   = oci_core_network_security_group.gods_eye_view_proxy
-}
-
-moved {
-  from = oci_core_network_security_group.territorial
-  to   = oci_core_network_security_group.gods_eye_view
-}
-
-moved {
-  from = oci_core_network_security_group_security_rule.territorial
-  to   = oci_core_network_security_group_security_rule.gods_eye_view
-}
-
-moved {
-  from = oci_core_instance.territorial
-  to   = oci_core_instance.gods_eye_view
-}
-
-moved {
-  from = oci_core_network_security_group_security_rule.territorial_admin
-  to   = oci_core_network_security_group_security_rule.gods_eye_view_admin
-}
-
-moved {
-  from = oci_core_network_security_group_security_rule.territorial_admin_egress
-  to   = oci_core_network_security_group_security_rule.gods_eye_view_admin_egress
-}
-
-moved {
-  from = oci_identity_dynamic_group.territorial
-  to   = oci_identity_dynamic_group.gods_eye_view
-}
-
-moved {
-  from = oci_identity_policy.territorial
-  to   = oci_identity_policy.gods_eye_view
-}
-
-moved {
-  from = oci_identity_policy.territorial_run_command
-  to   = oci_identity_policy.gods_eye_view_run_command
-}
-
 output "gods_eye_view_enabled" {
   value = local.gods_eye_view_enabled
 }
@@ -372,28 +217,5 @@ output "gods_eye_view_instance_id" {
 }
 
 output "gods_eye_view_principal_group" {
-  value = local.gods_eye_view_enabled ? oci_identity_dynamic_group.gods_eye_view[0].id : null
-}
-
-# Legacy output names remain available to previously installed deployment hooks.
-output "territorial_viewer_enabled" {
-  value = local.gods_eye_view_enabled
-}
-
-output "territorial_viewer_url" {
-  value = local.gods_eye_view_enabled ? "https://${data.oci_core_vnic.lab.public_ip_address}/gods-eye-view/" : null
-}
-
-output "territorial_viewer_private_url" {
-  description = "Server-side viewer upstream; browsers use territorial_viewer_url through VM1 authentication."
-  sensitive   = true
-  value       = local.gods_eye_view_enabled ? "http://${oci_core_instance.gods_eye_view[0].private_ip}:8081" : null
-}
-
-output "territorial_viewer_instance_id" {
-  value = local.gods_eye_view_enabled ? oci_core_instance.gods_eye_view[0].id : null
-}
-
-output "territorial_viewer_principal_group" {
   value = local.gods_eye_view_enabled ? oci_identity_dynamic_group.gods_eye_view[0].id : null
 }

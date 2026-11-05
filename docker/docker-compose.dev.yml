@@ -5,6 +5,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        APP_RELEASE_SHA: ${APP_RELEASE_SHA:-development}
     env_file: ../.env.dev
     environment:
       GODS_EYE_VIEW_URL: http://gods-eye-view:8081
@@ -16,7 +18,7 @@ services:
     volumes:
       - aidp-session-dev:/var/lib/aidp-lab
       - ./nginx.oci-local.conf:/etc/nginx/nginx.conf:ro
-      - ../../../.local/prisma:/var/lib/aidp-lab/local-artifacts
+      - local-identity-artifacts-dev:/var/lib/aidp-lab/local-artifacts
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1/api/health"]
     restart: unless-stopped
@@ -24,7 +26,7 @@ services:
   gods-eye-view:
     build:
       context: ..
-      dockerfile: apps/gods-eye-view/Dockerfile
+      dockerfile: modules/ai-gods-eye-view/Dockerfile
     environment:
       GODS_EYE_VIEW_MODE: local
       GODS_EYE_VIEW_ADMIN_URL: http://aidp-lab:8000
@@ -42,5 +44,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  local-identity-artifacts-dev:
   aidp-session-dev:
   prisma-native-cache-dev:

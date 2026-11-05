@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import vm_release_updater as updater
+from scripts.release import vm_release_updater as updater
 
 
 ROOT = Path(__file__).parents[2]
@@ -153,7 +153,7 @@ def test_vm_update_bridge_keeps_docker_privilege_on_the_host() -> None:
         encoding="utf-8"
     )
     dockerfile = (ROOT / "docker/Dockerfile").read_text(encoding="utf-8")
-    updater_source = (ROOT / "scripts/vm_release_updater.py").read_text(
+    updater_source = (ROOT / "scripts/release/vm_release_updater.py").read_text(
         encoding="utf-8"
     )
 
@@ -220,7 +220,7 @@ def test_candidate_mount_and_runtime_hardening_are_explicit(
     observed: list[str] = []
     snapshot = tmp_path / "releases/candidate-state"
     environment = tmp_path / ".env"
-    environment.write_text("PRISMA_VIEWER_ENABLED=true\n", encoding="utf-8")
+    environment.write_text("GODS_EYE_VIEW_ENABLED=true\n", encoding="utf-8")
     monkeypatch.setattr(
         updater,
         "_run",
@@ -244,13 +244,13 @@ def test_candidate_mount_and_runtime_hardening_are_explicit(
     assert "--read-only" in observed
     assert "/var/run/docker.sock" not in " ".join(observed)
     assert observed[observed.index("-e") + 1] == "GODS_EYE_VIEW_ENABLED=false"
-    assert "PRISMA_VIEWER_ENABLED=false" in observed
+    assert not any(value.startswith(("PRISMA_", "TERRITORIAL_")) for value in observed)
     assert observed.index("-e") > observed.index("--env-file")
     observed.clear()
     updater._run_container(tmp_path, updater.APP_NAME, "aidp-lab:" + "b" * 40, candidate=False)
-    assert "PRISMA_VIEWER_ENABLED=false" not in observed
+    assert "GODS_EYE_VIEW_ENABLED=false" not in observed
     assert observed[observed.index("--env-file") + 1] == str(environment)
-    assert environment.read_text() == "PRISMA_VIEWER_ENABLED=true\n"
+    assert environment.read_text() == "GODS_EYE_VIEW_ENABLED=true\n"
 
 
 @pytest.mark.parametrize("status, expected", [("200", True), ("204", False), ("302", False)])
@@ -386,7 +386,8 @@ def test_reconcile_reports_when_no_healthy_rollback_can_be_verified(
 ) -> None:
     state = tmp_path / "state"
     (state / "update/status").mkdir(parents=True)
-    (tmp_path / "release.json").write_text(
+    (tmp_path / "releases").mkdir()
+    (tmp_path / "releases/current.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
@@ -416,12 +417,13 @@ def test_reconcile_reports_when_no_healthy_rollback_can_be_verified(
 
 
 @pytest.mark.parametrize("candidate_healthy", [True, False])
-def test_legacy_release_state_migrates_atomically_without_losing_rollback(monkeypatch, tmp_path, candidate_healthy):
+def test_current_release_state_updates_atomically_without_losing_rollback(monkeypatch, tmp_path, candidate_healthy):
     old_sha, new_sha = "a" * 40, "b" * 40
-    legacy = {"schema_version": 1, "repository": updater.REPOSITORY.removesuffix(".git"),
+    original = {"schema_version": 1, "repository": updater.REPOSITORY.removesuffix(".git"),
               "release": "v2.2.0", "commit_sha": old_sha}
-    legacy_path = tmp_path / "release.json"
-    legacy_path.write_text(json.dumps(legacy), encoding="utf-8")
+    current_path = tmp_path / "releases/current.json"
+    current_path.parent.mkdir()
+    current_path.write_text(json.dumps(original), encoding="utf-8")
     (tmp_path / "state").mkdir()
     (tmp_path / "state/settings.json").write_text('{"preserve":true}', encoding="utf-8")
     containers, _ = _fake_containers(monkeypatch, {updater.APP_NAME: {"image": f"aidp-lab:{old_sha}", "running": True}})
@@ -441,10 +443,21 @@ def test_legacy_release_state_migrates_atomically_without_losing_rollback(monkey
     current = json.loads((tmp_path / "releases/current.json").read_text(encoding="utf-8"))
     assert current["commit_sha"] == (new_sha if candidate_healthy else old_sha)
     assert containers[updater.APP_NAME]["image"] == f"aidp-lab:{current['commit_sha']}"
-    assert json.loads(legacy_path.read_text(encoding="utf-8")) == legacy
     assert json.loads((tmp_path / "state/settings.json").read_text(encoding="utf-8")) == {"preserve": True}
-    # New metadata is authoritative; a later check must not read the unchanged legacy file.
+    # The successful current receipt is authoritative on a subsequent operation.
     if candidate_healthy:
         updater.reconcile(tmp_path, "f937d706-6299-4d6a-a7b5-ae63d17b943e")
         status = json.loads((tmp_path / "state/update/status/status.json").read_text(encoding="utf-8"))
         assert status["status"] == "up_to_date"
+
+
+def test_old_release_state_location_is_rejected_without_network_or_mutation(monkeypatch, tmp_path):
+    original = {"schema_version": 1, "repository": updater.REPOSITORY.removesuffix(".git"), "release": "v2.2.0", "commit_sha": "a" * 40}
+    old_path = tmp_path / "release.json"
+    old_path.write_text(json.dumps(original), encoding="utf-8")
+    monkeypatch.setattr(updater, "latest_release", lambda: pytest.fail("No network without current installation state"))
+    with pytest.raises(RuntimeError, match="invalid_current_release_state"):
+        updater.reconcile(tmp_path, "d9282ff6-8717-4db7-9f59-241469a2c526")
+    assert json.loads(old_path.read_text(encoding="utf-8")) == original
+    assert not (tmp_path / "releases").exists()
+    assert not (tmp_path / "state").exists()

@@ -1,0 +1,22 @@
+{
+  "name": "aidp_data_governance_agent_compute",
+  "type": "AI_COMPUTE",
+  "ownership": "module",
+  "binding": "agent_compute_key",
+  "provisioner": "services/oci/aidp.py:_ensure_agent_compute",
+  "payload": {
+    "type": "AI_COMPUTE",
+    "displayName": "aidp_data_governance_agent_compute",
+    "description": "Dedicated AI compute for the managed global Agent",
+    "driverConfig": {
+      "driverShapeConfig": {
+        "ocpus": 1,
+        "memoryInGBs": 16
+      }
+    },
+    "replicaConfig": {
+      "minReplica": 1,
+      "maxReplica": 1
+    }
+  }
+}

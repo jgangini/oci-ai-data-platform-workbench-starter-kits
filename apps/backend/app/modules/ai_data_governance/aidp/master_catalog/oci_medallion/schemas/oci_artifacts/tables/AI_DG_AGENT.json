@@ -1,0 +1,74 @@
+{
+  "name": "AI_DG_AGENT",
+  "domain": "Operación compartida",
+  "row": 0,
+  "col": 3,
+  "grain": "Un agente lógico desplegado y reutilizable; no una fila ni un agente por corrida.",
+  "pk": [
+    "agent_id"
+  ],
+  "unique": [
+    [
+      "platform_key",
+      "workspace_key",
+      "agent_role"
+    ]
+  ],
+  "columns": [
+    {
+      "name": "agent_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Identidad lógica estable del agente."
+    },
+    {
+      "name": "platform_key",
+      "type": "STRING",
+      "required": true,
+      "comment": "Plataforma del despliegue."
+    },
+    {
+      "name": "workspace_key",
+      "type": "STRING",
+      "required": true,
+      "comment": "Workspace del agente; debe coincidir con el ámbito de la ejecución."
+    },
+    {
+      "name": "agent_role",
+      "type": "STRING",
+      "required": true,
+      "comment": "GOVERNANCE_ASSISTANT o DOCUMENTATION; sincronización y publicación son tareas Python."
+    },
+    {
+      "name": "native_agent_key",
+      "type": "STRING",
+      "required": false,
+      "comment": "ID del agente nativo una vez desplegado; nunca una credencial."
+    },
+    {
+      "name": "deployment_version",
+      "type": "STRING",
+      "required": true,
+      "comment": "Versión desplegada, reproducible y registrada también en cada ejecución."
+    },
+    {
+      "name": "code_path",
+      "type": "STRING",
+      "required": true,
+      "comment": "Ruta prevista .artifact/ai_data_governance/agents/<archivo>.py; propuesta aún no implementada."
+    },
+    {
+      "name": "capabilities_json",
+      "type": "STRING",
+      "required": true,
+      "comment": "Herramientas permitidas y versión de contrato; no concede privilegios IAM."
+    },
+    {
+      "name": "enabled",
+      "type": "BOOLEAN",
+      "required": true,
+      "comment": "Habilitación lógica; la salud nativa se consulta por separado."
+    }
+  ],
+  "foreign_keys": []
+}

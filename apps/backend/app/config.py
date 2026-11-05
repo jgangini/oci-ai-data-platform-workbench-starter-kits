@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from pytz import all_timezones_set, common_timezones
 
 from .security import hash_secret
-from .viewer_identity import DEFAULT_IDENTITY, ViewerIdentity
+from app.api.viewer_identity import DEFAULT_IDENTITY, ViewerIdentity
 
 
 def _deployment_mode(value: str) -> str:
@@ -26,12 +26,6 @@ def _artifacts_bucket_name(value: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", normalized) is None:
         raise ValueError("ARTIFACTS_BUCKET_NAME must contain 1–128 letters, digits, dots, underscores or hyphens")
     return normalized
-
-
-def _governance_runtime_mode(value: str) -> str:
-    if value not in {"legacy", "v2_test"}:
-        raise ValueError("GOVERNANCE_RUNTIME_MODE must be legacy or v2_test")
-    return value
 
 
 _RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -99,14 +93,12 @@ class Settings:
     gods_eye_view_mode: str | None = None
     gods_eye_view_enabled: bool = False
     portal_managed_modules: bool = False
-    governance_runtime_mode: str = "legacy"
     gods_eye_oci_text_model: str = "xai.grok-4.6"
     gods_eye_oci_voice_model: str = "google.gemini-2.5-flash-lite"
     gods_eye_oci_voice: str = "ara"
     local_identity_artifact_dir: str = ""
 
     def __post_init__(self):
-        _governance_runtime_mode(self.governance_runtime_mode)
         if self.gods_eye_view_mode not in {None, "local", "oci"}:
             raise ValueError("GODS_EYE_VIEW_MODE must be local or oci")
 
@@ -145,7 +137,6 @@ class Settings:
                 "/etc/aidp-lab/autonomous/runtime.json",
             ),
             agent_model_id=os.getenv("AGENT_MODEL_ID", ""),
-            governance_runtime_mode=_governance_runtime_mode(os.getenv("GOVERNANCE_RUNTIME_MODE", "legacy")),
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
             objectstorage_namespace=os.getenv("OBJECTSTORAGE_NAMESPACE", ""),
             bucket_name=os.getenv("BUCKET_NAME", ""),
@@ -172,9 +163,8 @@ class Settings:
             in {"1", "true", "yes"},
             cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
             local_development_mode=os.getenv("LOCAL_DEVELOPMENT_MODE", "false").lower() in {"1", "true", "yes"},
-            # Deployment aliases are read-only compatibility; new installations use GODS_EYE_VIEW_*.
-            gods_eye_view_mode=os.getenv("GODS_EYE_VIEW_MODE", os.getenv("TERRITORIAL_MODE", os.getenv("PRISMA_MODE"))),
-            gods_eye_view_enabled=os.getenv("GODS_EYE_VIEW_ENABLED", os.getenv("TERRITORIAL_VIEWER_ENABLED", os.getenv("PRISMA_VIEWER_ENABLED", "false"))).lower() in {"1", "true", "yes"},
+            gods_eye_view_mode=os.getenv("GODS_EYE_VIEW_MODE"),
+            gods_eye_view_enabled=os.getenv("GODS_EYE_VIEW_ENABLED", "false").lower() in {"1", "true", "yes"},
             portal_managed_modules=os.getenv("PORTAL_MANAGED_MODULES", "false").lower() in {"1", "true", "yes"},
             gods_eye_oci_text_model=os.getenv("GODS_EYE_OCI_TEXT_MODEL", "xai.grok-4.6").strip(),
             gods_eye_oci_voice_model=os.getenv("GODS_EYE_OCI_VOICE_MODEL", "google.gemini-2.5-flash-lite").strip(),

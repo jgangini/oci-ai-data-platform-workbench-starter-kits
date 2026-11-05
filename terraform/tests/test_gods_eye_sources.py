@@ -16,7 +16,7 @@ ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "terraform/hooks"))
 sys.path.insert(0, str(ROOT / "apps/backend"))
 from gods_eye_sources import NOTEBOOK_ROOT, WORKFLOW_FILES, configured_source, render_workflow_source, workflow_source, source_fragments
-from app.gods_eye_view import core, sensors, synthetic_reset
+from app.modules.ai_gods_eye_view.runtime import core, sensors, synthetic_reset
 
 CONFIG = {"writer_credential_name": "AidpControlStore", "pipeline_revision": "a" * 64,
           "oci_credential_name": "AidpRuntime", "oci_identity_sha256": "b" * 64,
@@ -27,7 +27,7 @@ CONFIG = {"writer_credential_name": "AidpControlStore", "pipeline_revision": "a"
 def bundle():
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as archive:
-        for path in (ROOT / "apps/backend/app/gods_eye_view").glob("*.py"):
+        for path in (ROOT / "apps/backend/app/modules/ai_gods_eye_view/runtime").glob("*.py"):
             archive.writestr("gods_eye_view/" + path.name, path.read_bytes())
     return data.getvalue()
 
@@ -78,7 +78,7 @@ def test_native_startup_uses_injected_utilities_without_reading_secrets(bundle, 
 def test_fragment_preserves_multiline_literals_comments_and_decorators(bundle):
     source = source_fragments(bundle, "x", "XFailure THIRD_PARTY")
     assert "@dataclass\nclass XFailure" in source.replace("\r\n", "\n")
-    original = ast.parse((ROOT / "apps/backend/app/gods_eye_view/x.py").read_text(encoding="utf-8"))
+    original = ast.parse((ROOT / "apps/backend/app/modules/ai_gods_eye_view/runtime/x.py").read_text(encoding="utf-8"))
     expected = next(node.value.value for node in original.body if isinstance(node, ast.Assign) and node.targets[0].id == "THIRD_PARTY")
     actual = next(node.value.value for node in ast.parse(source).body if isinstance(node, ast.Assign) and node.targets[0].id == "THIRD_PARTY")
     assert actual == expected
@@ -100,7 +100,7 @@ def test_only_nonsecret_deployment_fields_are_embedded(bundle):
 
 def test_emitted_social_program_appends_posts_to_shared_object_journal(bundle, monkeypatch):
     monkeypatch.syspath_prepend(str(ROOT / "apps/backend/tests"))
-    from test_gods_eye_view_control_store import Objects
+    from tests.modules.ai_gods_eye_view.test_gods_eye_view_control_store import Objects
     runtime = emitted(bundle, "pipeline", monkeypatch)
     store = runtime.ObjectControlStore(Objects(), "namespace", "gold")
     runtime.write_document(store, "runtime", {"analytics_store": "gold", "control_new_install": True}, 0)
@@ -214,7 +214,7 @@ def test_canonical_runtime_refuses_missing_or_duplicate_config_assignment():
 
 def test_renderer_canonicalizes_manifest_newlines_and_check_never_mutates(tmp_path, monkeypatch, bundle):
     import hashlib
-    from scripts import render_gods_eye_view_runtime as renderer
+    from scripts.modules.ai_gods_eye_view import render_gods_eye_view_runtime as renderer
 
     lab = tmp_path / "lab"
     relatives = ("source/social_networks/v1/manifest.json", "source/social_networks/v2/manifest.json", "source/sensors/colombia/v1/manifest.json")

@@ -78,7 +78,7 @@ visudo -cf /etc/sudoers.d/101-aidp-lab-bootstrap-public-key
 systemctl stop firewalld >/dev/null 2>&1 || true
 firewall-offline-cmd --zone=public --add-service=http
 firewall-offline-cmd --zone=public --add-service=https
-%{ if enable_gods_eye_view ~}
+%{ if gods_eye_view_enabled ~}
 firewall-offline-cmd --zone=public --add-port=8000/tcp
 %{ endif ~}
 systemctl enable --now firewalld
@@ -136,7 +136,7 @@ git -C "$SOURCE_DIR" checkout --detach "$SOURCE_COMMIT_SHA"
 test "$(git -C "$SOURCE_DIR" rev-parse HEAD)" = "$SOURCE_COMMIT_SHA"
 SOURCE_RELEASE_TAG=$(git -C "$SOURCE_DIR" describe --tags --exact-match "$SOURCE_COMMIT_SHA")
 printf '%s' "$SOURCE_RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-retry 5 python3 "$SOURCE_DIR/scripts/load_release_image.py" \
+retry 5 python3 "$SOURCE_DIR/scripts/release/load_release_image.py" \
   --release "$SOURCE_RELEASE_TAG" --commit "$SOURCE_COMMIT_SHA" --component aidp-lab
 
 cat > /opt/aidp-lab/.env <<'EOF'
@@ -159,7 +159,6 @@ AUTONOMOUS_DATABASE_ID=${autonomous_database_id}
 AUTONOMOUS_RUNTIME_FILE=/etc/aidp-lab/autonomous/runtime.json
 AGENT_MODEL_ID=${agent_model_id}
 ARTIFACTS_BUCKET_NAME=${artifacts_bucket_name}
-GOVERNANCE_RUNTIME_MODE=${aidp_runtime_mode}
 OCI_CONFIG_FILE=/etc/aidp-lab/oci/config
 OBJECTSTORAGE_NAMESPACE=${objectstorage_namespace}
 BUCKET_NAME=${bucket_name}
@@ -171,21 +170,15 @@ VM_UPDATE_ENABLED=true
 AIDP_UPDATE_DIR=/var/lib/aidp-lab/update
 COOKIE_SECURE=true
 GODS_EYE_VIEW_URL=${gods_eye_view_url}
-TERRITORIAL_VIEWER_URL=${gods_eye_view_url}
-GODS_EYE_VIEW_ENABLED=${enable_gods_eye_view}
+GODS_EYE_VIEW_ENABLED=${gods_eye_view_enabled}
 PORTAL_MANAGED_MODULES=${portal_managed_modules}
-TERRITORIAL_VIEWER_ENABLED=${enable_gods_eye_view}
-PRISMA_VIEWER_URL=${gods_eye_view_url}
-PRISMA_VIEWER_ENABLED=${enable_gods_eye_view}
-%{ if enable_gods_eye_view ~}
+%{ if gods_eye_view_enabled ~}
 GODS_EYE_VIEW_ADMIN_BIND=${gods_eye_view_admin_private_ip}
-TERRITORIAL_ADMIN_BIND=${gods_eye_view_admin_private_ip}
-PRISMA_ADMIN_BIND=${gods_eye_view_admin_private_ip}
 %{ endif ~}
 EOF
 chmod 0600 /opt/aidp-lab/.env
 
-install -o root -g root -m 0755 "$SOURCE_DIR/scripts/vm_release_updater.py" /usr/local/sbin/aidp-lab-release-update
+install -o root -g root -m 0755 "$SOURCE_DIR/scripts/release/vm_release_updater.py" /usr/local/sbin/aidp-lab-release-update
 cat >/etc/systemd/system/aidp-lab-update.service <<'EOF'
 [Unit]
 Description=Update AIDP Starter Kits from an immutable GitHub release
@@ -260,7 +253,7 @@ retry 60 docker run --rm \
   -v "$BOOTSTRAP_DIR:/etc/aidp-lab/bootstrap:ro,Z" \
   -v "$OCI_DIR:/etc/aidp-lab/oci:rw,Z" \
   -v "$AUTONOMOUS_DIR:/etc/aidp-lab/autonomous:rw,Z" \
-  "$LOCAL_IMAGE" -m app.credential_bootstrap
+  "$LOCAL_IMAGE" -m app.services.oci.credential_bootstrap
 rm -f "$BOOTSTRAP_DIR/key.pem" "$BOOTSTRAP_DIR/key_public.pem"
 docker rm -f "$APP_NAME" >/dev/null 2>&1 || true
 docker run -d \
@@ -280,7 +273,7 @@ docker run -d \
   --env-file /opt/aidp-lab/.env \
   -p 80:80 \
   -p 443:443 \
-%{ if enable_gods_eye_view ~}
+%{ if gods_eye_view_enabled ~}
   -p ${gods_eye_view_admin_private_ip}:8000:8000 \
 %{ endif ~}
   -v "$TLS_DIR:/etc/aidp-lab/tls:ro,z" \
@@ -295,7 +288,7 @@ docker run -d \
   "$LOCAL_IMAGE"
 
 %{ if enable_public_ip_tls ~}
-install -m 0755 "$SOURCE_DIR/scripts/ensure_public_ip_tls.sh" /usr/local/sbin/aidp-lab-public-tls
+install -m 0755 "$SOURCE_DIR/scripts/deployment/ensure_public_ip_tls.sh" /usr/local/sbin/aidp-lab-public-tls
 printf '%s\n' "$PUBLIC_IP" >/etc/aidp-lab-public-ip
 chmod 0600 /etc/aidp-lab-public-ip
 retry 6 /usr/local/sbin/aidp-lab-public-tls issue

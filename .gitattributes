@@ -1,12 +1,14 @@
 *.sh text eol=lf
-apps/backend/app/labs/ai_market_intelligence/** text eol=lf
-apps/backend/app/legacy_labs/** text eol=lf
 .sentrux/**/*.json text eol=lf
 .sentrux/history/*.json -text whitespace=cr-at-eol
-apps/backend/app/labs/** text eol=lf
+apps/backend/app/kits/** text eol=lf
+apps/backend/app/modules/**/package/** text eol=lf
+apps/backend/app/modules/*/aidp/** text=auto eol=lf
+apps/backend/app/modules/ai_data_governance/*.py text eol=lf
+apps/backend/app/modules/ai_market_intelligence/installation/*.py text eol=lf
 apps/frontend/public/brand-icons/** text eol=lf
-apps/gods-eye-view/public/brand-icons/** text eol=lf
+modules/ai-gods-eye-view/public/brand-icons/** text eol=lf
 
 # Synthetic media is immutable binary data; preserve manifest SHA-256 values.
-apps/backend/app/labs/gods_eye_view/source/**/*.png -text
-apps/backend/app/labs/gods_eye_view/source/**/*.webp -text
+apps/backend/app/modules/ai_gods_eye_view/package/source/**/*.png -text
+apps/backend/app/modules/ai_gods_eye_view/package/source/**/*.webp -text

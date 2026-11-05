@@ -12,34 +12,20 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from oci._vendor import requests
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .aidp import (
-    AidpClient,
-    AidpProvisionConflict,
-    AidpProvisionError,
-    AidpProvisionPending,
-    LocalAidpClient,
-    UserMaterial,
-    participant_owner_key,
-)
+from app.services.oci.aidp import AidpClient, LocalAidpClient, participant_owner_key
+from app.services.oci.contracts import AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, UserMaterial, IdentityConflict, IdentityPending, IdentityRejected
 from .config import Settings, SettingsStore
-from .social_network_api import mount_social_network
-from .market_intelligence import MarketAidpClient
-from .market_installation.v2_installer import MarketV2AidpClient
-from .market_intelligence_api import LocalMarketClient, mount_market_intelligence
-from .viewer_identity import mount_identity
-from .viewer_auth import _application as viewer_application, mount_viewer_login
-from .identity import IdentityClient, IdentityConflict, IdentityPending, IdentityRejected, LocalIdentityClient
-from .lab_packs import available_lab_ids, public_lab_catalog
-from .gods_eye_view.api import mount_gods_eye_view, run_local_gods_eye_view
-from .gods_eye_view.access import mount_access
-from .releases import (
-    ApplicationReleaseManager,
-    ReleaseUpdateConflict,
-    ReleaseUpdateUnavailable,
-    semantic_version,
-)
+from app.modules.ai_market_intelligence.client import MarketAidpClient
+from app.modules.ai_market_intelligence.api import LocalMarketClient, mount_market_intelligence
+from app.api.viewer_identity import mount_identity
+from app.api.viewer_auth import _application as viewer_application, mount_viewer_login
+from app.services.oci.identity import IdentityClient, LocalIdentityClient
+from app.packages.catalog import available_kit_ids, public_kit_catalog
+from app.modules.ai_gods_eye_view.runtime.api import mount_gods_eye_view, run_local_gods_eye_view
+from app.modules.ai_gods_eye_view.runtime.access import mount_access
+from app.services.releases import ApplicationReleaseManager, ReleaseUpdateConflict, ReleaseUpdateUnavailable, semantic_version
 from .security import (
     RateLimiter,
     issue_session,
@@ -64,7 +50,7 @@ class UserRequest(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=5, max_length=254)
     lab_ids: list[str] = Field(min_length=1)
-    gods_eye_view: bool = Field(default=False, strict=True, validation_alias=AliasChoices("gods_eye_view", "territorial_control"))
+    gods_eye_view: bool = Field(default=False, strict=True)
 
     @field_validator("name")
     @classmethod
@@ -87,7 +73,7 @@ class UserRequest(BaseModel):
     def validate_lab_ids(cls, values: list[str]) -> list[str]:
         if len(values) != len(set(values)):
             raise ValueError("Labs cannot be duplicated")
-        supported = set(available_lab_ids())
+        supported = set(available_kit_ids())
         if any(value not in supported for value in values):
             raise ValueError("Choose only available labs")
         return values
@@ -122,7 +108,7 @@ class AdminLabRequest(BaseModel):
     @field_validator("lab_id")
     @classmethod
     def validate_lab_id(cls, value: str) -> str:
-        if value not in available_lab_ids():
+        if value not in available_kit_ids():
             raise ValueError("Choose an available lab")
         return value
 
@@ -208,7 +194,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 with suppress(asyncio.CancelledError):
                     await gods_eye_view_task
         for client in (app.state.identity_client, app.state.aidp_client, app.state.gods_eye_view_aidp_client,
-                       app.state.market_client, app.state.market_v2_client):
+                       app.state.market_client):
             if client is not None:
                 await client.close()
 
@@ -228,7 +214,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.aidp_client = None
     app.state.gods_eye_view_aidp_client = None
     app.state.market_client = None
-    app.state.market_v2_client = None
     app.state.release_manager = ApplicationReleaseManager(settings)
     app.state.health_lock = asyncio.Lock()
     app.state.health_expires_at = 0.0
@@ -263,17 +248,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return app.state.market_client
 
     app.state.market_factory = market_factory
-
-    def market_v2_factory():
-        if app.state.market_v2_client is None:
-            if settings.local_development_mode:
-                app.state.market_v2_client = LocalMarketClient(runtime_version='v2')
-            else:
-                app.state.market_v2_client = MarketV2AidpClient(settings)
-                app.state.market_v2_client._locks = market_factory()._locks
-        return app.state.market_v2_client
-
-    app.state.market_v2_factory = market_v2_factory
 
     def gods_eye_view_aidp_factory():
         if not settings.local_development_mode or settings.gods_eye_view_local_mode:
@@ -485,13 +459,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/api/config")
-    @app.get("/api/public/config")
     async def public_config() -> dict[str, Any]:
         return {
             "lab_name": "Oracle AI Data Platform Workbench Starter Kits",
             "deployment_mode": settings.deployment_mode,
             "registration_code_pattern": "AAAA-0000",
-            "labs": public_lab_catalog(),
+            "labs": public_kit_catalog(),
             "local_participant_access": settings.local_development_mode,
             "viewer_identity": app.state.settings_store.get_viewer_identity(),
             "viewer_signin_enabled": not settings.local_development_mode and bool(
@@ -558,9 +531,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/admin/session")
     async def admin_session(response: Response, username: str = Depends(require_admin)) -> dict[str, str]:
-        response.headers["X-Territorial-User"] = username
         response.headers["X-Gods-Eye-View-User"] = username
-        response.headers["X-PRISMA-User"] = username  # Existing reverse proxies use this header.
         return {"username": username, "operator_username": settings.operator_username}
 
     async def admin_settings_payload() -> dict[str, object]:
@@ -602,7 +573,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def admin_users(_admin: str = Depends(require_admin)) -> dict[str, list[dict]]:
         require_identity()
         bundled_versions = {
-            lab["lab_id"]: lab["pack_version"] for lab in public_lab_catalog()
+            lab["lab_id"]: lab["pack_version"] for lab in public_kit_catalog()
         }
         client = app.state.identity_factory()
         users = [dict(user) for user in await client.list_lab_users()]
@@ -676,7 +647,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return dict(matches[0])
 
     mount_gods_eye_view(app, require_admin, require_viewer, selected_platform_admin)
-    mount_social_network(app, require_admin)
     mount_market_intelligence(app, require_admin, selected_platform_admin)
 
     async def module_pending_response(
@@ -737,7 +707,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (AidpProvisionPending, AidpProvisionError) as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
-    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension", include_in_schema=False)
     @app.post("/api/admin/users/{user_id}/modules/ai_data_governance")
     async def admin_install_governance_module(
         user_id: str,
@@ -759,7 +728,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result["message"] = "AI Data Governance is active."
         return JSONResponse(content=result)
 
-    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension/redeploy", include_in_schema=False)
     @app.post("/api/admin/users/{user_id}/modules/ai_data_governance/redeploy")
     async def admin_redeploy_governance_module(
         user_id: str,
@@ -781,7 +749,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result["message"] = "AI Data Governance was redeployed."
         return JSONResponse(content=result)
 
-    @app.delete("/api/admin/users/{user_id}/modules/ai_data_governance_vsc_extension", include_in_schema=False)
     @app.delete("/api/admin/users/{user_id}/modules/ai_data_governance")
     async def admin_delete_governance_module(
         user_id: str,

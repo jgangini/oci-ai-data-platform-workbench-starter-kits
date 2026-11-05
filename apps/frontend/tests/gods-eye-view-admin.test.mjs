@@ -10,7 +10,7 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const exports = {};
 new Function('exports', compiled)(exports);
 const { captureState, postStatus, refreshedEditor, refreshedPosts, safeMediaUrl, scheduleLocalTime, schedulePayload, sourceDefaults, sourceDirty, sourcePayload, timestamp } = exports;
-const saved = sourceDefaults({ platform: 'x', enabled: true, mode: 'simulation', query: '#bogota', interval_minutes: 5,
+const saved = sourceDefaults({ platform: 'x', enabled: true, mode: 'Synthetic', query: '#bogota', interval_minutes: 5,
   secret_ref: 'GodsEyeViewSource_x', credential_configured: false, status: 'paused', capture_running: false, config_version: 7 });
 
 test('polling preserves unsaved searches, credentials and the optimistic revision', () => {
@@ -24,10 +24,11 @@ test('polling preserves unsaved searches, credentials and the optimistic revisio
   }
 });
 
-test('Synthetic saves normalize legacy mode, omit hidden tokens and preserve revision checks', () => {
+test('Synthetic saves reject retired mode, omit hidden tokens and preserve revision checks', () => {
   const editor = { saved, draft: saved, token: 'hidden-token' };
   assert.equal(saved.mode, 'Synthetic');
-  assert.equal(sourcePayload({ ...editor, draft: { ...saved, mode: 'simulation' } }).mode, 'Synthetic');
+  assert.throws(() => sourcePayload({ ...editor, draft: { ...saved, mode: 'simulation' } }), /Invalid source mode/);
+  assert.throws(() => sourceDefaults({ ...saved, mode: 'simulation' }), /Invalid source mode/);
   assert.equal(sourceDirty(editor), false);
   assert.equal('bearer_token' in sourcePayload(editor), false);
   assert.equal(sourcePayload(editor).synthetic_batch_max, 3);
@@ -392,10 +393,9 @@ test('incremental polling updates processing without shifting rows or pagination
 
 test('preview permits authenticated fixture media and HTTPS without executable or ambiguous URLs', () => {
   assert.equal(safeMediaUrl('/api/admin/gods-eye-view/media/post-0001/image-01.svg'), '/api/admin/gods-eye-view/media/post-0001/image-01.svg');
-  // Compatibility: existing publication URLs survive a source/package rename.
   for (const legacy of ['territorial', 'prisma']) {
     const path = `/api/admin/${legacy}/media/post-0001/image-01.svg`;
-    assert.equal(safeMediaUrl(path), path);
+    assert.equal(safeMediaUrl(path), null);
     assert.equal(safeMediaUrl(`/api/admin/${legacy}/media/../secret.svg`), null);
   }
   assert.equal(safeMediaUrl('https://pbs.twimg.com/media/example.jpg'), 'https://pbs.twimg.com/media/example.jpg');

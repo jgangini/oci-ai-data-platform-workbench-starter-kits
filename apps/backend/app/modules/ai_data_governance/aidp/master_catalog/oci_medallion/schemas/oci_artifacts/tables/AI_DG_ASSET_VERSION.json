@@ -1,0 +1,116 @@
+{
+  "name": "AI_DG_ASSET_VERSION",
+  "domain": "Ámbito e inventario",
+  "row": 1,
+  "col": 0,
+  "grain": "Una revisión inmutable y deduplicada de los metadatos de un activo.",
+  "pk": [
+    "version_id"
+  ],
+  "unique": [
+    [
+      "asset_id",
+      "metadata_hash"
+    ]
+  ],
+  "columns": [
+    {
+      "name": "version_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Identidad de la revisión; preserva procedencia de cualquier respuesta histórica."
+    },
+    {
+      "name": "asset_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Activo al que pertenece la revisión."
+    },
+    {
+      "name": "native_version",
+      "type": "STRING",
+      "required": false,
+      "comment": "Versión o ETag nativo; puede pertenecer a toda la tabla, no a cada columna."
+    },
+    {
+      "name": "qualified_name",
+      "type": "STRING",
+      "required": true,
+      "comment": "Nombre completo observado; no sustituye el ID estable."
+    },
+    {
+      "name": "description",
+      "type": "STRING",
+      "required": false,
+      "comment": "Texto exacto leído del catálogo, incluida la marca [IA] cuando existe."
+    },
+    {
+      "name": "description_origin",
+      "type": "STRING",
+      "required": true,
+      "comment": "UNKNOWN, EXTERNAL_UNVERIFIED, GENERATED_VERIFIED o HUMAN_VERIFIED; no se deduce sólo de [IA]."
+    },
+    {
+      "name": "data_type",
+      "type": "STRING",
+      "required": false,
+      "comment": "Tipo completo para columnas; nulo si no aplica."
+    },
+    {
+      "name": "ordinal_position",
+      "type": "INT",
+      "required": false,
+      "comment": "Posición observada de columna; nula para otros tipos."
+    },
+    {
+      "name": "owner_ref",
+      "type": "STRING",
+      "required": false,
+      "comment": "Responsable declarado y su origen; no prueba permiso efectivo."
+    },
+    {
+      "name": "metadata_json",
+      "type": "STRING",
+      "required": true,
+      "comment": "Extensión tipada por asset_kind: código/ruta/revisión, parámetros de tarea, propiedades; sin credenciales ni datos de negocio."
+    },
+    {
+      "name": "metadata_hash",
+      "type": "STRING",
+      "required": true,
+      "comment": "Huella de metadatos canónicos, incluyendo versión fuente y descripción; no cambia por cada lectura."
+    },
+    {
+      "name": "observed_at",
+      "type": "TIMESTAMP",
+      "required": true,
+      "comment": "Primera observación de esta revisión."
+    },
+    {
+      "name": "observed_run_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Ejecución que persistió la observación."
+    }
+  ],
+  "foreign_keys": [
+    {
+      "columns": [
+        "asset_id"
+      ],
+      "table": "AI_DG_ASSET",
+      "target": [
+        "asset_id"
+      ]
+    },
+    {
+      "columns": [
+        "observed_run_id"
+      ],
+      "table": "AI_DG_RUN",
+      "target": [
+        "run_id"
+      ]
+    }
+  ]
+}

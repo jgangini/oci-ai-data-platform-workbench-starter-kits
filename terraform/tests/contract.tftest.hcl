@@ -540,7 +540,7 @@ run "gods_eye_view_private_viewer" {
     admin_password_hash     = "pbkdf2_sha256$600000$salt$digest"
     registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
     source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
-    enable_prisma_viewer    = true
+    enabled_vm_modules      = ["gods_eye_view"]
     enable_public_ip_tls    = true
   }
 
@@ -550,7 +550,7 @@ run "gods_eye_view_private_viewer" {
   }
 
   assert {
-    condition = oci_identity_dynamic_group.gods_eye_view[0].name == "aidp-lab-test1234-prisma" && [
+    condition = oci_identity_dynamic_group.gods_eye_view[0].name == "aidp-lab-test1234-gods-eye-view" && [
       oci_core_nat_gateway.gods_eye_view[0].display_name,
       oci_core_security_list.gods_eye_view[0].display_name,
       oci_core_subnet.gods_eye_view[0].display_name,
@@ -559,8 +559,8 @@ run "gods_eye_view_private_viewer" {
       oci_core_instance.gods_eye_view[0].display_name,
       oci_identity_policy.gods_eye_view[0].name,
       oci_identity_policy.gods_eye_view_run_command[0].name,
-    ] == [for suffix in ["nat", "egress", "private", "proxy", "viewer", "viewer", "read", "update"] : "aidp-lab-test1234-prisma-${suffix}"]
-    error_message = "Legacy deployments must retain every existing physical resource name."
+    ] == [for suffix in ["nat", "egress", "private", "proxy", "viewer", "viewer", "read", "update"] : "aidp-lab-test1234-gods-eye-view-${suffix}"]
+    error_message = "Current deployments use the canonical physical resource names."
   }
 
   assert {
@@ -589,34 +589,32 @@ run "gods_eye_view_private_viewer" {
   }
 
   assert {
-    condition     = strcontains(base64decode(oci_core_instance.gods_eye_view[0].metadata.user_data), "GODS_EYE_VIEW_ADMIN_URL=http://10.10.0.10:8000") && output.prisma_viewer_enabled
+    condition     = strcontains(base64decode(oci_core_instance.gods_eye_view[0].metadata.user_data), "GODS_EYE_VIEW_ADMIN_URL=http://10.10.0.10:8000") && output.gods_eye_view_enabled
     error_message = "Both frozen containers must share the private authenticated bridge contract."
   }
 
   assert {
-    condition     = output.prisma_viewer_private_url == "http://10.10.0.130:8081" && output.public_ip_tls_enabled
+    condition     = output.gods_eye_view_private_url == "http://10.10.0.130:8081" && output.public_ip_tls_enabled
     error_message = "The admin must use the actual private viewer address and issue verified public TLS only when opted in."
   }
 }
 
-run "canonical_viewer_input_overrides_legacy" {
+run "empty_module_selection_keeps_viewer_disabled" {
   command = plan
   variables {
-    tenancy_ocid              = "ocid1.tenancy.oc1..test"
-    home_region               = "us-ashburn-1"
-    operator_user_ocid        = "ocid1.user.oc1..operator"
-    compartment_ocid          = "ocid1.compartment.oc1..test"
-    objectstorage_namespace   = "testnamespace"
-    deployment_suffix         = "test1234"
-    admin_password_hash       = "pbkdf2_sha256$600000$salt$digest"
-    registration_code_hash    = "pbkdf2_sha256$600000$salt$digest"
-    source_commit_sha         = "0123456789abcdef0123456789abcdef01234567"
-    enable_prisma_viewer      = true
-    enable_territorial_viewer = true
-    enable_gods_eye_view      = false
+    tenancy_ocid            = "ocid1.tenancy.oc1..test"
+    home_region             = "us-ashburn-1"
+    operator_user_ocid      = "ocid1.user.oc1..operator"
+    compartment_ocid        = "ocid1.compartment.oc1..test"
+    objectstorage_namespace = "testnamespace"
+    deployment_suffix       = "test1234"
+    admin_password_hash     = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
+    enabled_vm_modules      = []
   }
   assert {
-    condition     = !output.gods_eye_view_enabled && !output.prisma_viewer_enabled && length(oci_core_instance.gods_eye_view) == 0
-    error_message = "The canonical toggle must override the legacy alias without producing a second viewer."
+    condition     = !output.gods_eye_view_enabled && length(oci_core_instance.gods_eye_view) == 0
+    error_message = "An empty module selection must not create a viewer."
   }
 }

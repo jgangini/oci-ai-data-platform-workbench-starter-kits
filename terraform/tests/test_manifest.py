@@ -11,6 +11,11 @@ from pathlib import Path
 def test_manifest_packages_importable_gods_eye_view_hook_runtime(tmp_path) -> None:
     root = Path(__file__).parents[2]
     manifest = json.loads((root / "terraform/deploy-studio.json").read_text(encoding="utf-8"))
+    paths = manifest["post_apply"]["include_paths"]
+    assert len(paths) <= 20
+    assert len(paths) == len(set(paths))
+    assert not any(Path(first) in Path(second).parents for first in paths for second in paths if first != second)
+    assert "apps/backend/app/modules/ai_gods_eye_view" not in paths
     for relative in ["terraform/hooks", *manifest["post_apply"]["include_paths"]]:
         source, target = root / relative, tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -20,15 +25,15 @@ def test_manifest_packages_importable_gods_eye_view_hook_runtime(tmp_path) -> No
             shutil.copyfile(source, target)
     result = subprocess.run([sys.executable, "-I", "-c",
         "import sys; sys.path.insert(0, 'terraform/hooks'); import gods_eye_view_bootstrap; "
-        "from app.aidp import AidpClient; from app.lab_packs import load_lab_pack; "
+        "from app.services.oci.aidp import AidpClient; from app.packages.catalog import load_package; "
         "from gods_eye_sources import workflow_source; from gods_eye_agent_source import agent_source; "
         "bundle = gods_eye_view_bootstrap.runtime_archive(); assert bundle; "
         "config = {key: 'test' for key in ('namespace','bucket','pipeline_revision','oci_credential_name',"
         "'oci_identity_sha256','region','model_id','compartment_id','catalog','gold_query_compute_id')}; "
         "assert workflow_source('pipeline', config, bundle); assert workflow_source('sensor_pipeline', config, bundle); "
         "assert agent_source(config, bundle); "
-        "assert load_lab_pack('gods_eye_view').runtime_files; "
-        "assert load_lab_pack('ai_data_governance').runtime_files"],
+        "assert load_package('gods_eye_view').runtime_files; "
+        "assert load_package('ai_data_governance').runtime_files"],
         cwd=tmp_path, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
 
@@ -300,9 +305,10 @@ def test_release_workflow_reruns_only_mutate_drafts() -> None:
     assert "Existing published release is mutable; refusing to edit or republish it." in workflow
     assert "if: steps.release.outputs.mode == 'immutable'" in workflow
     assert "immutable release asset manifest mismatch" in workflow
-    assert workflow.count('test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz"') == 1
-    assert workflow.count('test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,prisma-release.json,prisma-viewer-image-amd64.tar.gz,territorial-release.json,territorial-viewer-image-amd64.tar.gz"') == 1
-    assert workflow.count('test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,gods-eye-view-image-amd64.tar.gz,gods-eye-view-release.json,prisma-release.json,prisma-viewer-image-amd64.tar.gz,territorial-release.json,territorial-viewer-image-amd64.tar.gz"') == 2
+    assets = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,gods-eye-view-image-amd64.tar.gz,gods-eye-view-release.json"
+    assert workflow.count(f'test "$asset_names" = "{assets}"') == 2
+    assert re.findall(r'^\s*test "\$asset_names" = "([^"]+)"\s*$', workflow, re.MULTILINE) == [assets, assets]
+    assert not any(name in workflow for name in ("prisma-release.json", "prisma-viewer-image-amd64.tar.gz", "territorial-release.json", "territorial-viewer-image-amd64.tar.gz"))
     immutable_start = workflow.index("- name: Verify existing immutable release assets")
     immutable_end = workflow.index("- uses: hashicorp/setup-terraform@v3")
     immutable_verification = workflow[immutable_start:immutable_end]
@@ -370,7 +376,7 @@ def test_runtime_security_contracts() -> None:
     assert "firewall-offline-cmd --zone=public --add-service=https" in cloud_init
     assert "firewall-cmd" not in cloud_init
     assert "download.docker.com/linux/centos/docker-ce.repo" in cloud_init
-    assert 'retry 5 python3 "$SOURCE_DIR/scripts/load_release_image.py"' in cloud_init
+    assert 'retry 5 python3 "$SOURCE_DIR/scripts/release/load_release_image.py"' in cloud_init
     assert "--component aidp-lab" in cloud_init
     assert "docker build" not in cloud_init
     assert "tee -a /var/log/aidp-lab-bootstrap.log /dev/console" in cloud_init
@@ -433,7 +439,7 @@ def test_runtime_security_contracts() -> None:
     assert 'resource "oci_identity_policy" "vm_run_command"' in compute
     assert "manage instance-agent-command-family" in compute
     assert "use instance-agent-command-execution-family" in compute
-    credential_bootstrap = (root / "apps/backend/app/credential_bootstrap.py").read_text(encoding="utf-8")
+    credential_bootstrap = (root / "apps/backend/app/services/oci/credential_bootstrap.py").read_text(encoding="utf-8")
     assert 'temporary.chmod(0o600)' in credential_bootstrap
     assert 'path.chmod(0o600)' in credential_bootstrap
     assert "database_admin_password" not in credential_bootstrap

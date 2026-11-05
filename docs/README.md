@@ -1,18 +1,21 @@
-# Documentation
+# Documentación
 
-[Project overview](../README.md)
+[Proyecto](../README.md)
 
-## Choose a path
+Guías del comportamiento implementado en este repositorio. El manifiesto de cada paquete determina versiones, hashes y resultados esperados; los recibos y salidas nativas determinan qué está instalado y qué ejecutó realmente cada entorno. Un test local o un despliegue ACTIVE no acredita aceptación completa en OCI.
 
-| Reader | Start with | Continue with |
-| --- | --- | --- |
-| Participant or instructor | [Getting started](getting-started.md) | A starter kit guide below |
-| Platform administrator | [Operations](operations.md) | [Architecture](architecture.md), global module guides |
-| Developer | [Development](development.md) | [Architecture](architecture.md), [compatibility](reference/compatibility.md) |
+## Por dónde empezar
 
-## Participant starter kits
+| Necesidad | Guía |
+| --- | --- |
+| Preparar el entorno o ejecutar un kit | [Primeros pasos](getting-started.md) y [límites vigentes](getting-started.md#current-implementation-limits). |
+| Administrar usuarios, módulos y actualizaciones | [Operación y recuperación](operations.md). |
+| Modificar y validar el código en local | [Desarrollo](development.md). |
+| Consultar formatos admitidos y rechazos | [Contratos vigentes](contracts.md). |
 
-Every guide contains source data, task dependencies, Gold outputs and reproducible acceptance checks.
+## Kits de participantes
+
+Cada kit mantiene su dataset, dependencias, tablas, workflow y checks de resultado; el aprovisionamiento separa recursos por participante.
 
 - [Banking](kits/banking.md)
 - [Telecommunications](kits/telecommunications.md)
@@ -20,24 +23,36 @@ Every guide contains source data, task dependencies, Gold outputs and reproducib
 - [Retail](kits/retail.md)
 - [Healthcare](kits/healthcare.md)
 
-## Shared global modules
+<a id="shared-global-modules"></a>
+## Tres módulos compartidos
 
-- [AI Market Intelligence](modules/ai-market-intelligence.md): candidate research graph, resumable empty installer and pending native acceptance.
-- [AI Market Intelligence v2](modules/ai-market-intelligence-v2.md): bounded domain research, evidence-backed drafts and a separate TEST installer without the legacy business tables; corpus and client acceptance remain separate.
-- [Legacy AI Social Network](modules/ai-social-network.md): retired package; authenticated historical routes report HTTP 410.
-- [AI Data Governance](modules/ai-data-governance.md): catalog synchronization, permissions, agent tools and lifecycle.
-- [Governance V2 TEST candidate](modules/ai-data-governance-v2.md): explicit fresh-tenant Terraform configuration; functional acceptance pending.
-- [God's Eye View](modules/gods-eye-view.md): sources, streaming, map publications, agent queries and synthetic cleanup.
+| Módulo | Comportamiento y límites |
+| --- | --- |
+| [AI Data Governance](modules/ai-data-governance.md) | Dos agentes, dieciocho tablas y workflow documental; aceptación funcional en TEST pendiente. |
+| [AI Market Intelligence](modules/ai-market-intelligence.md) | Investigación y recuperación propias con instalador TEST. El paquete permanece planned hasta aceptación nativa. |
+| [God’s Eye View](modules/ai-gods-eye-view.md) | Visor privado de publicaciones sociales/sensores, evidencia, controles durables y consulta Gold. |
 
-## Reference and scope
+Instalar módulos es distinto de asignar kits. Governance y Market Intelligence se administran en **Settings → Application**; God’s Eye View también incorpora su VM privada mediante el stack original y permite conceder acceso lector a usuarios. Las guías separan comprobaciones locales, instalación y aceptación nativa.
 
-- [Architecture](architecture.md): deployment, trust boundaries, storage and processing flows.
-- [Operations](operations.md): installation, updates, recovery and scoped deletion.
-- [Development](development.md): local profiles, source ownership and checks.
-- [Compatibility](reference/compatibility.md): retained names and rolling-upgrade contracts.
-- [Repository instructions](../AGENTS.md): deployment, content, UI and validation rules for contributors.
-- [Implementation limits](getting-started.md#current-implementation-limits): differences between source intent, packaged assets and accepted native behavior.
+## Distribución y flujo actuales
 
-These guides describe the checked-in implementation. The linked `lab.json` files define package versions, asset hashes and expected results; deployment manifests and native job outputs establish what is installed and has actually run. A local test, diagram or historical validation report is not evidence that a different cloud release passed acceptance.
+| Ubicación | Responsabilidad |
+| --- | --- |
+| [`apps/frontend`](../apps/frontend) | Portal de registro y administración React. |
+| [`apps/backend`](../apps/backend) | API FastAPI, identidad, aprovisionamiento y ciclo de vida. |
+| [`app/kits`](../apps/backend/app/kits) | Cinco kits de participantes: `lab.json`, datasets y notebooks versionados. |
+| [`app/modules`](../apps/backend/app/modules) | Governance, Market Intelligence y God’s Eye View del backend; Governance y Market tienen fuentes/recursos en `aidp/`, con metadatos del paquete en `package/lab.json`. |
+| [`app/packages/catalog.py`](../apps/backend/app/packages/catalog.py) | Registro explícito y loader común que valida identidad, ámbito, hashes y dependencias de kits/módulos. |
+| [`app/services`](../apps/backend/app/services) | Capacidades OCI de AIDP, identidad, Autonomous y bootstrap de credenciales; servicio de releases. |
+| [`app/api`](../apps/backend/app/api) | Acceso/identidad del visor; las rutas retiradas no se montan y devuelven 404. |
+| [`modules/ai-gods-eye-view`](../modules/ai-gods-eye-view) | Aplicación visual independiente, upstream fijado, parches y su propia imagen/VM privada. |
+| [`terraform`](../terraform) | Infraestructura, contrato Deploy Studio y hooks de reconciliación. |
+| [`docker`](../docker) y [`scripts`](../scripts) | Entornos locales, imágenes, releases y validación. |
 
-Keep reusable explanations here. Credentials, tenant identifiers, private run logs and temporary migration diagnostics do not belong in this documentation.
+La VM pública autentica y da acceso a AIDP y al visor privado. El módulo Python `app/modules/ai_gods_eye_view` administra el dominio y sus fuentes AIDP; `modules/ai-gods-eye-view` contiene la aplicación visual desplegable. Son responsabilidades distintas y no se copian íntegramente a Workbench. La distribución interna y el [mapeo a recursos nativos](development.md#repository-and-aidp-resources) se explican en Desarrollo.
+
+Spark ejecuta los workflows y agentes dedicados utilizan los servicios/modelos configurados. Landing, Bronze, Silver y Gold tienen buckets seleccionados distintos; el bucket de artefactos almacena tablas framework y recibos de instalación. Los controles operativos del visor y su diario están en Object Storage del bucket Gold; SQLite es una proyección reconstruible. La ubicación real de tablas se comprueba en Master Catalog, no se deduce del nombre de una carpeta.
+
+Terraform y los [hooks](../terraform/hooks) reproducen el entorno; los recibos protegidos permiten reanudar operaciones. Ninguna guía da por migrados los recursos de una instalación existente al actualizar código o imagen. Para contributors, las reglas están en [AGENTS.md](../AGENTS.md) y los checks en [Desarrollo](development.md).
+
+Mantener aquí explicaciones reutilizables. Credenciales, IDs de tenant, recibos privados, logs de ejecución y diagnósticos temporales quedan fuera de esta documentación.

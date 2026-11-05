@@ -10,7 +10,7 @@ def agent_source(config, bundle):
     fields = ("region", "model_id", "compartment_id", "oci_credential_name", "oci_identity_sha256", "catalog", "gold_query_compute_id")
     if not isinstance(config, dict) or any(not isinstance(config.get(key), str) or not config[key] for key in fields):
         raise ValueError("God’s Eye View Gold agent configuration incomplete")
-    from app.lab_packs import module_runtime_source
+    from app.packages.catalog import module_runtime_source
     source = module_runtime_source("gods_eye_view", "notebooks/40_report/ai_gods_eye_view.py").decode("utf-8")
     return configured_source(source, {key: config[key] for key in fields})
 

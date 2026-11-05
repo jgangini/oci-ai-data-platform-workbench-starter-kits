@@ -1,6 +1,6 @@
 export type GodsEyeViewApi = <T>(path: string, init?: RequestInit) => Promise<T>;
 export type Source = {
-  platform: string; enabled: boolean; mode: 'Synthetic' | 'simulation' | 'real'; query: string;
+  platform: string; enabled: boolean; mode: 'Synthetic' | 'real'; query: string;
   interval_minutes: number; synthetic_batch_max: number; secret_ref: string; credential_configured: boolean;
   status: string; last_run_at?: string; next_due?: string; last_error?: string;
   last_received_count?: number | null; capture_running?: boolean; capture_state?: string;
@@ -21,7 +21,8 @@ export const sourceQueryLimit = 1000;
 export const timestamp = (value?: string | null, timeZone = 'America/Bogota') => value ? new Date(value).toLocaleString('en-GB', { timeZone }) : 'Not available';
 export const postStatus = (value: string) => value === 'processed' ? 'Processed' : 'New';
 export function sourceDefaults(source: Source): Source {
-  return { ...source, mode: source.mode === 'simulation' ? 'Synthetic' : source.mode, synthetic_batch_max: source.synthetic_batch_max ?? 3, correlation_window_minutes: source.correlation_window_minutes ?? 30,
+  if (!['Synthetic', 'real'].includes(source.mode)) throw new Error('Invalid source mode');
+  return { ...source, mode: source.mode, synthetic_batch_max: source.synthetic_batch_max ?? 3, correlation_window_minutes: source.correlation_window_minutes ?? 30,
     report_thresholds: source.report_thresholds ?? { low: 5, medium: 10, high: 20 }, config_version: source.config_version ?? 0 };
 }
 export function sourceDirty({ draft, saved, token }: SourceEditor): boolean {
@@ -31,6 +32,7 @@ export function sourceDirty({ draft, saved, token }: SourceEditor): boolean {
 }
 export function sourcePayload({ draft, saved, token }: SourceEditor) {
   const { mode, query, synthetic_batch_max, correlation_window_minutes, report_thresholds } = draft;
+  if (!['Synthetic', 'real'].includes(mode)) throw new Error('Invalid source mode');
   if (query.length > sourceQueryLimit) throw new Error(`Searches must contain at most ${sourceQueryLimit} characters in total.`);
   if (!(report_thresholds.low > 0 && report_thresholds.low < report_thresholds.medium && report_thresholds.medium < report_thresholds.high)) {
     throw new Error('Report activity thresholds must be positive and increase from Low to Medium to High.');
@@ -38,7 +40,7 @@ export function sourcePayload({ draft, saved, token }: SourceEditor) {
   if (mode !== 'real' && (!Number.isInteger(synthetic_batch_max) || synthetic_batch_max < 1 || synthetic_batch_max > 100)) {
     throw new Error('Synthetic records per capture must be a whole number from 1 to 100.');
   }
-  return { mode: mode === 'simulation' ? 'Synthetic' : mode, query, correlation_window_minutes, report_thresholds,
+  return { mode, query, correlation_window_minutes, report_thresholds,
     ...(mode !== 'real' ? { synthetic_batch_max } : {}),
     expected_revision: saved.config_version, ...(mode === 'real' && token ? { bearer_token: token } : {}) };
 }
@@ -69,8 +71,7 @@ export function captureState(source: Source): string {
   return source.enabled && source.capture_running ? 'Running' : 'Paused';
 }
 export function safeMediaUrl(value: string): string | null {
-  // Compatibility: saved publications may retain either authenticated legacy media path.
-  if (/^\/api\/admin\/(?:gods-eye-view|territorial|prisma)\/media\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\.(svg|webp|png|jpe?g|mp4|webm)$/.test(value)) return value;
+  if (/^\/api\/admin\/gods-eye-view\/media\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\.(svg|webp|png|jpe?g|mp4|webm)$/.test(value)) return value;
   try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password ? url.href : null; }
   catch { return null; }
 }

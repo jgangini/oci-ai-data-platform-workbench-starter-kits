@@ -1,89 +1,41 @@
-# Retail
+# Comercio minorista · Retail
 
-[Documentation](../README.md) · [Getting started](../getting-started.md)
+[Documentación](../README.md) · [Primeros pasos](../getting-started.md)
 
-Turn customer, product and order data into customer-value and daily product summaries.
-This participant lab uses deterministic training CSVs with controlled quality problems,
-not a live commerce connector.
-The current [package contract](../../apps/backend/app/labs/retail/lab.json) is version `2.0.0`.
+El [paquete `2.0.0`](../../apps/backend/app/kits/retail/lab.json) transforma clientes, productos y pedidos en resúmenes de valor y actividad diaria. Usa CSV deterministas de entrenamiento con problemas controlados de calidad; no es un conector comercial real. Antes de ejecutarlo, revise la [incompatibilidad actual entre notebooks y aprovisionador](../getting-started.md#current-implementation-limits).
 
-## Inputs
+## Entradas y flujo
 
-The checked-in [source files](../../apps/backend/app/labs/retail/source) are the actual inputs.
-Provisioning copies them into the participant workspace's `source/` directory.
+El aprovisionamiento copia los [archivos fuente](../../apps/backend/app/kits/retail/source) a `source/` del participante. El manifiesto fija sus filas y SHA-256.
 
-| CSV | Rows | Business role |
+| CSV | Filas | Contenido |
 | --- | ---: | --- |
-| `customers.csv` | 300 | Segment, region, loyalty tier and signup date |
-| `products.csv` | 150 | Category, unit cost, list price and status |
-| `orders.csv` | 1,200 | Customer, channel, currency, order time and status |
-| `order_items.csv` | 3,000 | Product, quantity, unit price and line discount |
+| `customers.csv` | 300 | Segmento, región, fidelización y alta |
+| `products.csv` | 150 | Categoría, coste, precio de lista y estado |
+| `orders.csv` | 1,200 | Cliente, canal, moneda, fecha y estado |
+| `order_items.csv` | 3,000 | Producto, cantidad, precio y descuento |
 
-The raw `order_items.quantity` sum is **7,487**.
-This is a fixture check; Silver quarantine can change the quantity represented in Gold.
-The manifest also pins every source file's row count and SHA-256.
+La suma original de `order_items.quantity` es **7,487**; la cuarentena de Silver puede cambiar la cantidad representada en Gold.
 
-## Workflow
+El trabajo `wf_<participant_key>_retail` ejecuta `01_landing_retail` → `02_bronze_retail` → `03_silver_retail` → `04_gold_retail` → `05_lineage_retail`. Los [notebooks](../../apps/backend/app/kits/retail/notebooks) usan tablas Delta administradas en las cuatro capas. Landing añade identidad; Bronze conserva registros; Silver normaliza, ordena duplicados y valida relaciones; Gold agrega artículos aceptados junto con pedidos y costes. Los rechazos quedan en `quality_issues`.
 
-The deployed job is `wf_<participant_key>_retail`.
-The task sequence below is the actual manifest dependency chain.
+## Resultados y aceptación
 
-```mermaid
-flowchart LR
-    L["01_landing_retail"] --> B["02_bronze_retail"]
-    B --> S["03_silver_retail"]
-    S --> G["04_gold_retail"]
-    G --> V["05_lineage_retail"]
-```
+Los nombres físicos añaden `<participant_key>_` a estas tablas de `<catalog_name>.oci_gold`.
 
-1. Landing reads workspace CSVs, adds participant identity and writes managed Delta tables.
-2. Bronze preserves the source records in managed Delta tables.
-3. Silver normalizes and types fields, ranks duplicates, validates relationships,
-   and writes rejected records to `quality_issues`.
-4. Gold joins accepted items to orders and product costs, then aggregates them.
-5. The final notebook verifies declared tables and the lineage setting.
-
-See the [notebook sources](../../apps/backend/app/labs/retail/notebooks) for the transformations.
-Every catalog layer is managed Delta; source files are CSV.
-
-## Gold outputs
-
-Physical names prefix these names with `<participant_key>_` in `<catalog_name>.oci_gold`.
-
-| Table | Grain | Metrics |
+| Tabla | Agrupación | Métricas |
 | --- | --- | --- |
-| `retail_customer_value` | Customer | Orders, units, gross/net revenue, discounts, average order value and last order |
-| `retail_product_daily` | Product and order date | Units, net revenue, gross margin and refunded units |
+| `retail_customer_value` | Cliente | Pedidos, unidades, ingresos brutos/netos, descuentos, pedido promedio y último pedido |
+| `retail_product_daily` | Producto y fecha | Unidades, ingreso neto, margen bruto y unidades reembolsadas |
 
-Line gross is `quantity × unit_price`; line net subtracts the item discount.
-Gross margin subtracts `quantity × unit_cost` from line net.
-Refunded orders contribute to the aggregates and are also counted in `refunded_units`;
-the notebook does not automatically negate their revenue.
+El importe bruto es `quantity × unit_price`; el neto resta el descuento del artículo. El margen resta `quantity × unit_cost` al neto. Los pedidos reembolsados contribuyen a los agregados y a `refunded_units`; el notebook no invierte automáticamente sus ingresos.
 
-## Checks and expected results
+- Landing y Bronze deben reconciliar las entradas. Silver valida campos obligatorios, tipos, enumeraciones, identidad y referencias.
+- Coste y precio de producto, cantidad y precio de artículo deben ser positivos. Duplicados y referencias inválidas de cliente, pedido o producto se envían a cuarentena.
+- `<participant_key>_retail_quality_issues`, en `oci_silver`, debe contener al menos una fila; ambas salidas Gold deben contener datos.
+- El [notebook final](../../apps/backend/app/kits/retail/notebooks/05_lineage_retail.ipynb) comprueba las 15 tablas Delta administradas y la configuración de linaje.
+- En Master Catalog, revise ambas anclas Gold a nivel de entidad y columna, en ambas direcciones y con profundidad 8. Siga la identidad del cliente hasta `retail_customer_value` y la cantidad del artículo hasta `retail_product_daily.units`, con sus relaciones de productos y pedidos. La configuración de linaje no demuestra todas las aristas del grafo nativo.
 
-- Landing/Bronze row counts must reconcile with the input counts above.
-- Silver checks required fields, casts, enumerations, participant identity and foreign keys.
-- Product cost/list price and item quantity/unit price must be positive.
-- Duplicate business keys and invalid customer/order/product references are quarantined.
-- `<participant_key>_retail_quality_issues` in `oci_silver` must contain at least one row.
-- Both Gold tables must be non-empty; the final notebook verifies 15 managed Delta tables.
+## Ejecución del participante
 
-Inspect entity and column lineage for both Gold anchors, in both directions at depth 8.
-Trace customer identity into `retail_customer_value`, and item quantity through Silver
-into `retail_product_daily.units`. Products and orders should participate in the corresponding paths.
-The notebook checks that lineage is enabled; inspect Master Catalog for the actual graph.
-
-## Run as a participant
-
-1. Follow [Getting started](../getting-started.md), including the package/provisioner compatibility notes.
-2. Open your Retail workflow and retain the supplied workspace, catalog and participant parameters.
-3. Run all five tasks; review Silver quarantine before treating aggregates as accepted results.
-4. Compare customer-level and product-day metrics, then inspect their lineage.
-5. Rerun unchanged inputs and confirm stable counts under overwrite writes.
-
-Use your deployed `catalog_name` and table prefix when querying results.
-For an exercise, compare product-day net revenue, gross margin and refunded units
-to explain which part of the fixture contributes to each metric.
-The [Gold notebook](../../apps/backend/app/labs/retail/notebooks/04_gold_retail.ipynb)
-and [validation notebook](../../apps/backend/app/labs/retail/notebooks/05_lineage_retail.ipynb) define the checks.
+Siga [Primeros pasos](../getting-started.md), conserve los parámetros de su flujo y ejecute las cinco tareas. Revise la cuarentena antes de aceptar los agregados, compare ambas salidas y su linaje, y repita con entradas idénticas para comprobar conteos estables bajo sobrescritura. Use su `catalog_name` y prefijo. Compare ingreso neto, margen y reembolsos por producto y día con las expresiones del [notebook Gold](../../apps/backend/app/kits/retail/notebooks/04_gold_retail.ipynb).

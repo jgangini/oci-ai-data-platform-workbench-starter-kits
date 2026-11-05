@@ -1,0 +1,52 @@
+{
+  "name": "AI_DG_DOC_EVIDENCE",
+  "domain": "Documentación y réplica",
+  "row": 1,
+  "col": 4,
+  "grain": "Una evidencia utilizada por un documento; relación muchos-a-muchos sin IDs dentro de texto libre.",
+  "pk": [
+    "document_id",
+    "evidence_id"
+  ],
+  "unique": [],
+  "columns": [
+    {
+      "name": "document_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Documento sustentado."
+    },
+    {
+      "name": "evidence_id",
+      "type": "STRING",
+      "required": true,
+      "comment": "Evidencia de la misma pertenencia de ámbito que el trabajo."
+    },
+    {
+      "name": "support_role",
+      "type": "STRING",
+      "required": true,
+      "comment": "ORIGIN, TRANSFORMATION, USAGE o DEFINITION; identifica qué respalda."
+    }
+  ],
+  "foreign_keys": [
+    {
+      "columns": [
+        "document_id"
+      ],
+      "table": "AI_DG_DOCUMENT",
+      "target": [
+        "document_id"
+      ]
+    },
+    {
+      "columns": [
+        "evidence_id"
+      ],
+      "table": "AI_DG_EVIDENCE",
+      "target": [
+        "evidence_id"
+      ]
+    }
+  ]
+}

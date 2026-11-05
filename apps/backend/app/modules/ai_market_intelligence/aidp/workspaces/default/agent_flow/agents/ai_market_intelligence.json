@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "module_id": "ai_market_intelligence",
+  "name": "ai_market_intelligence",
+  "type": "CODE",
+  "pathInfo": "/Workspace/.artifact/ai_market_intelligence/agents/ai_market_intelligence",
+  "entryFilePath": "/Workspace/.artifact/ai_market_intelligence/agents/ai_market_intelligence/market_intelligence.py",
+  "dependenciesFilePath": "/Workspace/.artifact/ai_market_intelligence/agents/ai_market_intelligence/requirements.txt",
+  "compute": "ai_market_intelligence",
+  "deployment_surface": "TEST"
+}

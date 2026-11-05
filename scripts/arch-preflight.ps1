@@ -17,7 +17,7 @@ try {
             $previousErrorActionPreference = $ErrorActionPreference
             try {
                 $ErrorActionPreference = "Continue"
-                $gateOutput = @(& $Python "$PSScriptRoot/sentrux_scope.py" gate 2>&1)
+                $gateOutput = @(& $Python "$PSScriptRoot/validation/sentrux_scope.py" gate 2>&1)
                 $gateExitCode = $LASTEXITCODE
             }
             finally {
@@ -28,11 +28,11 @@ try {
                 throw "Existing Sentrux gate failed; baseline preserved."
             }
         } else {
-            & $Python "$PSScriptRoot/sentrux_scope.py" gate --save
+            & $Python "$PSScriptRoot/validation/sentrux_scope.py" gate --save
             if ($LASTEXITCODE -ne 0) { throw "Sentrux baseline could not be saved." }
         }
         if (Test-Path ".\.sentrux\rules.toml") {
-            & $Python "$PSScriptRoot/sentrux_scope.py" check
+            & $Python "$PSScriptRoot/validation/sentrux_scope.py" check
             if ($LASTEXITCODE -ne 0) { throw "Sentrux rules check failed." }
         } else {
             Write-Host "Sentrux custom rules: not configured."

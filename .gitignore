@@ -4,6 +4,7 @@
 *.tfplan
 .oci/
 .tmp/
+.local/
 .aidp/payloads/
 *.pem
 *.key
@@ -15,10 +16,11 @@
 __pycache__/
 .pytest_cache/
 apps/backend/pytest-cache-files-*/
+/pytest-cache-files-*/
 node_modules/
 dist/
 *.tsbuildinfo
-apps/gods-eye-view/.upstream/
+modules/ai-gods-eye-view/.upstream/
 coverage/
 .DS_Store
 .codex/AGENTS.md
@@ -27,7 +29,7 @@ graphify-out/
 .aidp-local/
 /aidp-agent.toml
 # Generated from the exact release commit before building its image.
-apps/backend/app/labs/package-releases.json
+apps/backend/app/packages/package-releases.json
 .aidp-local/
 
 # Local selected OCI/runtime identity; template lives in test documentation.
