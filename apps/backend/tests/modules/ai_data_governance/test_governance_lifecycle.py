@@ -129,7 +129,7 @@ def test_module_status_compares_installed_and_bundled_versions() -> None:
     module = asyncio.run(client.list_modules())[0]
 
     assert module["installed_version"] == "2.0.0"
-    assert module["bundled_version"] == "4.0.0"
+    assert module["bundled_version"] == "4.0.1"
     assert module["update_available"] is True
 
 

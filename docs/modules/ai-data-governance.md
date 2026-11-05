@@ -51,6 +51,8 @@ Completar la instalación conserva `validation_stage=TEST_PENDING`. El endpoint 
 
 ## Verificación
 
+La entrada de inventario publicada utiliza el mismo sincronizador que la implementación mantenida, con el control de actividad explícito. Las regresiones ejecutan ambas formas con un catálogo vacío y una tabla descrita: verifican inventario persistido, entrega documental durable y reanudación sin repetir escrituras, sin inferencia ni modificaciones del catálogo. Un inventario vacío correcto no acredita calidad documental ni respuestas sobre datos de negocio.
+
 Comprobar inventario, linaje de una tabla inequívoca, protección del esquema de control, rechazo de SQL arbitrario, conservación/relleno documental, ámbitos de origen, respuestas útiles y recuperación de tareas fallidas. HTTP 401/403 exige comprobar sesión y rol; HTTP 202 exige observar la operación original; fallos de credencial exigen comprobar nombre, estado e identidad, sin rotación automática.
 
 Los [tests del estándar](../../apps/backend/tests/modules/ai_data_governance/test_ai_dg_standard_layout.py), [tests de ciclo de vida](../../apps/backend/tests/modules/ai_data_governance/test_governance_lifecycle.py), demás checks del [backend](../../apps/backend/tests) y el [manifiesto](../../apps/backend/app/modules/ai_data_governance/package/lab.json) son contratos ejecutables. Los fixtures locales no certifican permisos, ejecución Spark/agente ni calidad semántica. Usar el [flujo de validación](../development.md) y mantener registros específicos del destino fuera de Git.

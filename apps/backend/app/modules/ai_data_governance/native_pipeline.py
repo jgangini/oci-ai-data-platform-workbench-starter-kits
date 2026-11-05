@@ -251,8 +251,7 @@ def pipeline_inventory(repository, journal, request, reader, binding, revision, 
         scope_id, run_id = prepare_sync_context(repository, binding, arguments, selected, revision)
         scoped_reader = reader if confirm_description is None else inventory_readback_reader(repository, reader,
             {**selected, "scope_id": scope_id, "platform_key": binding["platform_id"]}, confirm_description, check_active)
-        result = synchronize_scope(repository, scoped_reader, scope_id, run_id,
-            lambda detail: {}, check_active=check_active)
+        result = synchronize_scope(repository, scoped_reader, scope_id, run_id, check_active=check_active)
         results.append({"scope_id": scope_id, "run_id": run_id, **result})
     code_reader = WorkspaceCodeReader(request, binding['workspace_key'], check_active=check_active)
     return stage_workflow(repository, journal, binding, arguments.job_run_id, results,

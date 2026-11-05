@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from urllib.parse import quote
 
+from app.packages.catalog import load_package
+
 from .deployment_bundle import (ARTIFACT_ROOT, BOOTSTRAP_PATH, DOCUMENTARY_ENTRY_PATH,
                                GOVERNANCE_ENTRY_PATH, build_deployment_bundle)
 from .documentary_source import documentary_entry_source
@@ -176,6 +178,7 @@ class GovernanceInstaller:
         self.resources.update(bundle_manifest=bundle['manifest'], workflow_definition=bundle['workflow'],
                               source_revision=bundle['manifest']['consultative_revision'])
         self.publish(self.bootstrap_job())
+        self.manifest['pack_version'] = load_package('ai_data_governance', require_available=False).pack_version
         self.advance('sync')
 
     def bootstrap_job(self):

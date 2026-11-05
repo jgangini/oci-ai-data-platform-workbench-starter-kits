@@ -2,7 +2,7 @@
   "schema_version": 1,
   "lab_id": "ai_data_governance",
   "display_name": "AI Data Governance",
-  "pack_version": "4.0.0",
+  "pack_version": "4.0.1",
   "status": "available",
   "kind": "global_module",
   "scope": "global",
@@ -249,7 +249,7 @@
     },
     {
       "file": "native_pipeline.py",
-      "sha256": "c32a457f933d807b7d63f2f03e512b1e8af0cce7f5f324891e4d9d5f361d682c"
+      "sha256": "d70a845debb399eef5d05d9a7cec63ef37f703d0f92b38089b2496790c831de8"
     },
     {
       "file": "native_sync.py",
@@ -426,5 +426,5 @@
       "sha256": "79de04ca7eeae72ac271dd7dfa6052da8223f777664275dffee6187fb9b62cf0"
     }
   ],
-  "pack_sha256": "1bf376bdd0352e3879cfd7387827c5c0a001caa05ea012b7343b98ce11416023"
+  "pack_sha256": "dd0d810c96f4a5a56c5502e59d850e9e8221877c5cc834b837689a8303cab6b1"
 }

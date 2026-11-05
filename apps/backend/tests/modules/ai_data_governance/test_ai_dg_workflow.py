@@ -1,4 +1,5 @@
 import ast
+import json
 from copy import deepcopy
 
 import pytest
@@ -53,6 +54,47 @@ def test_generated_native_entries_load_real_modules_and_preserve_dataclass_decor
     assert namespace["DocumentationAdmission"].model_fields["work_id"]
     assert not any(isinstance(n, ast.ImportFrom) and n.level for n in ast.walk(ast.parse(source)))
     assert "base64" not in source.decode() and "run_native_pipeline" in namespace
+
+
+@pytest.mark.parametrize("assembled", [False, True])
+@pytest.mark.parametrize("has_table", [False, True])
+def test_inventory_entry_persists_real_inventory_and_freezes_handoff(assembled, has_table, monkeypatch):
+    import sys
+    from types import ModuleType
+    from unittest.mock import Mock
+    from app.modules.ai_data_governance import native_pipeline
+    from tests.modules.ai_data_governance.test_ai_dg_inventory_writer import MemoryRepository
+    from tests.modules.ai_data_governance.test_ai_dg_sync_inventory import Reader, table
+
+    runtime = native_pipeline
+    if assembled:
+        runtime = ModuleType("inventory_entry_regression")
+        monkeypatch.setitem(sys.modules, runtime.__name__, runtime)
+        exec(compile(pipeline_task_source(binding(), "sync_inventory"), "sync_inventory.py", "exec"), runtime.__dict__)
+    monkeypatch.setattr(runtime, "phase_work", lambda *args: [])
+    repository, journal, request = MemoryRepository(), Store(), Mock()
+    tables = {"catalog.schema.users": {**table(), "description": "Confirmed catalog description"}} if has_table else {}
+    reader = Reader(tables)
+    args = TaskArguments(RUN, TASK, "sync_inventory", 1, 0)
+    active = Mock()
+
+    result = runtime.pipeline_inventory(repository, journal, request, reader, binding(), "revision", args,
+        check_active=active)
+
+    scope, = result["scopes"]
+    inventory = repository.data["AI_DG_RUN"][(scope["inventory_run_id"],)]
+    stats = json.loads(inventory["manifest_json"])["inventory"]
+    assert inventory["status"] == "SUCCEEDED" and stats["enumeration_complete"]
+    assert stats["tables_observed"] == stats["assets_confirmed"] == int(has_table)
+    assert stats["model_calls"] == stats["catalog_writes"] == 0
+    assert journal.read("executions", execution_receipt_key(RUN)) == result
+    assert reader.detail_calls == list(tables)
+    assert active.called
+    request.assert_not_called()
+    writes = len(repository.calls)
+    assert runtime.pipeline_inventory(repository, journal, request, reader, binding(), "revision", args,
+        check_active=active) == result
+    assert len(repository.calls) == writes
 
 
 def test_execution_receipt_is_stable_across_repairs_and_rejects_foreign_or_duplicate_scopes():

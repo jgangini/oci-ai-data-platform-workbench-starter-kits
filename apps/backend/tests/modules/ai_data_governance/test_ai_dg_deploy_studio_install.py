@@ -7,6 +7,7 @@ import pytest
 
 from app.modules.ai_data_governance.deploy_studio_install import GovernanceInstaller, JOB_NAME, job_matches
 from app.services.oci.aidp import AidpClient
+from app.packages.catalog import load_package
 
 WORKSPACE = '11111111-1111-4111-8111-111111111111'
 SPARK = '22222222-2222-4222-8222-222222222222'
@@ -149,6 +150,19 @@ def test_creating_artifacts_schema_waits_before_agents_jobs_or_files():
         installer.reconcile()
     assert manifest['phase'] == 'verify'
     assert not owner.agents and not owner.job and not owner.files
+
+
+def test_content_resume_records_published_package_version_and_keeps_operation():
+    owner, manifest, installer = fixture()
+    installer.prepare()
+    manifest['pack_version'] = '4.0.0'
+    operation = deepcopy(manifest['operation'])
+    with pytest.raises(Pending):
+        installer.reconcile()
+    assert manifest['phase'] == 'sync'
+    assert manifest['pack_version'] == load_package('ai_data_governance', require_available=False).pack_version
+    assert manifest['operation'] == operation
+    assert manifest['resources']['workflow_key'] == JOB
 
 
 def test_wrong_native_task_identity_never_advances_bootstrap():
