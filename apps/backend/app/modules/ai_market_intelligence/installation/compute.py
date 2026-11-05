@@ -1,5 +1,7 @@
 """Project-owned AI Compute provisioning; never deletes shared resources."""
 from uuid import UUID
+from app.services.oci.aidp import AidpClient
+from app.services.oci.contracts import AidpProvisionPending
 from .resources import resource
 
 
@@ -38,14 +40,17 @@ def prepare_compute(client, expected_workspace, operation_id, *, expected_key=''
             compute = client._request('POST', path, payload=payload, phase='workspace',
                 retry_scope='ai-market-compute:' + operation_id)
         if not compute or not compute.get('key'):
-            raise RuntimeError('Compute creation is pending; keep the same operation identity')
+            raise AidpProvisionPending('Compute creation is pending; keep the same operation identity', 'compute')
         compute = client._request('GET', path + '/' + compute['key'])
     if (compute.get('displayName') != name or compute.get('type') != 'AI_COMPUTE'
             or compute.get('description') != payload['description']):
         raise RuntimeError('Refusing to adopt a compute outside this project operation')
-    state = compute.get('state') or compute.get('lifecycleState')
-    if state not in {'CREATING', 'STARTING', 'ACTIVE', 'STOPPED'}:
-        raise RuntimeError('Market compute is not ready; native state=' + str(state) + '; no replacement created')
+    state = str(compute.get('lifecycleState') or compute.get('state') or '').upper()
+    try:
+        AidpClient._require_operational_state(compute, {'ACTIVE', 'STOPPED'}, 'Market AI compute', 'compute')
+    except AidpProvisionPending:
+        # The caller saves the validated key before waiting for readiness.
+        pass
     shape = compute.get('driverConfig', {}).get('driverShapeConfig', {})
     if shape.get('ocpus') != 1 or shape.get('memoryInGBs') != 16:
         raise RuntimeError('Market compute shape differs from the prepared payload')

@@ -311,6 +311,32 @@ def test_current_compute_preserves_foreign_owner_and_resumes_exact_identity():
     assert len(posts) == 1 and posts[0]['displayName'] == api.compute_name
 
 
+@pytest.mark.parametrize('fields', [{'state': 'CREATING'}, {'lifecycleState': 'UPDATING'}, {}])
+def test_pending_compute_key_is_saved_and_resume_waits_for_same_resource(fields):
+    api = client()
+    record, rows, calls, writes = saved('compute'), [], [], []
+    api._save = lambda item: writes.append(copy.deepcopy(item))
+    api._list = lambda *a, **k: rows
+    def request(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        if method == 'POST':
+            rows.append({**kwargs['payload'], 'key': 'current', **fields})
+        assert method == 'POST' or path == '/workspaces/workspace/clusters/current'
+        return rows[0]
+    api._request = request
+    for _ in range(2):
+        with pytest.raises(AidpProvisionPending, match='dedicated AI Compute'):
+            api._compute_step(record)
+        assert writes[-1]['resources']['agent_compute_key'] == 'current'
+        assert record['resources']['compute_creation_operation'] == OP
+        assert record['operation_id'] == OP and record['phase'] == 'compute'
+    rows[0].update(lifecycleState='ACTIVE', state='ACTIVE')
+    api._compute_step(record)
+    assert record['resources']['agent_compute_key'] == 'current'
+    posts = [call for call in calls if call[0] == 'POST']
+    assert len(posts) == 1 and posts[0][2]['retry_scope'] == 'ai-market-compute:' + OP
+
+
 
 def test_test_session_submission_is_durable_and_does_not_repeat_after_timeout():
     api = client()

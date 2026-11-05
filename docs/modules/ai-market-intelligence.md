@@ -17,6 +17,8 @@ El alias local `default` se vincula al workspace seleccionado en el portal. `pac
 
 El [cliente de instalación](../../apps/backend/app/modules/ai_market_intelligence/client.py) conserva las fases `verify → credentials → compute → files → agent → permissions → test → ready`. Registra intenciones antes de escribir y reconcilia resultados inciertos por la operación existente. Preserva archivos, credenciales y despliegues ajenos; no adopta instalaciones por similitud de nombre.
 
+La preparación del compute conserva su clave conocida mientras OCI publica un estado operativo. Los estados transitorios o todavía ausentes mantienen la instalación pendiente; los estados terminales se rechazan sin crear un reemplazo. La operación, el workspace, la identidad y la configuración del recurso se verifican antes de reutilizarlo. Si la respuesta de creación aún no contiene una clave, la recuperación conserva la misma operación y su token de reintento.
+
 La API no admite selectores de implementación. GET solo consulta; POST exige administrador nativo verificado, operación UUID estable y configuración validada sin devolver tokens en errores. El instalador comprueba los metadatos de la credencial en AIDP Credential Store y la reutiliza sin rotación; la conexión con Apify requiere una prueba independiente. El token completo nunca llega al estado público ni se almacena en el navegador.
 
 La configuración inicial mantiene `research_enabled=false`. La comprobación de setup exige revisión exacta, sesión vinculada y respuesta completa con cero llamadas al modelo y cero capturas Apify. Una instalación ready o un TEST ACTIVE no certifica investigación, MCP ni aceptación semántica. Una actualización de fuente no sustituye silenciosamente el candidato enviado.
