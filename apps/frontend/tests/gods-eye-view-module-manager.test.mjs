@@ -116,7 +116,7 @@ test('reopening a live installation polls GET without overlap and displays the a
   assert.equal(view.nodes().filter(node => node?.type?.name === 'SearchableCombobox').length, 0);
   assert.equal(view.find('p', props => props.className === 'registration-progress-phase').props.children, 'OCI Compute');
   assert.match(view.text(), /Creating the private viewer/);
-  assert.match(view.text(), /Installation continues in the background/);
+  assert.doesNotMatch(view.text(), /Installation continues in the background/);
   assert.equal(view.find('div', props => props.className === 'registration-result module-install-progress').props.role, 'status');
   view.find('span', props => props.className === 'progress-orbit');
   const track = view.find('div', props => props.role === 'progressbar');

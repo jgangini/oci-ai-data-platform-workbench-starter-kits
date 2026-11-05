@@ -163,7 +163,6 @@ export function GodsEyeViewModuleManager({ api, onClose, onChanged }: {
           <span />
         </div>
         <p className="registration-progress-detail">{activating ? module.message : 'Submitting the installation request…'}</p>
-        <p className="registration-progress-detail">Installation continues in the background when you close this window. Reopen it to follow progress.</p>
       </div>}
     </div>
     <footer>
