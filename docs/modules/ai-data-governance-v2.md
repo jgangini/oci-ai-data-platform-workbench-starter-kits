@@ -4,9 +4,9 @@ This is a development candidate for continuing Governance acceptance in a fresh 
 
 The maintained implementation is [app/ai_data_governance](../../apps/backend/app/ai_data_governance/). Prompts and the eighteen-table model are under [the Governance lab](../../apps/backend/app/labs/ai_data_governance/). Runtime assembly produces readable Python files with explicit target bindings; it does not copy an operator profile, token, wallet, historical conversation or permission grant into the deployment.
 
-## Deploy Studio selection
+## Fresh-tenant Terraform configuration
 
-Choose **Governance installation → Governance V2 · TEST candidate** when creating the new deployment. The manifest passes `aidp_runtime_mode=v2_test` to Terraform and the application environment as `GOVERNANCE_RUNTIME_MODE`. The default remains `legacy`.
+Deploy Studio uses the stable `legacy` runtime and does not expose a Governance installation selector. The V2 TEST candidate remains available to explicitly configured direct Terraform deployments through `aidp_runtime_mode=v2_test`, passed to the application environment as `GOVERNANCE_RUNTIME_MODE`. This compatibility option does not change the default or establish V2 production acceptance.
 
 Deploy Studio prepares the platform, workspace, selected artifacts bucket and application. In the portal, open **Settings → Application → AI Data Governance**, select an authorized platform administrator, review the resources, and start installation. The same durable module operation is resumed after polling, navigation or a transient failure. Selecting the V2 mode does not convert an already-installed legacy module. Do not delete or replace an existing installation as a migration shortcut.
 

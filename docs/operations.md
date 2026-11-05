@@ -4,7 +4,7 @@
 
 New deployments install a dedicated RSA SSH public key for `opc`. Deploy Studio collects its private key as the declared `ssh-private-key.pem` artifact and emails it inside `vm-ssh-access.zip` with connection instructions; the email's Attachments list names that ZIP. Keep the package as an administrative credential. It is separate from the OCI API profile.
 
-Set **SSH allowed source CIDR** to the administrator's IPv4 source (preferably `/32`) to allow TCP 22. Empty keeps public SSH closed. The installed key can later be used after an authorized OCI network-rule update, without resetting VM access. Existing VMs without this installed key require a separate migration; an image update or a changed email template cannot invent their private key.
+Deploy Studio keeps public SSH closed and does not expose a source-CIDR field. Direct Terraform deployments retain the optional `ssh_allowed_cidr` variable for an explicitly authorized administrator IPv4 source (preferably `/32`); its empty default keeps TCP 22 closed. The installed key can later be used after an authorized OCI network-rule update, without resetting VM access. Existing VMs without this installed key require a separate migration; an image update or a changed email template cannot invent their private key.
 
 The generated SSH private key is sensitive Terraform resource state, collected through the existing Deploy Studio artifact path. Restrict access to Resource Manager state and deployment artifacts. Private key contents are not Terraform outputs, VM metadata, email HTML, execution logs or source archives; only the public key enters VM metadata.
 
