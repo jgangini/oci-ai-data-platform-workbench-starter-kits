@@ -63,6 +63,8 @@ class Owner:
         return changed
 
     def _ensure_agent(self, workspace, compute, name, folder, source, descriptor, **kwargs):
+        if kwargs.get('before_create'):
+            kwargs['before_create']()
         key=DOC if name.endswith('sync_master_catalog') else AGENT
         self.agents[key]={'key':key,'displayName':name,'pathInfo':folder}
         return key, True
@@ -289,3 +291,57 @@ def test_uncertain_agent_creation_never_submits_a_duplicate_or_writes_sources():
     assert manifest == original
     assert not owner.saved and not owner.files
     owner._ensure_agent.assert_not_called()
+
+
+def test_pending_agent_file_upload_does_not_record_native_creation_and_can_resume():
+    from unittest.mock import Mock
+    from app.modules.ai_data_governance.deployment_bundle import GOVERNANCE_ENTRY_PATH
+
+    owner, manifest, installer = fixture()
+    manifest['resources']['agent_compute_key'] = COMPUTE
+    owner._agent_entry_path = lambda root, filename=None: root + '/' + (filename or 'agent.py')
+    owner._agent_description = 'Governance TEST'
+    owner._ensure_agent = lambda *args, **kwargs: AidpClient._ensure_agent(owner, *args, **kwargs)
+    original_upload = owner._upload_file
+    pending = True
+
+    def upload(workspace, path, body, **kwargs):
+        nonlocal pending
+        original_upload(workspace, path, body, **kwargs)
+        if pending and path.endswith('agent-manifest.json'):
+            pending = False
+            raise Pending('Descriptor readback is pending', 'content')
+        return True
+
+    def request(method, path, **kwargs):
+        assert method == 'POST' and path == f'/workspaces/{WORKSPACE}/agents'
+        assert manifest['resources']['agent_key_creation_submitted'] is True
+        owner.agents[AGENT] = {'key': AGENT, **kwargs['payload']}
+
+    owner._upload_file = upload
+    owner._request = Mock(side_effect=request)
+    with pytest.raises(Pending, match='Descriptor readback'):
+        installer.ensure_agent('agent_key', 'ai_data_governance', GOVERNANCE_ENTRY_PATH, b'code')
+    assert not manifest['resources'].get('agent_key_creation_submitted')
+    owner._request.assert_not_called()
+    installer.ensure_agent('agent_key', 'ai_data_governance', GOVERNANCE_ENTRY_PATH, b'code')
+    assert manifest['resources']['agent_key'] == AGENT
+    assert owner._request.call_count == 1
+
+
+def test_actual_agent_post_uncertainty_keeps_creation_intent_and_never_reposts():
+    from unittest.mock import Mock
+    from app.modules.ai_data_governance.deployment_bundle import GOVERNANCE_ENTRY_PATH
+
+    owner, manifest, installer = fixture()
+    manifest['resources']['agent_compute_key'] = COMPUTE
+    owner._agent_entry_path = lambda root, filename=None: root + '/' + (filename or 'agent.py')
+    owner._agent_description = 'Governance TEST'
+    owner._ensure_agent = lambda *args, **kwargs: AidpClient._ensure_agent(owner, *args, **kwargs)
+    owner._request = Mock(side_effect=Pending('Native POST outcome is uncertain', 'content'))
+    with pytest.raises(Pending, match='Native POST outcome'):
+        installer.ensure_agent('agent_key', 'ai_data_governance', GOVERNANCE_ENTRY_PATH, b'code')
+    assert manifest['resources']['agent_key_creation_submitted'] is True
+    with pytest.raises(Pending, match='uncertain result'):
+        installer.ensure_agent('agent_key', 'ai_data_governance', GOVERNANCE_ENTRY_PATH, b'code')
+    assert owner._request.call_count == 1

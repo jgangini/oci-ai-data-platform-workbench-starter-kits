@@ -51,6 +51,33 @@ def bare_client() -> AidpClient:
     return client
 
 
+@pytest.mark.parametrize('expected', [
+    b'{"schema_version": 1, "module_id": "ai_data_governance"}',
+    b'{\n  "z": [1, true],\n  "a": "Governance"\n}\n',
+])
+def test_uploaded_json_readback_preserves_content_across_native_json_parsing(expected):
+    from unittest.mock import Mock
+
+    client = bare_client()
+    parsed = client._response_body(FakeResponse(json.loads(expected)))
+    client._workspace_object = Mock(side_effect=[(None, {}), (parsed, {'type': 'FILE'})])
+    client._request = Mock()
+    assert client._upload_file('workspace', '/Workspace/agent-manifest.json', expected)
+    assert client._request.call_count == 1
+    assert client._request.call_args.kwargs['data'] == expected
+
+
+@pytest.mark.parametrize('actual,expected', [
+    ({'enabled': True}, b'{"enabled": 1}'),
+    ({'version': 2}, b'{"version": 1}'),
+    ({'name': 'agent'}, b'not JSON'),
+    (b'{"a":1}', b'{ "a": 1 }'),
+    ('source changed', b'source'),
+])
+def test_workspace_content_readback_rejects_material_or_raw_byte_drift(actual, expected):
+    assert not AidpClient._content_matches(actual, expected)
+
+
 def test_participant_code_names_technical_resources_and_email_names_workspace() -> None:
     owner = "u_" + hashlib.sha256(USER_OCID.encode()).hexdigest()[:16]
     assert participant_owner_key(USER_OCID) == owner

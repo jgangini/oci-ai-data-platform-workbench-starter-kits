@@ -113,15 +113,20 @@ class GovernanceInstaller:
         definition = json.loads(definition_path.read_text(encoding="utf-8"))
         if definition["pathInfo"] != folder or definition["entry_file"] != entry.rsplit('/', 1)[1]:
             raise self.error("Governance agent descriptor disagrees with its maintained entry.")
-        self.resources[intent] = True
         if expected:
             self.resources[resource] = expected
-        self.save()
+            self.save()
+
+        def before_create():
+            self.resources[intent] = True
+            self.save()
+
         descriptor = json.dumps({'schema_version': 1, 'module_id': 'ai_data_governance',
             'deployment_stage': 'TEST', 'entry_sha256': hashlib.sha256(source).hexdigest()}).encode()
         key, _ = self.client._ensure_agent(self.workspace, self.resources['agent_compute_key'],
             name, entry.rsplit('/', 1)[0], source, descriptor, repair_drift=True,
-            expected_key=expected or '', entry_filename=entry.rsplit('/', 1)[1])
+            expected_key=expected or '', entry_filename=entry.rsplit('/', 1)[1],
+            before_create=before_create)
         self.resources[resource] = key
         self.save()
 

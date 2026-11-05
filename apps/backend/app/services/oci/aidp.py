@@ -10,7 +10,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 from oci._vendor import requests
@@ -736,6 +736,7 @@ class AidpClient:
         repair_drift: bool,
         expected_key: str = "",
         entry_filename: str | None = None,
+        before_create: Callable[[], None] | None = None,
     ) -> tuple[str, bool]:
         session_config = {"variables": {}}
         entry_path = self._agent_entry_path(root, entry_filename)
@@ -769,6 +770,8 @@ class AidpClient:
         ) or changed
         created = False
         if not agents:
+            if before_create is not None:
+                before_create()
             self._request(
                 "POST",
                 f"/workspaces/{workspace_key}/agents",
@@ -950,7 +953,12 @@ class AidpClient:
         elif isinstance(body, str):
             actual = body.encode("utf-8")
         elif isinstance(body, (dict, list)):
+            try:
+                parsed_expected = json.loads(expected)
+            except (ValueError, UnicodeDecodeError):
+                return False
             actual = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            expected = json.dumps(parsed_expected, sort_keys=True, separators=(",", ":")).encode("utf-8")
         else:
             return False
         return actual == expected

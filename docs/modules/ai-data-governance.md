@@ -26,6 +26,8 @@ El [ensamblador](../../apps/backend/app/modules/ai_data_governance/deployment_bu
 
 En Settings → Application se selecciona un administrador AIDP verificado y se confirma Deploy. El [instalador único](../../apps/backend/app/modules/ai_data_governance/deploy_studio_install.py) conserva operación, recursos, intenciones y recibo para reanudar. GET solo observa; HTTP 202 indica trabajo pendiente. El usuario operador y la credencial OCI compartida `AidpRuntime` deben conservar su identidad; entradas duplicadas, permisos insuficientes o recursos ajenos bloquean la operación.
 
+La preparación de archivos precede al registro de intención de crear cada agente. Una espera de publicación de archivos permite reanudar la misma operación; una respuesta incierta después de enviar el POST mantiene el bloqueo para evitar duplicados. El readback compara código y contenido bruto byte a byte; cuando la API devuelve un objeto JSON ya interpretado, compara su contenido JSON conservando tipos y valores, sin exigir el orden de claves ni los espacios originales.
+
 El agente consultivo requiere `deployment_stage=TEST`. La instalación no acredita calidad semántica, permisos de un segundo usuario ni recuperación real. Los accesos de producción y las operaciones de mantenimiento no aceptadas permanecen bloqueados. Cambiar carpetas locales no adopta ni migra una instalación remota.
 
 El worker documental tiene un despliegue de ejecución propio para el workflow; esto no publica el agente consultivo en PROD.
