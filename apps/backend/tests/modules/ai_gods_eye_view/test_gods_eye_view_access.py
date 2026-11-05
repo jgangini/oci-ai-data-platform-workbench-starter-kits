@@ -1,10 +1,69 @@
+import asyncio
 import json
+from dataclasses import replace
+from types import SimpleNamespace
 
+import httpx
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import LOCAL_COOKIE_NAME, create_app
 from app.security import hash_secret, issue_session, verify_session
+from tests.api.test_api import make_client, login
+
+
+@pytest.mark.parametrize("changed_identity", [None, "not-admin", "ocid", "invalid-app"])
+def test_installation_reader_callback_revalidates_original_platform_administrator(tmp_path, monkeypatch, changed_identity):
+    from app.modules.ai_gods_eye_view.runtime import api, module
+    client = make_client(tmp_path, deployment_mode="production")
+    app = client.app
+    app.state.settings = replace(app.state.settings, viewer_oidc_app_name="viewer", gods_eye_view_group_id="readers")
+    callbacks, grants, app_checks = [], [], []
+    class Module:
+        def __init__(self, settings, runtime, grant_administrator_reader):
+            callbacks.append(grant_administrator_reader)
+        async def status(self, deploy=False, administrator=None):
+            return {"status": "available"}
+    monkeypatch.setattr(module, "GodsEyeViewModule", Module)
+    monkeypatch.setattr(api, "runtime_for", lambda _: SimpleNamespace())
+    identity = app.state.test_identity
+    async def group():
+        return "readers"
+    async def request(method, path, **kwargs):
+        app_checks.append((method, path))
+        assert method == "GET" and path == "/admin/v1/Apps"
+        assert kwargs["params"]["filter"] == 'name eq "viewer"'
+        return httpx.Response(200, request=httpx.Request(method, "https://identity.example.test" + path), json={
+            "totalResults": 1, "Resources": [{"id": "app", "name": "viewer", "active": changed_identity != "invalid-app",
+                "isOAuthClient": True, "clientType": "public", "allowedGrants": ["authorization_code"],
+                "redirectUris": ["https://portal.example.test/api/auth/oci/callback"]}]})
+    async def grant(user_id, enabled):
+        grants.append((user_id, enabled))
+    identity._gods_eye_view_group, identity._request, identity.grant_gods_eye_view = group, request, grant
+    login(client)
+    assert client.get("/api/admin/gods-eye-view/module").status_code == 200
+    assert len(callbacks) == 1 and grants == app_checks == []
+    administrator = {"id": "user-id", "ocid": "ocid1.user.oc1..ada"}
+    if changed_identity == "not-admin":
+        app.state.test_aidp.admin_ocids.clear()
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(callbacks[0](administrator))
+        assert error.value.status_code == 403
+    elif changed_identity == "ocid":
+        with pytest.raises(ValueError, match="identity has changed"):
+            asyncio.run(callbacks[0]({**administrator, "ocid": "ocid1.user.oc1..other"}))
+    elif changed_identity == "invalid-app":
+        with pytest.raises(ValueError, match="Invalid viewer sign-in application"):
+            asyncio.run(callbacks[0](administrator))
+        assert app_checks == [("GET", "/admin/v1/Apps")] and not grants
+    else:
+        asyncio.run(callbacks[0](administrator))
+        assert grants == [("user-id", True)] and app_checks == [("GET", "/admin/v1/Apps")]
+    if changed_identity in {"not-admin", "ocid"}:
+        assert grants == app_checks == []
+    assert not identity.closed
 
 
 def local_settings(tmp_path, **overrides):

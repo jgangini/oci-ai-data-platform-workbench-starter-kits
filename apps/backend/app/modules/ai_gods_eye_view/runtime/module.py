@@ -18,8 +18,9 @@ PACKAGE = {"package_id": _pack.lab_id, "display_name": _pack.display_name,
 
 
 class GodsEyeViewModule:
-    def __init__(self, settings, runtime):
+    def __init__(self, settings, runtime, grant_administrator_reader=None):
         self.settings, self.runtime = settings, runtime
+        self.grant_administrator_reader = grant_administrator_reader
         self.lock = asyncio.Lock()
         self.installer = None
 
@@ -29,7 +30,8 @@ class GodsEyeViewModule:
                 if self.settings.portal_managed_modules and not self.settings.gods_eye_view_local_mode:
                     if self.installer is None:
                         from .installation import ModuleInstallation
-                        self.installer = ModuleInstallation(self.settings, self.runtime.aidp_factory, lambda: self._status(True))
+                        self.installer = ModuleInstallation(self.settings, self.runtime.aidp_factory,
+                            lambda: self._status(True), self.grant_administrator_reader)
                     state = await self.installer.status(deploy, administrator)
                     return self._response(state, stage=state.get("stage"), resumable=state.get("resumable", False))
                 return await asyncio.to_thread(self._status, deploy)

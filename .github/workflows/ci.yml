@@ -69,6 +69,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -f docker/Dockerfile -t aidp-lab:test .
+      - name: Verify viewer authentication proxy
+        run: docker run --rm --network none --mount type=bind,source="$PWD",target=/source,readonly --entrypoint python aidp-lab:test /source/apps/backend/tests/modules/ai_gods_eye_view/test_viewer_nginx.py
       - run: docker build -f modules/ai-gods-eye-view/Dockerfile -t gods-eye-view:test .
 
   market-runtime:

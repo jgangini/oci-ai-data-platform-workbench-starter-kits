@@ -15,6 +15,8 @@ import oci
 from app.config import Settings
 from app.modules.ai_gods_eye_view.runtime.installation import CREATE_ADDRESSES, ModuleInstallation, RECEIPT_KEY, check_plan
 from tests.modules.ai_gods_eye_view.test_gods_eye_view_control_store import Objects
+from tests.modules.ai_gods_eye_view.test_identity_gods_eye_view import native_identity
+from app.services.oci.contracts import IdentityPending
 
 
 ARCHIVE = b"immutable terraform archive"
@@ -328,6 +330,111 @@ def test_readiness_failure_never_reports_success_or_leaks_provider_details(monke
     state = install.read()
     assert state["status"] == "failed" and not state["enabled"]
     assert "sensitive" not in state["message"]
+
+
+def test_original_administrator_gets_real_reader_membership_only_after_readiness(monkeypatch):
+    install = installer()
+    identity, members, patches = native_identity()
+    administrator = {"id": "participant", "ocid": "ocid1.user.oc1..participant"}
+    events = []
+    monkeypatch.setattr(install, "provision", lambda *_: events.append("infrastructure"))
+    monkeypatch.setattr(install, "bootstrap", lambda *_: events.append("bootstrap"))
+    monkeypatch.setattr(oci.resource_manager, "ResourceManagerClient", lambda *_args, **_kwargs: None)
+    def verify():
+        events.append("verify")
+        assert not members
+        return {"status": "ready", "enabled": True, "message": "verified"}
+    monkeypatch.setattr(install, "verify", verify)
+    async def grant(selected):
+        assert selected == administrator and events == ["infrastructure", "bootstrap", "verify"]
+        await identity.grant_gods_eye_view(selected["id"], True)
+    install.grant_administrator_reader = grant
+    async def scenario():
+        await install.status(True, administrator)
+        await install.task
+        assert install.read()["status"] == "ready"
+        assert install.read()["administrator_reader_grant"] == {
+            "user_id": administrator["id"], "ocid": administrator["ocid"], "status": "completed"}
+        assert members == {"readers"} and len(patches) == 1
+        await identity.grant_gods_eye_view(administrator["id"], False)
+        before = install.read()
+        await install.status()
+        assert install.read() == before
+        await install.status(True, {"id": "other", "ocid": "ocid1.user.oc1..other"})
+        await install.task
+        assert install.read()["status"] == "ready" and not members and len(patches) == 2
+        assert install.read()["administrator_user_id"] == administrator["id"]
+        assert events == ["infrastructure", "bootstrap", "verify", "verify"]
+        install.write(status="activating", enabled=False, stage="verification")
+        await install.status(True, {"id": "other", "ocid": "ocid1.user.oc1..other"})
+        await install.task
+        assert install.read()["status"] == "ready" and not members and len(patches) == 2
+        assert events == ["infrastructure", "bootstrap", "verify", "verify", "verify"]
+        await identity.close()
+    asyncio.run(scenario())
+
+
+def test_pending_reader_grant_resumes_original_beneficiary_without_infrastructure(monkeypatch):
+    install = installer()
+    administrator = {"id": "administrator", "ocid": "ocid1.user.oc1..administrator"}
+    calls = []
+    def provision(*_):
+        calls.append("infrastructure")
+        install.write(plan_job_id="original-plan", apply_job_id="original-apply")
+    monkeypatch.setattr(install, "provision", provision)
+    monkeypatch.setattr(install, "bootstrap", lambda *_: calls.append("bootstrap"))
+    monkeypatch.setattr(oci.resource_manager, "ResourceManagerClient", lambda *_args, **_kwargs: None)
+    async def grant(selected):
+        assert selected == administrator
+        calls.append("grant")
+        if calls.count("grant") == 1:
+            raise IdentityPending("sensitive provider response")
+    install.grant_administrator_reader = grant
+    async def scenario():
+        await install.status(True, administrator)
+        await install.task
+        pending = install.read()
+        assert pending["status"] == "activating" and pending["stage"] == "verification"
+        assert not pending["enabled"] and "sensitive" not in pending["message"]
+        resumed = ModuleInstallation(install.settings, install.aidp_factory, install.verify, grant)
+        assert (await resumed.status())["resumable"]
+        await resumed.status(True, {"id": "other", "ocid": "ocid1.user.oc1..other"})
+        await resumed.task
+        result = resumed.read()
+        assert result["status"] == "ready" and result["administrator_reader_grant"]["status"] == "completed"
+        for field in ("operation_id", "attempt", "plan_job_id", "apply_job_id", "administrator_user_id", "administrator_ocid"):
+            assert result[field] == pending[field]
+        assert calls == ["infrastructure", "bootstrap", "grant", "grant"]
+    asyncio.run(scenario())
+
+
+def test_readiness_failure_never_attempts_administrator_reader_grant(monkeypatch):
+    install = installer()
+    install.write(stage="verification")
+    monkeypatch.setattr(install, "verify", lambda: {"status": "failed", "enabled": False})
+    async def grant(_):
+        pytest.fail("Unready installations must not grant access")
+    install.grant_administrator_reader = grant
+    async def scenario():
+        await install.status(True, {"id": "administrator", "ocid": "ocid1.user.oc1..administrator"})
+        await install.task
+        assert install.read()["status"] == "failed"
+        assert install.read()["administrator_reader_grant"]["status"] == "pending"
+    asyncio.run(scenario())
+
+
+def test_verify_of_existing_ready_installation_does_not_create_reader_grant(monkeypatch):
+    install = installer()
+    install.write(status="ready", enabled=True, stage="complete")
+    async def grant(_):
+        pytest.fail("Verify must not create a new reader assignment")
+    install.grant_administrator_reader = grant
+    async def scenario():
+        await install.status(True, {"id": "administrator", "ocid": "ocid1.user.oc1..administrator"})
+        await install.task
+        assert install.read()["status"] == "ready"
+        assert "administrator_reader_grant" not in install.read()
+    asyncio.run(scenario())
 
 
 def test_native_transport_failure_preserves_attempt_and_recovers_job_on_resume(monkeypatch):

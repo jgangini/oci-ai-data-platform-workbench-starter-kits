@@ -79,8 +79,9 @@ def check_plan(plan, receipt):
 
 
 class ModuleInstallation:
-    def __init__(self, settings, aidp_factory, verify):
+    def __init__(self, settings, aidp_factory, verify, grant_administrator_reader=None):
         self.settings, self.aidp_factory, self.verify = settings, aidp_factory, verify
+        self.grant_administrator_reader = grant_administrator_reader
         self.lock, self.task = asyncio.Lock(), None
 
     def store(self):
@@ -140,8 +141,14 @@ class ModuleInstallation:
                 # ponytail: the portal runs one API process; CAS and OCI job tokens preserve restart recovery.
                 # Add a renewable distributed lease before replicating the administrative API.
                 await asyncio.to_thread(self.receipt)
-                actor = {"administrator_user_id": str(administrator["id"]),
-                         "administrator_ocid": str(administrator["ocid"])} if administrator else {}
+                actor = {}
+                if administrator and not state.get("administrator_user_id") and not state.get("enabled"):
+                    actor = {"administrator_user_id": str(administrator["id"]),
+                             "administrator_ocid": str(administrator["ocid"])}
+                    if self.grant_administrator_reader is not None:
+                        actor["administrator_reader_grant"] = {
+                            "user_id": actor["administrator_user_id"], "ocid": actor["administrator_ocid"],
+                            "status": "pending"}
                 if state.get("status") == "failed":
                     state = await asyncio.to_thread(self.write, **actor, attempt=state.get("attempt", 0) + 1,
                         plan_job_id=None, apply_job_id=None, status="activating", enabled=False)
@@ -274,6 +281,18 @@ class ModuleInstallation:
             verified = self.verify()
             if verified.get("status") != "ready" or not verified.get("enabled"):
                 raise RuntimeError("Native module readiness has not been confirmed")
+            grant = self.read().get("administrator_reader_grant")
+            if grant and grant.get("status") == "pending":
+                self.write(message="Confirming reader access for the original installation administrator.")
+                try:
+                    if self.grant_administrator_reader is None:
+                        raise ValueError("Administrator reader assignment is unavailable")
+                    asyncio.run(self.grant_administrator_reader({"id": grant["user_id"], "ocid": grant["ocid"]}))
+                    self.write(administrator_reader_grant={**grant, "status": "completed"})
+                except Exception:
+                    self.write(status="activating", enabled=False, stage="verification",
+                        message="Reader access for the original installation administrator could not be confirmed. Review the account and resume verification.")
+                    return
             self.write(status="ready", enabled=True, stage="complete", message=verified["message"])
         except Exception as exc:
             state = self.read()

@@ -233,10 +233,21 @@ def mount_gods_eye_view(app, require_admin, require_viewer=None, selected_platfo
         result = await voice_provider().turn(payload, request.is_disconnected)
         return result
 
+    async def grant_administrator_reader(administrator):
+        from app.api.viewer_auth import _application
+        if selected_platform_admin is None:
+            raise ValueError("Platform administrator verification is unavailable")
+        current = await selected_platform_admin(administrator["id"])
+        if current.get("ocid") != administrator["ocid"]:
+            raise ValueError("The installation administrator identity has changed")
+        identity = app.state.identity_factory()
+        await _application(identity, app.state.settings)
+        await identity.grant_gods_eye_view(administrator["id"], True)
+
     async def module_status(deploy=False, administrator=None):
         from .module import GodsEyeViewModule
         if not getattr(app.state, "gods_eye_view_module", None):
-            app.state.gods_eye_view_module = GodsEyeViewModule(app.state.settings, runtime_for(app))
+            app.state.gods_eye_view_module = GodsEyeViewModule(app.state.settings, runtime_for(app), grant_administrator_reader)
         return await app.state.gods_eye_view_module.status(deploy, administrator)
 
     app.state.gods_eye_view_status = module_status

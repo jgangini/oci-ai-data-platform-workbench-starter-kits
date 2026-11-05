@@ -19,7 +19,11 @@ La imagen se construye a partir del commit/archive upstream y parches verificado
 
 Una instalación sirve a todos los lectores. En **Users → Add user** se puede elegir solo este acceso, sin workspace/kit de participante, o combinarlo con kits. No hay selecciones iniciales; la concesión está deshabilitada hasta que el módulo esté listo. **Manage starter kits** permite conceder o revocar a usuarios existentes; no instala el módulo ni concede privilegios OCI/AIDP de administrador.
 
+Al terminar una instalación nueva se concede acceso lector al administrador AIDP seleccionado para instalarla, después de verificar recursos y volver a comprobar su identidad, rol y aplicación OCI de acceso. El diario conserva el beneficiario y el resultado. Si OCI no confirma la concesión, **Resume deployment** reintenta ese paso sin recrear infraestructura ni workflows. **Verify installation** no cambia el beneficiario ni restaura permisos revocados; las instalaciones ya completadas mantienen las asignaciones administradas desde **Users**.
+
 Los lectores abren `/gods-eye-view/` y usan **Sign in with OCI** en `/viewer/login`. El portal intercambia un código de un solo uso con PKCE, valida el token firmado y verifica cuenta y membresía actuales del grupo lector en cada petición autenticada. Revocar bloquea peticiones posteriores de una sesión abierta. Las contraseñas permanecen en OCI. Administración de fuentes, revisiones y ubicaciones de sensores exige la sesión administradora.
+
+Si OCI no permite confirmar el acceso, el proxy devuelve `503` con `Retry-After`, sin reenviar la petición al visor. Los estados OCI de texto y voz se consultan con acceso lector; las claves de proveedores externos son opcionales y su ausencia no significa que OCI esté sin configurar.
 
 Las claves de firma se obtienen con una petición OCI firmada por el operador existente a `/admin/v1/SigningCert/jwk` del dominio configurado. El portal exige que discovery publique exactamente ese endpoint y mantiene la validación de firma, issuer, audience, nonce y vigencia del token. El dominio puede restringir la lectura anónima de su certificado. Cada callback consume su propia transacción; una respuesta de otra pestaña no elimina la cookie de un inicio de sesión más reciente.
 
