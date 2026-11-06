@@ -1,5 +1,6 @@
 {
   "schema_version": 2,
+  "execution_source": "oci_resource_manager",
   "project_id": "oci-aidp-cloud-migration-lab",
   "terraform": {
     "path": "terraform",
@@ -59,18 +60,6 @@
     {
       "key": "apply",
       "label": "Terraform apply"
-    },
-    {
-      "key": "network",
-      "label": "VCN and public subnet"
-    },
-    {
-      "key": "bucket",
-      "label": "Medallion Object Storage"
-    },
-    {
-      "key": "compute",
-      "label": "Starter Kit Application VM"
     },
     {
       "key": "application",

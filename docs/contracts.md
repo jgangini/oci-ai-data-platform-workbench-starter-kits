@@ -22,6 +22,8 @@ Se rechazan usuarios, recursos y manifiestos ajenos. No hay aliases ni adopción
 
 [Deploy Studio](../terraform/deploy-studio.json) usa una release fijada a un commit. Terraform crea AIDP o referencia una plataforma existente, prepara buckets y la VM del portal. El [hook](../terraform/hooks/post_apply.py) reconcilia workspace, catálogo, permisos y bootstrap.
 
+El manifiesto declara `execution_source: "oci_resource_manager"`. `run_steps` define únicamente las etiquetas y el orden de las fases del ciclo de despliegue: cola, credenciales, compartimento, políticas, stack, PLAN, APPLY, aplicación, artefactos, correo y finalización. No define el inventario ni el orden de creación de recursos. Deploy Studio obtiene ese inventario del PLAN de OCI Resource Manager y actualiza las filas de recursos dentro de APPLY con sus logs reales; Terraform puede ejecutar recursos en paralelo según sus dependencias. El hook de aplicación, la preparación de artefactos y el correo conservan sus fases posteriores a APPLY y sus propias comprobaciones.
+
 No se importa estado ni se adoptan recursos de otras pilas. Aplicar este paquete sobre una pila combinada podría retirar recursos: no es un procedimiento de migración.
 
 ## Releases
