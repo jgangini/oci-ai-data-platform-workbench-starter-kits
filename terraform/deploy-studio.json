@@ -19,7 +19,7 @@
   },
   "presentation": {
     "title": "Oracle AI Data Platform Workbench Starter Kits",
-    "summary": "Deploys five laboratory starter kits with isolated Workbench notebooks, scheduled workflows and medallion data layers.",
+    "summary": "Deploys five laboratory starter kits for Banking, Telecommunications, Telco Customer 360 Lineage, Retail and Healthcare on Oracle AI Data Platform Workbench. Participants work with isolated notebooks, scheduled Spark workflows and Landing, Bronze, Silver and Gold data layers, with tables and lineage in Master Catalog. An HTTPS portal lets instructors manage registration, assign starter kits and control participant access. Create a new AIDP platform or reuse an existing one and select the four Medallion buckets in Deploy Studio.",
     "tags": [
       "VM",
       "VCN",
