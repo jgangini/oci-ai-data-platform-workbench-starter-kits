@@ -18,24 +18,21 @@ La discrepancia de rutas puede comprobarse en las [funciones de nombres](../apps
 
 Use el [paquete de Deploy Studio](../terraform/deploy-studio.json) de una [versión inmutable](https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits/releases) validada. Necesita un perfil de operador OCI, una clave API RSA, un compartimento de destino y permisos para los recursos declarados en Terraform. Entregue las credenciales por la carga protegida de Deploy Studio; no las añada al repositorio ni a las fuentes o al estado de Terraform. Seleccione una región suscrita con las capacidades AIDP, base de datos que requiere el formulario.
 
-1. Seleccione un compartimento nuevo o existente y el modo de despliegue.
+1. Seleccione un compartimento nuevo o existente e indique las credenciales del administrador y el código de registro del laboratorio.
 2. Seleccione o cree los cuatro buckets de medallón y otro de artefactos, cuyo nombre predeterminado es `oci_artifacts`. Los cinco deben ser distintos; los existentes deben pertenecer al compartimento seleccionado.
 3. Elija la base de datos nueva o existente. La plataforma mantiene Autonomous para sus contratos actuales.
 4. Despliegue el portal de kits con HTTPS automático. Los módulos se instalan desde Deploy Studio usando sus repositorios independientes.
 5. Revise las fases de comprobación previa, plan, aplicación y comprobación posterior. Un `terraform apply` correcto no certifica espacios de trabajo, modelos, flujos ni participantes.
 6. Conserve el resumen protegido de acceso y las salidas `application_url`, `admin_url` y `aidp_workbench_url`.
 
-| Modo del formulario | Registro |
-| --- | --- |
-| `Laboratory` | Los participantes pueden registrarse con el código del instructor; los administradores también pueden crear usuarios. |
-| `Production` | El registro público está deshabilitado; los administradores crean participantes desde Users. |
+Starter Kits funciona exclusivamente como laboratorio. No hay selector de modo de despliegue. El código de registro es obligatorio y Deploy Studio entrega a Terraform únicamente su verificador PBKDF2. El administrador puede cambiarlo en Settings sin exponer el código guardado.
 
 El [manifiesto de despliegue](../terraform/deploy-studio.json) define el formulario y el contrato de descubrimiento; [`l_outputs.tf`](../terraform/l_outputs.tf) define los endpoints y nombres de buckets resueltos.
 
 
 ## Registrar y activar un participante
 
-1. Abra la URL de la aplicación. En modo `Laboratory`, indique nombre, correo, código de registro y uno o más kits. En modo `Production`, use **Users → Add user** con una cuenta administradora.
+1. Abra la URL de la aplicación e indique nombre, correo, código de registro y uno o más kits. El administrador también puede usar **Users → Add user**.
 2. Espere las fases de identidad, espacio de trabajo, contenido y permisos. Si se ofrece un reintento, continúe la misma operación.
 3. Active la cuenta OCI Identity Domains desde su correo de bienvenida estándar.
 4. Acceda a AIDP Workbench con ese correo y la URL suministrada.

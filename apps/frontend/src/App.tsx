@@ -62,14 +62,12 @@ type AdminSettingsResponse = {
   aidp_service_endpoint: string;
   aidp_url: string;
   aidp_platform_id: string;
-  deployment_mode: "laboratory" | "production";
   operator_username: string;
   registration_code_configured: boolean;
   time_zone: string;
   time_zones: string[];
 };
 type PublicConfig = {
-  deployment_mode: "laboratory" | "production";
   labs: CatalogLab[];
 };
 type AdminSession = { username: string; operator_username: string };
@@ -1010,14 +1008,12 @@ function Shell({
 
 function registrationAccessView(
   configLoaded: boolean,
-  production: boolean,
   adminLoginVisible: boolean,
 ) {
-  const canSwitch = configLoaded && !production;
   return {
-    showAdminLogin: !configLoaded || production || adminLoginVisible,
-    showAdminLink: canSwitch && !adminLoginVisible,
-    showHomeLink: canSwitch && adminLoginVisible,
+    showAdminLogin: !configLoaded || adminLoginVisible,
+    showAdminLink: configLoaded && !adminLoginVisible,
+    showHomeLink: configLoaded && adminLoginVisible,
   };
 }
 
@@ -1028,7 +1024,6 @@ function RegisterPage({
 }) {
   const publicConfig = usePublicConfig();
   const catalog = publicConfig?.labs ?? fallbackCatalog;
-  const production = publicConfig?.deployment_mode === "production";
   const configLoaded = publicConfig !== null;
   const [adminLoginVisible, setAdminLoginVisible] = useState(initialAdminLogin);
   const [form, setForm] = useState({ name: "", email: "" });
@@ -1193,14 +1188,12 @@ function RegisterPage({
     setAdminLoginVisible(true);
   };
   const showRegistration = () => {
-    if (production) return;
     setAdminLoginVisible(false);
     if (window.location.pathname === "/admin/login")
       window.history.replaceState(null, "", "/");
   };
   const accessView = registrationAccessView(
     configLoaded,
-    production,
     adminLoginVisible,
   );
 
@@ -2182,22 +2175,18 @@ function SettingsRegistrationCodeField({
 }
 
 function RegistrationAccessSettings({
-  deploymentMode,
   registrationCode,
   registrationCodeConfigured,
   onRegistrationCodeChange,
   onSave,
   busy,
 }: {
-  deploymentMode: "laboratory" | "production";
   registrationCode: string;
   registrationCodeConfigured: boolean;
   onRegistrationCodeChange: (value: string) => void;
   onSave: () => void;
   busy: boolean;
 }) {
-  if (deploymentMode === "production") return null;
-
   return (
     <SettingsRegistrationCodeField
       value={registrationCode}
@@ -2366,7 +2355,6 @@ function AdminSettings() {
   const [aidpUrl, setAidpUrl] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [aidpPlatformId, setAidpPlatformId] = useState("");
-  const [deploymentMode, setDeploymentMode] = useState<"laboratory" | "production">("laboratory");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
   const [confirmRegistrationSave, setConfirmRegistrationSave] = useState(false);
@@ -2403,7 +2391,6 @@ function AdminSettings() {
     setAidpServiceEndpoint(result.aidp_service_endpoint);
     setAidpUrl(result.aidp_url);
     setAidpPlatformId(result.aidp_platform_id);
-    setDeploymentMode(result.deployment_mode);
     setRegistrationCodeConfigured(result.registration_code_configured);
     if (!section || section === "timezone") setTimeZone(result.time_zone);
     setSavedTimeZone(result.time_zone);
@@ -2501,7 +2488,7 @@ function AdminSettings() {
     setToast(`${label} copied.`);
   }
   function requestRegistrationSave() {
-    if (settingsSaveRef.current || settingsLoading || deploymentMode !== "laboratory") return;
+    if (settingsSaveRef.current || settingsLoading) return;
     if (!/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)) {
       setError("Enter four letters followed by four numbers.");
       return;
@@ -2731,7 +2718,6 @@ function AdminSettings() {
               </span>
             </label>
             <RegistrationAccessSettings
-              deploymentMode={deploymentMode}
               registrationCode={registrationCode}
               registrationCodeConfigured={registrationCodeConfigured}
               onRegistrationCodeChange={setRegistrationCode}

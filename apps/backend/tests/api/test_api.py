@@ -173,13 +173,13 @@ class FakeAidp:
 def make_client(
     tmp_path: Path,
     mode: str = "active",
-    deployment_mode: str = "laboratory",
+    registration_code_hash: str | None = None,
 ) -> TestClient:
     settings = Settings(
         admin_username="lab-admin",
         admin_password_hash=hash_secret("long-admin-password", iterations=1_000, salt=b"admin-test-salt"),
-        deployment_mode=deployment_mode,
-        registration_code_hash=hash_secret("ABCD-1234", iterations=1_000, salt=b"code-test-salt"),
+        registration_code_hash=(hash_secret("ABCD-1234", iterations=1_000, salt=b"code-test-salt")
+                                if registration_code_hash is None else registration_code_hash),
         operator_username="joel.ganggini@oracle.com",
         identity_domain_url="https://identity.example.test",
         developer_group_id="developers", pending_group_id="pending",
@@ -257,19 +257,24 @@ def test_public_catalog_exposes_only_five_participant_labs(tmp_path: Path) -> No
     assert all(lab["description"].strip() for lab in payload["labs"])
     assert payload["labs"][-1]["status"] == "available"
     assert payload["labs"][-1]["pack_version"] == "2.0.0"
-    assert payload["deployment_mode"] == "laboratory"
+    assert "deployment_mode" not in payload
     assert "industries" not in payload
 
 
-def test_production_mode_hides_registration_and_preserves_admin_identity(tmp_path: Path) -> None:
-    client = make_client(tmp_path, deployment_mode="production")
-    assert client.get("/api/config").json()["deployment_mode"] == "production"
-    assert client.post("/api/register", json=register_payload()).status_code == 404
+def test_registration_requires_a_code_and_administrator_can_configure_it(tmp_path: Path) -> None:
+    client = make_client(tmp_path, registration_code_hash="")
+    assert client.post("/api/register", json=register_payload()).status_code == 503
+    assert client.put("/api/admin/settings", json={"registration_code": "ABCD-1234"}).status_code == 401
     login(client)
     assert client.get("/api/admin/session").json() == {
         "username": "lab-admin",
         "operator_username": "joel.ganggini@oracle.com",
     }
+    configured = client.put("/api/admin/settings", json={"registration_code": "ABCD-1234"})
+    assert configured.status_code == 200
+    assert configured.json()["registration_code_configured"] is True
+    assert "ABCD-1234" not in configured.text
+    assert client.post("/api/register", json=register_payload()).status_code == 201
 
 
 def test_health_reports_safe_failure_and_recreates_cached_client(tmp_path: Path) -> None:
@@ -303,7 +308,7 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json()["aidp_service_endpoint"] == "https://aidp.us-chicago-1.oci.oraclecloud.com"
     assert response.json()["aidp_platform_id"] == "ocid1.aidataplatform.oc1..test"
-    assert response.json()["deployment_mode"] == "laboratory"
+    assert "deployment_mode" not in response.json()
     assert response.json()["operator_username"] == "joel.ganggini@oracle.com"
 
 

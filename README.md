@@ -1,6 +1,6 @@
 # Oracle AI Data Platform Workbench Starter Kits
 
-Portal React y API FastAPI para registrar participantes y aprovisionar cinco kits en Oracle AI Data Platform Workbench.
+Portal React y API FastAPI para registrar participantes y aprovisionar cinco kits de laboratorio en Oracle AI Data Platform Workbench. El registro requiere el código del instructor; el administrador también puede crear participantes desde Users.
 
 | Kit | Resultado |
 | --- | --- |

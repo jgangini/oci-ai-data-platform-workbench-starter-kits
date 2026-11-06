@@ -123,24 +123,6 @@
         "group": "application_vm"
       },
       {
-        "name": "deployment_mode",
-        "label": "Deployment mode",
-        "type": "select",
-        "required": true,
-        "default": "laboratory",
-        "group": "application_vm",
-        "options": [
-          {
-            "value": "laboratory",
-            "label": "Laboratory"
-          },
-          {
-            "value": "production",
-            "label": "Production"
-          }
-        ]
-      },
-      {
         "name": "registration_code",
         "label": "Lab registration code",
         "type": "text",
@@ -150,10 +132,6 @@
         "min_length": 9,
         "max_length": 9,
         "transform": "uppercase_pbkdf2_sha256",
-        "visible_when": {
-          "field": "deployment_mode",
-          "equals": "laboratory"
-        },
         "group": "application_vm"
       },
       {
@@ -443,7 +421,6 @@
       }
     ],
     "email_access_fields": [
-      "deployment_mode",
       "admin_username",
       "admin_password",
       "registration_code",

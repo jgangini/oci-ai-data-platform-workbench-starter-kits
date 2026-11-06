@@ -253,8 +253,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Identity is not configured")
 
     def require_registration_ready() -> None:
-        if settings.deployment_mode != "laboratory":
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Participant registration is disabled")
         require_identity()
         if not app.state.settings_store.get_registration_code_hash():
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Registration is not configured")
@@ -393,7 +391,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def public_config() -> dict[str, Any]:
         return {
             "lab_name": "Oracle AI Data Platform Workbench Starter Kits",
-            "deployment_mode": settings.deployment_mode,
             "registration_code_pattern": "AAAA-0000",
             "labs": public_kit_catalog(),
             "local_participant_access": settings.local_development_mode,

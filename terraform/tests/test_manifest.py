@@ -101,16 +101,12 @@ def test_deploy_studio_manifest_contract() -> None:
         "autonomous_database_admin_password",
         "autonomous_database_wallet_password",
     ]
-    assert fields["deployment_mode"]["options"] == [
-        {"value": "laboratory", "label": "Laboratory"},
-        {"value": "production", "label": "Production"},
-    ]
-    assert fields["registration_code"]["visible_when"] == {
-        "field": "deployment_mode",
-        "equals": "laboratory",
-    }
+    assert "deployment_mode" not in fields
+    assert "visible_when" not in fields["registration_code"]
+    assert fields["registration_code"]["required"] is True
+    assert fields["registration_code"]["transform"] == "uppercase_pbkdf2_sha256"
+    assert 'variable "deployment_mode"' not in variables
     assert manifest["form"]["email_access_fields"] == [
-        "deployment_mode",
         "admin_username",
         "admin_password",
         "registration_code",

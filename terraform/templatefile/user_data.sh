@@ -139,7 +139,6 @@ retry 5 python3 "$SOURCE_DIR/scripts/release/load_release_image.py" \
 cat > /opt/aidp-lab/.env <<'EOF'
 ADMIN_USERNAME=${admin_username}
 ADMIN_PASSWORD_HASH=${admin_password_hash}
-DEPLOYMENT_MODE=${deployment_mode}
 REGISTRATION_CODE_HASH=${registration_code_hash}
 OPERATOR_USERNAME=${operator_username}
 IDENTITY_DOMAIN_URL=${identity_domain_url}

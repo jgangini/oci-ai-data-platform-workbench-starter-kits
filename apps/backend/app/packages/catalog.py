@@ -59,7 +59,6 @@ class Package:
     status: str
     kind: str
     scope: str
-    installation_modes: tuple[str, ...]
     pack_sha256: str
     datasets: tuple[PackageAsset, ...]
     notebooks: tuple[PackageAsset, ...]
@@ -263,10 +262,7 @@ def load_package(lab_id: str, *, require_available: bool = True) -> Package:
     )
     datasets, notebooks = _pack_assets(root, metadata, status, kind, lab_id)
     scope = str(metadata.get("scope") or "participant")
-    installation_modes = tuple(map(str, metadata.get("installation_modes") or ["laboratory", "production"]))
-    if scope != "participant" or any(
-        mode not in {"laboratory", "production"} for mode in installation_modes
-    ):
+    if scope != "participant":
         raise PackageError(f"Invalid lab scope: {lab_id}")
     return Package(
         lab_id=lab_id,
@@ -275,7 +271,6 @@ def load_package(lab_id: str, *, require_available: bool = True) -> Package:
         status=status,
         kind=kind,
         scope=scope,
-        installation_modes=installation_modes,
         pack_sha256=digest,
         datasets=datasets,
         notebooks=notebooks,

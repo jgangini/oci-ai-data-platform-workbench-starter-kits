@@ -41,11 +41,11 @@ test("registration has no password field while administrator login remains prote
   assert.doesNotMatch(source, /Generate password/);
 });
 
-test("deployment mode selects registration or inline administrator login", () => {
+test("laboratory registration and inline administrator login remain accessible", () => {
   assert.match(source, /function RegisterPage\(\{[\s\S]*initialAdminLogin = false/);
   assert.match(source, /const \[adminLoginVisible, setAdminLoginVisible\] = useState\(initialAdminLogin\)/);
-  assert.match(source, /const production = publicConfig\?\.deployment_mode === "production"/);
-  assert.match(source, /function registrationAccessView[\s\S]*showAdminLogin: !configLoaded \|\| production \|\| adminLoginVisible/);
+  assert.doesNotMatch(source, /deployment_mode|deploymentMode/);
+  assert.match(source, /function registrationAccessView[\s\S]*showAdminLogin: !configLoaded \|\| adminLoginVisible/);
   assert.match(source, /onAdminLogin=\{accessView\.showAdminLink \? showAdminLogin : undefined\}/);
   assert.match(source, /onHome=\{accessView\.showHomeLink \? showRegistration : undefined\}/);
   assert.match(source, /accessView\.showAdminLogin \? \([\s\S]*<AdminLoginCard \/>/);

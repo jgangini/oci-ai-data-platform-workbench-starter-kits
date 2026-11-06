@@ -9,7 +9,7 @@ const poll = {};
 new Function('exports', ts.transpileModule(readFileSync(new URL('../src/registrationPoll.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(poll);
 const assignments = {};
 new Function('exports', ts.transpileModule(readFileSync(new URL('../src/labAssignments.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(assignments);
-const settings = { aidp_service_endpoint: 'https://example.test/api', aidp_url: 'https://example.test/workbench', aidp_platform_id: 'platform', deployment_mode: 'laboratory', registration_code_configured: true, time_zone: 'America/Bogota', time_zones: ['America/Bogota', 'UTC'] };
+const settings = { aidp_service_endpoint: 'https://example.test/api', aidp_url: 'https://example.test/workbench', aidp_platform_id: 'platform', registration_code_configured: true, time_zone: 'America/Bogota', time_zones: ['America/Bogota', 'UTC'] };
 const release = { current_release: 'v2.3.9', current_commit_sha: 'abc123', latest_release: 'v2.4.0', update_available: true, updater_available: true, operation: null, packages: [] };
 async function harness(t, currentRelease = release, route = '/admin/settings', initial = {}, sessionState = new Map(), loginProps = null) {
   let cursor = 0, dirty = true, effects = [], tree;
@@ -177,13 +177,14 @@ test('registration code validates incomplete drafts and preserves a rejected dra
   assert.equal(registration().props.busy, false);
 });
 
-test('production registration settings expose no code save action', async t => {
-  const h = await harness(t, release, '/admin/settings', { '/api/admin/settings': { ...settings, deployment_mode: 'production' } });
+test('registration settings always expose code configuration', async t => {
+  const h = await harness(t, release, '/admin/settings');
   const registration = h.find('RegistrationAccessSettings');
-  assert.equal(registration.type(registration.props), null);
+  assert.equal(registration.type(registration.props).type.name, 'SettingsRegistrationCodeField');
   h.act(() => { registration.props.onRegistrationCodeChange('DEMO-4321'); registration.props.onSave(); });
   assert.equal(h.mutations().length, 0);
-  assert.equal(h.find('ConfirmModal', props => props.title === 'Save registration code?').props.open, false);
+  h.act(() => h.find('RegistrationAccessSettings').props.onSave());
+  assert.equal(h.find('ConfirmModal', props => props.title === 'Save registration code?').props.open, true);
 });
 
 test('application updates require confirmation, preserve the warning and cancel without dispatching', async t => {
@@ -214,7 +215,7 @@ const administrators = [
 const text = value => Array.isArray(value) ? value.map(text).join('') : value == null || typeof value === 'boolean' ? '' : typeof value === 'object' ? text(value.props?.children) : String(value);
 const action = (h, label) => h.find('button', props => text(props.children) === label);
 test('Users keeps participant actions and OCI administrator restrictions without module requests', async t => {
-  const h = await harness(t, release, '/admin/users', { '/api/admin/users': { users: administrators }, '/api/config': { deployment_mode: 'laboratory', labs: [] } });
+  const h = await harness(t, release, '/admin/users', { '/api/admin/users': { users: administrators }, '/api/config': { labs: [] } });
   assert.equal(h.nodes().filter(node => node?.props?.className === 'table-action table-module').length, 0);
   assert.ok(h.find('button', props => props['aria-label'] === 'Manage starter kits for student@example.test'));
   assert.ok(h.find('button', props => props['aria-label'] === 'Manage starter kits for operator@example.test'));
@@ -533,7 +534,7 @@ const kitCatalog = [
 ].map(([lab_id, display_name]) => ({ lab_id, display_name, pack_version: '2.0.0', available: true, status: 'available' }));
 const participant = { id: 'participant', name: 'Student', email: 'student@example.test', active: true, status: 'active', managed: true,
   is_aidp_admin: false, labs: [{ lab_id: 'banking', pack_version: '2.0.0', phase: 'permissions' }] };
-const kitInitial = (user = participant) => ({ '/api/config': { deployment_mode: 'laboratory', labs: kitCatalog }, '/api/admin/users': { users: [user] } });
+const kitInitial = (user = participant) => ({ '/api/config': { labs: kitCatalog }, '/api/admin/users': { users: [user] } });
 const create = h => h.find('CreateUserModal');
 const manager = h => h.find('LabManagerModal');
 const modalControl = (h, component, type, match) => {

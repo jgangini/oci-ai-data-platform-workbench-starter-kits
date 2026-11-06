@@ -6,7 +6,7 @@
 
 El administrador usa /admin/users para crear participantes y asignar uno o varios kits. El portal conserva la operación y consulta el progreso. Los fallos no borran el estado necesario para reintentar.
 
-Laboratory permite registro con código del instructor. Production restringe la creación al administrador. Añadir, retirar o eliminar material mantiene el aislamiento del participante y solo actúa sobre recursos verificados como propios.
+El portal funciona exclusivamente como laboratorio y permite el registro con el código del instructor. Si falta su verificador, el registro devuelve un error de configuración; el administrador puede guardar un código válido desde Settings. Añadir, retirar o eliminar material mantiene el aislamiento del participante y solo actúa sobre recursos verificados como propios.
 
 ## Configuración y versiones
 

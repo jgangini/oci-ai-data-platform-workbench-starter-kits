@@ -13,13 +13,6 @@ from pytz import all_timezones_set, common_timezones
 from .security import hash_secret
 
 
-def _deployment_mode(value: str) -> str:
-    normalized = value.strip().lower()
-    if normalized not in {"laboratory", "production"}:
-        raise ValueError("DEPLOYMENT_MODE must be laboratory or production")
-    return normalized
-
-
 def _artifacts_bucket_name(value: str) -> str:
     normalized = value.strip()
     if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", normalized) is None:
@@ -57,7 +50,6 @@ def _application_repository(value: str) -> str:
 class Settings:
     admin_username: str = "admin"
     admin_password_hash: str = ""
-    deployment_mode: str = "laboratory"
     registration_code_hash: str = ""
     operator_username: str = ""
     identity_domain_url: str = ""
@@ -94,7 +86,6 @@ class Settings:
             admin_username=os.getenv("ADMIN_USERNAME", "admin"),
             local_identity_artifact_dir=os.getenv("LOCAL_IDENTITY_ARTIFACT_DIR", ""),
             admin_password_hash=os.getenv("ADMIN_PASSWORD_HASH", ""),
-            deployment_mode=_deployment_mode(os.getenv("DEPLOYMENT_MODE", "laboratory")),
             registration_code_hash=os.getenv("REGISTRATION_CODE_HASH", ""),
             operator_username=os.getenv("OPERATOR_USERNAME", "").strip(),
             identity_domain_url=os.getenv("IDENTITY_DOMAIN_URL", "").rstrip("/"),
@@ -180,7 +171,6 @@ class SettingsStore:
             ),
             "aidp_url": values["aidp_workbench_url"],
             "aidp_platform_id": self._settings.aidp_platform_id,
-            "deployment_mode": self._settings.deployment_mode,
             "operator_username": self._settings.operator_username,
             "registration_code_configured": bool(values["registration_code_hash"]),
             "time_zone": values["time_zone"],
@@ -205,8 +195,6 @@ class SettingsStore:
                     raise ValueError("Enter a valid HTTPS Oracle AI Data Platform Workbench URL")
                 values["aidp_workbench_url"] = normalized
             if registration_code is not None:
-                if self._settings.deployment_mode != "laboratory":
-                    raise ValueError("Registration codes are available only in Laboratory mode")
                 values["registration_code_hash"] = hash_secret(registration_code)
             if time_zone is not None:
                 if time_zone not in all_timezones_set:

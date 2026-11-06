@@ -481,7 +481,7 @@ run "authorized_e3_fallback_contract" {
   }
 }
 
-run "production_rejects_registration_code" {
+run "registration_code_is_required" {
   command = plan
 
   variables {
@@ -492,10 +492,9 @@ run "production_rejects_registration_code" {
     objectstorage_namespace = "testnamespace"
     deployment_suffix       = "test1234"
     admin_password_hash     = "pbkdf2_sha256$600000$salt$digest"
-    deployment_mode         = "production"
-    registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash  = ""
     source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
   }
 
-  expect_failures = [oci_core_instance.lab]
+  expect_failures = [var.registration_code_hash]
 }

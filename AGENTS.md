@@ -22,6 +22,7 @@ This is the canonical repository guidance. Read docs/README.md and the source-li
 
 ## Kits and UI
 
+- Starter Kits supports laboratories only. Keep participant registration protected by the instructor code and administrator sessions; do not restore a deployment-mode selector or administrator-only business mode.
 - Version package metadata, assets, dependencies, hashes and expected results together. Never silently change bytes under an immutable version.
 - Preserve naming, workflow parameters, permissions and notebook guards. The notebook2.0.0 naming discrepancy in getting-started remains a native acceptance requirement; do not suppress it.
 - Registration and administration retain durable operations and verified ownership. Closing progress is not cancellation.

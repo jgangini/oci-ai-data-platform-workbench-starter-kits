@@ -76,16 +76,6 @@ variable "admin_password_hash" {
   }
 }
 
-variable "deployment_mode" {
-  description = "Application access mode: participant registration for laboratory or administrator-only production."
-  type        = string
-  default     = "laboratory"
-  validation {
-    condition     = contains(["laboratory", "production"], var.deployment_mode)
-    error_message = "deployment_mode must be laboratory or production."
-  }
-}
-
 variable "enable_public_ip_tls" {
   description = "Obtain and automatically renew a publicly trusted Let's Encrypt certificate for the application IPv4 address."
   type        = bool
@@ -96,10 +86,9 @@ variable "registration_code_hash" {
   description = "PBKDF2 hash of the normalized registration code."
   type        = string
   sensitive   = true
-  default     = ""
   validation {
-    condition     = var.registration_code_hash == "" || startswith(var.registration_code_hash, "pbkdf2_sha256$")
-    error_message = "registration_code_hash must be empty or use the Deploy Studio PBKDF2 format."
+    condition     = startswith(var.registration_code_hash, "pbkdf2_sha256$")
+    error_message = "registration_code_hash is required and must use the Deploy Studio PBKDF2 format."
   }
 }
 

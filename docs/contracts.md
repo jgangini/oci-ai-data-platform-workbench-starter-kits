@@ -12,6 +12,8 @@ Los nombres lab.json, lab_id y labs siguen siendo campos del contrato actual de 
 
 El [backend](../apps/backend/app/main.py) autentica al administrador y controla registro, asignación y reconciliación. Las sesiones siguen [security.py](../apps/backend/app/security.py). Las rutas de módulos y visor no se montan.
 
+Starter Kits ofrece únicamente laboratorios: el formulario, Terraform y la API no admiten `deployment_mode`. El código del instructor es obligatorio en Deploy Studio y Terraform recibe `registration_code_hash` en formato PBKDF2. El registro público verifica el código, los límites de frecuencia y la disponibilidad de los servicios; las acciones administrativas siguen requiriendo sesión. El tipo de instalación no altera HTTPS, cookies seguras ni aislamiento de recursos.
+
 El operador OCI es distinto de los participantes. El bootstrap entrega su credencial mediante un sobre cifrado de un solo uso, verifica identidad y huella y elimina el objeto después de confirmarlo. El paquete SQL de Autonomous restringe operaciones sobre esquemas de participantes; su nombre interno no significa que AI Data Governance esté instalado.
 
 Se rechazan usuarios, recursos y manifiestos ajenos. No hay aliases ni adopción automática de contratos retirados.

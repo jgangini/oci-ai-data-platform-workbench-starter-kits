@@ -97,7 +97,6 @@ resource "oci_core_instance" "lab" {
     user_data = base64encode(templatefile("${path.module}/templatefile/user_data.sh", {
       admin_username          = var.admin_username
       admin_password_hash     = var.admin_password_hash
-      deployment_mode         = var.deployment_mode
       registration_code_hash  = var.registration_code_hash
       identity_domain_url     = local.default_domain.url
       developer_group_id      = oci_identity_domains_group.developers.id
@@ -140,10 +139,6 @@ resource "oci_core_instance" "lab" {
       error_message = "availability_domain_index is outside the region's available domains."
     }
 
-    precondition {
-      condition     = var.deployment_mode == "production" ? var.registration_code_hash == "" : startswith(var.registration_code_hash, "pbkdf2_sha256$")
-      error_message = "registration_code_hash must use Deploy Studio PBKDF2 in laboratory mode and be empty in production mode."
-    }
   }
 }
 
