@@ -108,7 +108,8 @@ resource "oci_core_instance" "lab" {
       bucket_name             = local.bootstrap_bucket_name
       aidp_workbench_url      = local.aidp_workbench_url
       aidp_platform_id        = local.selected_aidp.id
-      aidp_workspace_name     = local.selected_aidp.default_workspace_name
+      aidp_workspace_name     = local.selected_workspace_name
+      aidp_workspace_key      = local.selected_workspace_key
       aidp_region             = var.region
       compartment_id          = local.target_compartment
       artifacts_bucket_name   = local.artifacts_bucket_name

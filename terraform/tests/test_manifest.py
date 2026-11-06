@@ -123,6 +123,7 @@ def test_deploy_studio_manifest_contract() -> None:
         "operator_username",
         "preferred_vm_shape",
         "availability_domain_index",
+        "existing_workspace_name",
     ]
     assert manifest["preflight"]["output_inputs"] == [
         "home_region",
@@ -130,6 +131,7 @@ def test_deploy_studio_manifest_contract() -> None:
         "operator_username",
         "preferred_vm_shape",
         "availability_domain_index",
+        "existing_workspace_name",
     ]
     runtime_fields = {
         field["name"]: field for field in manifest["preflight"]["runtime_fields"]
@@ -435,3 +437,24 @@ def test_terraform_files_preserve_resource_layout_without_modules() -> None:
     assert not {"main.tf", "network.tf", "compute.tf", "storage.tf", "identity.tf", "aidp.tf", "outputs.tf", "providers.tf"} & {
         path.name for path in root.glob("*.tf")
     }
+
+
+def test_existing_workspace_form_and_runtime_contract():
+    root = Path(__file__).parents[2]
+    manifest = json.loads((root / "terraform/deploy-studio.json").read_text(encoding="utf-8"))
+    fields = {field["name"]: field for field in manifest["form"]["fields"]}
+    workspace = fields["existing_workspace_key"]
+    assert workspace["options_source"] == "oci_aidp_workspaces"
+    assert workspace["required"] is True
+    assert workspace["visible_when"] == {"field": "aidp_mode", "equals": "existing"}
+    assert "existing_workspace_name" in manifest["preflight"]["output_inputs"]
+    runtime = {field["name"] for field in manifest["preflight"]["runtime_fields"]}
+    assert "existing_workspace_name" in runtime
+    name_field = next(field for field in manifest["preflight"]["runtime_fields"] if field["name"] == "existing_workspace_name")
+    assert name_field["type"] == "text"
+    assert name_field["required"] is False
+    assert re.fullmatch(name_field["pattern"], "Shared workspace-01")
+    assert not re.fullmatch(name_field["pattern"], "workspace\nINJECTED=value")
+    assert manifest["email"]["services"][1]["fields"][1]["output"] == "workspace_name"
+    template = (root / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")
+    assert "AIDP_WORKSPACE_KEY=${aidp_workspace_key}" in template

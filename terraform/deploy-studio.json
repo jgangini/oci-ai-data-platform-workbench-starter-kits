@@ -168,6 +168,18 @@
         }
       },
       {
+        "name": "existing_workspace_key",
+        "label": "Existing workspace",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_aidp_workspaces",
+        "group": "aidp_platform",
+        "visible_when": {
+          "field": "aidp_mode",
+          "equals": "existing"
+        }
+      },
+      {
         "name": "landing_bucket_mode",
         "label": "Landing bucket mode",
         "type": "select",
@@ -420,7 +432,7 @@
           },
           {
             "label": "Workspace",
-            "output": "default_workspace_name"
+            "output": "workspace_name"
           },
           {
             "label": "Authentication",
@@ -468,7 +480,10 @@
     "public_ip",
     "ssh_username",
     "vm_shape",
-    "aidp_mode"
+    "aidp_mode",
+    "existing_workspace_key",
+    "existing_workspace_name",
+    "workspace_name"
   ],
   "artifacts": [
     "aidp_lab_summary.json",
@@ -484,7 +499,8 @@
       "operator_user_ocid",
       "operator_username",
       "preferred_vm_shape",
-      "availability_domain_index"
+      "availability_domain_index",
+      "existing_workspace_name"
     ],
     "runtime_fields": [
       {
@@ -540,6 +556,14 @@
         "required": true,
         "min_length": 1,
         "max_length": 2
+      },
+      {
+        "name": "existing_workspace_name",
+        "label": "Verified workspace name",
+        "type": "text",
+        "required": false,
+        "pattern": "^[A-Za-z0-9 _.-]{1,128}$",
+        "max_length": 128
       }
     ]
   },

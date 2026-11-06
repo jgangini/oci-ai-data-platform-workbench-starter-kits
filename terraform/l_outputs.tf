@@ -138,3 +138,15 @@ output "vm_shape" {
 output "aidp_mode" {
   value = var.aidp_mode
 }
+
+output "existing_workspace_key" {
+  value = local.selected_workspace_key
+}
+
+output "existing_workspace_name" {
+  value = var.aidp_mode == "existing" ? var.existing_workspace_name : ""
+}
+
+output "workspace_name" {
+  value = local.selected_workspace_name
+}

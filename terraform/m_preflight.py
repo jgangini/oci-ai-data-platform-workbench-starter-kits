@@ -119,6 +119,17 @@ def _require_aidp(aidp: Any, inputs: dict[str, Any], region: str, compartment: s
     return "Existing AIDP validated; this stack will not own or delete the platform"
 
 
+def _workspace_inputs(inputs: dict[str, Any], config: dict[str, Any]) -> dict[str, str]:
+    if inputs.get("aidp_mode") != "existing":
+        return {}
+    from hooks.post_apply import AidpApi, assert_operator_platform_admin, build_signer, selected_existing_workspace
+
+    api = AidpApi(config["region"], inputs["existing_ai_data_platform_ocid"], build_signer(config), "preflight")
+    assert_operator_platform_admin(api, config["user"], attempts=1)
+    workspace = selected_existing_workspace(api, str(inputs.get("existing_workspace_key") or ""))
+    return {"existing_workspace_name": str(workspace["displayName"])}
+
+
 def _candidate_shapes(preferred: str) -> list[str]:
     if preferred not in SUPPORTED_SHAPES:
         raise ValueError("preferred_vm_shape must be E5 Flex, E4 Flex, or E3 Flex")
@@ -230,6 +241,7 @@ def select_inputs(
         else ""
     )
     aidp_message = _require_aidp(aidp_factory(regional_config), inputs, region, target, mode)
+    workspace_inputs = _workspace_inputs(inputs, regional_config)
     compartment_message = _require_compartment_target(
         identity,
         aidp_factory(regional_config),
@@ -263,6 +275,7 @@ def select_inputs(
         if selected:
             return {
                 "inputs": {
+                    **workspace_inputs,
                     "home_region": home_region,
                     "operator_user_ocid": operator_user_ocid,
                     "operator_username": operator_username,

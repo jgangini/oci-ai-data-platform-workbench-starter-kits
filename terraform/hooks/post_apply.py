@@ -851,21 +851,34 @@ def require_existing_platform_isolation(api: AidpApi, workspace_key: str) -> Non
     api.resource_owner = owner
 
 
+def selected_existing_workspace(api: AidpApi, key: str) -> dict[str, Any]:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", key):
+        raise ReconcileError("Select a valid existing workspace key")
+    matches = [item for item in api.list_all("/workspaces") if item.get("key") == key]
+    if len(matches) != 1:
+        raise ReconcileError("Selected workspace does not belong to the selected AIDP or is inaccessible")
+    workspace = matches[0]
+    if str(workspace.get("lifecycleState") or "").upper() != "ACTIVE":
+        raise ReconcileError("Selected workspace must be ACTIVE")
+    if not re.fullmatch(r"[A-Za-z0-9 _.-]{1,128}", str(workspace.get("displayName") or "")):
+        raise ReconcileError("Selected workspace has an unsupported runtime display name")
+    return workspace
+
+
 def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     events: list[str] = []
     assert_operator_platform_admin(api, str(outputs["operator_user_ocid"]))
     events.append("Deployment operator AI_DATA_PLATFORM_ADMIN membership verified")
-    workspace_name = str(outputs["default_workspace_name"])
-    workspace = wait_for_existing_active(
-        api,
-        "/workspaces",
-        "workspace",
-        workspace_name,
-        {"type": "DEFAULT"},
-    )
-
     if outputs.get("aidp_mode") == "existing":
+        workspace = selected_existing_workspace(api, str(outputs.get("existing_workspace_key") or ""))
+        if workspace["displayName"] != outputs.get("existing_workspace_name"):
+            raise ReconcileError("Selected workspace changed after preflight; validate deployment again")
         require_existing_platform_isolation(api, str(workspace["key"]))
+    else:
+        workspace = wait_for_existing_active(
+            api, "/workspaces", "workspace", str(outputs["default_workspace_name"]),
+            {"type": "DEFAULT"},
+        )
 
     catalog, created = ensure_resource(
         api,

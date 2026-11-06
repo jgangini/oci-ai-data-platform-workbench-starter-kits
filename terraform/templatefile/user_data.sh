@@ -145,6 +145,7 @@ IDENTITY_PENDING_GROUP_ID=${pending_group_id}
 AIDP_WORKBENCH_URL=${aidp_workbench_url}
 AIDP_PLATFORM_ID=${aidp_platform_id}
 AIDP_WORKSPACE_NAME=${aidp_workspace_name}
+AIDP_WORKSPACE_KEY=${aidp_workspace_key}
 AIDP_REGION=${aidp_region}
 COMPARTMENT_ID=${compartment_id}
 ARTIFACTS_BUCKET_NAME=${artifacts_bucket_name}

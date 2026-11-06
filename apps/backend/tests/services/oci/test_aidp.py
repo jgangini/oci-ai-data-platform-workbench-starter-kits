@@ -552,3 +552,23 @@ def test_current_manifest_rejects_workspace_for_a_different_email() -> None:
             },
             owner_key,
         )
+
+
+def test_workspace_selection_uses_key_without_name_fallback():
+    client = bare_client()
+    client.settings = Settings(aidp_workspace_key="selected", aidp_workspace_name="old-name")
+    client._list = lambda *args, **kwargs: [
+        {"key": "wrong", "displayName": "old-name", "lifecycleState": "ACTIVE"},
+        {"key": "selected", "displayName": "renamed", "lifecycleState": "ACTIVE"},
+    ]
+    assert client._workspace()["key"] == "selected"
+    client.settings = replace(client.settings, aidp_workspace_key="not-in-platform")
+    with pytest.raises(AidpProvisionPending):
+        client._workspace()
+
+
+def test_workspace_name_resolution_is_preserved_for_new_platform():
+    client = bare_client()
+    client.settings = Settings(aidp_workspace_name="default")
+    client._list = lambda *args, **kwargs: [{"key": "default-key", "displayName": "default", "lifecycleState": "ACTIVE"}]
+    assert client._workspace()["key"] == "default-key"
