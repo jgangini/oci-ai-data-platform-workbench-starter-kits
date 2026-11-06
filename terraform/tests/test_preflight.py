@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 
 TERRAFORM_ROOT = Path(__file__).parents[1]
+sys.path.insert(0, str(TERRAFORM_ROOT))
 RELEASE_GATE_PATH = TERRAFORM_ROOT / "release_gate.py"
 RELEASE_GATE_SPEC = importlib.util.spec_from_file_location("release_gate", RELEASE_GATE_PATH)
 assert RELEASE_GATE_SPEC and RELEASE_GATE_SPEC.loader
@@ -524,3 +525,17 @@ def test_existing_platform_cannot_be_selected_with_a_new_compartment():
     with pytest.raises(ValueError, match="existing compartment"):
         preflight._require_aidp(object(), {"aidp_mode": "existing", "existing_ai_data_platform_ocid":
             "ocid1.aidataplatform.oc1.us-chicago-1.test"}, "us-chicago-1", "new", "new")
+
+
+def test_workspace_preflight_resolves_name_and_checks_operator(monkeypatch):
+    from hooks import post_apply
+    calls = []
+    api = object()
+    monkeypatch.setattr(post_apply, "AidpApi", lambda *args: api)
+    monkeypatch.setattr(post_apply, "build_signer", lambda config: object())
+    monkeypatch.setattr(post_apply, "assert_operator_platform_admin", lambda client, user, **kwargs: calls.append((client, user, kwargs)))
+    monkeypatch.setattr(post_apply, "selected_existing_workspace", lambda client, key: {"key": key, "displayName": "Selected workspace"})
+    result = preflight._workspace_inputs({"aidp_mode": "existing", "existing_ai_data_platform_ocid": "platform", "existing_workspace_key": "ws-key", "existing_workspace_name": "untrusted"}, {"region": "us-chicago-1", "user": "operator"})
+    assert result == {"existing_workspace_name": "Selected workspace"}
+    assert calls == [(api, "operator", {"attempts": 1})]
+    assert preflight._workspace_inputs({"aidp_mode": "new"}, {}) == {}

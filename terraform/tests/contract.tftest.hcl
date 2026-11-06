@@ -510,6 +510,8 @@ run "existing_aidp_is_referenced_without_owning_it" {
     admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
     registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
     source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    existing_workspace_key         = "chosen-workspace-key"
+    existing_workspace_name        = "chosen-workspace"
     aidp_mode                      = "existing"
     existing_ai_data_platform_ocid = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
   }
@@ -532,8 +534,8 @@ run "existing_aidp_is_referenced_without_owning_it" {
     error_message = "Existing mode must not create or own the selected platform."
   }
   assert {
-    condition     = output.default_workspace_name == "shared-workspace"
-    error_message = "The actual existing default workspace must be used."
+    condition     = output.workspace_name == "chosen-workspace" && output.existing_workspace_key == "chosen-workspace-key"
+    error_message = "The explicitly selected existing workspace must be propagated."
   }
 }
 
@@ -550,6 +552,8 @@ run "existing_aidp_rejects_wrong_compartment" {
     admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
     registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
     source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    existing_workspace_key         = "chosen-workspace-key"
+    existing_workspace_name        = "chosen-workspace"
     aidp_mode                      = "existing"
     existing_ai_data_platform_ocid = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
   }
@@ -582,6 +586,8 @@ run "existing_aidp_requires_an_identifier" {
     admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
     registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
     source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    existing_workspace_key         = "chosen-workspace-key"
+    existing_workspace_name        = "chosen-workspace"
     aidp_mode                      = "existing"
     existing_ai_data_platform_ocid = ""
   }

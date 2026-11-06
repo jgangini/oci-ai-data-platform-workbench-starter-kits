@@ -83,3 +83,7 @@ Los [módulos independientes](README.md#módulos-independientes) tienen sus prop
 El compute compartido de Spark mantiene un driver de 2 OCPU/32 GiB y workers de 2 OCPU/32 GiB, con un mínimo de 1 y máximo de 10 workers. La VM del portal conserva 2 OCPU/16 GiB. La capacidad efectiva se valida durante el despliegue; no se reservan recursos con una comprobación previa.
 
 Al reutilizar AIDP, use su compartimento existente. Si ya contiene recursos con los nombres reservados de Kits que pertenecen a otro despliegue, la instalación se detiene antes de modificar sus permisos. Consulte el contrato de propiedad y recuperación en [Contratos](contracts.md).
+
+## Workspace de una plataforma existente
+
+Al elegir **Use existing AIDP**, seleccione la plataforma y luego **Workspace**. La lista depende de esa plataforma y de los permisos del operador OCI. La selección debe estar ACTIVE; se comprueba de nuevo al desplegar. El portal identifica el workspace por su clave y mantiene carpetas y permisos separados por participante y kit dentro de ese workspace compartido. No crea un workspace AIDP por participante. Con **Create new AIDP**, se usa automáticamente el workspace predeterminado de la plataforma nueva.

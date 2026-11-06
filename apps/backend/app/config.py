@@ -58,6 +58,7 @@ class Settings:
     aidp_workbench_url: str = ""
     aidp_platform_id: str = ""
     aidp_workspace_name: str = ""
+    aidp_workspace_key: str = ""
     aidp_region: str = ""
     compartment_id: str = ""
     oci_config_file: str = "/etc/aidp-lab/oci/config"
@@ -92,6 +93,7 @@ class Settings:
             aidp_workbench_url=os.getenv("AIDP_WORKBENCH_URL", ""),
             aidp_platform_id=os.getenv("AIDP_PLATFORM_ID", ""),
             aidp_workspace_name=os.getenv("AIDP_WORKSPACE_NAME", ""),
+            aidp_workspace_key=os.getenv("AIDP_WORKSPACE_KEY", ""),
             aidp_region=os.getenv("AIDP_REGION", ""),
             compartment_id=os.getenv("COMPARTMENT_ID", ""),
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),

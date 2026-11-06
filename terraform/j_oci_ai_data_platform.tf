@@ -77,6 +77,10 @@ data "oci_ai_data_platform_ai_data_platform" "existing" {
       condition     = var.existing_ai_data_platform_ocid != ""
       error_message = "An AIDP OCID is required in existing mode."
     }
+    precondition {
+      condition     = var.existing_workspace_key != "" && var.existing_workspace_name != ""
+      error_message = "Existing AIDP requires a workspace selected and verified by preflight."
+    }
     postcondition {
       condition     = self.state == "ACTIVE" && self.ai_data_platform_type == "STRUCTURED" && self.compartment_id == local.target_compartment
       error_message = "The existing AIDP must be ACTIVE, STRUCTURED and in the selected compartment."
@@ -85,7 +89,9 @@ data "oci_ai_data_platform_ai_data_platform" "existing" {
 }
 
 locals {
-  selected_aidp = var.aidp_mode == "new" ? oci_ai_data_platform_ai_data_platform.lab[0] : data.oci_ai_data_platform_ai_data_platform.existing[0]
+  selected_workspace_name = var.aidp_mode == "existing" ? var.existing_workspace_name : local.selected_aidp.default_workspace_name
+  selected_workspace_key  = var.aidp_mode == "existing" ? var.existing_workspace_key : ""
+  selected_aidp           = var.aidp_mode == "new" ? oci_ai_data_platform_ai_data_platform.lab[0] : data.oci_ai_data_platform_ai_data_platform.existing[0]
 }
 
 moved {

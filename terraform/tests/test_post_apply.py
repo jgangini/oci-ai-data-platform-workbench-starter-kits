@@ -1336,3 +1336,48 @@ def test_existing_platform_resumes_only_its_owned_resources():
     api.deployment_id = "other-deployment"
     with pytest.raises(post_apply.ReconcileError, match="not owned"):
         post_apply.require_existing_platform_isolation(api, "ws-key")
+
+
+def test_selected_workspace_accepts_nondefault_but_matches_exact_key():
+    api = FakeApi()
+    api.resources["/workspaces"][0]["type"] = "USER"
+    assert post_apply.selected_existing_workspace(api, "ws-key")["displayName"] == "ws"
+    with pytest.raises(post_apply.ReconcileError, match="does not belong"):
+        post_apply.selected_existing_workspace(api, "other-platform-key")
+
+
+@pytest.mark.parametrize("key,state,name", [("../ws", "ACTIVE", "ws"), ("ws-key", "CREATING", "ws"), ("ws-key", "ACTIVE", "ws\nEVIL=value")])
+def test_selected_workspace_rejects_unsafe_or_inactive(key, state, name):
+    api = FakeApi()
+    api.resources["/workspaces"][0].update(lifecycleState=state, displayName=name)
+    with pytest.raises(post_apply.ReconcileError):
+        post_apply.selected_existing_workspace(api, key)
+
+
+def test_reconcile_existing_workspace_checks_name_before_writes():
+    api = FakeApi()
+    with pytest.raises(post_apply.ReconcileError, match="changed after preflight"):
+        post_apply.reconcile(api, {"operator_user_ocid": "ocid1.user.oc1..operator", "aidp_mode": "existing", "existing_workspace_key": "ws-key", "existing_workspace_name": "renamed"})
+    assert not any(method in {"POST", "PUT", "DELETE"} for method, *_ in api.calls)
+
+
+def test_reconcile_reuses_selected_nondefault_workspace_without_adopting_foreign_resources(monkeypatch):
+    monkeypatch.setattr(post_apply.time, "sleep", lambda _: None)
+    api = FakeApi()
+    api.deployment_id = "deployment-123"
+    api.resources["/workspaces"][0]["type"] = "USER"
+    outputs = {
+        "aidp_mode": "existing", "existing_workspace_key": "ws-key", "existing_workspace_name": "ws",
+        "default_workspace_name": "different-default", "objectstorage_namespace": "namespace",
+        "bucket_name": "aidp-data-test", "developer_group_ocid": "ocid1.group.developer",
+        "pending_group_ocid": "ocid1.group.pending", "operator_user_ocid": "ocid1.user.oc1..operator",
+    }
+    result, _ = post_apply.reconcile(api, outputs)
+    assert result["workspace_key"] == "ws-key"
+    assert not any(method == "POST" and path == "/workspaces" for method, path, *_ in api.calls)
+    foreign = FakeApi()
+    foreign.deployment_id = "deployment-123"
+    foreign.resources["/catalogs"] = [{"displayName": post_apply.CATALOG_NAME, "description": "belongs to another deployment"}]
+    with pytest.raises(post_apply.ReconcileError, match="not owned"):
+        post_apply.reconcile(foreign, outputs)
+    assert not any(method in {"POST", "PUT", "DELETE"} for method, *_ in foreign.calls)

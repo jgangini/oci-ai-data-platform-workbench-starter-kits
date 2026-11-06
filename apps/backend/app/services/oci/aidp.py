@@ -384,13 +384,15 @@ class AidpClient:
         raise AidpProvisionError("AIDP pagination exceeded the safety limit.")
 
     def _workspace(self) -> dict[str, Any]:
+        selected_key = self.settings.aidp_workspace_key
         workspaces = [
             item
             for item in self._list("/workspaces", phase="workspace")
-            if item.get("displayName") == self.settings.aidp_workspace_name
+            if (item.get("key") == selected_key if selected_key
+                else item.get("displayName") == self.settings.aidp_workspace_name)
         ]
         if len(workspaces) != 1:
-            raise AidpProvisionPending("The default AIDP workspace is not ready yet. Retry shortly.", "workspace")
+            raise AidpProvisionPending("The selected AIDP workspace is not ready yet. Retry shortly.", "workspace")
         return self._require_operational_state(
             workspaces[0], {"ACTIVE"}, "workspace", "workspace"
         )

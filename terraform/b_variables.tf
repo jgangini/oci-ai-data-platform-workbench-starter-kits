@@ -290,3 +290,21 @@ variable "existing_ai_data_platform_ocid" {
     error_message = "The existing platform identifier must be an AIDP OCID."
   }
 }
+
+variable "existing_workspace_key" {
+  type    = string
+  default = ""
+  validation {
+    condition     = var.existing_workspace_key == "" || can(regex("^[A-Za-z0-9_-]{1,128}$", var.existing_workspace_key))
+    error_message = "Select a valid workspace key."
+  }
+}
+
+variable "existing_workspace_name" {
+  type    = string
+  default = ""
+  validation {
+    condition     = var.existing_workspace_name == "" || can(regex("^[A-Za-z0-9 _.-]{1,128}$", var.existing_workspace_name))
+    error_message = "The verified workspace name must be safe for runtime configuration."
+  }
+}
