@@ -10,13 +10,13 @@ Esta guía describe el despliegue compartido y el acceso de participantes. Para 
 | Área | Comportamiento del código y limitación |
 | --- | --- |
 | Rutas de participantes | El aprovisionador entrega `/Workspace/<lab_id>/<participant_key>_<email>` y el catálogo `oci_medallion`. Los notebooks incluidos en los paquetes `2.0.0` aún validan `/Workspace/medallon/` y `<participant_key>_aidp`. Las ejecuciones nuevas pueden fallar en esas comprobaciones antes de ingerir datos. Es necesario reconciliar y aceptar este contrato antes de considerar listos los trabajos de participantes. |
-| Evidencia de Telco Customer 360 | El informe de validación disponible corresponde al paquete `1.1.2`; no certifica el paquete actual `2.0.0` ni una instalación nueva. |
+| Telco Customer 360 | La aceptación del paquete `2.0.0` requiere ejecutar las aserciones de sus notebooks y comprobar sus resultados en la instalación del participante. No se certifica mediante pruebas de otra versión. |
 
 La discrepancia de rutas puede comprobarse en las [funciones de nombres](../apps/backend/app/kits/naming.py), el [aprovisionamiento de trabajos](../apps/backend/app/services/oci/aidp.py) y el [notebook de Banking](../apps/backend/app/kits/banking/notebooks/01_landing_banking.ipynb). No omita las comprobaciones del notebook ni use el catálogo de otro participante para aparentar una ejecución correcta.
 
 ## Desplegar un entorno compartido
 
-Use el [paquete de Deploy Studio](../terraform/deploy-studio.json) de una [versión inmutable](https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits/releases) validada. Necesita un perfil de operador OCI, una clave API RSA, un compartimento de destino y permisos para los recursos declarados en Terraform. Entregue las credenciales por la carga protegida de Deploy Studio; no las añada al repositorio ni a las fuentes o al estado de Terraform. Seleccione una región suscrita con las capacidades AIDP, base de datos que requiere el formulario.
+Use el [paquete de Deploy Studio](../terraform/deploy-studio.json) de una [versión inmutable](https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits/releases) validada. Necesita un perfil de operador OCI, una clave API RSA, un compartimento de destino y permisos para los recursos declarados en Terraform. Entregue las credenciales por la carga protegida de Deploy Studio; no las añada al repositorio ni a las fuentes o al estado de Terraform. Seleccione una región suscrita compatible con AIDP.
 
 1. Seleccione un compartimento nuevo o existente e indique las credenciales del administrador y el código de registro del laboratorio.
 2. Seleccione o cree los cuatro buckets de medallón y otro de artefactos, cuyo nombre predeterminado es `oci_artifacts`. Los cinco deben ser distintos; los existentes deben pertenecer al compartimento seleccionado.
@@ -78,7 +78,7 @@ El flujo suministra `participant_key`, `lab_id`, `workspace_root`, `bucket_name`
 Para una canalización de medallón de cinco tareas, use [Banking](kits/banking.md), [Telecommunications](kits/telecommunications.md), [Retail](kits/retail.md) o [Healthcare](kits/healthcare.md). [Telco Customer 360 Lineage](kits/telco-lineage.md) incluye ramificación y convergencia en 14 tareas.
 
 
-Los módulos y sus gates se documentan en el [plan de separación](module-repository-separation.md). Una pila combinada existente no se convierte aplicando el Terraform reducido ni actualizando la imagen del portal.
+Los [módulos independientes](README.md#módulos-independientes) tienen sus propias guías de instalación. Este paquete solo administra kits: no debe aplicarse sobre una pila combinada ni usarse para convertirla mediante una actualización del portal.
 
 El compute compartido de Spark mantiene un driver de 2 OCPU/32 GiB y workers de 2 OCPU/32 GiB, con un mínimo de 1 y máximo de 10 workers. La VM del portal conserva 2 OCPU/16 GiB. La capacidad efectiva se valida durante el despliegue; no se reservan recursos con una comprobación previa.
 

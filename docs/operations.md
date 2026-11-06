@@ -24,4 +24,4 @@ Actualizar el portal no reprovisiona todos los kits de participantes. Las accion
 - Ante un fallo de actualización, confirme versión activa y salud.
 - No destruya la pila para resolver un fallo de aplicación.
 
-El [plan de separación](module-repository-separation.md) distingue código, releases y aceptación OCI. Los módulos ya instalados permanecen en sus pilas hasta una transición explícita; esta distribución no importa automáticamente su estado.
+Esta distribución no administra módulos externos ni importa automáticamente su estado. Use las herramientas de cada producto para operarlo; mantenga sus recursos fuera del ciclo de vida del stack de Kits.

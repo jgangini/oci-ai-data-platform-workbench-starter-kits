@@ -8,7 +8,7 @@
 | --- | --- |
 | apps/backend/app/kits | Cinco paquetes y convenciones de nombres. |
 | apps/backend/app/packages | Catálogo y validación de contratos. |
-| apps/backend/app/services/oci | AIDP, Identity Domains, Autonomous y bootstrap. |
+| apps/backend/app/services/oci | AIDP, Identity Domains y bootstrap de credenciales. |
 | apps/backend/app/services/releases.py | Versiones de la aplicación. |
 | apps/backend/app/main.py | Composición de API y operaciones de participantes. |
 | apps/frontend | Registro, Users y Settings. |
@@ -36,7 +36,7 @@ El [asistente OCI-local](../scripts/development/bootstrap_local_oci_env.py) y [C
 
 En Windows use un --basetemp nuevo bajo .local: pytest borra destinos existentes. Las pruebas nativas Sentrux/PowerShell pueden omitirse en contenedores Linux, pero deben ejecutarse en el host; informe cada omisión.
 
-La aceptación nativa sigue los [límites documentados](getting-started.md#current-implementation-limits). El [plan de separación](module-repository-separation.md) mantiene los gates independientes de módulos.
+La aceptación nativa sigue los [límites documentados](getting-started.md#current-implementation-limits) y comprueba los workflows y datos del participante en su instalación AIDP.
 
 ## Publicación
 

@@ -6,7 +6,6 @@ El portal administra cinco kits de participantes. Su [catálogo](../apps/backend
 - [Operación](operations.md): usuarios, reintentos y actualización.
 - [Desarrollo](development.md): estructura y comprobaciones.
 - [Contratos](contracts.md): paquetes, permisos e imágenes.
-- [Separación de módulos](module-repository-separation.md): plan único y gates de migración.
 
 ## Kits
 
@@ -20,6 +19,6 @@ El portal administra cinco kits de participantes. Su [catálogo](../apps/backend
 | [aidp-ai_market-intelligence](https://github.com/jgangini/aidp-ai_market-intelligence) | Agente Market e integración Apify. |
 | [aidp-ai-gods-eye-view](https://github.com/jgangini/aidp-ai-gods-eye-view) | Visor, streaming, configuración integrada y agente. |
 
-Governance y Market no requieren portal ni VM administrativa. Deploy Studio selecciona al administrador. God's Eye View conserva su interfaz en su propia VM. Cada repositorio mantiene documentación y pruebas propias; el plan distingue extracción, publicación y aceptación OCI.
+Governance y Market se instalan desde Deploy Studio con el administrador seleccionado y no requieren portal ni VM administrativa. God's Eye View ofrece el visor y su configuración en su propia VM. Cada repositorio documenta sus requisitos, instalación, operación y límites.
 
 Credenciales, recibos privados y logs temporales quedan fuera de estas guías.

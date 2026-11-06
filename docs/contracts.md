@@ -34,7 +34,7 @@ Las fechas de kits proceden del historial Git y hashes del manifiesto; no se sus
 
 ## Evidencia
 
-Las pruebas locales no demuestran ejecución en AIDP. La aceptación nativa requiere evidencia del workflow y datos del participante correcto. El [plan de separación](module-repository-separation.md) registra los gates de los módulos.
+Las pruebas locales no demuestran ejecución en AIDP. La aceptación nativa requiere evidencia del workflow y datos del participante correcto, conforme a los [límites de la implementación](getting-started.md#current-implementation-limits).
 
 ## Plataforma existente
 
