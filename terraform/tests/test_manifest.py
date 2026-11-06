@@ -29,6 +29,7 @@ def test_deploy_studio_manifest_contract() -> None:
     variables = (root / "terraform" / "b_variables.tf").read_text(encoding="utf-8")
     storage = (root / "terraform" / "f_oci_objectstorage_bucket.tf").read_text(encoding="utf-8")
     assert manifest["schema_version"] == 2
+    assert manifest["execution_source"] == "oci_resource_manager"
     assert manifest["project_id"] == "oci-aidp-cloud-migration-lab"
     assert manifest["terraform"] == {"path": "terraform", "package_oci_credentials": False}
     assert manifest["capabilities"] == {
@@ -103,15 +104,12 @@ def test_deploy_studio_manifest_contract() -> None:
         "stack",
         "plan",
         "apply",
-        "network",
-        "bucket",
-        "compute",
         "application",
         "artifacts",
         "email",
         "complete",
     ]
-    assert not {"database", "wallet"} & {step["key"] for step in manifest["run_steps"]}
+    assert not {"network", "bucket", "compute", "database", "wallet"} & {step["key"] for step in manifest["run_steps"]}
     assert [field["name"] for field in manifest["preflight"]["runtime_fields"]] == [
         "home_region",
         "operator_user_ocid",
