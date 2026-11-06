@@ -35,9 +35,8 @@ def test_deploy_studio_manifest_contract() -> None:
         "compartment_modes": ["new", "existing"],
         "default_compartment_name": "oracle-ai-data-platform",
         "requires_genai_region": False,
-        "database_profile": "new_or_existing",
         "region_selection": "subscribed_compatible",
-        "regional_requirements": ["aidp", "autonomous_26ai_dw"],
+        "regional_requirements": ["aidp"],
     }
     assert manifest["post_apply"]["requires_oci_credentials"] is True
     assert manifest["post_apply"]["entrypoint"] == "terraform/hooks/post_apply.py"
@@ -58,25 +57,12 @@ def test_deploy_studio_manifest_contract() -> None:
     assert fields["admin_password"]["transform"] == "pbkdf2_sha256"
     assert fields["registration_code"]["pattern"] == "^[A-Z]{4}-[0-9]{4}$"
     assert fields["registration_code"]["transform"] == "uppercase_pbkdf2_sha256"
-    assert fields["autonomous_database_version"]["options"] == [
-        {"value": "26ai:DW", "label": "Oracle AI Database 26ai — Data Warehouse"}
-    ]
-    assert "autonomous_database_compute_count" not in fields
-    assert re.search(
-        r'variable\s+"autonomous_database_compute_count"\s*\{.*?default\s*=\s*4\s*\}',
-        variables,
-        re.DOTALL,
-    )
-    assert fields["autonomous_database_mode"]["group"] == "database"
-    password_pattern = "^(?!.*[Aa][Dd][Mm][Ii][Nn])(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])[^\"']{12,30}$"
-    for name in ("autonomous_database_admin_password", "autonomous_database_wallet_password"):
-        assert fields[name]["min_length"] == 12
-        assert fields[name]["max_length"] == 30
-        assert fields[name]["pattern"] == password_pattern
-    assert fields["existing_autonomous_database_ocid"]["visible_when"] == {
-        "field": "autonomous_database_mode",
-        "equals": "existing",
-    }
+    assert not any(name.startswith(("autonomous_", "existing_autonomous_", "agent_model")) for name in fields)
+    assert fields["aidp_mode"]["group"] == "aidp_platform"
+    assert fields["aidp_display_name"]["default"] == "aidp_medallion"
+    assert fields["existing_ai_data_platform_ocid"]["options_source"] == "oci_aidp_platforms"
+    groups = [item["group"] for item in manifest["form"]["fields"]]
+    assert groups.index("aidp_platform") < groups.index("medallion")
     for layer in ("landing", "bronze", "silver", "gold", "artifacts"):
         assert fields[f"{layer}_bucket_mode"]["group"] == "medallion"
         assert fields[f"{layer}_new_bucket_name"]["default"] == f"oci_{layer}"
@@ -98,8 +84,6 @@ def test_deploy_studio_manifest_contract() -> None:
     assert not any(name.startswith("governance_gateway_") for name in fields)
     assert fields["admin_username"]["group"] == "application_vm"
     assert manifest["post_apply"]["secret_inputs"] == [
-        "autonomous_database_admin_password",
-        "autonomous_database_wallet_password",
     ]
     assert "deployment_mode" not in fields
     assert "visible_when" not in fields["registration_code"]
@@ -110,11 +94,9 @@ def test_deploy_studio_manifest_contract() -> None:
         "admin_username",
         "admin_password",
         "registration_code",
-        "autonomous_database_admin_password",
-        "autonomous_database_wallet_password",
     ]
     assert manifest["presentation"]["title"] == "Oracle AI Data Platform Workbench Starter Kits"
-    assert manifest["presentation"]["summary"].startswith("Deploys five participant starter kits")
+    assert manifest["presentation"]["summary"].startswith("Deploys five laboratory starter kits")
     assert manifest["presentation"]["href"] == "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
     assert manifest["presentation"]["tags"] == ["VM", "VCN", "AI Data Platform Workbench", "Object Storage", "IAM"]
     assert manifest["presentation"]["image"] == "/assets/oci-aidp-cloud-migration-lab.png"
@@ -129,14 +111,12 @@ def test_deploy_studio_manifest_contract() -> None:
         "network",
         "bucket",
         "compute",
-        "database",
-        "wallet",
         "application",
         "artifacts",
         "email",
         "complete",
     ]
-    assert {"database", "wallet"}.issubset({step["key"] for step in manifest["run_steps"]})
+    assert not {"database", "wallet"} & {step["key"] for step in manifest["run_steps"]}
     assert [field["name"] for field in manifest["preflight"]["runtime_fields"]] == [
         "home_region",
         "operator_user_ocid",
@@ -168,11 +148,6 @@ def test_deploy_studio_manifest_contract() -> None:
         "aidp_runtime_ready",
         "operator_user_ocid",
         "home_region",
-        "autonomous_database_id",
-        "autonomous_database_mode",
-        "autonomous_database_version",
-        "autonomous_database_workload",
-        "autonomous_database_compute_count",
     }.issubset(manifest["outputs"])
     assert "aidp_console_url" not in manifest["outputs"]
 
@@ -209,9 +184,9 @@ def test_hook_result_matches_runner_and_manifest_contract() -> None:
         "aidp_runtime_ready": True,
         "aidp_external_volume_count": 0,
     }
-    # Resource Manager collects the wallet and sensitive TLS key from state.
+    # Resource Manager collects only the sensitive SSH key from state.
     assert {item["name"] for item in result["artifacts"]} == set(manifest["artifacts"]) - {
-        "adb_wallet.zip", "ssh-private-key.pem"
+        "ssh-private-key.pem"
     }
     assert set(result["outputs"]).issubset(manifest["outputs"])
     artifact = json.loads(base64.b64decode(result["artifacts"][0]["content_b64"]))
@@ -391,8 +366,8 @@ def test_runtime_security_contracts() -> None:
     assert 'resource "oci_vault_' not in identity
     assert 'resource "time_sleep"' not in identity
     assert 'resource "oci_objectstorage_object"' not in storage
-    assert 'web_socket_endpoint == null ? "" : oci_ai_data_platform_ai_data_platform.lab.web_socket_endpoint' in aidp
-    assert 'alias_key == null ? "" : oci_ai_data_platform_ai_data_platform.lab.alias_key' in aidp
+    assert 'web_socket_endpoint == null ? "" : local.selected_aidp.web_socket_endpoint' in aidp
+    assert 'alias_key == null ? "" : local.selected_aidp.alias_key' in aidp
     assert 'timeouts {' in aidp
     assert 'create = "120m"' in aidp
     assert 'depends_on = [time_sleep.aidp_iam_propagation]' in aidp
@@ -420,15 +395,15 @@ def test_runtime_security_contracts() -> None:
     assert 'temporary.chmod(0o600)' in credential_bootstrap
     assert 'path.chmod(0o600)' in credential_bootstrap
     assert "database_admin_password" not in credential_bootstrap
-    assert "wallet_password" in credential_bootstrap
+    assert "wallet_password" not in credential_bootstrap
     assert "runtime_secrets" not in credential_bootstrap
     post_apply = (root / "terraform/hooks/post_apply.py").read_text(encoding="utf-8")
     assert '"admin_password": admin_password' not in post_apply
     assert '"database_admin_password"' not in post_apply
-    assert "wallet_zip_b64" in post_apply
+    assert "wallet_zip_b64" not in post_apply
     assert '"$OCI_DIR:/etc/aidp-lab/oci:ro,Z"' in cloud_init
     assert "ocarun ALL=(root) NOPASSWD: /usr/local/sbin/aidp-lab-bootstrap-public-key" in cloud_init
-    assert "AIDP_LAB_CREDENTIALS_V2_READY" in cloud_init
+    assert "AIDP_LAB_CREDENTIALS_V3_READY" in cloud_init
     assert "cat /opt/aidp-lab/bootstrap/key_public.pem" in cloud_init
     assert "cat /opt/aidp-lab/bootstrap/key.pem" not in cloud_init
     assert "cat /opt/aidp-lab/.oci/config" not in cloud_init
@@ -450,11 +425,10 @@ def test_terraform_files_preserve_resource_layout_without_modules() -> None:
         "g_oci_core_instance.tf",
         "i_oci_identity.tf",
         "j_oci_ai_data_platform.tf",
-        "k_oci_autonomous_database.tf",
         "l_outputs.tf",
     }
     assert expected == {path.name for path in root.glob("*.tf")}
-    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefgijkl")
+    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefgijl")
     manifest = json.loads((root / "deploy-studio.json").read_text(encoding="utf-8"))
     assert manifest["preflight"]["entrypoint"] == "terraform/m_preflight.py"
     assert (root / "m_preflight.py").is_file()

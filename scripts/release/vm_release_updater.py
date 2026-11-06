@@ -490,8 +490,6 @@ def _run_container(
             "-v",
             f"{root / '.oci'}:/etc/aidp-lab/oci:ro,Z",
             "-v",
-            f"{root / 'autonomous'}:/etc/aidp-lab/autonomous:ro,Z",
-            "-v",
             f"{mounted_state}:/var/lib/aidp-lab:Z",
         ]
     )

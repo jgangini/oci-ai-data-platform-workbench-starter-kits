@@ -16,7 +16,7 @@ This is the canonical repository guidance. Read docs/README.md and the source-li
 - Preserve Terraform resource addresses of retained kit resources. Renaming source files does not authorize changing cloud identities.
 - Preserve five distinct bucket selections and exact ownership. Use Master Catalog metadata to establish table locations.
 - Reuse the uploaded operator identity. The one-use credential envelope remains encrypted/authenticated, identity/fingerprint verified, atomically installed with restricted permissions and deleted after confirmation.
-- Preserve the Autonomous definer package and EXECUTE-only operator for participant isolation. Its internal governance name does not mean the extracted module is installed.
+- Kits use Spark and Master Catalog isolation, not Autonomous, agent memory or model selectors. Keep the operator credential envelope authenticated and strict. Existing AIDP is a data source, never imported or destroyed; reject unowned kit resource collisions.
 - Never commit OCI keys/configuration, wallets, passwords, registration codes, certificates, Terraform state or private receipts. Parse private evidence selectively without printing secrets.
 - Preserve authentication, authorization, validation and recovery. Unsupported formats fail without deleting remote resources.
 

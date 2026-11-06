@@ -14,13 +14,13 @@ El [backend](../apps/backend/app/main.py) autentica al administrador y controla 
 
 Starter Kits ofrece únicamente laboratorios: el formulario, Terraform y la API no admiten `deployment_mode`. El código del instructor es obligatorio en Deploy Studio y Terraform recibe `registration_code_hash` en formato PBKDF2. El registro público verifica el código, los límites de frecuencia y la disponibilidad de los servicios; las acciones administrativas siguen requiriendo sesión. El tipo de instalación no altera HTTPS, cookies seguras ni aislamiento de recursos.
 
-El operador OCI es distinto de los participantes. El bootstrap entrega su credencial mediante un sobre cifrado de un solo uso, verifica identidad y huella y elimina el objeto después de confirmarlo. El paquete SQL de Autonomous restringe operaciones sobre esquemas de participantes; su nombre interno no significa que AI Data Governance esté instalado.
+El operador OCI es distinto de los participantes. El bootstrap entrega su credencial mediante un sobre cifrado de un solo uso, verifica identidad y huella y elimina el objeto después de confirmarlo. El sobre de credenciales usa el contrato estricto 3 y solo transporta la identidad OCI. El aislamiento de participantes reside en Master Catalog, carpetas y permisos de Workbench; Kits no crea memoria de agentes ni Autonomous.
 
 Se rechazan usuarios, recursos y manifiestos ajenos. No hay aliases ni adopción automática de contratos retirados.
 
 ## Infraestructura
 
-[Deploy Studio](../terraform/deploy-studio.json) usa una release fijada a un commit. Terraform prepara AIDP, Autonomous nueva o existente, buckets y la VM del portal. El [hook](../terraform/hooks/post_apply.py) reconcilia workspace, catálogo, permisos y bootstrap.
+[Deploy Studio](../terraform/deploy-studio.json) usa una release fijada a un commit. Terraform crea AIDP o referencia una plataforma existente, prepara buckets y la VM del portal. El [hook](../terraform/hooks/post_apply.py) reconcilia workspace, catálogo, permisos y bootstrap.
 
 No se importa estado ni se adoptan recursos de otras pilas. Aplicar este paquete sobre una pila combinada podría retirar recursos: no es un procedimiento de migración.
 
@@ -35,3 +35,11 @@ Las fechas de kits proceden del historial Git y hashes del manifiesto; no se sus
 ## Evidencia
 
 Las pruebas locales no demuestran ejecución en AIDP. La aceptación nativa requiere evidencia del workflow y datos del participante correcto. El [plan de separación](module-repository-separation.md) registra los gates de los módulos.
+
+## Plataforma existente
+
+`aidp_mode=existing` consulta la plataforma mediante un data source: no la importa al estado y no la elimina al destruir el stack. Debe ser ACTIVE, STRUCTURED y pertenecer a la región y al compartimento seleccionados. Se usa su workspace predeterminado real. El operador necesita administración efectiva de AIDP; el hook la verifica antes de crear recursos.
+
+Los nombres de Kits (`oci_medallion`, `aidp_cluster_shared_compute`, roles y `/Workspace/medallon`) no se adoptan de otro producto ni de un stack combinado. Antes de escribir, el hook rechaza colisiones sin la marca de propiedad del despliegue. Los recursos parciales de la misma operación conservan su marca y se reanudan. La autorización de usar una plataforma compartida no permite reasignar sus roles o datos existentes.
+
+El gate fresh-only sigue rechazando planes que actualicen o destruyan recursos existentes. Cambiar el selector de una instalación ya aplicada no es un mecanismo de migración. La plataforma y bases de datos de instalaciones anteriores se conservan hasta una transición expresamente autorizada.

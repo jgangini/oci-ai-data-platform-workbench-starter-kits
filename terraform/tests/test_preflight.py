@@ -93,36 +93,6 @@ class Aidp:
         return SimpleNamespace(data=SimpleNamespace(items=self.work_requests), headers={})
 
 
-class Database:
-    def list_autonomous_db_versions(self, **_kwargs: Any) -> Any:
-        return SimpleNamespace(data=[SimpleNamespace(version="26ai")], headers={})
-
-    def get_autonomous_database(self, _database_id: str) -> Any:
-        return SimpleNamespace(
-            data=SimpleNamespace(db_version="26ai", db_workload="DW", lifecycle_state="AVAILABLE")
-        )
-
-
-class Genai:
-    def __init__(self, models: list[Any] | None = None) -> None:
-        self.models = models or [
-            SimpleNamespace(
-                id="ocid1.generativeaimodel.oc1..chat",
-                display_name="Test Chat",
-                lifecycle_state="ACTIVE",
-                capabilities=["CHAT"],
-                type="BASE",
-                base_model_id=None,
-                compartment_id=None,
-                time_deprecated=None,
-                time_on_demand_retired=None,
-            )
-        ]
-
-    def list_models(self, **_kwargs: Any) -> Any:
-        return SimpleNamespace(data=SimpleNamespace(items=self.models), headers={})
-
-
 class ObjectStorage:
     def __init__(self, bucket_exists: bool = False) -> None:
         self.bucket_exists = bucket_exists
@@ -155,8 +125,6 @@ def _select(
     identity = identity or Identity()
     aidp = aidp or Aidp()
     inputs = {
-        "autonomous_database_mode": "new",
-        "autonomous_database_compute_count": 4,
         **(input_overrides or {}),
     }
     result = preflight.select_inputs(
@@ -170,7 +138,6 @@ def _select(
         identity_factory=lambda _config: identity,
         compute_factory=lambda _config: compute,
         aidp_factory=lambda _config: aidp,
-        database_factory=lambda _config: Database(),
         object_storage_factory=lambda _config: object_storage or ObjectStorage(),
     )
     return result, compute
@@ -388,15 +355,14 @@ def test_preflight_checks_all_availability_domains_for_standard_shape() -> None:
             "compartment": "aidp-lab",
             "compartment_mode": "new",
             "inputs": {
-                "autonomous_database_mode": "new",
-                "autonomous_database_compute_count": 4,
+
+
             },
         },
         {"tenancy": "ocid1.tenancy.oc1..test", "user": "ocid1.user.oc1..operator", "region": "us-chicago-1"},
         identity_factory=lambda _config: MultiAdIdentity(),
         compute_factory=lambda _config: MultiAdCompute(),
         aidp_factory=lambda _config: Aidp(),
-        database_factory=lambda _config: Database(),
         object_storage_factory=lambda _config: ObjectStorage(),
     )
     assert result["inputs"]["availability_domain_index"] == 1
@@ -453,15 +419,14 @@ def test_preflight_accepts_any_available_fault_domain() -> None:
             "compartment": "aidp-lab",
             "compartment_mode": "new",
             "inputs": {
-                "autonomous_database_mode": "new",
-                "autonomous_database_compute_count": 4,
+
+
             },
         },
         {"tenancy": "ocid1.tenancy.oc1..test", "user": "ocid1.user.oc1..operator", "region": "us-chicago-1"},
         identity_factory=lambda _config: Identity(),
         compute_factory=lambda _config: FaultDomainCompute(),
         aidp_factory=lambda _config: Aidp(),
-        database_factory=lambda _config: Database(),
         object_storage_factory=lambda _config: ObjectStorage(),
     )
     assert result["inputs"]["preferred_vm_shape"] == preflight.E5_SHAPE
@@ -526,3 +491,36 @@ def test_safe_error_message_keeps_capacity_and_oci_errors_actionable() -> None:
     assert preflight._safe_error_message(RuntimeError("OCI reports no capacity")) == "OCI reports no capacity"
     error = preflight.oci.exceptions.ServiceError(status=429, code="TooManyRequests", headers={}, message="hidden detail")
     assert preflight._safe_error_message(error) == "OCI 429 TooManyRequests"
+
+
+@pytest.mark.parametrize("state,kind,compartment,region", [
+    ("CREATING", "STRUCTURED", "ocid1.compartment.oc1..target", "us-chicago-1"),
+    ("ACTIVE", "UNSTRUCTURED", "ocid1.compartment.oc1..target", "us-chicago-1"),
+    ("ACTIVE", "STRUCTURED", "ocid1.compartment.oc1..other", "us-chicago-1"),
+    ("ACTIVE", "STRUCTURED", "ocid1.compartment.oc1..target", "us-ashburn-1"),
+])
+def test_existing_platform_rejects_incompatible_selection(state, kind, compartment, region):
+    client = SimpleNamespace(get_ai_data_platform=lambda _: SimpleNamespace(data=SimpleNamespace(
+        lifecycle_state=state, ai_data_platform_type=kind, compartment_id=compartment)))
+    with pytest.raises(ValueError):
+        preflight._require_aidp(client, {"aidp_mode": "existing", "existing_ai_data_platform_ocid":
+            "ocid1.aidataplatform.oc1.us-chicago-1.test"}, region, "ocid1.compartment.oc1..target", "existing")
+
+
+def test_existing_platform_is_read_only_and_new_does_not_require_database():
+    calls = []
+    def get_platform(ocid):
+        calls.append(ocid)
+        return SimpleNamespace(data=SimpleNamespace(lifecycle_state="ACTIVE", ai_data_platform_type="STRUCTURED",
+            compartment_id="ocid1.compartment.oc1..target"))
+    client = SimpleNamespace(get_ai_data_platform=get_platform)
+    message = preflight._require_aidp(client, {"aidp_mode": "existing", "existing_ai_data_platform_ocid":
+        "ocid1.aidataplatform.oc1.us-chicago-1.test"}, "us-chicago-1", "ocid1.compartment.oc1..target", "existing")
+    assert len(calls) == 1 and "will not own or delete" in message
+    assert "aidp_medallion" in preflight._require_aidp(object(), {}, "us-chicago-1", "new", "new")
+
+
+def test_existing_platform_cannot_be_selected_with_a_new_compartment():
+    with pytest.raises(ValueError, match="existing compartment"):
+        preflight._require_aidp(object(), {"aidp_mode": "existing", "existing_ai_data_platform_ocid":
+            "ocid1.aidataplatform.oc1.us-chicago-1.test"}, "us-chicago-1", "new", "new")

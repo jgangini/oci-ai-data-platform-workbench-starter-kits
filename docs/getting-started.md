@@ -20,9 +20,9 @@ Use el [paquete de Deploy Studio](../terraform/deploy-studio.json) de una [versi
 
 1. Seleccione un compartimento nuevo o existente e indique las credenciales del administrador y el código de registro del laboratorio.
 2. Seleccione o cree los cuatro buckets de medallón y otro de artefactos, cuyo nombre predeterminado es `oci_artifacts`. Los cinco deben ser distintos; los existentes deben pertenecer al compartimento seleccionado.
-3. Elija la base de datos nueva o existente. La plataforma mantiene Autonomous para sus contratos actuales.
+3. En **AI Data Platform Workbench**, elija **Services mode**. Para crear, el nombre inicial es `aidp_medallion`; para reutilizar, seleccione una plataforma ACTIVE y STRUCTURED del compartimento y región elegidos. No se solicita Autonomous ni un modelo de Agent Flow.
 4. Despliegue el portal de kits con HTTPS automático. Los módulos se instalan desde Deploy Studio usando sus repositorios independientes.
-5. Revise las fases de comprobación previa, plan, aplicación y comprobación posterior. Un `terraform apply` correcto no certifica espacios de trabajo, modelos, flujos ni participantes.
+5. Revise las fases de comprobación previa, plan, aplicación y comprobación posterior. Un `terraform apply` correcto no certifica espacios de trabajo, flujos ni participantes.
 6. Conserve el resumen protegido de acceso y las salidas `application_url`, `admin_url` y `aidp_workbench_url`.
 
 Starter Kits funciona exclusivamente como laboratorio. No hay selector de modo de despliegue. El código de registro es obligatorio y Deploy Studio entrega a Terraform únicamente su verificador PBKDF2. El administrador puede cambiarlo en Settings sin exponer el código guardado.
@@ -79,3 +79,7 @@ Para una canalización de medallón de cinco tareas, use [Banking](kits/banking.
 
 
 Los módulos y sus gates se documentan en el [plan de separación](module-repository-separation.md). Una pila combinada existente no se convierte aplicando el Terraform reducido ni actualizando la imagen del portal.
+
+El compute compartido de Spark mantiene un driver de 2 OCPU/32 GiB y workers de 2 OCPU/32 GiB, con un mínimo de 1 y máximo de 10 workers. La VM del portal conserva 2 OCPU/16 GiB. La capacidad efectiva se valida durante el despliegue; no se reservan recursos con una comprobación previa.
+
+Al reutilizar AIDP, use su compartimento existente. Si ya contiene recursos con los nombres reservados de Kits que pertenecen a otro despliegue, la instalación se detiene antes de modificar sus permisos. Consulte el contrato de propiedad y recuperación en [Contratos](contracts.md).

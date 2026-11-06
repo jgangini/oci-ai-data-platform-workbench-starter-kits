@@ -16,7 +16,7 @@ El portal administra cinco kits de participantes. Su [catálogo](../apps/backend
 
 | Repositorio | Alcance |
 | --- | --- |
-| [aidp-ai_data_governance](https://github.com/jgangini/aidp-ai_data_governance) | Agentes, tablas y workflow de gobierno. |
+| [aidp-ai-data-gobernance](https://github.com/jgangini/aidp-ai-data-gobernance) | Agentes, tablas y workflow de gobierno. |
 | [aidp-ai_market-intelligence](https://github.com/jgangini/aidp-ai_market-intelligence) | Agente Market e integración Apify. |
 | [aidp-ai-gods-eye-view](https://github.com/jgangini/aidp-ai-gods-eye-view) | Visor, streaming, configuración integrada y agente. |
 

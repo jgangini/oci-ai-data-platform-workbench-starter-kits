@@ -45,7 +45,6 @@ def bare_client() -> AidpClient:
         objectstorage_namespace="namespace",
         aidp_region="us-chicago-1",
         compartment_id="ocid1.compartment.oc1..example",
-        autonomous_database_id="ocid1.autonomousdatabase.oc1.us-chicago-1.example",
     )
     return client
 

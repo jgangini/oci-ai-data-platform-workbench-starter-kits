@@ -16,9 +16,7 @@ mock_provider "oci" {
 mock_provider "random" {}
 
 variables {
-  autonomous_database_admin_password  = "TestRootPassword123"
-  autonomous_database_wallet_password = "TestWalletPassword123"
-  operator_username                   = "test.operator@example.test"
+  operator_username = "test.operator@example.test"
 }
 
 override_resource {
@@ -27,7 +25,7 @@ override_resource {
 }
 
 override_resource {
-  target          = oci_ai_data_platform_ai_data_platform.lab
+  target          = oci_ai_data_platform_ai_data_platform.lab[0]
   override_during = plan
   values = {
     alias_key           = "testalias"
@@ -154,7 +152,7 @@ run "resolved_compartment_contract" {
   }
 
   assert {
-    condition     = oci_ai_data_platform_ai_data_platform.lab.default_workspace_name == "aidp-lab-workspace-test1234"
+    condition     = oci_ai_data_platform_ai_data_platform.lab[0].default_workspace_name == "aidp-lab-workspace-test1234"
     error_message = "The AIDP default workspace must be deterministic."
   }
 
@@ -229,8 +227,8 @@ run "resolved_compartment_contract" {
   }
 
   assert {
-    condition     = length(oci_identity_policy.aidp_service.statements) == 10
-    error_message = "The required AIDP Advanced policy plus regional Generative AI use must remain complete."
+    condition     = length(oci_identity_policy.aidp_service.statements) == 9
+    error_message = "The required AIDP policy must remain complete without unused Generative AI access."
   }
 
   assert {
@@ -497,4 +495,76 @@ run "registration_code_is_required" {
   }
 
   expect_failures = [var.registration_code_hash]
+}
+
+run "existing_aidp_is_referenced_without_owning_it" {
+
+  command = plan
+  variables {
+    tenancy_ocid                   = "ocid1.tenancy.oc1..test"
+    home_region                    = "us-ashburn-1"
+    operator_user_ocid             = "ocid1.user.oc1..operator"
+    compartment_ocid               = "ocid1.compartment.oc1..test"
+    objectstorage_namespace        = "testnamespace"
+    deployment_suffix              = "test1234"
+    admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    aidp_mode                      = "existing"
+    existing_ai_data_platform_ocid = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+  }
+
+  override_data {
+    target = data.oci_ai_data_platform_ai_data_platform.existing[0]
+    values = {
+      id                     = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+      state                  = "ACTIVE"
+      ai_data_platform_type  = "STRUCTURED"
+      compartment_id         = "ocid1.compartment.oc1..test"
+      default_workspace_name = "shared-workspace"
+      web_socket_endpoint    = "shared.datalake.oci.oraclecloud.com"
+      alias_key              = "shared"
+    }
+  }
+
+  assert {
+    condition     = length(oci_ai_data_platform_ai_data_platform.lab) == 0 && output.ai_data_platform_id == "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+    error_message = "Existing mode must not create or own the selected platform."
+  }
+  assert {
+    condition     = output.default_workspace_name == "shared-workspace"
+    error_message = "The actual existing default workspace must be used."
+  }
+}
+
+run "existing_aidp_rejects_wrong_compartment" {
+
+  command = plan
+  variables {
+    tenancy_ocid                   = "ocid1.tenancy.oc1..test"
+    home_region                    = "us-ashburn-1"
+    operator_user_ocid             = "ocid1.user.oc1..operator"
+    compartment_ocid               = "ocid1.compartment.oc1..test"
+    objectstorage_namespace        = "testnamespace"
+    deployment_suffix              = "test1234"
+    admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    aidp_mode                      = "existing"
+    existing_ai_data_platform_ocid = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+  }
+
+  override_data {
+    target = data.oci_ai_data_platform_ai_data_platform.existing[0]
+    values = {
+      id                     = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+      state                  = "ACTIVE"
+      ai_data_platform_type  = "STRUCTURED"
+      compartment_id         = "ocid1.compartment.oc1..other"
+      default_workspace_name = "shared-workspace"
+      web_socket_endpoint    = "shared.datalake.oci.oraclecloud.com"
+      alias_key              = "shared"
+    }
+  }
+  expect_failures = [data.oci_ai_data_platform_ai_data_platform.existing[0]]
 }

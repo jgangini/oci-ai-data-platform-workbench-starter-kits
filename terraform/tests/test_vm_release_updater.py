@@ -239,6 +239,8 @@ def test_candidate_mount_and_runtime_hardening_are_explicit(
         state_dir=snapshot,
     )
 
+    assert all(observed[index + 1] != "-v" for index, value in enumerate(observed) if value == "-v")
+    assert not any("autonomous" in value for value in observed)
     assert f"{snapshot}:/var/lib/aidp-lab:Z" in observed
     assert f"{tmp_path / 'state'}:/var/lib/aidp-lab:Z" not in observed
     assert ["--security-opt", "no-new-privileges:true"] == observed[

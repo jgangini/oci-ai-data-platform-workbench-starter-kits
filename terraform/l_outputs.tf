@@ -8,13 +8,6 @@ output "application_login_url" {
   value       = "https://${data.oci_core_vnic.lab.public_ip_address}/admin/login"
 }
 
-output "database_actions_url" {
-  description = "Native Database Actions URL returned by OCI for the selected database."
-  value = var.autonomous_database_mode == "new" ? (
-    oci_database_autonomous_database.agent[0].connection_urls[0].sql_dev_web_url
-  ) : data.oci_database_autonomous_database.existing_agent[0].connection_urls[0].sql_dev_web_url
-}
-
 output "source_commit_sha" {
   value = var.source_commit_sha
 }
@@ -77,32 +70,11 @@ output "medallion_prefixes" {
 }
 
 output "ai_data_platform_id" {
-  value = oci_ai_data_platform_ai_data_platform.lab.id
-}
-
-output "autonomous_database_id" {
-  description = "Autonomous AI Database for participant schemas and AIDP AI features."
-  value       = local.autonomous_database_id
-}
-
-output "autonomous_database_mode" {
-  value = var.autonomous_database_mode
-}
-
-output "autonomous_database_version" {
-  value = local.autonomous_database_version
-}
-
-output "autonomous_database_workload" {
-  value = local.autonomous_database_workload
-}
-
-output "autonomous_database_compute_count" {
-  value = var.autonomous_database_mode == "new" ? var.autonomous_database_compute_count : null
+  value = local.selected_aidp.id
 }
 
 output "default_workspace_name" {
-  value = oci_ai_data_platform_ai_data_platform.lab.default_workspace_name
+  value = local.selected_aidp.default_workspace_name
 }
 
 output "developer_group_ocid" {
@@ -137,7 +109,7 @@ output "aidp_shared_compute_name" {
 }
 
 output "aidp_external_volume_count" {
-  description = "Base Terraform creates no external volumes; the God’s Eye View post-apply reports its validated Landing volume when enabled."
+  description = "Base Terraform creates no external volumes; the Godâ€™s Eye View post-apply reports its validated Landing volume when enabled."
   value       = 0
 }
 
@@ -161,4 +133,8 @@ output "ssh_username" {
 output "vm_shape" {
   description = "Explicit shape used by this APPLY."
   value       = oci_core_instance.lab.shape
+}
+
+output "aidp_mode" {
+  value = var.aidp_mode
 }

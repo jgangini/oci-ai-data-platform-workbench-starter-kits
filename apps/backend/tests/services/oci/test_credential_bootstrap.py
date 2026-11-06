@@ -6,8 +6,6 @@ import hashlib
 import json
 import os
 import stat
-import zipfile
-from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -94,11 +92,6 @@ def _envelope(
         {
             "config_text": config_text,
             "key_text": key_text,
-            "wallet_zip_b64": base64.b64encode(_wallet()).decode(),
-            "wallet_password": "WalletPassword123",
-            "operator_username": "AIDP_LAB_OPERATOR",
-            "operator_password": "OperatorPassword1234567890",
-            "dsn": "aidp_low",
         },
         separators=(",", ":"),
     ).encode()
@@ -115,7 +108,7 @@ def _envelope(
     )
     return json.dumps(
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "wrapped_key_b64": base64.b64encode(wrapped_key).decode(),
             "nonce_b64": base64.b64encode(nonce).decode(),
             "ciphertext_b64": base64.b64encode(ciphertext).decode(),
@@ -134,20 +127,8 @@ def _settings(tmp_path: Path, bootstrap_key: rsa.RSAPrivateKey) -> BootstrapSett
         private_key=private_key,
         expected_user_ocid=USER_OCID,
         config_dir=tmp_path / "oci",
-        autonomous_dir=tmp_path / "autonomous",
         region="us-chicago-1",
     )
-
-
-def _wallet() -> bytes:
-    stream = BytesIO()
-    with zipfile.ZipFile(stream, "w") as archive:
-        for name, content in (
-            ("tnsnames.ora", "aidp_low = (DESCRIPTION=(ADDRESS=(PROTOCOL=TCPS)))\n"),
-            ("sqlnet.ora", "WALLET_LOCATION=(SOURCE=(METHOD=file))\n"),
-        ):
-            archive.writestr(zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0)), content)
-    return stream.getvalue()
 
 
 def test_bootstrap_installs_exact_operator_profile_and_deletes_object(tmp_path: Path) -> None:
@@ -169,10 +150,7 @@ def test_bootstrap_installs_exact_operator_profile_and_deletes_object(tmp_path: 
         (settings.namespace, settings.bucket, settings.object_name),
     ]
     assert storage.delete_calls == [(settings.namespace, settings.bucket, settings.object_name)]
-    assert (settings.autonomous_dir / "wallet.zip").read_bytes() == _wallet()
-    runtime = json.loads((settings.autonomous_dir / "runtime.json").read_text())
-    assert runtime["bootstrap_version"] == 2
-    assert runtime["operator_username"] == "AIDP_LAB_OPERATOR"
+    assert json.loads((settings.config_dir / "bootstrap.json").read_text()) == {"schema_version": 3}
     if os.name != "nt":
         assert stat.S_IMODE(settings.config_dir.stat().st_mode) == 0o700
         assert stat.S_IMODE((settings.config_dir / "config").stat().st_mode) == 0o600
@@ -283,7 +261,6 @@ def test_main_uses_instance_principal_and_all_environment_settings(tmp_path: Pat
     monkeypatch.setenv("OCI_BOOTSTRAP_PRIVATE_KEY", str(settings.private_key))
     monkeypatch.setenv("OCI_EXPECTED_USER_OCID", settings.expected_user_ocid)
     monkeypatch.setenv("OCI_CONFIG_DIR", str(settings.config_dir))
-    monkeypatch.setenv("AUTONOMOUS_RUNTIME_DIR", str(settings.autonomous_dir))
     monkeypatch.setenv("OCI_REGION", settings.region)
     monkeypatch.setattr(
         "oci.auth.signers.InstancePrincipalsSecurityTokenSigner",
@@ -312,7 +289,6 @@ def test_main_failure_does_not_print_credential_contents(tmp_path: Path, monkeyp
     monkeypatch.setenv("OCI_BOOTSTRAP_PRIVATE_KEY", str(settings.private_key))
     monkeypatch.setenv("OCI_EXPECTED_USER_OCID", settings.expected_user_ocid)
     monkeypatch.setenv("OCI_CONFIG_DIR", str(settings.config_dir))
-    monkeypatch.setenv("AUTONOMOUS_RUNTIME_DIR", str(settings.autonomous_dir))
     monkeypatch.setenv("OCI_REGION", settings.region)
     monkeypatch.setattr("oci.auth.signers.InstancePrincipalsSecurityTokenSigner", object)
     monkeypatch.setattr(
@@ -325,3 +301,15 @@ def test_main_failure_does_not_print_credential_contents(tmp_path: Path, monkeyp
     assert "does not match the expected operator" in output.err
     assert "unexpected" not in output.err
     assert "BEGIN PRIVATE KEY" not in output.err
+
+
+def test_bootstrap_rejects_previous_envelope_contract_without_deleting(tmp_path):
+    bootstrap_key, operator_key = _private_key(), _private_key()
+    settings = _settings(tmp_path, bootstrap_key)
+    envelope = json.loads(_envelope(bootstrap_key, operator_key))
+    envelope["schema_version"] = 2
+    storage = FakeObjectStorage(json.dumps(envelope).encode())
+    with pytest.raises(CredentialBootstrapError, match="schema is not supported"):
+        bootstrap_credentials(settings, storage)
+    assert not storage.delete_calls
+    assert not settings.config_dir.exists()

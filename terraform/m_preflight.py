@@ -95,37 +95,28 @@ def _require_ready_region(identity: Any, tenancy_id: str, region: str) -> None:
 
 
 
-def _require_autonomous(
-    database: Any,
-    tenancy_id: str,
-    inputs: dict[str, Any],
-) -> str:
-    mode = str(inputs.get("autonomous_database_mode") or "new")
-    if mode == "existing":
-        database_id = str(inputs.get("existing_autonomous_database_ocid") or "")
-        if not database_id.startswith("ocid1.autonomousdatabase."):
-            raise ValueError("existing Autonomous database OCID is required")
-        item = database.get_autonomous_database(database_id).data
-        if str(getattr(item, "db_version", "")) != "26ai":
-            raise RuntimeError("the existing Autonomous database must use version 26ai")
-        if str(getattr(item, "db_workload", "")).upper() != "DW":
-            raise RuntimeError("the existing Autonomous database must use the Data Warehouse workload")
-        state = str(getattr(item, "lifecycle_state", "")).upper()
-        if state not in {"AVAILABLE", "STOPPED"}:
-            raise RuntimeError(f"the existing Autonomous database is {state or 'not available'}")
-        return f"existing Oracle AI Database 26ai DW is {state}"
-
-    count = inputs.get("autonomous_database_compute_count", 4)
-    if isinstance(count, bool) or not isinstance(count, (int, float)) or int(count) != count or not 2 <= int(count) <= 512:
-        raise ValueError("new Autonomous database ECPU count must be an integer between 2 and 512")
-    versions = _list_all(
-        database.list_autonomous_db_versions,
-        compartment_id=tenancy_id,
-        db_workload="DW",
-    )
-    if not any(str(getattr(item, "version", "")) == "26ai" for item in versions):
-        raise RuntimeError("Oracle AI Database 26ai DW is not available in the selected region")
-    return f"new Oracle AI Database 26ai DW will use {int(count)} ECPU"
+def _require_aidp(aidp: Any, inputs: dict[str, Any], region: str, compartment: str, compartment_mode: str) -> str:
+    mode = str(inputs.get("aidp_mode") or "new")
+    if mode == "new":
+        name = str(inputs.get("aidp_display_name") or "aidp_medallion")
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,99}", name):
+            raise ValueError("Invalid new AIDP display name")
+        return f"A new AIDP {name} will be created"
+    if mode != "existing":
+        raise ValueError("aidp_mode must be new or existing")
+    platform_id = str(inputs.get("existing_ai_data_platform_ocid") or "")
+    if not re.fullmatch(r"ocid1\.aidataplatform\.[a-z0-9.-]+", platform_id):
+        raise ValueError("An existing AIDP OCID is required")
+    if compartment_mode != "existing":
+        raise ValueError("Existing AIDP requires its existing compartment")
+    platform = aidp.get_ai_data_platform(platform_id).data
+    if getattr(platform, "lifecycle_state", "") != "ACTIVE" or getattr(platform, "ai_data_platform_type", "") != "STRUCTURED":
+        raise ValueError("Existing AIDP must be ACTIVE and STRUCTURED")
+    if getattr(platform, "compartment_id", "") != compartment:
+        raise ValueError("Existing AIDP must belong to the selected compartment")
+    if platform_id.split(".")[3] != region:
+        raise ValueError("Existing AIDP must belong to the selected region")
+    return "Existing AIDP validated; this stack will not own or delete the platform"
 
 
 def _candidate_shapes(preferred: str) -> list[str]:
@@ -207,7 +198,6 @@ def select_inputs(
     identity_factory: Callable[[dict[str, Any]], Any] = oci.identity.IdentityClient,
     compute_factory: Callable[[dict[str, Any]], Any] = oci.core.ComputeClient,
     aidp_factory: Callable[[dict[str, Any]], Any] = oci.ai_data_platform.AiDataPlatformClient,
-    database_factory: Callable[[dict[str, Any]], Any] = oci.database.DatabaseClient,
     object_storage_factory: Callable[[dict[str, Any]], Any] = oci.object_storage.ObjectStorageClient,
 ) -> dict[str, Any]:
     target, mode = compartment_target(context)
@@ -239,7 +229,7 @@ def select_inputs(
         if artifacts_mode == "new"
         else ""
     )
-    database_message = _require_autonomous(database_factory(regional_config), tenancy_id, inputs)
+    aidp_message = _require_aidp(aidp_factory(regional_config), inputs, region, target, mode)
     compartment_message = _require_compartment_target(
         identity,
         aidp_factory(regional_config),
@@ -292,7 +282,7 @@ def select_inputs(
                     },
                     {"name": "OCI tenancy home region", "status": "passed", "message": home_region},
                     {"name": "Inherited tag defaults", "status": "passed", "message": tags_message},
-                    {"name": "Autonomous AI Database 26ai", "status": "passed", "message": database_message},
+                    {"name": "AI Data Platform Workbench", "status": "passed", "message": aidp_message},
                     {
                         "name": "Compute capacity preflight",
                         "status": "passed",
