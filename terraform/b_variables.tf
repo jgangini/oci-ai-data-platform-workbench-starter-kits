@@ -286,7 +286,7 @@ variable "existing_ai_data_platform_ocid" {
   type    = string
   default = ""
   validation {
-    condition     = var.aidp_mode != "existing" || can(regex("^ocid1\\.aidataplatform\\.[a-z0-9.-]+$", var.existing_ai_data_platform_ocid))
-    error_message = "An AIDP OCID is required in existing mode."
+    condition     = var.existing_ai_data_platform_ocid == "" || can(regex("^ocid1\\.aidataplatform\\.[a-z0-9.-]+$", var.existing_ai_data_platform_ocid))
+    error_message = "The existing platform identifier must be an AIDP OCID."
   }
 }

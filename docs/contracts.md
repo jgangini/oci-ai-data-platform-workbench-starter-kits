@@ -43,3 +43,5 @@ Las pruebas locales no demuestran ejecución en AIDP. La aceptación nativa requ
 Los nombres de Kits (`oci_medallion`, `aidp_cluster_shared_compute`, roles y `/Workspace/medallon`) no se adoptan de otro producto ni de un stack combinado. Antes de escribir, el hook rechaza colisiones sin la marca de propiedad del despliegue. Los recursos parciales de la misma operación conservan su marca y se reanudan. La autorización de usar una plataforma compartida no permite reasignar sus roles o datos existentes.
 
 El gate fresh-only sigue rechazando planes que actualicen o destruyan recursos existentes. Cambiar el selector de una instalación ya aplicada no es un mecanismo de migración. La plataforma y bases de datos de instalaciones anteriores se conservan hasta una transición expresamente autorizada.
+
+La configuración mantiene compatibilidad con Terraform 1.5.7: las validaciones de variables solo inspeccionan su propia variable. La obligatoriedad del OCID en modo existente se comprueba mediante una precondición del data source, antes de consultarlo.

@@ -73,6 +73,10 @@ data "oci_ai_data_platform_ai_data_platform" "existing" {
   count               = var.aidp_mode == "existing" ? 1 : 0
   ai_data_platform_id = var.existing_ai_data_platform_ocid
   lifecycle {
+    precondition {
+      condition     = var.existing_ai_data_platform_ocid != ""
+      error_message = "An AIDP OCID is required in existing mode."
+    }
     postcondition {
       condition     = self.state == "ACTIVE" && self.ai_data_platform_type == "STRUCTURED" && self.compartment_id == local.target_compartment
       error_message = "The existing AIDP must be ACTIVE, STRUCTURED and in the selected compartment."

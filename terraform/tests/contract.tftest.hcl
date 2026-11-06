@@ -568,3 +568,35 @@ run "existing_aidp_rejects_wrong_compartment" {
   }
   expect_failures = [data.oci_ai_data_platform_ai_data_platform.existing[0]]
 }
+
+run "existing_aidp_requires_an_identifier" {
+
+  command = plan
+  variables {
+    tenancy_ocid                   = "ocid1.tenancy.oc1..test"
+    home_region                    = "us-ashburn-1"
+    operator_user_ocid             = "ocid1.user.oc1..operator"
+    compartment_ocid               = "ocid1.compartment.oc1..test"
+    objectstorage_namespace        = "testnamespace"
+    deployment_suffix              = "test1234"
+    admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    aidp_mode                      = "existing"
+    existing_ai_data_platform_ocid = ""
+  }
+
+  override_data {
+    target = data.oci_ai_data_platform_ai_data_platform.existing[0]
+    values = {
+      id                     = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+      state                  = "ACTIVE"
+      ai_data_platform_type  = "STRUCTURED"
+      compartment_id         = "ocid1.compartment.oc1..other"
+      default_workspace_name = "shared-workspace"
+      web_socket_endpoint    = "shared.datalake.oci.oraclecloud.com"
+      alias_key              = "shared"
+    }
+  }
+  expect_failures = [data.oci_ai_data_platform_ai_data_platform.existing[0]]
+}
