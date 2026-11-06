@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "project_id": "oci-aidp-cloud-migration-lab",
   "terraform": {
     "path": "terraform",
@@ -110,7 +110,8 @@
         "min_length": 12,
         "max_length": 128,
         "transform": "pbkdf2_sha256",
-        "group": "application_vm"
+        "group": "application_vm",
+        "generate_password": true
       },
       {
         "name": "registration_code",
@@ -356,6 +357,174 @@
       "admin_username",
       "admin_password",
       "registration_code"
+    ],
+    "groups": [
+      {
+        "id": "credentials",
+        "title": "OCI credentials",
+        "items": [
+          {
+            "kind": "control",
+            "name": "oci_config",
+            "label": "OCI config"
+          },
+          {
+            "kind": "control",
+            "name": "oci_key",
+            "label": "API private key"
+          }
+        ]
+      },
+      {
+        "id": "services",
+        "title": "Services to deploy",
+        "items": [
+          {
+            "kind": "control",
+            "name": "oci_region",
+            "label": "OCI Region",
+            "span": 2
+          },
+          {
+            "kind": "control",
+            "name": "compartment_mode",
+            "label": "Compartment mode",
+            "options": [
+              {
+                "value": "new",
+                "label": "New compartment"
+              },
+              {
+                "value": "existing",
+                "label": "Existing compartment"
+              }
+            ]
+          },
+          {
+            "kind": "control",
+            "name": "new_compartment",
+            "label": "New compartment name"
+          },
+          {
+            "kind": "control",
+            "name": "existing_compartment",
+            "label": "Existing compartment"
+          }
+        ]
+      },
+      {
+        "id": "aidp_platform",
+        "title": "AI Data Platform Workbench",
+        "items": [
+          {
+            "kind": "field",
+            "name": "aidp_mode",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "aidp_display_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "existing_ai_data_platform_ocid",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "existing_workspace_key",
+            "span": 1
+          }
+        ]
+      },
+      {
+        "id": "medallion",
+        "title": "Medallion Architecture",
+        "items": [
+          {
+            "kind": "field",
+            "name": "landing_bucket_mode",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "landing_new_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "landing_existing_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "bronze_bucket_mode",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "bronze_new_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "bronze_existing_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "silver_bucket_mode",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "silver_new_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "silver_existing_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "gold_bucket_mode",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "gold_new_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "gold_existing_bucket_name",
+            "span": 1
+          }
+        ]
+      },
+      {
+        "id": "application_vm",
+        "title": "Application VM",
+        "items": [
+          {
+            "kind": "field",
+            "name": "admin_username",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "admin_password",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "registration_code",
+            "span": 1
+          }
+        ]
+      }
     ]
   },
   "email": {

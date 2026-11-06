@@ -51,3 +51,7 @@ Los nombres de Kits (`oci_medallion`, `aidp_cluster_shared_compute`, roles y `/W
 El gate fresh-only sigue rechazando planes que actualicen o destruyan recursos existentes. Cambiar el selector de una instalación ya aplicada no es un mecanismo de migración. La plataforma y bases de datos de instalaciones anteriores se conservan hasta una transición expresamente autorizada.
 
 La configuración mantiene compatibilidad con Terraform 1.5.7: las validaciones de variables solo inspeccionan su propia variable. La obligatoriedad del OCID en modo existente se comprueba mediante una precondición del data source, antes de consultarlo.
+
+## Formulario declarativo de Deploy Studio
+
+`terraform/deploy-studio.json` utiliza `schema_version: 2`. `form.groups` declara los títulos y el orden de los grupos; cada lista `items` fija el orden de campos, archivos y controles comunes, y `span` su ancho en columnas. Los campos declaran valores predeterminados y condiciones de visibilidad. CloudTechNext valida las referencias y requiere este contrato; no reconstruye formularios antiguos. Las credenciales se cargan en el grupo `credentials`; los demás controles se habilitan tras validarlas. Las releases publicadas conservan sus manifiestos inmutables: este contrato requiere una nueva release y un motor compatible.

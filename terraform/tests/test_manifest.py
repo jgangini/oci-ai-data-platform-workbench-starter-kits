@@ -28,7 +28,7 @@ def test_deploy_studio_manifest_contract() -> None:
     manifest = json.loads((root / "terraform" / "deploy-studio.json").read_text(encoding="utf-8"))
     variables = (root / "terraform" / "b_variables.tf").read_text(encoding="utf-8")
     storage = (root / "terraform" / "f_oci_objectstorage_bucket.tf").read_text(encoding="utf-8")
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["project_id"] == "oci-aidp-cloud-migration-lab"
     assert manifest["terraform"] == {"path": "terraform", "package_oci_credentials": False}
     assert manifest["capabilities"] == {
