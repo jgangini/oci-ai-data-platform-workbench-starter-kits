@@ -169,7 +169,7 @@
       },
       {
         "name": "existing_workspace_key",
-        "label": "Workspace",
+        "label": "Existing workspace",
         "type": "select",
         "required": true,
         "options_source": "oci_aidp_workspaces",
