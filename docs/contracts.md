@@ -36,6 +36,12 @@ Las fechas de kits proceden del historial Git y hashes del manifiesto; no se sus
 
 Las pruebas locales no demuestran ejecución en AIDP. La aceptación nativa requiere evidencia del workflow y datos del participante correcto, conforme a los [límites de la implementación](getting-started.md#current-implementation-limits).
 
+## Buckets de Kits
+
+El formulario selecciona cuatro buckets Medallion distintos: Landing, Bronze, Silver y Gold. Cada capa permite crear o reutilizar un bucket del compartimento seleccionado. Landing también recibe el sobre cifrado de credenciales de un solo uso. Kits no configura ni crea un bucket de artefactos de Governance. El bucket técnico `aidp-data-<sufijo>` y sus permisos de consola se conservan; no es una quinta selección del formulario.
+
+Los buckets de instalaciones previas permanecen en su stack. Un Terraform reducido no debe aplicarse sobre esos estados para eliminarlos; el cambio de configuración no constituye una autorización de borrado ni un procedimiento de migración.
+
 ## Plataforma existente
 
 `aidp_mode=existing` consulta la plataforma mediante un data source: no la importa al estado y no la elimina al destruir el stack. Debe ser ACTIVE, STRUCTURED y pertenecer a la región y al compartimento seleccionados. Deploy Studio lista sus workspaces accesibles. Debe seleccionarse un workspace ACTIVE: la comprobación previa verifica la clave dentro de la plataforma usando la identidad del operador, resuelve su nombre y entrega ambos al portal. El hook vuelve a comprobar la selección antes de escribir contenido. Un AIDP nuevo conserva su workspace predeterminado. El operador necesita administración efectiva de AIDP; el hook la verifica antes de crear recursos.

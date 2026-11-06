@@ -18,7 +18,6 @@ E4_SHAPE = "VM.Standard.E4.Flex"
 E3_SHAPE = "VM.Standard.E3.Flex"
 SUPPORTED_SHAPES = (E5_SHAPE, E4_SHAPE, E3_SHAPE)
 ACTIVE_WORK_REQUEST_STATES = {"ACCEPTED", "IN_PROGRESS", "WAITING", "NEEDS_ATTENTION", "CANCELING"}
-DEFAULT_ARTIFACTS_BUCKET = "oci_artifacts"
 
 
 def _require_automatic_tag_defaults(identity: Any, compartment_id: str) -> str:
@@ -29,27 +28,6 @@ def _require_automatic_tag_defaults(identity: Any, compartment_id: str) -> str:
             "Configure automatic values for inherited required tag defaults before deployment."
         )
     return f"{len(defaults)} inherited tag defaults have automatic values; tenancy defaults will be preserved"
-
-
-def _require_new_bucket_available(object_storage: Any, bucket_name: str) -> str:
-    if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", bucket_name) is None:
-        raise ValueError("The artifacts bucket name must contain 1-128 letters, numbers, dots, underscores, or hyphens")
-    namespace = str(object_storage.get_namespace().data or "").strip()
-    if not namespace:
-        raise RuntimeError("OCI did not return an Object Storage namespace")
-    try:
-        object_storage.get_bucket(
-            namespace_name=namespace,
-            bucket_name=bucket_name,
-        )
-    except oci.exceptions.ServiceError as exc:
-        if exc.status == 404 and exc.code == "BucketNotFound":
-            return f"{bucket_name} is available in the Object Storage namespace"
-        raise
-    raise RuntimeError(
-        f"{bucket_name} already exists in this Object Storage namespace; "
-        "choose a different name for a new environment, or select Use existing bucket for this environment's own bucket"
-    )
 
 
 def _safe_error_message(exc: Exception) -> str:
@@ -209,7 +187,6 @@ def select_inputs(
     identity_factory: Callable[[dict[str, Any]], Any] = oci.identity.IdentityClient,
     compute_factory: Callable[[dict[str, Any]], Any] = oci.core.ComputeClient,
     aidp_factory: Callable[[dict[str, Any]], Any] = oci.ai_data_platform.AiDataPlatformClient,
-    object_storage_factory: Callable[[dict[str, Any]], Any] = oci.object_storage.ObjectStorageClient,
 ) -> dict[str, Any]:
     target, mode = compartment_target(context)
     region = str(context.get("region") or sdk_config.get("region") or "").strip()
@@ -231,15 +208,6 @@ def select_inputs(
     identity = identity_factory(regional_config)
     _require_ready_region(identity, tenancy_id, region)
     operator_username = _operator_username(identity, operator_user_ocid)
-    artifacts_mode = str(inputs.get("artifacts_bucket_mode") or "new").strip().lower()
-    artifacts_bucket_message = (
-        _require_new_bucket_available(
-            object_storage_factory(regional_config),
-            str(inputs.get("artifacts_new_bucket_name", DEFAULT_ARTIFACTS_BUCKET)).strip(),
-        )
-        if artifacts_mode == "new"
-        else ""
-    )
     aidp_message = _require_aidp(aidp_factory(regional_config), inputs, region, target, mode)
     workspace_inputs = _workspace_inputs(inputs, regional_config)
     compartment_message = _require_compartment_target(
@@ -301,17 +269,6 @@ def select_inputs(
                         "status": "passed",
                         "message": f"{selected} is AVAILABLE in {availability_domain}; requesting {required_count} VMs; OCI may omit available_count and capacity is not reserved",
                     },
-                    *(
-                        [
-                            {
-                                "name": "Medallion artifacts bucket",
-                                "status": "passed",
-                                "message": artifacts_bucket_message,
-                            }
-                        ]
-                        if artifacts_mode == "new"
-                        else []
-                    ),
                 ],
             }
     raise RuntimeError("OCI reports no capacity for the supported E5/E4/E3 Flex shapes in any Availability Domain")

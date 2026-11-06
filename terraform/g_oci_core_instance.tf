@@ -112,7 +112,6 @@ resource "oci_core_instance" "lab" {
       aidp_workspace_key      = local.selected_workspace_key
       aidp_region             = var.region
       compartment_id          = local.target_compartment
-      artifacts_bucket_name   = local.artifacts_bucket_name
       lab_marker              = local.name_prefix
       source_repo_url         = var.source_repository_url
       source_commit_sha       = var.source_commit_sha
