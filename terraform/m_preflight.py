@@ -18,7 +18,6 @@ E4_SHAPE = "VM.Standard.E4.Flex"
 E3_SHAPE = "VM.Standard.E3.Flex"
 SUPPORTED_SHAPES = (E5_SHAPE, E4_SHAPE, E3_SHAPE)
 ACTIVE_WORK_REQUEST_STATES = {"ACCEPTED", "IN_PROGRESS", "WAITING", "NEEDS_ATTENTION", "CANCELING"}
-MODEL_TYPE_BASE = "BASE"
 DEFAULT_ARTIFACTS_BUCKET = "oci_artifacts"
 
 
@@ -92,30 +91,8 @@ def _require_ready_region(identity: Any, tenancy_id: str, region: str) -> None:
         raise RuntimeError(f"region {region} subscription is {status}, not READY")
 
 
-def _model_is_selectable(model: Any) -> bool:
-    capabilities = {str(value).upper() for value in (getattr(model, "capabilities", None) or [])}
-    return (
-        str(getattr(model, "lifecycle_state", "")).upper() == "ACTIVE"
-        and "CHAT" in capabilities
-        and str(getattr(model, "type", "")).upper() == MODEL_TYPE_BASE
-        and not getattr(model, "base_model_id", None)
-        and not getattr(model, "compartment_id", None)
-        and not getattr(model, "time_deprecated", None)
-        and not getattr(model, "time_on_demand_retired", None)
-    )
 
 
-def _require_agent_model(genai: Any, tenancy_id: str, model_id: str) -> str:
-    models = _list_all(
-        genai.list_models,
-        compartment_id=tenancy_id,
-        capability=["CHAT"],
-        lifecycle_state="ACTIVE",
-    )
-    selected = next((model for model in models if str(getattr(model, "id", "")) == model_id), None)
-    if selected is None or not _model_is_selectable(selected):
-        raise RuntimeError("the selected Agent LLM is no longer an ACTIVE on-demand CHAT model in this region")
-    return str(getattr(selected, "display_name", None) or model_id)
 
 
 def _require_autonomous(
@@ -231,7 +208,6 @@ def select_inputs(
     compute_factory: Callable[[dict[str, Any]], Any] = oci.core.ComputeClient,
     aidp_factory: Callable[[dict[str, Any]], Any] = oci.ai_data_platform.AiDataPlatformClient,
     database_factory: Callable[[dict[str, Any]], Any] = oci.database.DatabaseClient,
-    genai_factory: Callable[[dict[str, Any]], Any] = oci.generative_ai.GenerativeAiClient,
     object_storage_factory: Callable[[dict[str, Any]], Any] = oci.object_storage.ObjectStorageClient,
 ) -> dict[str, Any]:
     target, mode = compartment_target(context)
@@ -242,11 +218,9 @@ def select_inputs(
         raise ValueError("preflight requires deployment region, tenancy OCID, and operator user OCID")
 
     inputs = context.get("inputs") if isinstance(context.get("inputs"), dict) else {}
-    if {"enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer"} & inputs.keys():
-        raise ValueError("Unsupported VM module flags; use enabled_vm_modules")
-    enabled_modules = inputs.get("enabled_vm_modules", [])
-    if not isinstance(enabled_modules, list) or any(module != "gods_eye_view" for module in enabled_modules):
-        raise ValueError("enabled_vm_modules must be a list containing only gods_eye_view")
+    if {"enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer",
+        "enabled_vm_modules", "portal_managed_modules"} & inputs.keys():
+        raise ValueError("Module deployment inputs are not supported by the kits-only project")
 
     candidates = _candidate_shapes(E5_SHAPE)
     ocpus = 2.0
@@ -265,10 +239,6 @@ def select_inputs(
         if artifacts_mode == "new"
         else ""
     )
-    model_id = str(inputs.get("agent_model_id") or "").strip()
-    if not model_id:
-        raise ValueError("agent_model_id is required")
-    model_name = _require_agent_model(genai_factory(regional_config), tenancy_id, model_id)
     database_message = _require_autonomous(database_factory(regional_config), tenancy_id, inputs)
     compartment_message = _require_compartment_target(
         identity,
@@ -298,7 +268,7 @@ def select_inputs(
             ],
         )
         report = compute.create_compute_capacity_report(details).data
-        required_count = 2 if "gods_eye_view" in enabled_modules else 1
+        required_count = 1
         selected = _available_shape(report, candidates, required_count)
         if selected:
             return {
@@ -322,7 +292,6 @@ def select_inputs(
                     },
                     {"name": "OCI tenancy home region", "status": "passed", "message": home_region},
                     {"name": "Inherited tag defaults", "status": "passed", "message": tags_message},
-                    {"name": "Regional Agent LLM", "status": "passed", "message": model_name},
                     {"name": "Autonomous AI Database 26ai", "status": "passed", "message": database_message},
                     {
                         "name": "Compute capacity preflight",

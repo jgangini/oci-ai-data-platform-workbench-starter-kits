@@ -68,7 +68,8 @@ def test_release_manifest_binds_the_asset_tag_commit_and_protocol() -> None:
     commit_sha = "c" * 40
     manifest = {
         "schema_version": 1,
-        "updater_protocol": 1,
+        "updater_protocol": 2,
+        "deployment_profile": "kits-only",
         "release": "v2.3.0",
         "commit_sha": commit_sha,
         "repository": updater.REPOSITORY.removesuffix(".git"),
@@ -82,7 +83,9 @@ def test_release_manifest_binds_the_asset_tag_commit_and_protocol() -> None:
 
     assert updater._validated_manifest(manifest, release)["commit_sha"] == commit_sha
     for invalid in (
-        {"updater_protocol": 2},
+        {"updater_protocol": 1},
+        {"deployment_profile": "combined"},
+        {"deployment_profile": None},
         {"release": "v2.4.0"},
         {"commit_sha": "not-a-sha"},
         {"image": {**manifest["image"], "sha256": "d" * 64}},
@@ -103,6 +106,7 @@ def test_prebuilt_image_must_match_release_metadata_and_platform(
             "APP_RELEASE_TAG": "v2.3.0",
             "APP_RELEASE_SHA": commit_sha,
             "APP_REPOSITORY": updater.REPOSITORY.removesuffix(".git"),
+            "APP_DEPLOYMENT_PROFILE": "kits-only",
         },
     )
     monkeypatch.setattr(
@@ -220,7 +224,7 @@ def test_candidate_mount_and_runtime_hardening_are_explicit(
     observed: list[str] = []
     snapshot = tmp_path / "releases/candidate-state"
     environment = tmp_path / ".env"
-    environment.write_text("GODS_EYE_VIEW_ENABLED=true\n", encoding="utf-8")
+    environment.write_text("APP_DEPLOYMENT_PROFILE=kits-only\n", encoding="utf-8")
     monkeypatch.setattr(
         updater,
         "_run",
@@ -243,14 +247,16 @@ def test_candidate_mount_and_runtime_hardening_are_explicit(
     assert "--cap-drop" in observed and "ALL" in observed
     assert "--read-only" in observed
     assert "/var/run/docker.sock" not in " ".join(observed)
-    assert observed[observed.index("-e") + 1] == "GODS_EYE_VIEW_ENABLED=false"
-    assert not any(value.startswith(("PRISMA_", "TERRITORIAL_")) for value in observed)
-    assert observed.index("-e") > observed.index("--env-file")
+    assert "-e" not in observed
+    assert "127.0.0.1:18443:443" in observed
+    assert not any(":8000" in value for value in observed)
     observed.clear()
     updater._run_container(tmp_path, updater.APP_NAME, "aidp-lab:" + "b" * 40, candidate=False)
-    assert "GODS_EYE_VIEW_ENABLED=false" not in observed
+    assert "80:80" in observed and "443:443" in observed
+    assert not any(":8000" in value for value in observed)
     assert observed[observed.index("--env-file") + 1] == str(environment)
-    assert environment.read_text() == "GODS_EYE_VIEW_ENABLED=true\n"
+    assert environment.read_text() == "APP_DEPLOYMENT_PROFILE=kits-only\n"
+
 
 
 @pytest.mark.parametrize("status, expected", [("200", True), ("204", False), ("302", False)])
@@ -392,6 +398,8 @@ def test_reconcile_reports_when_no_healthy_rollback_can_be_verified(
             {
                 "schema_version": 1,
                 "repository": updater.REPOSITORY.removesuffix(".git"),
+                "deployment_profile": "kits-only",
+                "updater_protocol": 2,
                 "release": "v2.2.0",
                 "commit_sha": "a" * 40,
             }
@@ -420,6 +428,7 @@ def test_reconcile_reports_when_no_healthy_rollback_can_be_verified(
 def test_current_release_state_updates_atomically_without_losing_rollback(monkeypatch, tmp_path, candidate_healthy):
     old_sha, new_sha = "a" * 40, "b" * 40
     original = {"schema_version": 1, "repository": updater.REPOSITORY.removesuffix(".git"),
+              "deployment_profile": "kits-only", "updater_protocol": 2,
               "release": "v2.2.0", "commit_sha": old_sha}
     current_path = tmp_path / "releases/current.json"
     current_path.parent.mkdir()
@@ -442,6 +451,8 @@ def test_current_release_state_updates_atomically_without_losing_rollback(monkey
 
     current = json.loads((tmp_path / "releases/current.json").read_text(encoding="utf-8"))
     assert current["commit_sha"] == (new_sha if candidate_healthy else old_sha)
+    assert current["deployment_profile"] == "kits-only"
+    assert current["updater_protocol"] == 2
     assert containers[updater.APP_NAME]["image"] == f"aidp-lab:{current['commit_sha']}"
     assert json.loads((tmp_path / "state/settings.json").read_text(encoding="utf-8")) == {"preserve": True}
     # The successful current receipt is authoritative on a subsequent operation.
@@ -461,3 +472,70 @@ def test_old_release_state_location_is_rejected_without_network_or_mutation(monk
     assert json.loads(old_path.read_text(encoding="utf-8")) == original
     assert not (tmp_path / "releases").exists()
     assert not (tmp_path / "state").exists()
+
+
+@pytest.mark.parametrize("profile,protocol", [(None, None), ("combined", 1), ("kits-only", 1), (None, 2)])
+def test_combined_installation_is_rejected_before_network_or_docker(monkeypatch, tmp_path, profile, protocol):
+    current = {"schema_version": 1, "repository": updater.REPOSITORY.removesuffix(".git"),
+               "release": "v4.0.11", "commit_sha": "a" * 40}
+    if profile is not None:
+        current["deployment_profile"] = profile
+    if protocol is not None:
+        current["updater_protocol"] = protocol
+    path = tmp_path / "releases/current.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(current))
+    monkeypatch.setattr(updater, "latest_release", lambda: pytest.fail("No network across the deployment boundary"))
+    monkeypatch.setattr(updater, "_run", lambda *_args, **_kwargs: pytest.fail("No Docker across the deployment boundary"))
+    monkeypatch.setattr(updater, "_remove_container", lambda *_args: pytest.fail("No container cleanup before migration"))
+    with pytest.raises(RuntimeError, match="release_profile_migration_required"):
+        updater.reconcile(tmp_path, "d9282ff6-8717-4db7-9f59-241469a2c526")
+    assert json.loads(path.read_text()) == current
+    status = json.loads((tmp_path / "state/update/status/status.json").read_text())
+    assert status["status"] == "failed"
+    assert "explicit migration" in status["message"]
+
+
+def test_frozen_combined_updater_rejects_kits_manifest_before_image_download_or_load(tmp_path):
+    fixture = Path(__file__).with_name("fixtures") / "combined_release_protocol.py.txt"
+    namespace = {"Path": Path, "Any": object, "REPOSITORY": updater.REPOSITORY, "SHA": updater.SHA,
+                 "MANIFEST_ASSET": updater.MANIFEST_ASSET, "IMAGE_ASSET": updater.IMAGE_ASSET,
+                 "MANIFEST_LIMIT": updater.MANIFEST_LIMIT, "IMAGE_LIMIT": updater.IMAGE_LIMIT,
+                 "_json": updater._json, "_safe_rmtree": updater._safe_rmtree,
+                 "resolved_tag_sha": lambda *_: pytest.fail("No tag resolution after rejected manifest")}
+    exec(compile(fixture.read_text(), str(fixture), "exec"), namespace)
+    downloaded = []
+    def download(_url, path, _digest, _limit):
+        downloaded.append(path.name)
+        assert path.name == updater.MANIFEST_ASSET, "Combined updater must never download the kits image"
+        path.write_text(json.dumps({"schema_version": 1, "updater_protocol": 2, "deployment_profile": "kits-only",
+            "release": "v5.0.0", "commit_sha": "b" * 40, "repository": updater.REPOSITORY.removesuffix(".git"),
+            "image": {"asset_name": updater.IMAGE_ASSET, "sha256": "b" * 64, "platform": "linux/amd64", "image_tag": "aidp-lab:" + "b" * 40}}))
+    namespace["_download"] = download
+    release = updater.validated_release(release_payload("v5.0.0"))
+    with pytest.raises(RuntimeError, match="invalid_release_manifest"):
+        namespace["_prepare_artifact"](tmp_path, "operation", release)
+        pytest.fail("Combined updater must never reach image loading")
+    assert downloaded == [updater.MANIFEST_ASSET]
+    assert not (tmp_path / "update-operation").exists()
+
+
+def test_release_assets_exclude_other_products():
+    release = release_payload()
+    release["assets"].append({"name": "gods-eye-view-release.json"})
+    with pytest.raises(RuntimeError, match="release_assets_mismatch"):
+        updater.validated_release(release)
+
+
+@pytest.mark.parametrize("profile", [None, "combined"])
+def test_candidate_image_must_carry_the_kits_profile(monkeypatch, tmp_path, profile):
+    environment = {"APP_RELEASE_TAG": "v5.0.0", "APP_RELEASE_SHA": "b" * 40,
+                   "APP_REPOSITORY": updater.REPOSITORY.removesuffix(".git")}
+    if profile is not None:
+        environment["APP_DEPLOYMENT_PROFILE"] = profile
+    monkeypatch.setattr(updater, "_image_environment", lambda *_: environment)
+    commands = []
+    monkeypatch.setattr(updater, "_run", lambda args, **_kwargs: commands.append(args))
+    with pytest.raises(RuntimeError, match="candidate_release_metadata_mismatch"):
+        updater._load_image(tmp_path / updater.IMAGE_ASSET, "v5.0.0", "b" * 40)
+    assert len(commands) == 1 and commands[0][:3] == ["docker", "image", "load"]

@@ -16,18 +16,16 @@
     "region_selection": "subscribed_compatible",
     "regional_requirements": [
       "aidp",
-      "autonomous_26ai_dw",
-      "genai_chat"
+      "autonomous_26ai_dw"
     ]
   },
   "presentation": {
     "title": "Oracle AI Data Platform Workbench Starter Kits",
-    "summary": "Deploys reusable Oracle AI Data Platform Workbench starter kits with governed medallion data layers, Autonomous AI Database agent memory, and native OCI governance extension support.",
+    "summary": "Deploys five participant starter kits with isolated Workbench notebooks, scheduled workflows, medallion data layers and Autonomous AI Database.",
     "tags": [
       "VM",
       "VCN",
       "AI Data Platform Workbench",
-      "Data Governance",
       "Object Storage",
       "IAM"
     ],
@@ -82,7 +80,7 @@
     },
     {
       "key": "wallet",
-      "label": "Agent memory and governance runtime"
+      "label": "Participant database runtime"
     },
     {
       "key": "application",
@@ -157,14 +155,6 @@
           "equals": "laboratory"
         },
         "group": "application_vm"
-      },
-      {
-        "name": "agent_model_id",
-        "label": "Agent LLM model",
-        "type": "select",
-        "required": true,
-        "options_source": "oci_genai_chat_models",
-        "group": "enterprise_ai"
       },
       {
         "name": "autonomous_database_mode",
@@ -535,22 +525,8 @@
     ]
   },
   "outputs": [
-    "portal_managed_modules",
-    "enabled_vm_modules",
     "source_commit_sha",
     "deployment_suffix",
-    "gods_eye_view_enabled",
-    "gods_eye_view_url",
-    "gods_eye_view_instance_id",
-    "gods_eye_view_principal_group",
-    "territorial_viewer_enabled",
-    "territorial_viewer_url",
-    "territorial_viewer_instance_id",
-    "territorial_viewer_principal_group",
-    "prisma_viewer_enabled",
-    "prisma_viewer_url",
-    "prisma_viewer_instance_id",
-    "prisma_viewer_principal_group",
     "application_url",
     "application_login_url",
     "database_actions_url",
@@ -572,7 +548,6 @@
     "autonomous_database_version",
     "autonomous_database_workload",
     "autonomous_database_compute_count",
-    "agent_model_id",
     "default_workspace_name",
     "developer_group_ocid",
     "pending_group_ocid",
@@ -668,24 +643,7 @@
   },
   "post_apply": {
     "entrypoint": "terraform/hooks/post_apply.py",
-    "include_paths": [
-      "apps/backend/app/modules/ai_gods_eye_view/runtime",
-      "apps/backend/app/modules/ai_gods_eye_view/package/lab.json",
-      "apps/backend/app/modules/ai_gods_eye_view/package/notebooks",
-      "apps/backend/app/modules/ai_gods_eye_view/package/source/social_networks/v1/manifest.json",
-      "apps/backend/app/modules/ai_gods_eye_view/package/source/social_networks/v2/manifest.json",
-      "apps/backend/app/modules/ai_gods_eye_view/package/source/sensors/colombia/v1/manifest.json",
-      "apps/backend/app/modules/ai_data_governance",
-      "apps/backend/app/__init__.py",
-      "apps/backend/app/services/oci/aidp.py",
-      "apps/backend/app/services/oci/contracts.py",
-      "apps/backend/app/config.py",
-      "apps/backend/app/api/viewer_identity.py",
-      "apps/backend/app/security.py",
-      "apps/backend/app/packages/catalog.py",
-      "apps/backend/app/packages/aidp.py",
-      "apps/backend/app/kits/naming.py"
-    ],
+    "include_paths": [],
     "timeout_seconds": 3600,
     "requires_oci_credentials": true,
     "secret_inputs": [

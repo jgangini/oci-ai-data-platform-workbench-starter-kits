@@ -75,8 +75,6 @@ resource "oci_core_instance" "lab" {
   create_vnic_details {
     subnet_id        = oci_core_subnet.public.id
     assign_public_ip = true
-    private_ip       = local.module_network_enabled ? local.gods_eye_view_admin_private_ip : null
-    nsg_ids          = local.module_network_enabled ? [oci_core_network_security_group.gods_eye_view_proxy[0].id] : []
   }
 
   source_details {
@@ -97,37 +95,29 @@ resource "oci_core_instance" "lab" {
   metadata = {
     ssh_authorized_keys = tls_private_key.instance_ssh.public_key_openssh
     user_data = base64encode(templatefile("${path.module}/templatefile/user_data.sh", {
-      admin_username                 = var.admin_username
-      admin_password_hash            = var.admin_password_hash
-      deployment_mode                = var.deployment_mode
-      registration_code_hash         = var.registration_code_hash
-      identity_domain_url            = local.default_domain.url
-      developer_group_id             = oci_identity_domains_group.developers.id
-      pending_group_id               = oci_identity_domains_group.pending.id
-      gods_eye_view_group_id         = oci_identity_domains_group.gods_eye_view_readers.id
-      viewer_oidc_app_name           = "aidp_viewer_${local.suffix}"
-      operator_user_ocid             = var.operator_user_ocid
-      operator_username              = var.operator_username
-      tenancy_ocid                   = var.tenancy_ocid
-      objectstorage_namespace        = var.objectstorage_namespace
-      bucket_name                    = local.bootstrap_bucket_name
-      gods_eye_control_bucket        = local.medallion_bucket_names["gold"]
-      aidp_workbench_url             = local.aidp_workbench_url
-      aidp_platform_id               = oci_ai_data_platform_ai_data_platform.lab.id
-      aidp_workspace_name            = oci_ai_data_platform_ai_data_platform.lab.default_workspace_name
-      aidp_region                    = var.region
-      compartment_id                 = local.target_compartment
-      autonomous_database_id         = local.autonomous_database_id
-      agent_model_id                 = var.agent_model_id
-      artifacts_bucket_name          = local.artifacts_bucket_name
-      lab_marker                     = local.name_prefix
-      source_repo_url                = var.source_repository_url
-      source_commit_sha              = var.source_commit_sha
-      gods_eye_view_url              = local.gods_eye_view_upstream
-      gods_eye_view_enabled          = local.module_network_enabled
-      portal_managed_modules         = var.portal_managed_modules
-      enable_public_ip_tls           = var.enable_public_ip_tls
-      gods_eye_view_admin_private_ip = local.gods_eye_view_admin_private_ip
+      admin_username          = var.admin_username
+      admin_password_hash     = var.admin_password_hash
+      deployment_mode         = var.deployment_mode
+      registration_code_hash  = var.registration_code_hash
+      identity_domain_url     = local.default_domain.url
+      developer_group_id      = oci_identity_domains_group.developers.id
+      pending_group_id        = oci_identity_domains_group.pending.id
+      operator_user_ocid      = var.operator_user_ocid
+      operator_username       = var.operator_username
+      tenancy_ocid            = var.tenancy_ocid
+      objectstorage_namespace = var.objectstorage_namespace
+      bucket_name             = local.bootstrap_bucket_name
+      aidp_workbench_url      = local.aidp_workbench_url
+      aidp_platform_id        = oci_ai_data_platform_ai_data_platform.lab.id
+      aidp_workspace_name     = oci_ai_data_platform_ai_data_platform.lab.default_workspace_name
+      aidp_region             = var.region
+      compartment_id          = local.target_compartment
+      autonomous_database_id  = local.autonomous_database_id
+      artifacts_bucket_name   = local.artifacts_bucket_name
+      lab_marker              = local.name_prefix
+      source_repo_url         = var.source_repository_url
+      source_commit_sha       = var.source_commit_sha
+      enable_public_ip_tls    = var.enable_public_ip_tls
     }))
   }
 

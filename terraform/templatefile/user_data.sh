@@ -78,9 +78,6 @@ visudo -cf /etc/sudoers.d/101-aidp-lab-bootstrap-public-key
 systemctl stop firewalld >/dev/null 2>&1 || true
 firewall-offline-cmd --zone=public --add-service=http
 firewall-offline-cmd --zone=public --add-service=https
-%{ if gods_eye_view_enabled ~}
-firewall-offline-cmd --zone=public --add-port=8000/tcp
-%{ endif ~}
 systemctl enable --now firewalld
 
 dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
@@ -148,8 +145,6 @@ OPERATOR_USERNAME=${operator_username}
 IDENTITY_DOMAIN_URL=${identity_domain_url}
 IDENTITY_DEVELOPER_GROUP_ID=${developer_group_id}
 IDENTITY_PENDING_GROUP_ID=${pending_group_id}
-IDENTITY_GODS_EYE_VIEW_GROUP_ID=${gods_eye_view_group_id}
-IDENTITY_VIEWER_APP_NAME=${viewer_oidc_app_name}
 AIDP_WORKBENCH_URL=${aidp_workbench_url}
 AIDP_PLATFORM_ID=${aidp_platform_id}
 AIDP_WORKSPACE_NAME=${aidp_workspace_name}
@@ -157,24 +152,17 @@ AIDP_REGION=${aidp_region}
 COMPARTMENT_ID=${compartment_id}
 AUTONOMOUS_DATABASE_ID=${autonomous_database_id}
 AUTONOMOUS_RUNTIME_FILE=/etc/aidp-lab/autonomous/runtime.json
-AGENT_MODEL_ID=${agent_model_id}
 ARTIFACTS_BUCKET_NAME=${artifacts_bucket_name}
 OCI_CONFIG_FILE=/etc/aidp-lab/oci/config
 OBJECTSTORAGE_NAMESPACE=${objectstorage_namespace}
 BUCKET_NAME=${bucket_name}
-GODS_EYE_CONTROL_BUCKET=${gods_eye_control_bucket}
 AIDP_SETTINGS_FILE=/var/lib/aidp-lab/settings.json
 LAB_MARKER=${lab_marker}
 SESSION_SECRET_FILE=/var/lib/aidp-lab/session.key
 VM_UPDATE_ENABLED=true
+APP_DEPLOYMENT_PROFILE=kits-only
 AIDP_UPDATE_DIR=/var/lib/aidp-lab/update
 COOKIE_SECURE=true
-GODS_EYE_VIEW_URL=${gods_eye_view_url}
-GODS_EYE_VIEW_ENABLED=${gods_eye_view_enabled}
-PORTAL_MANAGED_MODULES=${portal_managed_modules}
-%{ if gods_eye_view_enabled ~}
-GODS_EYE_VIEW_ADMIN_BIND=${gods_eye_view_admin_private_ip}
-%{ endif ~}
 EOF
 chmod 0600 /opt/aidp-lab/.env
 
@@ -225,6 +213,8 @@ path = Path(sys.argv[1])
 temporary = path.with_suffix(".tmp")
 temporary.write_text(json.dumps({
     "schema_version": 1,
+    "updater_protocol": 2,
+    "deployment_profile": "kits-only",
     "repository": sys.argv[2].removesuffix(".git"),
     "release": sys.argv[3],
     "commit_sha": sys.argv[4],
@@ -273,9 +263,6 @@ docker run -d \
   --env-file /opt/aidp-lab/.env \
   -p 80:80 \
   -p 443:443 \
-%{ if gods_eye_view_enabled ~}
-  -p ${gods_eye_view_admin_private_ip}:8000:8000 \
-%{ endif ~}
   -v "$TLS_DIR:/etc/aidp-lab/tls:ro,z" \
 %{ if enable_public_ip_tls ~}
   -v /var/lib/letsencrypt:/var/lib/letsencrypt:ro,z \

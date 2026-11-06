@@ -1,6 +1,0 @@
-{
-  "name": "aidp_cluster_shared_compute",
-  "type": "SPARK",
-  "ownership": "shared",
-  "binding": "cluster_key"
-}

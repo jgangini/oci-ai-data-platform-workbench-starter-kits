@@ -27,8 +27,6 @@ jobs:
       - run: terraform validate
       - if: matrix.terraform_version == '1.15.7'
         run: terraform test
-      - if: matrix.terraform_version == '1.15.7'
-        run: python tests/check_module_plan.py
 
   backend:
     runs-on: ubuntu-latest
@@ -43,9 +41,6 @@ jobs:
       - run: python -m pytest apps/backend/tests terraform/tests
         env:
           SESSION_SECRET_FILE: ${{ runner.temp }}/aidp-lab/session.key
-      - run: python scripts/validation/check_aidp_modules.py
-      - run: python scripts/modules/ai_data_governance/check_ai_dg_documentary_graph.py
-      - run: python scripts/modules/ai_data_governance/check_ai_dg_governance_graph.py
 
   frontend:
     runs-on: ubuntu-latest
@@ -61,7 +56,6 @@ jobs:
           cache-dependency-path: apps/frontend/package-lock.json
       - run: npm ci
       - run: npm test
-      - run: node --test ../../scripts/tests/market-stream.test.mjs
       - run: npm run build
 
   container:
@@ -69,16 +63,3 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -f docker/Dockerfile -t aidp-lab:test .
-      - name: Verify viewer authentication proxy
-        run: docker run --rm --network none --mount type=bind,source="$PWD",target=/source,readonly --entrypoint python aidp-lab:test /source/apps/backend/tests/modules/ai_gods_eye_view/test_viewer_nginx.py
-      - run: docker build -f modules/ai-gods-eye-view/Dockerfile -t gods-eye-view:test .
-
-  market-runtime:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: pip install langgraph==0.6.7 oci==2.189.0 pytest==8.4.1 pypdf==6.20.1 jsonschema==4.26.0
-      - run: python -m pytest apps/backend/tests/modules/ai_market_intelligence/test_market_intelligence_*.py apps/backend/tests/modules/ai_market_intelligence/test_market_package.py

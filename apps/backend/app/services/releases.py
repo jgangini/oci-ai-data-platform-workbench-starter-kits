@@ -62,6 +62,10 @@ def validated_latest_release(payload: Any) -> dict[str, str | bool]:
     raw_assets = payload.get("assets")
     if not isinstance(raw_assets, list):
         raise ReleaseUpdateUnavailable("The latest GitHub release has no update artifacts")
+    if len(raw_assets) != len(RELEASE_ASSETS) or {
+        item.get("name") for item in raw_assets if isinstance(item, dict)
+    } != set(RELEASE_ASSETS):
+        raise ReleaseUpdateUnavailable("The release does not contain exactly the kits-only update artifacts")
     assets = {
         str(item.get("name") or ""): item
         for item in raw_assets
@@ -201,13 +205,14 @@ class ApplicationReleaseManager:
         return {
             "repository": REPOSITORY,
             "current_release": self.settings.application_release,
+            "current_deployment_profile": self.settings.application_deployment_profile,
             "current_commit_sha": self.settings.application_commit_sha,
             "latest_release": latest["tag"] if latest else None,
             "latest_published_at": latest["published_at"] if latest else None,
             "latest_release_url": latest["url"] if latest else None,
             "latest_release_immutable": bool(latest and latest["immutable"]),
             "update_available": bool(current and latest_version and latest_version > current),
-            "updater_available": self.settings.vm_update_enabled,
+            "updater_available": self.settings.vm_update_enabled and self.settings.application_deployment_profile == "kits-only",
             "update_check_error": check_error,
             "operation": self.current_operation(),
             "packages": [
@@ -247,6 +252,8 @@ class ApplicationReleaseManager:
     def request_update(self, operation_id: str) -> dict[str, Any]:
         if not self.settings.vm_update_enabled:
             raise ReleaseUpdateUnavailable("GitHub updates are available only on the deployed VM")
+        if self.settings.application_deployment_profile != "kits-only":
+            raise ReleaseUpdateUnavailable("This VM is not a kits-only installation")
         operation_id = str(UUID(operation_id))
         with self._request_lock:
             current = self.current_operation()

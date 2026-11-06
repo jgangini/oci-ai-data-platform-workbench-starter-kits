@@ -155,7 +155,6 @@ def _select(
     identity = identity or Identity()
     aidp = aidp or Aidp()
     inputs = {
-        "agent_model_id": "ocid1.generativeaimodel.oc1..chat",
         "autonomous_database_mode": "new",
         "autonomous_database_compute_count": 4,
         **(input_overrides or {}),
@@ -172,7 +171,6 @@ def _select(
         compute_factory=lambda _config: compute,
         aidp_factory=lambda _config: aidp,
         database_factory=lambda _config: Database(),
-        genai_factory=lambda _config: Genai(),
         object_storage_factory=lambda _config: object_storage or ObjectStorage(),
     )
     return result, compute
@@ -390,7 +388,6 @@ def test_preflight_checks_all_availability_domains_for_standard_shape() -> None:
             "compartment": "aidp-lab",
             "compartment_mode": "new",
             "inputs": {
-                "agent_model_id": "ocid1.generativeaimodel.oc1..chat",
                 "autonomous_database_mode": "new",
                 "autonomous_database_compute_count": 4,
             },
@@ -400,7 +397,6 @@ def test_preflight_checks_all_availability_domains_for_standard_shape() -> None:
         compute_factory=lambda _config: MultiAdCompute(),
         aidp_factory=lambda _config: Aidp(),
         database_factory=lambda _config: Database(),
-        genai_factory=lambda _config: Genai(),
         object_storage_factory=lambda _config: ObjectStorage(),
     )
     assert result["inputs"]["availability_domain_index"] == 1
@@ -413,23 +409,18 @@ def test_preflight_rejects_zero_or_missing_capacity() -> None:
         _select({preflight.E5_SHAPE: (available, "0"), preflight.E4_SHAPE: (unsupported, "0")})
 
 
-@pytest.mark.parametrize("modules,shape", [([], preflight.E5_SHAPE), (["gods_eye_view"], preflight.E4_SHAPE)])
-def test_preflight_capacity_uses_only_enabled_vm_modules(modules, shape) -> None:
-    result, _ = _select({preflight.E5_SHAPE: ("AVAILABLE", "1"), preflight.E4_SHAPE: ("AVAILABLE", "2")},
-                        input_overrides={"enabled_vm_modules": modules})
-    assert result["inputs"]["preferred_vm_shape"] == shape
 
 
 @pytest.mark.parametrize("enabled", [True, "true", False, "false"])
-@pytest.mark.parametrize("field", ["enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer"])
+@pytest.mark.parametrize("field", ["enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer", "portal_managed_modules"])
 def test_preflight_rejects_retired_module_fields(enabled, field) -> None:
-    with pytest.raises(ValueError, match="Unsupported VM module flags"):
+    with pytest.raises(ValueError, match="Module deployment inputs"):
         _select({preflight.E5_SHAPE: ("AVAILABLE", "2")}, input_overrides={field: enabled})
 
 
 @pytest.mark.parametrize("modules", ["gods_eye_view", None, {}, ["prisma"], ["gods_eye_view", "unknown"]])
 def test_preflight_rejects_invalid_module_contract(modules) -> None:
-    with pytest.raises(ValueError, match="enabled_vm_modules"):
+    with pytest.raises(ValueError, match="Module deployment inputs"):
         _select({preflight.E5_SHAPE: ("AVAILABLE", "2")}, input_overrides={"enabled_vm_modules": modules})
 
 
@@ -462,7 +453,6 @@ def test_preflight_accepts_any_available_fault_domain() -> None:
             "compartment": "aidp-lab",
             "compartment_mode": "new",
             "inputs": {
-                "agent_model_id": "ocid1.generativeaimodel.oc1..chat",
                 "autonomous_database_mode": "new",
                 "autonomous_database_compute_count": 4,
             },
@@ -472,7 +462,6 @@ def test_preflight_accepts_any_available_fault_domain() -> None:
         compute_factory=lambda _config: FaultDomainCompute(),
         aidp_factory=lambda _config: Aidp(),
         database_factory=lambda _config: Database(),
-        genai_factory=lambda _config: Genai(),
         object_storage_factory=lambda _config: ObjectStorage(),
     )
     assert result["inputs"]["preferred_vm_shape"] == preflight.E5_SHAPE

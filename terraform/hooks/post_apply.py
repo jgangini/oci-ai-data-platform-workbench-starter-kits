@@ -676,8 +676,6 @@ def assert_fresh_catalog(
     catalog_key: str,
     namespace: str,
     bucket: str,
-    *,
-    gods_eye_view_landing_bucket: str = "",
 ) -> tuple[int, int]:
     schemas = api.list_all("/schemas", params={"catalogKey": catalog_key})
     global_schemas = [
@@ -719,10 +717,7 @@ def assert_fresh_catalog(
         raise ReconcileError(
             f"Fresh-only bootstrap found legacy external volumes overlapping medallion paths: {names}; no resources were deleted"
         )
-    allowed = [item for item in external if gods_eye_view_landing_bucket
-               and item.get("_listed_schema") == "prisma_ingest" and item.get("displayName") == "landing"
-               and item.get("storageLocation") == f"oci://{gods_eye_view_landing_bucket}@{namespace}/01_landing/prisma/raw/"]
-    if len(allowed) > 1 or len(external) != len(allowed):
+    if external:
         raise ReconcileError(
             f"Fresh-only bootstrap found an unapproved external volume in {CATALOG_NAME}; no resources were deleted"
         )
@@ -866,7 +861,7 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
         CATALOG_NAME,
         {
             "displayName": CATALOG_NAME,
-            "description": "Medallion catalog for starter-kit data and governance artifacts",
+            "description": "Medallion catalog for participant starter-kit data",
             "catalogType": "INTERNAL",
         },
         {"catalogType": "INTERNAL"},
@@ -878,9 +873,8 @@ def reconcile(api: AidpApi, outputs: dict[str, Any]) -> tuple[dict[str, Any], li
     bucket = str(outputs["bucket_name"])
     global_schema_count, external_volume_count = assert_fresh_catalog(
         api, catalog_key, namespace, bucket,
-        gods_eye_view_landing_bucket=str(outputs["medallion_bucket_names"]["landing"]) if outputs.get("gods_eye_view_enabled", outputs.get("territorial_viewer_enabled", outputs.get("prisma_viewer_enabled"))) is True else "",
     )
-    events.append(f"Fresh-only catalog verified: zero legacy schemas; {external_volume_count} approved God’s Eye View external volumes")
+    events.append(f"Fresh-only catalog verified: zero legacy schemas; {external_volume_count} external volumes")
     workspace_key = str(workspace["key"])
     shared_compute, compute_created = ensure_resource(
         api,
@@ -1561,69 +1555,10 @@ def bootstrap_autonomous_governance(
     return DATABASE_OPERATOR, operator_password, dsn
 
 
-def _module_installation_stack(oci_module, config, signer, context, compartment_id):
-    client = oci_module.resource_manager.ResourceManagerClient({**config, "region": context["region"]}, signer=signer)
-    tags = {"deployment": context["deployment_id"], "catalog_item": context["project_id"]}
-    candidates = oci_module.pagination.list_call_get_all_results(client.list_stacks, compartment_id=compartment_id).data
-    matches = [item for item in candidates if all((item.freeform_tags or {}).get(key) == value for key, value in tags.items())]
-    if len(matches) != 1:
-        raise ReconcileError("Module installation requires exactly one Resource Manager stack with this deployment identity")
-    stack = client.get_stack(matches[0].id).data
-    if (stack.id != matches[0].id or stack.compartment_id != compartment_id or stack.lifecycle_state != "ACTIVE"
-            or any((stack.freeform_tags or {}).get(key) != value for key, value in tags.items())
-            or (stack.variables or {}).get("source_commit_sha") != context["source"]["commit_sha"]):
-        raise ReconcileError("Module installation stack ownership or immutable source does not match this deployment")
-    archive = client.get_stack_tf_config(stack.id).data.content
-    if not isinstance(archive, bytes) or not archive:
-        raise ReconcileError("Module installation stack source archive is unavailable")
-    return stack.id, hashlib.sha256(archive).hexdigest()
 
 
-def _store_module_installation_context(oci_module, storage, receipt):
-    scope = (receipt["namespace"], receipt["artifacts_bucket"], ".control/modules/installation.json")
-    body = json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    try:
-        storage.put_object(*scope, body, content_type="application/json", if_none_match="*")
-    except oci_module.exceptions.ServiceError as exc:
-        if exc.status != 412:
-            raise
-        existing = json.loads(storage.get_object(*scope).data.content)
-        if existing != receipt:
-            raise ReconcileError("Module installation context already belongs to a different deployment or immutable source") from None
 
 
-def write_module_installation_context(oci_module, config, signer, storage, context, outputs, reconciled):
-    """Record only verified deployment identifiers; never credentials or Terraform variables."""
-    if outputs.get("portal_managed_modules") is not True:
-        return False
-    buckets = {layer: outputs["medallion_bucket_names"][layer] for layer in (*LAYERS, "artifacts")}
-    receipt = {
-        "schema_version": 1,
-        "deployment_id": context["deployment_id"],
-        "project_id": context["project_id"],
-        "source_commit_sha": context["source"]["commit_sha"],
-        "region": context["region"],
-        "compartment_id": outputs["compartment_ocid"],
-        "platform_id": outputs["ai_data_platform_id"],
-        "namespace": outputs["objectstorage_namespace"],
-        "buckets": buckets,
-        "artifacts_bucket": buckets["artifacts"],
-        "workspace_key": reconciled["workspace_key"],
-        "catalog_name": reconciled["catalog_name"],
-        "agent_model_id": outputs["agent_model_id"],
-    }
-    identifiers = [value for key, value in receipt.items() if key not in {"schema_version", "buckets"}] + list(buckets.values())
-    if (not all(isinstance(value, str) and value.strip() == value and value for value in identifiers)
-            or re.fullmatch(r"[0-9a-f]{40}", receipt["source_commit_sha"]) is None
-            or len({name.casefold() for name in buckets.values()}) != len(buckets)):
-        raise ReconcileError("Module installation context identifiers are incomplete or conflicting")
-    try:
-        receipt["stack_id"], receipt["terraform_config_sha256"] = _module_installation_stack(
-            oci_module, config, signer, context, receipt["compartment_id"])
-        _store_module_installation_context(oci_module, storage, receipt)
-    except oci_module.exceptions.ServiceError as exc:
-        raise ReconcileError(f"Module installation context verification failed with OCI {exc.status}") from exc
-    return True
 
 
 def main() -> int:
@@ -1657,8 +1592,6 @@ def main() -> int:
         api = AidpApi(context["region"], outputs["ai_data_platform_id"], signer, context["deployment_id"])
         reconciled, reconcile_messages = reconcile(api, outputs)
         messages.extend(reconcile_messages)
-        if write_module_installation_context(oci, oci_config, signer, object_storage, context, outputs, reconciled):
-            messages.append("Private module installation context verified for the existing Resource Manager stack")
         key_text = Path(key_path).read_text(encoding="utf-8")
         aidp_url = resolve_workbench_url(outputs, oci_config, signer)
         if not aidp_url:
@@ -1707,26 +1640,6 @@ def main() -> int:
             messages.append("Registration VM consumed and deleted the encrypted bootstrap object")
         else:
             messages.append("Registration VM already has the validated Autonomous bootstrap v2 runtime")
-        if outputs.get("gods_eye_view_enabled", outputs.get("territorial_viewer_enabled", outputs.get("prisma_viewer_enabled"))) is True:
-            # Keep imports additive: existing one-VM labs do not load the God’s Eye View runtime.
-            from gods_eye_view_bootstrap import bootstrap_gods_eye_view
-            try:
-                reconciled.update(bootstrap_gods_eye_view(
-                    api, context, outputs, oci_config, signer, object_storage, reconciled,
-                    deadline=_post_apply_deadline,
-                    ensure_folder=ensure_workspace_folder,
-                ))
-            except Exception as exc:
-                # Database/SDK exceptions may contain secret-bearing request details.
-                safe = isinstance(exc, ReconcileError) or (type(exc) is RuntimeError and str(exc).startswith(
-                    ("God’s Eye View", "Managed Territorial", "Duplicate Territorial", "Duplicate managed Territorial", "Existing Territorial")
-                ))
-                detail = str(exc) if safe else type(exc).__name__
-                code = getattr(exc.args[0], "code", None) if exc.args else None
-                if not safe and type(code) is int and 0 < code < 100000:
-                    detail += f" (ORA-{code:05d})"
-                raise ReconcileError("God’s Eye View bootstrap failed: " + detail) from None
-            messages.append("God’s Eye View native job and published snapshot verified; versioned AIDP agent is ACTIVE")
         wait_for_application(str(outputs["application_url"]), verify_tls=outputs.get("public_ip_tls_enabled") is True)
         messages.append("Registration application is healthy over HTTPS")
         reconciled["runtime_ready"] = True

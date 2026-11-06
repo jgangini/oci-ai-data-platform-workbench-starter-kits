@@ -8,32 +8,17 @@ import sys
 from pathlib import Path
 
 
-def test_manifest_packages_importable_gods_eye_view_hook_runtime(tmp_path) -> None:
+def test_manifest_packages_only_self_contained_kits_hook(tmp_path) -> None:
     root = Path(__file__).parents[2]
     manifest = json.loads((root / "terraform/deploy-studio.json").read_text(encoding="utf-8"))
-    paths = manifest["post_apply"]["include_paths"]
-    assert len(paths) <= 20
-    assert len(paths) == len(set(paths))
-    assert not any(Path(first) in Path(second).parents for first in paths for second in paths if first != second)
-    assert "apps/backend/app/modules/ai_gods_eye_view" not in paths
-    for relative in ["terraform/hooks", *manifest["post_apply"]["include_paths"]]:
-        source, target = root / relative, tmp_path / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if source.is_dir():
-            shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
-        else:
-            shutil.copyfile(source, target)
+    assert manifest["post_apply"]["include_paths"] == []
+    hooks = root / "terraform/hooks"
+    assert {path.name for path in hooks.glob("*.py")} == {"post_apply.py"}
+    shutil.copytree(hooks, tmp_path / "hooks", ignore=shutil.ignore_patterns("__pycache__"))
     result = subprocess.run([sys.executable, "-I", "-c",
-        "import sys; sys.path.insert(0, 'terraform/hooks'); import gods_eye_view_bootstrap; "
-        "from app.services.oci.aidp import AidpClient; from app.packages.catalog import load_package; "
-        "from gods_eye_sources import workflow_source; from gods_eye_agent_source import agent_source; "
-        "bundle = gods_eye_view_bootstrap.runtime_archive(); assert bundle; "
-        "config = {key: 'test' for key in ('namespace','bucket','pipeline_revision','oci_credential_name',"
-        "'oci_identity_sha256','region','model_id','compartment_id','catalog','gold_query_compute_id')}; "
-        "assert workflow_source('pipeline', config, bundle); assert workflow_source('sensor_pipeline', config, bundle); "
-        "assert agent_source(config, bundle); "
-        "assert load_package('gods_eye_view').runtime_files; "
-        "assert load_package('ai_data_governance').runtime_files"],
+        "import sys; sys.path.insert(0, 'hooks'); import post_apply; "
+        "assert callable(post_apply.reconcile); "
+        "assert not any(name.startswith('app.modules') for name in sys.modules)"],
         cwd=tmp_path, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
 
@@ -52,7 +37,7 @@ def test_deploy_studio_manifest_contract() -> None:
         "requires_genai_region": False,
         "database_profile": "new_or_existing",
         "region_selection": "subscribed_compatible",
-        "regional_requirements": ["aidp", "autonomous_26ai_dw", "genai_chat"],
+        "regional_requirements": ["aidp", "autonomous_26ai_dw"],
     }
     assert manifest["post_apply"]["requires_oci_credentials"] is True
     assert manifest["post_apply"]["entrypoint"] == "terraform/hooks/post_apply.py"
@@ -60,7 +45,6 @@ def test_deploy_studio_manifest_contract() -> None:
     assert (root / manifest["post_apply"]["entrypoint"]).is_file()
     fields = {field["name"]: field for field in manifest["form"]["fields"]}
     assert not {"enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer", "enable_public_ip_tls", "enabled_vm_modules", "portal_managed_modules"} & fields.keys()
-    assert re.search(r'variable\s+"portal_managed_modules"\s*\{.*?default\s*=\s*true', variables, re.DOTALL)
     assert re.search(r'variable\s+"enable_public_ip_tls"\s*\{.*?default\s*=\s*true', variables, re.DOTALL)
     assert "home_region" not in fields
     assert "preferred_vm_shape" not in fields
@@ -74,8 +58,6 @@ def test_deploy_studio_manifest_contract() -> None:
     assert fields["admin_password"]["transform"] == "pbkdf2_sha256"
     assert fields["registration_code"]["pattern"] == "^[A-Z]{4}-[0-9]{4}$"
     assert fields["registration_code"]["transform"] == "uppercase_pbkdf2_sha256"
-    assert fields["agent_model_id"]["options_source"] == "oci_genai_chat_models"
-    assert fields["agent_model_id"]["group"] == "enterprise_ai"
     assert fields["autonomous_database_version"]["options"] == [
         {"value": "26ai:DW", "label": "Oracle AI Database 26ai — Data Warehouse"}
     ]
@@ -136,9 +118,9 @@ def test_deploy_studio_manifest_contract() -> None:
         "autonomous_database_wallet_password",
     ]
     assert manifest["presentation"]["title"] == "Oracle AI Data Platform Workbench Starter Kits"
-    assert manifest["presentation"]["summary"].startswith("Deploys reusable Oracle AI Data Platform Workbench starter kits")
+    assert manifest["presentation"]["summary"].startswith("Deploys five participant starter kits")
     assert manifest["presentation"]["href"] == "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
-    assert manifest["presentation"]["tags"] == ["VM", "VCN", "AI Data Platform Workbench", "Data Governance", "Object Storage", "IAM"]
+    assert manifest["presentation"]["tags"] == ["VM", "VCN", "AI Data Platform Workbench", "Object Storage", "IAM"]
     assert manifest["presentation"]["image"] == "/assets/oci-aidp-cloud-migration-lab.png"
     assert [step["key"] for step in manifest["run_steps"]] == [
         "queue",
@@ -195,7 +177,6 @@ def test_deploy_studio_manifest_contract() -> None:
         "autonomous_database_version",
         "autonomous_database_workload",
         "autonomous_database_compute_count",
-        "agent_model_id",
     }.issubset(manifest["outputs"])
     assert "aidp_console_url" not in manifest["outputs"]
 
@@ -266,7 +247,7 @@ def test_release_workflow_builds_frozen_amd64_assets_before_publish() -> None:
     assert "docker save \"$image_tag\" | gzip -n -9" in workflow
     assert platform_check in workflow
     assert '"schema_version": 1' in workflow
-    assert '"updater_protocol": 1' in workflow
+    assert '"updater_protocol": 2' in workflow
     assert '"release": os.environ["GITHUB_REF_NAME"]' in workflow
     assert '"commit_sha": os.environ["RELEASE_COMMIT_SHA"]' in workflow
     assert '"repository": os.environ["RELEASE_REPOSITORY"]' in workflow
@@ -305,7 +286,7 @@ def test_release_workflow_reruns_only_mutate_drafts() -> None:
     assert "Existing published release is mutable; refusing to edit or republish it." in workflow
     assert "if: steps.release.outputs.mode == 'immutable'" in workflow
     assert "immutable release asset manifest mismatch" in workflow
-    assets = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,gods-eye-view-image-amd64.tar.gz,gods-eye-view-release.json"
+    assets = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET"
     assert workflow.count(f'test "$asset_names" = "{assets}"') == 2
     assert re.findall(r'^\s*test "\$asset_names" = "([^"]+)"\s*$', workflow, re.MULTILINE) == [assets, assets]
     assert not any(name in workflow for name in ("prisma-release.json", "prisma-viewer-image-amd64.tar.gz", "territorial-release.json", "territorial-viewer-image-amd64.tar.gz"))
@@ -409,7 +390,7 @@ def test_runtime_security_contracts() -> None:
     assert 'resource "oci_identity_domains_grant"' not in identity
     assert "API Key Administrator" not in identity
     assert aidp.count("oci.home") == 1
-    assert re.findall(r'resource "oci_identity_domains_app" "([^"]+)"', identity) == ["viewer"]
+    assert re.findall(r'resource "oci_identity_domains_app" "([^"]+)"', identity) == []
     assert 'resource "oci_kms_' not in identity
     assert 'resource "oci_vault_' not in identity
     assert 'resource "time_sleep"' not in identity
@@ -460,7 +441,7 @@ def test_runtime_security_contracts() -> None:
     assert "AIDP_CONSOLE_URL" not in cloud_init
 
 
-def test_terraform_files_have_unique_contiguous_prefixes() -> None:
+def test_terraform_files_preserve_resource_layout_without_modules() -> None:
     root = Path(__file__).parents[2] / "terraform"
     assert 'required_version = ">= 1.5.7"' in (root / "a_versions.tf").read_text(encoding="utf-8")
     expected = {
@@ -471,14 +452,13 @@ def test_terraform_files_have_unique_contiguous_prefixes() -> None:
         "e_oci_core_vcn.tf",
         "f_oci_objectstorage_bucket.tf",
         "g_oci_core_instance.tf",
-        "h_gods_eye_view.tf",
         "i_oci_identity.tf",
         "j_oci_ai_data_platform.tf",
         "k_oci_autonomous_database.tf",
         "l_outputs.tf",
     }
     assert expected == {path.name for path in root.glob("*.tf")}
-    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefghijkl")
+    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefgijkl")
     manifest = json.loads((root / "deploy-studio.json").read_text(encoding="utf-8"))
     assert manifest["preflight"]["entrypoint"] == "terraform/m_preflight.py"
     assert (root / "m_preflight.py").is_file()

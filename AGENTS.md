@@ -1,56 +1,37 @@
 # Oracle AI Data Platform Workbench Starter Kits
 
-This is the canonical repository instruction file. Start with [docs/README.md](docs/README.md), then inspect the linked implementation and executable contracts. Do not use retired OpenWiki content, generated graphs, private diagnostics or historical deployment reports as current product documentation. A local `.codex/AGENTS.md` may point here; it must not duplicate or contradict these rules.
+This is the canonical repository guidance. Read docs/README.md and the source-linked contracts. This repository owns only the five participant kits, their portal and required OCI infrastructure.
 
-## Deployment and new environments
+## Boundaries
 
-- Keep `terraform/deploy-studio.json` and `terraform/` compatible with Deploy Studio schema v1. Hook paths resolve from the repository root; preserve the runner's dependency boundary.
-- Keep top-level Terraform files in one ordered `a_`–`l_` sequence with a unique letter per file; the supporting preflight is `m_preflight.py`. Update source references when renaming files without changing Terraform resource addresses or state.
-- All required resources and runtime configuration must be reproducible through Terraform, the post-apply hook and immutable release images. A manual repair on a running VM is not a fix for the next deployment: update and verify the deployment source too.
-- The public application VM serves the portal and authenticates requests. The optional God's Eye View VM is private, in the same VCN, and reachable through that authenticated proxy. Do not expose its provider runtime or administration directly.
-- New Deploy Studio environments prepare the central portal, automatic public-IP TLS and shared module networking; install optional modules from Settings → Application, without per-VM deployment-form switches. Installations require the current receipt and reserved network; obsolete installation layouts are unsupported.
-- Keep module VMs in the original Resource Manager stack. Verify its identity, immutable source, variables and create-only resource allowlist before apply; never create an untracked VM as a fallback. `enabled_vm_modules` currently supports only `gods_eye_view`; future modules require an explicit implementation and resource allowlist, not arbitrary VM uploads. Preserve the installation receipt and operation journal in the selected artifacts bucket, separately from Gold data controls.
-- Build the viewer image from the exact upstream commit/archive and hash-checked patches in `modules/ai-gods-eye-view/upstream.json`. VM bootstrap installs the verified release image; it must not clone a moving upstream branch or rebuild upstream at runtime. Preserve native controls and extend the existing application rather than replacing it with a monolithic viewer.
-- Use the four distinct Landing, Bronze, Silver and Gold bucket selections from `medallion_bucket_names`. The separately selected artifacts bucket (`ARTIFACTS_BUCKET_NAME`, default `oci_artifacts`) stores Governance framework tables and module operational artifacts; all five bucket selections must be distinct. Legacy path prefixes do not prove where managed tables reside; use Master Catalog metadata.
-- Reconciliation must reuse exact managed resource identities and preserve operation IDs, data and permissions. Never delete, replace or adopt a mismatched live resource to force success. Source/compute changes require the managed writers to be stopped first.
-- Support only current clients and installation contracts. Do not retain retired routes, field/header/environment aliases, historical manifest readers, automatic resource adoption, release aliases or migration bridges for old clients. Reject unsupported formats without modifying or deleting their data. Current resource identities, authentication and recovery for the supported contract remain required; preserve Oracle-native API versions and resource identities required by the current implementation.
+- Kits: Banking, Telecommunications, Telco Customer360Lineage, Retail and Healthcare. Keep their explicit catalog in apps/backend/app/packages and sources under apps/backend/app/kits.
+- Governance, Market Intelligence and God's Eye View belong to independent repositories listed in docs/module-repository-separation.md. Do not restore module installers, viewer proxies, optional VM switches or module dependencies here.
+- Preserve exact participant/resource identities, package hashes and isolation. Existing lab.json/lab_id fields are the current kit contract, not permission to add historical aliases or adoption logic.
+- kits-only is a distribution boundary. Never apply reduced Terraform to a combined stack, overwrite its state or relabel its installed profile. Preserve existing deployments until an explicit transition is implemented and accepted.
 
-## AIDP content and acceptance
+## Deployment and secrets
 
-- Participant kits are Banking, Telecommunications, Telco Customer 360 Lineage, Retail and Healthcare. AI Data Governance and God's Eye View are shared global modules. AI Market Intelligence replaces Social Network in the public package catalog; its current installer targets TEST and native acceptance remains pending. Retired Social routes are absent and return 404. Never alias its ingestion lifecycle to Market Intelligence.
-- Treat each `lab.json`, source dataset and notebook dependency list as one versioned contract. Update versions, hashes, row counts and expected results together; never silently change bytes under an immutable released package.
-- Keep the checked-in learning content and content deployed to AIDP aligned. Render environment configuration explicitly; do not claim complete byte equality when deployment injects configuration. Verify the common code body and declared differences. Governance and Market Intelligence each have one maintained implementation described by `aidp/manifest.json`; their editable agent sources and native-resource definitions live under `aidp/`, and generated programs declare their actual assembly sources. Do not restore runtime selectors or duplicate editable table models. Preserve the TEST acceptance boundary; God's Eye View's shared-code artifacts must pass `scripts/modules/ai_gods_eye_view/render_gods_eye_view_runtime.py --check` before publishing.
-- God's Eye View has one readable `.py` per stream (`social_network.py`, `sensor_stream.py`) and one `ai_gods_eye_view.py` agent under `/Workspace/medallion/gods_eye_view/`, organized by layer. Assembly occurs during packaging/deployment. Do not publish encoded runtime bundles, dynamic import discovery, hidden loaders or alternate numbered copies as the developer-facing implementation. Keep useful execution outputs.
-- Keep participant workspace/table naming, workflow parameters and notebook guards synchronized. The bundled participant 2.0.0 notebooks currently disagree with the provisioner on workspace/catalog naming; this is an unresolved native acceptance requirement, not permission to weaken guards or substitute another user's catalog. See [implementation limits](docs/getting-started.md#current-implementation-limits).
-- God's Eye View controls use conditional Object Storage writes; its VM SQLite post index is rebuildable. Analytics and agent queries use publication-scoped Gold views through AIDP. Do not introduce Autonomous writer/reader dependencies or migration adapters into these paths. Unsupported old installations require a separate retirement decision; do not modify their resources automatically.
-- Use one shared OCI-only runtime credential for the global modules. Keep sensor capture, social capture and Gold query compute separate, plus dedicated agent AI Compute. Configured sizes are starting defaults, not measured optimums; pausing capture is not stopping compute.
-- Keep local fixtures, native task execution, published Gold/Object output and model conversations as separate checks. Neither HTTP 202, an ACTIVE deployment, a running stream nor a plausible answer proves completion. Require current-revision task output, expected table/publication results, exact permissions and evidence-bound agent acceptance.
-- Validate AIDP REST payloads against the actual native API contract. Use the established signed Workbench endpoint and a read-only `/roles` probe with the exact runtime identity; control-plane access or an interactive browser login does not prove data-plane access. Preserve OCI request IDs privately when diagnosing failures.
+- Keep terraform/deploy-studio.json compatible with the trusted Deploy Studio schema and pin releases to immutable commits. Solution logic stays here, not in solution-specific CloudTechNext branches.
+- Terraform, hooks and release images must reproduce required configuration. Manual VM repairs are not substitutes for deployment fixes.
+- Preserve Terraform resource addresses of retained kit resources. Renaming source files does not authorize changing cloud identities.
+- Preserve five distinct bucket selections and exact ownership. Use Master Catalog metadata to establish table locations.
+- Reuse the uploaded operator identity. The one-use credential envelope remains encrypted/authenticated, identity/fingerprint verified, atomically installed with restricted permissions and deleted after confirmation.
+- Preserve the Autonomous definer package and EXECUTE-only operator for participant isolation. Its internal governance name does not mean the extracted module is installed.
+- Never commit OCI keys/configuration, wallets, passwords, registration codes, certificates, Terraform state or private receipts. Parse private evidence selectively without printing secrets.
+- Preserve authentication, authorization, validation and recovery. Unsupported formats fail without deleting remote resources.
 
-## Identity and secrets
+## Kits and UI
 
-- Reuse the uploaded operator identity for Identity Domains and AIDP. Do not create a second provisioner user, API key, OAuth client or Vault secret as a workaround.
-- The one-use operator envelope remains authenticated/encrypted, restricted to its exact bootstrap object, verified against operator/fingerprint, installed atomically with `0600` permissions and deleted after verification. Temporary RSA keys must also be removed before readiness.
-- Never commit OCI configuration, PEM keys, wallets, passwords, registration codes, Terraform state, generated certificates or private deployment outputs. Keep them outside generated workflow source, browser assets, logs and documentation. Parse private JSON and emit only explicitly selected safe fields; never search entire credential-bearing documents for a value.
-- Preserve exact role/resource checks and participant isolation. Do not grant module administration through participant registration or trust browser-provided identity headers.
-- Do not make the Identity Domain Access Signing Certificate setting a universal deployment requirement. A manually selected platform needs its own stable required policy; never depend on an unrelated stack's policy remaining present.
+- Version package metadata, assets, dependencies, hashes and expected results together. Never silently change bytes under an immutable version.
+- Preserve naming, workflow parameters, permissions and notebook guards. The notebook2.0.0 naming discrepancy in getting-started remains a native acceptance requirement; do not suppress it.
+- Registration and administration retain durable operations and verified ownership. Closing progress is not cancellation.
+- Reuse confirmations, focus, keyboard and accessible status patterns. Explain exact scope before destructive operations.
+- Keep fixtures, provisioning and native workflow execution as separate evidence. ACTIVE or HTTP202 does not prove native acceptance.
 
-## Portal and viewer UI
+## Releases and validation
 
-- Reuse existing components and visual patterns. Create Account's progress dialog is the standard for long-running provisioning and synthetic cleanup; show real phases/counts and an indeterminate indicator when no percentage is known.
-- Confirm a new deletion or destructive retry before execution, explaining scope, consequences and retained data. Social cleanup affects synthetic social data only; sensor cleanup affects all synthetic sensor families only. Preserve durable operation IDs and prevent duplicate submissions or scope changes during retries.
-- Closing a progress dialog is not cancellation. Completed/cancelled operations must release the UI; errors must remain actionable and dismissible. Never clear durable state merely to hide an error.
-- Installing/retrying/resuming a VM module requires confirmation of resources and costs. GET only observes installation; POST starts or resumes its durable operation. Resume a stopped worker with the same operation identity and tracked resources; native verification and agent-conversation acceptance remain separate gates.
-- Use the shared confirmation patterns for Save Code, Save Name and Save schedule. Place each save button beside its inputs. Keep Social Networks and Sensors spacing consistent and expose the configuration promptly; table requests show the shared spinner in the table, not a false empty state or a blocked configuration form.
-- Preserve modal focus, keyboard cancellation, accessible names and status announcements. User-facing flows explain effects, not implementation details or credential internals.
-- The Agent Flow panel follows Data Layers' expanded height; its composer remains visible, with a 500-character question limit/counter. Keep event rows compact and preserve scroll/focus during refresh. Viewer identity updates the browser title, loading state and in-view heading, with original defaults when blank.
-- Keep generated/synthetic evidence clearly identified; severity, corroboration, activity and human validation are distinct. Do not execute model output as HTML/code or claim an action succeeded before the client/backend confirms it.
-
-## Validation and maintenance
-
-- Run `./scripts/arch-preflight.ps1` before non-trivial code/configuration/structure changes and `./scripts/arch-postflight.ps1` afterward. One coordinator owns the architecture baseline; never overwrite it to hide degradation. Report missing tools or failed gates accurately.
-- Use the relevant Python, frontend, native-viewer and mock-provider Terraform checks during development; follow the [CI](.github/workflows/ci.yml) and [release](.github/workflows/release.yml) matrices before publishing. New-environment readiness additionally requires native deployment acceptance.
-- On Windows, use a fresh, nonexistent pytest `--basetemp` under `.local/`; pytest clears an existing target. Read/write uploaded source and diagnostics explicitly as UTF-8. Verify package hashes against staged/archive bytes, preserving binary files and intentional line endings.
-- Native viewer checks must use the pinned `.upstream/node_modules` dependencies. Use `node modules/ai-gods-eye-view/native/runtime.mjs --build` or the viewer Dockerfile for the deployed application; the retained standalone page is a different build.
-- Exclude `.source`, private state, caches, generated `.upstream`, nested repositories, OpenWiki and generated graphs from semantic-search/architecture input. Never index the enclosing workspace or a home directory. Use DOM/accessibility state and reproducible checks instead of screenshots as verification.
-- Keep README concise; maintain source-linked architecture, operations, kit/module flows and acceptance requirements in `docs/`. Keep tenant identifiers, private run status and temporary diagnostics out of reusable documentation. Record meaningful local harness friction privately rather than creating another competing instruction guide.
+- kits-only releases contain aidp-release.json and aidp-lab-image-amd64.tar.gz. Enforce updater_protocol=2 and deployment_profile=kits-only in manifest, image and installed receipt; preserve checksum/source/platform checks. Never rewrite historical releases.
+- Run scripts/arch-preflight.ps1 before nontrivial work and scripts/arch-postflight.ps1 afterward. One coordinator owns baseline and shared runtime. Do not reset baselines to hide degradation.
+- Follow CI/release workflows for Python, frontend, Terraform and images. Report missing/failed checks honestly.
+- On Windows use a fresh pytest --basetemp under .local. Exclude private state, caches, upstream builds and nested repos from architecture/search input. Update existing Graphify graphs without implicit initialization.
+- Maintain Spanish source-linked docs. Keep migration state in the single separation plan and private runtime evidence outside tracked documentation.

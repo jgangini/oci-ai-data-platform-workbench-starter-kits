@@ -1,4 +1,4 @@
-"""Resolve participant kits and shared modules; validate their immutable assets."""
+"""Resolve participant kits; validate their immutable assets."""
 
 from __future__ import annotations
 
@@ -8,22 +8,13 @@ import io
 import json
 import re
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
-
-from .aidp import STANDARD_MODULES, load_aidp_manifest, manifest_sources, source_file
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 KITS_ROOT = APP_ROOT / "kits"
 CATALOG_PATH = Path(__file__).with_name("catalog.json")
-MODULE_PACKAGE_ROOTS = {
-    "ai_data_governance": APP_ROOT / "modules/ai_data_governance",
-    "ai_market_intelligence": APP_ROOT / "modules/ai_market_intelligence",
-    "gods_eye_view": APP_ROOT / "modules/ai_gods_eye_view/package",
-}
-
-
 LAB_ID_PATTERN = re.compile(r"[a-z][a-z0-9_-]{1,31}")
 PACK_VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+")
 MEDALLION_LAYERS = frozenset({"landing", "bronze", "silver", "gold"})
@@ -36,12 +27,12 @@ class PackageError(ValueError):
 def package_root(package_id: str) -> Path:
     if not isinstance(package_id, str) or LAB_ID_PATTERN.fullmatch(package_id) is None:
         raise PackageError("Invalid package_id")
-    return MODULE_PACKAGE_ROOTS.get(package_id, KITS_ROOT / package_id)
+    return KITS_ROOT / package_id
 
 
 def package_metadata_path(package_id: str) -> Path:
     root = package_root(package_id)
-    return root / ("package/lab.json" if package_id in STANDARD_MODULES else "lab.json")
+    return root / "lab.json"
 
 
 @dataclass(frozen=True)
@@ -75,9 +66,6 @@ class Package:
     tables: dict[str, tuple[str, ...]]
     formats: dict[str, str]
     expected_results: dict[str, Any]
-    agent: dict[str, Any]
-    runtime_files: tuple[PackageAsset, ...] = ()
-    source_manifests: tuple[PackageAsset, ...] = ()
 
     @property
     def available(self) -> bool:
@@ -180,7 +168,7 @@ def _pack_contract(
     if require_available and status != "available":
         raise PackageError(f"Lab {lab_id} is not available yet")
     kind = str(metadata.get("kind") or "data_pipeline")
-    if kind not in {"data_pipeline", "global_module"}:
+    if kind != "data_pipeline":
         raise PackageError(f"Invalid lab kind: {lab_id}")
     pack_version = str(metadata.get("pack_version") or "")
     if PACK_VERSION_PATTERN.fullmatch(pack_version) is None:
@@ -217,38 +205,6 @@ def _pack_assets(
             raise PackageError(f"Notebook dependency must reference an earlier task: {item.name}")
         seen.add(item.task_key)
     return datasets, notebooks
-
-
-def _module_assets(root: Path, entries: Any, folder: str | None) -> tuple[PackageAsset, ...]:
-    """Verify the exact files published by a global module, including nested paths."""
-    if not isinstance(entries, list):
-        raise PackageError("Global module assets must be a list")
-    assets = []
-    for raw in entries:
-        if not isinstance(raw, dict):
-            raise PackageError("Invalid global module asset")
-        name = str(raw.get("file") or "")
-        relative = PurePosixPath(name)
-        prefix, pattern = folder + "/" if folder else "", r"[A-Za-z0-9_./-]+"
-        if (not name.startswith(prefix) or re.fullmatch(pattern, name) is None or ".." in relative.parts
-                or relative.as_posix() != name):
-            raise PackageError("Invalid global module asset path")
-        path = (root / name).resolve()
-        if not path.is_relative_to(root.resolve()):
-            raise PackageError("Global module asset escapes its package")
-        try:
-            if folder is None:
-                path = source_file(root, name)
-            content = path.read_bytes()
-        except (OSError, ValueError) as exc:
-            raise PackageError(f"Missing global module asset: {name}") from exc
-        digest = str(raw.get("sha256") or "")
-        if not re.fullmatch(r"[0-9a-f]{64}", digest) or _sha256(content) != digest:
-            raise PackageError(f"SHA-256 mismatch for {name}")
-        assets.append(PackageAsset(name, path, digest))
-    if len({asset.name for asset in assets}) != len(assets):
-        raise PackageError("Duplicate global module asset")
-    return tuple(assets)
 
 
 def _pack_tables(
@@ -297,10 +253,6 @@ def _pack_formats(
     return formats
 
 
-
-
-
-
 def load_package(lab_id: str, *, require_available: bool = True) -> Package:
     if LAB_ID_PATTERN.fullmatch(lab_id) is None:
         raise PackageError("Invalid lab_id")
@@ -309,28 +261,13 @@ def load_package(lab_id: str, *, require_available: bool = True) -> Package:
     status, kind, pack_version, digest = _pack_contract(
         metadata, lab_id, require_available
     )
-    manifest = None
-    if lab_id in STANDARD_MODULES:
-        try:
-            manifest = load_aidp_manifest(root, lab_id)
-        except (ValueError, OSError, TypeError) as exc:
-            raise PackageError(str(exc)) from exc
     datasets, notebooks = _pack_assets(root, metadata, status, kind, lab_id)
     scope = str(metadata.get("scope") or "participant")
     installation_modes = tuple(map(str, metadata.get("installation_modes") or ["laboratory", "production"]))
-    if scope not in {"participant", "global"} or any(
+    if scope != "participant" or any(
         mode not in {"laboratory", "production"} for mode in installation_modes
     ):
         raise PackageError(f"Invalid lab scope: {lab_id}")
-    if kind == "global_module" and (
-        scope != "global" or installation_modes != ("laboratory", "production")
-    ):
-        raise PackageError(f"Invalid global module scope: {lab_id}")
-    agent = metadata.get("agent", {})
-    runtime_files = _module_assets(root, metadata.get("runtime_files", []), None if manifest else "notebooks")
-    source_manifests = _module_assets(root, metadata.get("source_manifests", []), None if manifest else "source")
-    if manifest and not manifest_sources(manifest).issubset({asset.name for asset in (*runtime_files, *source_manifests)}):
-        raise PackageError("AIDP publication inputs must all have package hashes")
     return Package(
         lab_id=lab_id,
         display_name=str(metadata.get("display_name") or lab_id.title()),
@@ -345,26 +282,7 @@ def load_package(lab_id: str, *, require_available: bool = True) -> Package:
         tables=_pack_tables(metadata, status, kind, lab_id),
         formats=_pack_formats(metadata, status, kind, lab_id),
         expected_results=_pack_expected_results(metadata, status, kind, lab_id),
-        agent=dict(agent) if isinstance(agent, dict) else {},
-        runtime_files=runtime_files,
-        source_manifests=source_manifests,
     )
-
-
-def module_runtime_source(lab_id: str, name: str, *, require_available: bool = True) -> bytes:
-    """Read a declared, hash-verified runtime file; deployment only fills its config."""
-    if LAB_ID_PATTERN.fullmatch(lab_id) is None:
-        raise PackageError("Invalid lab_id")
-    root = package_root(lab_id)
-    metadata = _object(package_metadata_path(lab_id))
-    _pack_contract(metadata, lab_id, require_available)
-    if metadata.get("scope") != "global":
-        raise PackageError("Runtime assets belong to a global module")
-    assets = _module_assets(root, metadata.get("runtime_files", []), None if lab_id in STANDARD_MODULES else "notebooks")
-    for asset in assets:
-        if asset.name == name:
-            return asset.read_bytes()
-    raise PackageError(f"Undeclared runtime file: {lab_id}/{name}")
 
 
 def _catalog_manifest() -> tuple[tuple[str, ...], dict[str, str]]:
@@ -400,10 +318,6 @@ def available_kit_ids() -> tuple[str, ...]:
         for pack in package_catalog()
         if pack.available and pack.scope == "participant"
     )
-
-
-def module_catalog() -> tuple[Package, ...]:
-    return tuple(pack for pack in package_catalog() if pack.scope == "global")
 
 
 def public_kit_catalog() -> list[dict[str, Any]]:

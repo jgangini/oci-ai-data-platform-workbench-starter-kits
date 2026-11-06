@@ -17,6 +17,7 @@ def _settings(tmp_path: Path, *, enabled: bool = True) -> Settings:
         application_commit_sha="a" * 40,
         application_update_dir=str(tmp_path / "update"),
         vm_update_enabled=enabled,
+        application_deployment_profile="kits-only",
     )
 
 
@@ -79,9 +80,6 @@ def test_release_snapshot_uses_image_metadata_and_pack_manifests(tmp_path: Path)
         ("telco_lineage", "2.0.0"),
         ("retail", "2.0.0"),
         ("healthcare", "2.0.0"),
-        ("ai_data_governance", "4.0.1"),
-        ("gods_eye_view", "2.0.0"),
-        ("ai_market_intelligence", "2.0.0"),
     }
 
 
@@ -135,3 +133,20 @@ def test_update_request_is_disabled_outside_the_vm(tmp_path: Path) -> None:
     manager = ApplicationReleaseManager(_settings(tmp_path, enabled=False))
     with pytest.raises(ReleaseUpdateUnavailable, match="deployed VM"):
         manager.request_update(str(uuid4()))
+
+
+def test_update_rejects_combined_or_missing_deployment_profile(tmp_path):
+    from dataclasses import replace
+
+    for profile in ("", "combined", "unknown"):
+        manager = ApplicationReleaseManager(replace(_settings(tmp_path), application_deployment_profile=profile))
+        with pytest.raises(ReleaseUpdateUnavailable, match="kits-only"):
+            manager.request_update(str(uuid4()))
+        assert not (tmp_path / "update/inbox/request.json").exists()
+
+
+def test_latest_release_rejects_combined_module_assets():
+    combined = _latest()
+    combined["assets"].append({"name": "gods-eye-view-image-amd64.tar.gz"})
+    with pytest.raises(ReleaseUpdateUnavailable, match="kits-only"):
+        validated_latest_release(combined)

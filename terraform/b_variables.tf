@@ -86,22 +86,6 @@ variable "deployment_mode" {
   }
 }
 
-variable "portal_managed_modules" {
-  description = "Prepare the central portal and shared private network for module installation in this same stack."
-  type        = bool
-  default     = true
-}
-
-variable "enabled_vm_modules" {
-  description = "Internal module state managed by the central portal, not a deployment form input."
-  type        = set(string)
-  default     = []
-  validation {
-    condition     = alltrue([for module in var.enabled_vm_modules : module == "gods_eye_view"])
-    error_message = "The supported VM module is gods_eye_view."
-  }
-}
-
 variable "enable_public_ip_tls" {
   description = "Obtain and automatically renew a publicly trusted Let's Encrypt certificate for the application IPv4 address."
   type        = bool
@@ -116,15 +100,6 @@ variable "registration_code_hash" {
   validation {
     condition     = var.registration_code_hash == "" || startswith(var.registration_code_hash, "pbkdf2_sha256$")
     error_message = "registration_code_hash must be empty or use the Deploy Studio PBKDF2 format."
-  }
-}
-
-variable "agent_model_id" {
-  description = "ACTIVE on-demand OCI Generative AI CHAT model for the production-only global governance Agent."
-  type        = string
-  validation {
-    condition     = length(trimspace(var.agent_model_id)) > 0
-    error_message = "agent_model_id must identify the selected regional CHAT model."
   }
 }
 

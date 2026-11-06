@@ -11,7 +11,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.modules.ai_data_governance.naming import database_names
+from app.kits.naming import database_names
 
 
 class AutonomousProvisionError(RuntimeError):

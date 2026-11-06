@@ -15,27 +15,12 @@ output "database_actions_url" {
   ) : data.oci_database_autonomous_database.existing_agent[0].connection_urls[0].sql_dev_web_url
 }
 
-output "portal_managed_modules" {
-  description = "The portal can install modules by applying this stack at its installed source commit."
-  value       = var.portal_managed_modules
-}
-
-output "enabled_vm_modules" {
-  value = sort(tolist(var.enabled_vm_modules))
-}
-
 output "source_commit_sha" {
   value = var.source_commit_sha
 }
 
 output "deployment_suffix" {
   value = local.suffix
-}
-
-output "gods_eye_view_reserved_private_ip" {
-  description = "Reserved private VM2 address for portal-managed installations."
-  sensitive   = true
-  value       = var.portal_managed_modules ? local.gods_eye_view_reserved_private_ip : null
 }
 
 output "public_ip_tls_enabled" {
@@ -96,7 +81,7 @@ output "ai_data_platform_id" {
 }
 
 output "autonomous_database_id" {
-  description = "Autonomous AI Database used by the global governance Agent checkpointer."
+  description = "Autonomous AI Database for participant schemas and AIDP AI features."
   value       = local.autonomous_database_id
 }
 
@@ -114,10 +99,6 @@ output "autonomous_database_workload" {
 
 output "autonomous_database_compute_count" {
   value = var.autonomous_database_mode == "new" ? var.autonomous_database_compute_count : null
-}
-
-output "agent_model_id" {
-  value = var.agent_model_id
 }
 
 output "default_workspace_name" {

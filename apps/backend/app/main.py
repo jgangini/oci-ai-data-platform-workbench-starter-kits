@@ -4,27 +4,21 @@ import asyncio
 import logging
 import re
 import time
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from oci._vendor import requests
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.services.oci.aidp import AidpClient, LocalAidpClient, participant_owner_key
 from app.services.oci.contracts import AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, UserMaterial, IdentityConflict, IdentityPending, IdentityRejected
 from .config import Settings, SettingsStore
-from app.modules.ai_market_intelligence.client import MarketAidpClient
-from app.modules.ai_market_intelligence.api import LocalMarketClient, mount_market_intelligence
-from app.api.viewer_identity import mount_identity
-from app.api.viewer_auth import _application as viewer_application, mount_viewer_login
 from app.services.oci.identity import IdentityClient, LocalIdentityClient
 from app.packages.catalog import available_kit_ids, public_kit_catalog
-from app.modules.ai_gods_eye_view.runtime.api import mount_gods_eye_view, run_local_gods_eye_view
-from app.modules.ai_gods_eye_view.runtime.access import mount_access
 from app.services.releases import ApplicationReleaseManager, ReleaseUpdateConflict, ReleaseUpdateUnavailable, semantic_version
 from .security import (
     RateLimiter,
@@ -50,7 +44,6 @@ class UserRequest(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=5, max_length=254)
     lab_ids: list[str] = Field(min_length=1)
-    gods_eye_view: bool = Field(default=False, strict=True)
 
     @field_validator("name")
     @classmethod
@@ -91,16 +84,6 @@ class RegistrationRequest(UserRequest):
         return value
 
 
-class AdminUserRequest(UserRequest):
-    lab_ids: list[str] = Field(min_length=0)
-
-    @model_validator(mode="after")
-    def require_access(self):
-        if not self.lab_ids and not self.gods_eye_view:
-            raise ValueError("Choose at least one starter kit or God's Eye View")
-        return self
-
-
 class AdminLabRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     lab_id: str
@@ -116,11 +99,6 @@ class AdminLabRequest(BaseModel):
 class LabOperationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation_id: UUID
-
-
-class ModuleOperationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    operation_id: UUID | None = None
 
 
 class ApplicationUpdateRequest(BaseModel):
@@ -184,19 +162,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        run_producer = (settings.local_development_mode or settings.gods_eye_view_enabled) and not (settings.local_development_mode and not settings.gods_eye_view_local_mode)
-        gods_eye_view_task = asyncio.create_task(run_local_gods_eye_view(app)) if run_producer else None
         try:
             yield
         finally:
-            if gods_eye_view_task:
-                gods_eye_view_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await gods_eye_view_task
-        for client in (app.state.identity_client, app.state.aidp_client, app.state.gods_eye_view_aidp_client,
-                       app.state.market_client):
-            if client is not None:
-                await client.close()
+            for client in (app.state.identity_client, app.state.aidp_client):
+                if client is not None:
+                    await client.close()
 
     application_version = (
         settings.application_release.removeprefix("v")
@@ -212,8 +183,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.login_limiter = RateLimiter(5, 60)
     app.state.identity_client = None
     app.state.aidp_client = None
-    app.state.gods_eye_view_aidp_client = None
-    app.state.market_client = None
     app.state.release_manager = ApplicationReleaseManager(settings)
     app.state.health_lock = asyncio.Lock()
     app.state.health_expires_at = 0.0
@@ -242,21 +211,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.aidp_factory = default_aidp_factory
 
-    def market_factory():
-        if app.state.market_client is None:
-            app.state.market_client = LocalMarketClient() if settings.local_development_mode else MarketAidpClient(settings)
-        return app.state.market_client
-
-    app.state.market_factory = market_factory
-
-    def gods_eye_view_aidp_factory():
-        if not settings.local_development_mode or settings.gods_eye_view_local_mode:
-            return app.state.aidp_factory()
-        if app.state.gods_eye_view_aidp_client is None:
-            app.state.gods_eye_view_aidp_client = AidpClient(settings)
-        return app.state.gods_eye_view_aidp_client
-
-    app.state.gods_eye_view_aidp_factory = gods_eye_view_aidp_factory
 
     async def refresh_local_material(identity, user_id, user):
         if isinstance(identity, LocalIdentityClient):
@@ -309,28 +263,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def require_admin(request: Request) -> str:
         username = verify_session(request.cookies.get(cookie_name, ""), app.state.session_key)
-        if username != settings.admin_username or username.startswith("viewer:"):
+        if username != settings.admin_username:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Administrator session required")
         return username
 
-    require_viewer = mount_access(app, require_admin, cookie_name)
-    mount_identity(app, require_admin, require_viewer)
-    mount_viewer_login(app, cookie_name, client_ip)
 
-    async def provision_user(name: str, email: str, lab_ids: list[str], gods_eye_view: bool = False) -> JSONResponse:
+    async def provision_user(name: str, email: str, lab_ids: list[str]) -> JSONResponse:
         try:
             identity = app.state.identity_factory()
-            if gods_eye_view and not settings.local_development_mode:
-                module = await app.state.gods_eye_view_status()
-                if not (module.get("installed") is True and module.get("enabled") is True and module.get("status") == "ready"):
-                    raise HTTPException(409, "Deploy God's Eye View before granting access")
-                try:
-                    await viewer_application(identity, settings)
-                except (ValueError, KeyError, TypeError, AttributeError, IdentityPending,
-                        httpx.HTTPError, requests.exceptions.RequestException):
-                    raise HTTPException(503, "OCI viewer sign-in could not be verified") from None
-            result = await (identity.prepare_registration(name, email) if lab_ids
-                            else identity.prepare_registration(name, email, developer_access=False))
+            result = await identity.prepare_registration(name, email)
         except IdentityConflict as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
         except IdentityRejected as exc:
@@ -392,28 +333,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await restore_existing_access()
                 raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         try:
-            if lab_ids:
-                await identity.activate_registration(result.user_id)
-            else:
-                await identity.activate_registration(result.user_id, developer_access=False)
-            if gods_eye_view:
-                await identity.grant_gods_eye_view(result.user_id, True)
+            await identity.activate_registration(result.user_id)
         except IdentityPending as exc:
             return JSONResponse(
                 status_code=202,
                 content={"status": "pending", "phase": "permissions", "message": str(exc)},
             )
-        except IdentityRejected:
-            raise HTTPException(409, "God's Eye View access could not be granted") from None
         except (httpx.HTTPError, requests.exceptions.RequestException):
             raise HTTPException(503, "Identity Domains could not be verified") from None
         content = (_material_payload(material, result.email, app.state.settings_store.get_workbench_url())
                    if lab_ids else {"status": "active", "email": result.email, "labs": []})
         if lab_ids and isinstance(identity, LocalIdentityClient):
             await identity.record_material(result.user_id, content)
-            content["local_access"] = {"simulated": True, "login_url": "/local/gods-eye-view/login", "delivery": "Local welcome file; no email sent"}
-        if gods_eye_view:
-            content.update(gods_eye_view_access=True, viewer_url="/local/gods-eye-view/login" if settings.local_development_mode else "/viewer/login")
         return JSONResponse(status_code=201 if result.status == "created" else 200, content=content)
 
     @app.get("/api/health")
@@ -466,16 +397,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "registration_code_pattern": "AAAA-0000",
             "labs": public_kit_catalog(),
             "local_participant_access": settings.local_development_mode,
-            "viewer_identity": app.state.settings_store.get_viewer_identity(),
-            "viewer_signin_enabled": not settings.local_development_mode and bool(
-                (settings.viewer_oidc_app_name and settings.gods_eye_view_group_id) or settings.managed_viewer_app_name),
         }
 
     @app.post("/api/register")
     async def register(payload: RegistrationRequest, request: Request) -> JSONResponse:
         require_registration_ready()
-        if payload.gods_eye_view and not settings.local_development_mode:
-            raise HTTPException(403, "An administrator must grant God's Eye View access")
         source_ip = client_ip(request)
         invalid_retry_after = app.state.invalid_code_limiter.retry_after(source_ip)
         if invalid_retry_after:
@@ -501,7 +427,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Registration reconciliation is temporarily rate limited",
                 headers={"Retry-After": str(retry_after)},
             )
-        return await provision_user(payload.name, payload.email, payload.lab_ids, payload.gods_eye_view)
+        return await provision_user(payload.name, payload.email, payload.lab_ids)
 
     @app.post("/api/admin/login", status_code=204)
     async def admin_login(payload: LoginRequest, request: Request) -> Response:
@@ -531,7 +457,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/admin/session")
     async def admin_session(response: Response, username: str = Depends(require_admin)) -> dict[str, str]:
-        response.headers["X-Gods-Eye-View-User"] = username
         return {"username": username, "operator_username": settings.operator_username}
 
     async def admin_settings_payload() -> dict[str, object]:
@@ -627,154 +552,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             user.pop("ocid", None)
         return {"users": sorted(users, key=lambda item: (not item["is_aidp_admin"], str(item.get("email") or "").casefold()))}
 
-    async def selected_platform_admin(user_id: str) -> dict[str, Any]:
-        require_identity()
-        if not settings.aidp_ready():
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
-        aidp = app.state.aidp_factory()
-        try:
-            admin_user_ocids, admin_group_ocids = await aidp.platform_admin_principals()
-            users = await app.state.identity_factory().list_users_by_principals(
-                admin_user_ocids, admin_group_ocids
-            )
-        except IdentityPending as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        except (AidpProvisionPending, AidpProvisionError) as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        matches = [user for user in users if str(user.get("id") or "") == user_id]
-        if not matches:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "The selected user is not an AI_DATA_PLATFORM_ADMIN")
-        return dict(matches[0])
-
-    mount_gods_eye_view(app, require_admin, require_viewer, selected_platform_admin)
-    mount_market_intelligence(app, require_admin, selected_platform_admin)
-
-    async def module_pending_response(
-        operation_id: str, operation_type: str, exc: AidpProvisionPending
-    ) -> JSONResponse:
-        try:
-            modules = await app.state.aidp_factory().list_modules()
-        except (AidpProvisionPending, AidpProvisionError):
-            modules = []
-        candidate = modules[0] if modules else {}
-        pending_status = {
-            "install": "installing",
-            "redeploy": "redeploying",
-            "delete": "deleting",
-        }[operation_type]
-        reuses_global_install = bool(
-            operation_type == "install"
-            and candidate.get("operation_id")
-            and candidate.get("operation_type") == "install"
-            and candidate.get("status") == pending_status
-        )
-        module = (
-            candidate
-            if candidate.get("operation_id") == operation_id or reuses_global_install
-            else {}
-        )
-        return JSONResponse(status_code=202, content={
-            "module_id": module.get("module_id") or "ai_data_governance",
-            "display_name": module.get("display_name") or "AI Data Governance",
-            "status": str(module.get("status") or pending_status),
-            "installed": bool(module.get("installed", True)),
-            "phase": exc.phase,
-            "operation_id": module.get("operation_id") or operation_id,
-            "operation_type": module.get("operation_type") or operation_type,
-            "enabled": bool(module.get("enabled", candidate.get("enabled", False))),
-            "message": str(exc),
-        })
-
-    @app.get("/api/admin/modules")
-    async def admin_modules(_admin: str = Depends(require_admin)) -> dict[str, list[dict[str, Any]]]:
-        if not settings.aidp_ready():
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
-        try:
-            return {"modules": await app.state.aidp_factory().list_modules()}
-        except AidpProvisionPending as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        except AidpProvisionError as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-
-    @app.get("/api/admin/modules/ai_data_governance/agent-endpoint")
-    async def governance_agent_endpoint(_admin: str = Depends(require_admin)) -> dict[str, str]:
-        if not settings.aidp_ready():
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
-        try:
-            return {"url": await app.state.aidp_factory().governance_agent_endpoint()}
-        except AidpProvisionConflict as exc:
-            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-        except (AidpProvisionPending, AidpProvisionError) as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-
-    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance")
-    async def admin_install_governance_module(
-        user_id: str,
-        payload: ModuleOperationRequest | None = None,
-        _admin: str = Depends(require_admin),
-    ) -> JSONResponse:
-        user = await selected_platform_admin(user_id)
-        operation_id = str(payload.operation_id if payload and payload.operation_id else uuid4())
-        try:
-            result = await app.state.aidp_factory().install_governance_module(
-                str(user["ocid"]), operation_id, role_membership_verified=True
-            )
-        except AidpProvisionPending as exc:
-            return await module_pending_response(operation_id, "install", exc)
-        except AidpProvisionConflict as exc:
-            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-        except AidpProvisionError as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        result["message"] = "AI Data Governance is active."
-        return JSONResponse(content=result)
-
-    @app.post("/api/admin/users/{user_id}/modules/ai_data_governance/redeploy")
-    async def admin_redeploy_governance_module(
-        user_id: str,
-        payload: ModuleOperationRequest | None = None,
-        _admin: str = Depends(require_admin),
-    ) -> JSONResponse:
-        user = await selected_platform_admin(user_id)
-        operation_id = str(payload.operation_id if payload and payload.operation_id else uuid4())
-        try:
-            result = await app.state.aidp_factory().redeploy_governance_module(
-                str(user["ocid"]), operation_id, role_membership_verified=True
-            )
-        except AidpProvisionPending as exc:
-            return await module_pending_response(operation_id, "redeploy", exc)
-        except AidpProvisionConflict as exc:
-            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-        except AidpProvisionError as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        result["message"] = "AI Data Governance was redeployed."
-        return JSONResponse(content=result)
-
-    @app.delete("/api/admin/users/{user_id}/modules/ai_data_governance")
-    async def admin_delete_governance_module(
-        user_id: str,
-        operation_id: UUID,
-        _admin: str = Depends(require_admin),
-    ) -> JSONResponse:
-        user = await selected_platform_admin(user_id)
-        try:
-            result = await app.state.aidp_factory().delete_governance_module(
-                str(user["ocid"]), str(operation_id), role_membership_verified=True
-            )
-        except AidpProvisionPending as exc:
-            return await module_pending_response(str(operation_id), "delete", exc)
-        except AidpProvisionConflict as exc:
-            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-        except AidpProvisionError as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        result["message"] = "AI Data Governance was removed. Shared OCI credentials are retained."
-        return JSONResponse(content=result)
 
     @app.post("/api/admin/users")
-    async def admin_create_user(payload: AdminUserRequest, _admin: str = Depends(require_admin)) -> JSONResponse:
+    async def admin_create_user(payload: UserRequest, _admin: str = Depends(require_admin)) -> JSONResponse:
         require_identity()
         if payload.lab_ids and not settings.aidp_ready():
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "AIDP workspace provisioning is not configured")
-        return await provision_user(payload.name, payload.email, payload.lab_ids, payload.gods_eye_view)
+        return await provision_user(payload.name, payload.email, payload.lab_ids)
 
     @app.post("/api/admin/users/{user_id}/labs")
     async def admin_add_lab(
