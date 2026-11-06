@@ -94,24 +94,6 @@ class Aidp:
         return SimpleNamespace(data=SimpleNamespace(items=self.work_requests), headers={})
 
 
-class ObjectStorage:
-    def __init__(self, bucket_exists: bool = False) -> None:
-        self.bucket_exists = bucket_exists
-
-    def get_namespace(self) -> Any:
-        return SimpleNamespace(data="testnamespace")
-
-    def get_bucket(self, **_kwargs: Any) -> Any:
-        if self.bucket_exists:
-            return SimpleNamespace(data=SimpleNamespace(name="oci_artifacts"))
-        raise preflight.oci.exceptions.ServiceError(
-            status=404,
-            code="BucketNotFound",
-            headers={},
-            message="bucket not found",
-        )
-
-
 def _select(
     statuses: dict[str, tuple[str, str]],
     *,
@@ -120,7 +102,6 @@ def _select(
     compartment: str = "oci-aidp-cloud-migration-lab-5",
     compartment_mode: str = "new",
     input_overrides: dict[str, Any] | None = None,
-    object_storage: ObjectStorage | None = None,
 ) -> tuple[dict[str, Any], Compute]:
     compute = Compute(statuses)
     identity = identity or Identity()
@@ -139,7 +120,6 @@ def _select(
         identity_factory=lambda _config: identity,
         compute_factory=lambda _config: compute,
         aidp_factory=lambda _config: aidp,
-        object_storage_factory=lambda _config: object_storage or ObjectStorage(),
     )
     return result, compute
 
@@ -161,39 +141,15 @@ def test_preflight_selects_e5_and_discovers_home_region() -> None:
     assert compute.details.shape_availabilities[0].instance_shape_config.memory_in_gbs == 16
 
 
-def test_preflight_rejects_creating_the_legacy_artifacts_bucket_when_it_exists() -> None:
+def test_preflight_does_not_query_an_artifacts_bucket(monkeypatch) -> None:
+    def unexpected_storage_client(*args, **kwargs):
+        raise AssertionError("Kits preflight must not query a Governance artifacts bucket")
+
+    monkeypatch.setattr(preflight.oci.object_storage, "ObjectStorageClient", unexpected_storage_client)
     available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
-    with pytest.raises(RuntimeError, match="oci_artifacts already exists"):
-        _select(
-            {preflight.E5_SHAPE: (available, "1")},
-            input_overrides={"artifacts_bucket_mode": "new"},
-            object_storage=ObjectStorage(bucket_exists=True),
-        )
-
-
-def test_preflight_checks_only_the_selected_new_artifacts_bucket() -> None:
-    class SelectedBucket(ObjectStorage):
-        def get_bucket(self, **kwargs: Any) -> Any:
-            assert kwargs == {"namespace_name": "testnamespace", "bucket_name": "artifacts-second-lab"}
-            return super().get_bucket(**kwargs)
-
-    available = preflight.oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
-    inputs = {"artifacts_bucket_mode": "new", "artifacts_new_bucket_name": "artifacts-second-lab"}
-    result, _ = _select(
-        {preflight.E5_SHAPE: (available, "1")}, input_overrides=inputs, object_storage=SelectedBucket(),
-    )
-    assert any("artifacts-second-lab is available" in event["message"] for event in result["events"])
-    with pytest.raises(RuntimeError, match="artifacts-second-lab already exists"):
-        _select(
-            {preflight.E5_SHAPE: (available, "1")}, input_overrides=inputs,
-            object_storage=SelectedBucket(bucket_exists=True),
-        )
-
-
-@pytest.mark.parametrize("name", ["", "../other", "oci://other", "x" * 129])
-def test_preflight_rejects_invalid_artifacts_bucket_names_before_oci(name: str) -> None:
-    with pytest.raises(ValueError, match="artifacts bucket name"):
-        preflight._require_new_bucket_available(None, name)
+    result, _ = _select({preflight.E5_SHAPE: (available, "1")})
+    assert all(event["status"] == "passed" for event in result["events"])
+    assert not any("artifacts bucket" in event["name"].lower() for event in result["events"])
 
 
 def test_preflight_rejects_occupied_new_compartment_across_pages() -> None:
@@ -364,7 +320,6 @@ def test_preflight_checks_all_availability_domains_for_standard_shape() -> None:
         identity_factory=lambda _config: MultiAdIdentity(),
         compute_factory=lambda _config: MultiAdCompute(),
         aidp_factory=lambda _config: Aidp(),
-        object_storage_factory=lambda _config: ObjectStorage(),
     )
     assert result["inputs"]["availability_domain_index"] == 1
 
@@ -428,7 +383,6 @@ def test_preflight_accepts_any_available_fault_domain() -> None:
         identity_factory=lambda _config: Identity(),
         compute_factory=lambda _config: FaultDomainCompute(),
         aidp_factory=lambda _config: Aidp(),
-        object_storage_factory=lambda _config: ObjectStorage(),
     )
     assert result["inputs"]["preferred_vm_shape"] == preflight.E5_SHAPE
 

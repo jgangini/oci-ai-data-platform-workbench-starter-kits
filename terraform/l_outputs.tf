@@ -57,7 +57,7 @@ output "bucket_name" {
 }
 
 output "medallion_bucket_names" {
-  description = "Resolved landing, bronze, silver, gold, and artifacts Object Storage bucket names."
+  description = "Resolved landing, bronze, silver, and gold Object Storage bucket names."
   value       = local.medallion_bucket_names
 }
 

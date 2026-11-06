@@ -13,13 +13,6 @@ from pytz import all_timezones_set, common_timezones
 from .security import hash_secret
 
 
-def _artifacts_bucket_name(value: str) -> str:
-    normalized = value.strip()
-    if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", normalized) is None:
-        raise ValueError("ARTIFACTS_BUCKET_NAME must contain 1–128 letters, digits, dots, underscores or hyphens")
-    return normalized
-
-
 _RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _RELEASE_SHA = re.compile(r"^[0-9a-f]{40}$")
 _SOURCE_REPOSITORY = "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
@@ -64,7 +57,6 @@ class Settings:
     oci_config_file: str = "/etc/aidp-lab/oci/config"
     objectstorage_namespace: str = ""
     bucket_name: str = ""
-    artifacts_bucket_name: str = "oci_artifacts"
     aidp_settings_file: str = "/var/lib/aidp-lab/settings.json"
     lab_marker: str = "aidp-lab"
     session_secret_file: str = "/var/lib/aidp-lab/session.key"
@@ -99,9 +91,6 @@ class Settings:
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
             objectstorage_namespace=os.getenv("OBJECTSTORAGE_NAMESPACE", ""),
             bucket_name=os.getenv("BUCKET_NAME", ""),
-            artifacts_bucket_name=_artifacts_bucket_name(
-                os.getenv("ARTIFACTS_BUCKET_NAME", "oci_artifacts")
-            ),
             aidp_settings_file=os.getenv("AIDP_SETTINGS_FILE", "/var/lib/aidp-lab/settings.json"),
             lab_marker=os.getenv("LAB_MARKER", "aidp-lab"),
             session_secret_file=os.getenv("SESSION_SECRET_FILE", "/var/lib/aidp-lab/session.key"),

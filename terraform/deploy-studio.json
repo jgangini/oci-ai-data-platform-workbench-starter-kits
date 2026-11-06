@@ -219,7 +219,8 @@
         "visible_when": {
           "field": "landing_bucket_mode",
           "equals": "existing"
-        }
+        },
+        "default": "oci_landing"
       },
       {
         "name": "bronze_bucket_mode",
@@ -261,7 +262,8 @@
         "visible_when": {
           "field": "bronze_bucket_mode",
           "equals": "existing"
-        }
+        },
+        "default": "oci_bronze"
       },
       {
         "name": "silver_bucket_mode",
@@ -303,7 +305,8 @@
         "visible_when": {
           "field": "silver_bucket_mode",
           "equals": "existing"
-        }
+        },
+        "default": "oci_silver"
       },
       {
         "name": "gold_bucket_mode",
@@ -345,50 +348,8 @@
         "visible_when": {
           "field": "gold_bucket_mode",
           "equals": "existing"
-        }
-      },
-      {
-        "name": "artifacts_bucket_mode",
-        "label": "Artifacts bucket mode",
-        "type": "select",
-        "required": true,
-        "default": "new",
-        "group": "medallion",
-        "options": [
-          {
-            "value": "new",
-            "label": "Create new bucket"
-          },
-          {
-            "value": "existing",
-            "label": "Use existing bucket"
-          }
-        ]
-      },
-      {
-        "name": "artifacts_new_bucket_name",
-        "label": "New Governance artifacts bucket name",
-        "type": "text",
-        "required": true,
-        "default": "oci_artifacts",
-        "pattern": "^[A-Za-z0-9._-]{1,128}$",
-        "group": "medallion",
-        "visible_when": {
-          "field": "artifacts_bucket_mode",
-          "equals": "new"
-        }
-      },
-      {
-        "name": "artifacts_existing_bucket_name",
-        "label": "Existing Governance artifacts bucket for this environment",
-        "type": "select",
-        "required": true,
-        "options_source": "oci_active_buckets",
-        "group": "medallion",
-        "visible_when": {
-          "field": "artifacts_bucket_mode",
-          "equals": "existing"
-        }
+        },
+        "default": "oci_gold"
       }
     ],
     "email_access_fields": [

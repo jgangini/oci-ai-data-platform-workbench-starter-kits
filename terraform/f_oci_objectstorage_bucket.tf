@@ -34,7 +34,6 @@ locals {
     for config in values(local.medallion_bucket_configuration) :
     lower(config.mode == "new" ? config.new_name : config.existing_name)
   ]
-  selected_artifacts_bucket_name = trimspace(var.artifacts_bucket_mode == "new" ? var.artifacts_new_bucket_name : var.artifacts_existing_bucket_name)
 }
 
 resource "terraform_data" "validate_medallion_buckets" {
@@ -52,10 +51,6 @@ resource "terraform_data" "validate_medallion_buckets" {
       error_message = "Landing, bronze, silver, and gold must use four unique Object Storage bucket names."
     }
 
-    precondition {
-      condition     = !contains(local.selected_medallion_bucket_names, "oci_artifacts") && !contains(local.selected_medallion_bucket_names, lower(local.selected_artifacts_bucket_name))
-      error_message = "Governance artifacts must use a separate bucket; oci_artifacts remains reserved for legacy Governance data."
-    }
   }
 }
 
@@ -114,24 +109,10 @@ locals {
       : data.oci_objectstorage_bucket.medallion[layer].compartment_id
     )
   }
-  artifacts_bucket_name = var.artifacts_bucket_mode == "new" ? (
-    oci_objectstorage_bucket.artifacts[0].name
-    ) : (
-    data.oci_objectstorage_bucket.artifacts[0].name
-  )
-  artifacts_bucket_compartment_id = var.artifacts_bucket_mode == "new" ? (
-    local.target_compartment
-    ) : (
-    data.oci_objectstorage_bucket.artifacts[0].compartment_id
-  )
-  medallion_bucket_names = merge(local.layer_bucket_names, {
-    artifacts = local.artifacts_bucket_name
-  })
-  medallion_bucket_compartment_ids = merge(local.layer_bucket_compartment_ids, {
-    artifacts = local.artifacts_bucket_compartment_id
-  })
-  bootstrap_bucket_name           = local.medallion_bucket_names.landing
-  bootstrap_bucket_compartment_id = local.medallion_bucket_compartment_ids.landing
+  medallion_bucket_names           = local.layer_bucket_names
+  medallion_bucket_compartment_ids = local.layer_bucket_compartment_ids
+  bootstrap_bucket_name            = local.medallion_bucket_names.landing
+  bootstrap_bucket_compartment_id  = local.medallion_bucket_compartment_ids.landing
 }
 
 resource "terraform_data" "validate_resolved_medallion_buckets" {
@@ -144,30 +125,6 @@ resource "terraform_data" "validate_resolved_medallion_buckets" {
       error_message = "Existing medallion buckets must belong to the selected deployment compartment so least-privilege IAM policies remain exact."
     }
   }
-}
-
-resource "oci_objectstorage_bucket" "artifacts" {
-  count          = var.artifacts_bucket_mode == "new" ? 1 : 0
-  compartment_id = local.target_compartment
-  namespace      = var.objectstorage_namespace
-  name           = local.selected_artifacts_bucket_name
-  access_type    = "NoPublicAccess"
-  storage_tier   = "Standard"
-  versioning     = "Disabled"
-  auto_tiering   = "Disabled"
-
-  freeform_tags = {
-    managed-by = "deploy-studio"
-    data-model = "medallion-artifacts"
-  }
-
-  depends_on = [terraform_data.validate_medallion_buckets]
-}
-
-data "oci_objectstorage_bucket" "artifacts" {
-  count     = var.artifacts_bucket_mode == "existing" ? 1 : 0
-  namespace = var.objectstorage_namespace
-  name      = local.selected_artifacts_bucket_name
 }
 
 # ponytail: prefixes stay virtual until AIDP's first write; add markers only when OCI exposes write readiness.

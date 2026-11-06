@@ -21,7 +21,7 @@ El portal funciona en modo **Laboratory**. El registro requiere el código del i
 3. El registro reconcilia la identidad OCI del participante y aprovisiona contenido, workflows y permisos en Workbench.
 4. El participante accede a Workbench para ejecutar sus notebooks y consultar las tablas y el linaje en Master Catalog.
 
-Las canalizaciones usan Spark y cuatro capas Medallion: Landing, Bronze, Silver y Gold. Un quinto bucket almacena artefactos. Los nombres de tablas y workflows incorporan la identidad del participante y del kit.
+Las canalizaciones usan Spark y cuatro capas Medallion: Landing, Bronze, Silver y Gold. Los nombres de tablas y workflows incorporan la identidad del participante y del kit.
 
 ## Despliegue
 
@@ -29,7 +29,7 @@ Seleccione una [release inmutable](https://github.com/jgangini/oci-ai-data-platf
 
 En **AI Data Platform Workbench → Services mode** puede crear una plataforma con nombre inicial `aidp_medallion` o elegir una existente. La plataforma reutilizada debe estar ACTIVE/STRUCTURED en la región y compartimento seleccionados. Se conserva fuera del ciclo de vida del stack y se rechazan colisiones con recursos ajenos.
 
-El formulario configura cinco buckets distintos, el administrador del portal y el código de registro. Kits utiliza Workbench, Spark y Master Catalog; no requiere Autonomous ni un modelo de Agent Flow. La VM expone el portal y su API por HTTPS.
+El formulario configura cuatro buckets Medallion distintos, el administrador del portal y el código de registro. Kits utiliza Workbench, Spark y Master Catalog; no requiere Autonomous ni un modelo de Agent Flow. La VM expone el portal y su API por HTTPS.
 
 La guía de [primeros pasos](docs/getting-started.md) detalla requisitos, entradas, salidas y acceso. Revise sus [límites vigentes](docs/getting-started.md#current-implementation-limits): existe una discrepancia entre las rutas aprovisionadas y las validaciones de los notebooks que debe resolverse antes de aceptar las ejecuciones de participantes.
 

@@ -148,7 +148,6 @@ AIDP_WORKSPACE_NAME=${aidp_workspace_name}
 AIDP_WORKSPACE_KEY=${aidp_workspace_key}
 AIDP_REGION=${aidp_region}
 COMPARTMENT_ID=${compartment_id}
-ARTIFACTS_BUCKET_NAME=${artifacts_bucket_name}
 OCI_CONFIG_FILE=/etc/aidp-lab/oci/config
 OBJECTSTORAGE_NAMESPACE=${objectstorage_namespace}
 BUCKET_NAME=${bucket_name}

@@ -14,7 +14,7 @@ This is the canonical repository guidance. Read docs/README.md and the source-li
 - Keep terraform/deploy-studio.json compatible with the trusted Deploy Studio schema and pin releases to immutable commits. Solution logic stays here, not in solution-specific CloudTechNext branches.
 - Terraform, hooks and release images must reproduce required configuration. Manual VM repairs are not substitutes for deployment fixes.
 - Preserve Terraform resource addresses of retained kit resources. Renaming source files does not authorize changing cloud identities.
-- Preserve five distinct bucket selections and exact ownership. Use Master Catalog metadata to establish table locations.
+- Preserve four distinct Medallion bucket selections and exact ownership. Use Master Catalog metadata to establish table locations.
 - Reuse the uploaded operator identity. The one-use credential envelope remains encrypted/authenticated, identity/fingerprint verified, atomically installed with restricted permissions and deleted after confirmation.
 - Kits use Spark and Master Catalog isolation, not Autonomous, agent memory or model selectors. Keep the operator credential envelope authenticated and strict. Existing AIDP is a data source, never imported or destroyed; reject unowned kit resource collisions.
 - Never commit OCI keys/configuration, wallets, passwords, registration codes, certificates, Terraform state or private receipts. Parse private evidence selectively without printing secrets.

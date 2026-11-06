@@ -63,21 +63,16 @@ def test_deploy_studio_manifest_contract() -> None:
     assert fields["existing_ai_data_platform_ocid"]["options_source"] == "oci_aidp_platforms"
     groups = [item["group"] for item in manifest["form"]["fields"]]
     assert groups.index("aidp_platform") < groups.index("medallion")
-    for layer in ("landing", "bronze", "silver", "gold", "artifacts"):
+    for layer in ("landing", "bronze", "silver", "gold"):
         assert fields[f"{layer}_bucket_mode"]["group"] == "medallion"
         assert fields[f"{layer}_new_bucket_name"]["default"] == f"oci_{layer}"
         assert fields[f"{layer}_existing_bucket_name"]["options_source"] == "oci_active_buckets"
-    assert fields["artifacts_new_bucket_name"]["pattern"] == "^[A-Za-z0-9._-]{1,128}$"
-    for mode in ("new", "existing"):
-        assert fields[f"artifacts_{mode}_bucket_name"]["visible_when"] == {
-            "field": "artifacts_bucket_mode", "equals": mode,
-        }
-        assert re.search(
-            rf'variable\s+"artifacts_{mode}_bucket_name"\s*\{{.*?default\s*=\s*"oci_artifacts"',
-            variables, re.DOTALL,
-        )
-    assert 'name           = local.selected_artifacts_bucket_name' in storage
-    assert 'name      = local.selected_artifacts_bucket_name' in storage
+        assert fields[f"{layer}_existing_bucket_name"]["default"] == f"oci_{layer}"
+    assert not any(name.startswith("artifacts_") for name in fields)
+    assert '"artifacts"' not in storage
+    assert "artifacts_bucket" not in variables
+    assert 'resource "oci_objectstorage_bucket" "data"' in storage
+    assert 'bootstrap_bucket_name' in storage
     assert "enable_ai_data_governance" not in fields
     assert "optional_addons" not in {field["group"] for field in fields.values()}
     assert "enable_medallion_architecture" not in fields
