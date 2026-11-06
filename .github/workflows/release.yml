@@ -70,15 +70,12 @@ jobs:
           verify_dir="$RUNNER_TEMP/immutable-release"
           mkdir -p "$verify_dir"
           asset_names="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,gods-eye-view-image-amd64.tar.gz,gods-eye-view-release.json"
+          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$verify_dir" \
             --pattern "$RELEASE_IMAGE_ASSET" \
-            --pattern "$RELEASE_MANIFEST_ASSET" \
-            --pattern gods-eye-view-release.json \
-            --pattern gods-eye-view-image-amd64.tar.gz
+            --pattern "$RELEASE_MANIFEST_ASSET"
           gzip -t "$verify_dir/$RELEASE_IMAGE_ASSET"
-          gzip -t "$verify_dir/gods-eye-view-image-amd64.tar.gz"
           RELEASE_VERIFY_DIR="$verify_dir" python - <<'PY'
           import hashlib
           import json
@@ -88,13 +85,13 @@ jobs:
           root = Path(os.environ["RELEASE_VERIFY_DIR"])
           for image_name, manifest_name, component in (
               (os.environ["RELEASE_IMAGE_ASSET"], os.environ["RELEASE_MANIFEST_ASSET"], "aidp-lab"),
-              ("gods-eye-view-image-amd64.tar.gz", "gods-eye-view-release.json", "gods-eye-view"),
           ):
               with (root / image_name).open("rb") as stream:
                   digest = hashlib.file_digest(stream, "sha256").hexdigest()
               expected = {
                   "schema_version": 1,
-                  "updater_protocol": 1,
+                  "updater_protocol": 2,
+                  "deployment_profile": "kits-only",
                   "release": os.environ["GITHUB_REF_NAME"],
                   "commit_sha": os.environ["RELEASE_COMMIT_SHA"],
                   "repository": os.environ["RELEASE_REPOSITORY"],
@@ -126,8 +123,6 @@ jobs:
         run: python -m pytest apps/backend/tests terraform/tests
         env:
           SESSION_SECRET_FILE: ${{ runner.temp }}/aidp-lab/session.key
-      - if: steps.release.outputs.mode != 'immutable'
-        run: python scripts/modules/ai_data_governance/check_ai_dg_documentary_graph.py && python scripts/modules/ai_data_governance/check_ai_dg_governance_graph.py
       - if: steps.release.outputs.mode != 'immutable'
         run: npm ci
         working-directory: apps/frontend
@@ -169,7 +164,8 @@ jobs:
                   digest.update(chunk)
           manifest = {
               "schema_version": 1,
-              "updater_protocol": 1,
+              "updater_protocol": 2,
+              "deployment_profile": "kits-only",
               "release": os.environ["GITHUB_REF_NAME"],
               "commit_sha": os.environ["RELEASE_COMMIT_SHA"],
               "repository": os.environ["RELEASE_REPOSITORY"],
@@ -184,32 +180,6 @@ jobs:
               json.dumps(manifest, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
-          PY
-      - name: Build frozen God's Eye View release assets
-        if: steps.release.outputs.mode != 'immutable'
-        run: |
-          set -euo pipefail
-          image_tag="gods-eye-view:$RELEASE_COMMIT_SHA"
-          docker build --platform linux/amd64 \
-            --file modules/ai-gods-eye-view/Dockerfile --tag "$image_tag" .
-          test "$(docker image inspect "$image_tag" --format '{{.Os}}/{{.Architecture}}')" = "linux/amd64"
-          docker save "$image_tag" | gzip -n -9 > "$RELEASE_DIST/gods-eye-view-image-amd64.tar.gz"
-          python - <<'PY'
-          import hashlib
-          import json
-          import os
-          from pathlib import Path
-
-          root = Path(os.environ["RELEASE_DIST"])
-          manifest = json.loads((root / os.environ["RELEASE_MANIFEST_ASSET"]).read_text())
-          image = root / "gods-eye-view-image-amd64.tar.gz"
-          with image.open("rb") as stream:
-              digest = hashlib.file_digest(stream, "sha256").hexdigest()
-          manifest["image"] = {
-              "asset_name": image.name, "sha256": digest, "platform": "linux/amd64",
-              "image_tag": f'gods-eye-view:{os.environ["RELEASE_COMMIT_SHA"]}',
-          }
-          (root / "gods-eye-view-release.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
           PY
       - name: Create or reuse draft GitHub release
         if: steps.release.outputs.mode != 'immutable'
@@ -230,8 +200,6 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             "$RELEASE_DIST/$RELEASE_IMAGE_ASSET" \
             "$RELEASE_DIST/$RELEASE_MANIFEST_ASSET" \
-            "$RELEASE_DIST/gods-eye-view-release.json" \
-            "$RELEASE_DIST/gods-eye-view-image-amd64.tar.gz" \
             --clobber
         env:
           GH_TOKEN: ${{ github.token }}
@@ -242,17 +210,13 @@ jobs:
           verify_dir="$RUNNER_TEMP/uploaded-release"
           mkdir -p "$verify_dir"
           asset_names="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name] | sort | join(",")')"
-          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET,gods-eye-view-image-amd64.tar.gz,gods-eye-view-release.json"
+          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$verify_dir" \
             --pattern "$RELEASE_IMAGE_ASSET" \
-            --pattern "$RELEASE_MANIFEST_ASSET" \
-            --pattern gods-eye-view-release.json \
-            --pattern gods-eye-view-image-amd64.tar.gz
+            --pattern "$RELEASE_MANIFEST_ASSET"
           cmp "$RELEASE_DIST/$RELEASE_IMAGE_ASSET" "$verify_dir/$RELEASE_IMAGE_ASSET"
           cmp "$RELEASE_DIST/$RELEASE_MANIFEST_ASSET" "$verify_dir/$RELEASE_MANIFEST_ASSET"
-          cmp "$RELEASE_DIST/gods-eye-view-release.json" "$verify_dir/gods-eye-view-release.json"
-          cmp "$RELEASE_DIST/gods-eye-view-image-amd64.tar.gz" "$verify_dir/gods-eye-view-image-amd64.tar.gz"
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Publish GitHub release

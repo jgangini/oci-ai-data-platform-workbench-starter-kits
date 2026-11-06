@@ -101,8 +101,6 @@ class FakeAidp:
         self.admin_groups = {"ocid1.group.oc1..platform-admins"} if mode == "group-admin" else set()
         if mode == "group-admin":
             self.admin_ocids.clear()
-        self.module: dict | None = None
-        self.verified_governance_operations: list[str] = []
 
     @staticmethod
     def material(email: str, lab_id: str) -> UserMaterial:
@@ -171,99 +169,17 @@ class FakeAidp:
     async def platform_admin_principals(self) -> tuple[set[str], set[str]]:
         return set(self.admin_ocids), set(self.admin_groups)
 
-    async def list_modules(self) -> list[dict]:
-        if self.mode == "module-status-pending":
-            raise AidpProvisionPending("workspace is not visible yet", "workspace")
-        return [self.module or {
-            "module_id": "ai_data_governance",
-            "display_name": "AI Data Governance",
-            "status": "not_installed",
-            "installed": False,
-            "operation_id": None,
-            "operation_type": None,
-            "phase": "not_installed",
-            "enabled": False,
-        }]
-
-    async def governance_agent_endpoint(self) -> str:
-        if not self.module or self.module.get("status") != "active":
-            raise AidpProvisionConflict("Deploy the module before copying its Agent URL.")
-        return "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/agent/chat"
-
-    async def install_governance_module(
-        self,
-        user_ocid: str,
-        operation_id: str,
-        *,
-        role_membership_verified: bool = False,
-    ) -> dict:
-        if role_membership_verified:
-            self.verified_governance_operations.append("install")
-        if self.mode in {"module-pre-manifest-pending", "module-status-pending"}:
-            raise AidpProvisionPending("workspace is not visible yet", "workspace")
-        if self.mode == "module-concurrent-pending":
-            self.module = {
-                "module_id": "ai_data_governance", "display_name": "AI Data Governance",
-                "status": "installing", "installed": True,
-                "operation_id": "a635d4ba-6d8c-48df-9340-4c0c1266ca66",
-                "operation_type": "install", "phase": "control", "enabled": False,
-            }
-            raise AidpProvisionPending("the singleton install is already running", "control")
-        if self.mode == "module-pending":
-            self.module = {
-                "module_id": "ai_data_governance", "display_name": "AI Data Governance",
-                "status": "installing", "installed": True, "operation_id": operation_id,
-                "operation_type": "install", "phase": "sync", "enabled": False,
-            }
-            raise AidpProvisionPending("first snapshot running", "sync")
-        self.module = {
-            "module_id": "ai_data_governance", "display_name": "AI Data Governance",
-            "status": "active", "installed": True, "operation_id": operation_id,
-            "operation_type": "install", "phase": "active", "enabled": True,
-        }
-        return dict(self.module)
-
-    async def redeploy_governance_module(
-        self,
-        user_ocid: str,
-        operation_id: str,
-        *,
-        role_membership_verified: bool = False,
-    ) -> dict:
-        if role_membership_verified:
-            self.verified_governance_operations.append("redeploy")
-        if self.module is None:
-            raise AidpProvisionConflict("not installed")
-        self.module.update(operation_id=operation_id, operation_type="redeploy", status="active", phase="active")
-        return dict(self.module)
-
-    async def delete_governance_module(
-        self,
-        user_ocid: str,
-        operation_id: str,
-        *,
-        role_membership_verified: bool = False,
-    ) -> dict:
-        if role_membership_verified:
-            self.verified_governance_operations.append("delete")
-        self.module = None
-        return {
-            "module_id": "ai_data_governance", "display_name": "AI Data Governance",
-            "status": "not_installed", "installed": False, "operation_id": operation_id,
-            "operation_type": "delete", "phase": "complete", "enabled": False,
-        }
-
 
 def make_client(
     tmp_path: Path,
     mode: str = "active",
-    deployment_mode: str = "laboratory",
+    registration_code_hash: str | None = None,
 ) -> TestClient:
     settings = Settings(
         admin_username="lab-admin",
         admin_password_hash=hash_secret("long-admin-password", iterations=1_000, salt=b"admin-test-salt"),
-        deployment_mode=deployment_mode,
-        registration_code_hash=hash_secret("ABCD-1234", iterations=1_000, salt=b"code-test-salt"),
+        registration_code_hash=(hash_secret("ABCD-1234", iterations=1_000, salt=b"code-test-salt")
+                                if registration_code_hash is None else registration_code_hash),
         operator_username="joel.ganggini@oracle.com",
         identity_domain_url="https://identity.example.test",
         developer_group_id="developers", pending_group_id="pending",
@@ -277,7 +193,7 @@ def make_client(
         application_release="v2.2.0",
         application_commit_sha="a" * 40,
         application_update_dir=str(tmp_path / "update"),
-        vm_update_enabled=True,
+        vm_update_enabled=True, application_deployment_profile="kits-only",
         cookie_secure=False,
     )
     app = create_app(settings)
@@ -341,19 +257,24 @@ def test_public_catalog_exposes_only_five_participant_labs(tmp_path: Path) -> No
     assert all(lab["description"].strip() for lab in payload["labs"])
     assert payload["labs"][-1]["status"] == "available"
     assert payload["labs"][-1]["pack_version"] == "2.0.0"
-    assert payload["deployment_mode"] == "laboratory"
+    assert "deployment_mode" not in payload
     assert "industries" not in payload
 
 
-def test_production_mode_hides_registration_and_preserves_admin_identity(tmp_path: Path) -> None:
-    client = make_client(tmp_path, deployment_mode="production")
-    assert client.get("/api/config").json()["deployment_mode"] == "production"
-    assert client.post("/api/register", json=register_payload()).status_code == 404
+def test_registration_requires_a_code_and_administrator_can_configure_it(tmp_path: Path) -> None:
+    client = make_client(tmp_path, registration_code_hash="")
+    assert client.post("/api/register", json=register_payload()).status_code == 503
+    assert client.put("/api/admin/settings", json={"registration_code": "ABCD-1234"}).status_code == 401
     login(client)
     assert client.get("/api/admin/session").json() == {
         "username": "lab-admin",
         "operator_username": "joel.ganggini@oracle.com",
     }
+    configured = client.put("/api/admin/settings", json={"registration_code": "ABCD-1234"})
+    assert configured.status_code == 200
+    assert configured.json()["registration_code_configured"] is True
+    assert "ABCD-1234" not in configured.text
+    assert client.post("/api/register", json=register_payload()).status_code == 201
 
 
 def test_health_reports_safe_failure_and_recreates_cached_client(tmp_path: Path) -> None:
@@ -387,7 +308,7 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json()["aidp_service_endpoint"] == "https://aidp.us-chicago-1.oci.oraclecloud.com"
     assert response.json()["aidp_platform_id"] == "ocid1.aidataplatform.oc1..test"
-    assert response.json()["deployment_mode"] == "laboratory"
+    assert "deployment_mode" not in response.json()
     assert response.json()["operator_username"] == "joel.ganggini@oracle.com"
 
 
@@ -449,7 +370,7 @@ def test_application_release_and_update_are_admin_only_and_idempotent(tmp_path: 
     assert release.json()["latest_release"] == "v2.3.0"
     assert release.json()["update_available"] is True
     package_ids = {item["package_id"] for item in release.json()["packages"]}
-    assert {"ai_data_governance", "gods_eye_view"} <= package_ids
+    assert package_ids == {"banking", "telecommunications", "telco_lineage", "retail", "healthcare"}
 
     operation_id = "d9282ff6-8717-4db7-9f59-241469a2c526"
     pending = client.post(
@@ -574,159 +495,6 @@ def test_admin_lists_labs_and_can_add_redeploy_and_remove_one(tmp_path: Path) ->
     assert protected.status_code == 409
 
 
-@pytest.mark.parametrize("deployment_mode", ["laboratory", "production"])
-def test_governance_module_api_requires_admin_session_in_both_modes(tmp_path: Path, deployment_mode: str) -> None:
-    path = "/api/admin/users/user-id/modules/ai_data_governance"
-    laboratory = make_client(tmp_path, deployment_mode=deployment_mode)
-    assert laboratory.get("/api/admin/modules").status_code == 401
-    assert laboratory.post(path).status_code == 401
-    login(laboratory)
-    assert laboratory.get("/api/admin/modules").json()["modules"][0]["module_id"] == "ai_data_governance"
-    assert laboratory.post(path).status_code == 200
-    assert laboratory.app.state.test_aidp.verified_governance_operations == ["install"]
-
-
-def test_governance_module_lifecycle_uses_global_operation_contract(tmp_path: Path) -> None:
-    client = make_client(tmp_path, deployment_mode="production")
-    login(client)
-    modules = client.get("/api/admin/modules")
-    assert modules.status_code == 200
-    assert modules.json()["modules"][0] == {
-        "module_id": "ai_data_governance",
-        "display_name": "AI Data Governance",
-        "status": "not_installed",
-        "installed": False,
-        "operation_id": None,
-        "operation_type": None,
-        "phase": "not_installed",
-        "enabled": False,
-    }
-    operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
-    path = "/api/admin/users/user-id/modules/ai_data_governance"
-    installed = client.post(path, json={"operation_id": operation_id})
-    assert installed.status_code == 200
-    assert installed.json()["operation_type"] == "install"
-    assert installed.json()["operation_id"] == operation_id
-    assert installed.json()["enabled"] is True
-    redeployed = client.post(f"{path}/redeploy", json={"operation_id": operation_id})
-    assert redeployed.status_code == 200
-    assert redeployed.json()["operation_type"] == "redeploy"
-    deleted = client.delete(f"{path}?operation_id={operation_id}")
-    assert deleted.status_code == 200
-    assert deleted.json()["status"] == "not_installed"
-    assert deleted.json()["message"] == "AI Data Governance was removed. Shared OCI credentials are retained."
-
-
-@pytest.mark.parametrize("deployment_mode", ["laboratory", "production"])
-def test_governance_module_rejects_non_platform_admin_and_lists_unmanaged_admin(tmp_path: Path, deployment_mode: str) -> None:
-    path = "/api/admin/users/user-id/modules/ai_data_governance"
-    denied = make_client(tmp_path / "denied", mode="not-admin", deployment_mode=deployment_mode)
-    login(denied)
-    users = denied.get("/api/admin/users").json()["users"]
-    assert users[0]["is_aidp_admin"] is False
-    assert denied.post(path).status_code == 403
-
-    unmanaged = make_client(tmp_path / "unmanaged", mode="unmanaged-admin", deployment_mode=deployment_mode)
-    login(unmanaged)
-    users = unmanaged.get("/api/admin/users").json()["users"]
-    assert users == [{
-        "id": "user-id", "name": "Ada", "email": "ada@example.com", "status": "active",
-        "active": True, "managed": False, "is_aidp_admin": True,
-        "participant_code": None, "labs": [],
-    }]
-    assert unmanaged.post(path).status_code == 200
-
-
-def test_governance_module_accepts_admin_inherited_from_group(tmp_path: Path) -> None:
-    client = make_client(tmp_path, mode="group-admin", deployment_mode="production")
-    login(client)
-    users = client.get("/api/admin/users").json()["users"]
-    assert users[0]["is_aidp_admin"] is True
-
-    response = client.post(
-        "/api/admin/users/user-id/modules/ai_data_governance",
-        json={"operation_id": "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"},
-    )
-
-    assert response.status_code == 200
-    assert client.app.state.test_aidp.verified_governance_operations == ["install"]
-
-
-@pytest.mark.parametrize("mode,user_id,expected", [
-    ("active", "user-id", 200), ("group-admin", "user-id", 200), ("unmanaged-admin", "user-id", 200),
-    ("not-admin", "user-id", 403), ("active", "unknown-user", 403),
-])
-def test_viewer_deployment_verifies_selected_native_administrator(tmp_path: Path, mode: str, user_id: str, expected: int) -> None:
-    client = make_client(tmp_path, mode=mode, deployment_mode="production")
-    calls = []
-    class Module:
-        async def status(self, deploy=False, administrator=None):
-            calls.append((deploy, administrator))
-            return {"module_id": "gods_eye_view", "status": "available", "enabled": False,
-                    "installed": False, "bundled_version": "2.0.0"}
-    client.app.state.gods_eye_view_module = Module()
-    path = f"/api/admin/users/{user_id}/modules/gods_eye_view"
-    assert client.post(path).status_code == 401 and not calls
-    login(client)
-    assert client.get("/api/admin/gods-eye-view/module").json()["bundled_version"] == "2.0.0"
-    assert calls == [(False, None)]
-    response = client.post(path)
-    assert response.status_code == expected
-    if expected == 200:
-        deploy, administrator = calls[-1]
-        assert deploy and administrator["id"] == "user-id" and administrator["ocid"] == "ocid1.user.oc1..ada"
-    else:
-        assert calls == [(False, None)] and "AI_DATA_PLATFORM_ADMIN" in response.json()["detail"]
-    if mode == "active" and user_id == "user-id":
-        assert client.post("/api/admin/gods-eye-view/module/deploy").status_code == 200
-        assert calls[-1] == (True, None)
-
-
-def test_governance_module_pending_response_resumes_manifest_operation(tmp_path: Path) -> None:
-    client = make_client(tmp_path, mode="module-pending", deployment_mode="production")
-    login(client)
-    operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
-    response = client.post(
-        "/api/admin/users/user-id/modules/ai_data_governance",
-        json={"operation_id": operation_id},
-    )
-    assert response.status_code == 202
-    assert response.json()["operation_id"] == operation_id
-    assert response.json()["operation_type"] == "install"
-    assert response.json()["phase"] == "sync"
-
-
-@pytest.mark.parametrize("mode", ["module-pre-manifest-pending", "module-status-pending"])
-def test_governance_module_pending_before_manifest_is_retryable(tmp_path: Path, mode: str) -> None:
-    client = make_client(tmp_path / mode, mode=mode, deployment_mode="production")
-    login(client)
-    operation_id = "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"
-    response = client.post(
-        "/api/admin/users/user-id/modules/ai_data_governance",
-        json={"operation_id": operation_id},
-    )
-    assert response.status_code == 202
-    assert response.json()["status"] == "installing"
-    assert response.json()["installed"] is True
-    assert response.json()["operation_id"] == operation_id
-    assert response.json()["operation_type"] == "install"
-    assert response.json()["phase"] == "workspace"
-
-
-def test_concurrent_governance_install_reuses_the_global_operation_id(tmp_path: Path) -> None:
-    client = make_client(tmp_path, mode="module-concurrent-pending", deployment_mode="production")
-    login(client)
-    response = client.post(
-        "/api/admin/users/user-id/modules/ai_data_governance",
-        json={"operation_id": "4ab88c5e-c9e3-47bf-8dca-97f7eb7d0d43"},
-    )
-    assert response.status_code == 202
-    assert response.json()["status"] == "installing"
-    assert response.json()["operation_id"] == "a635d4ba-6d8c-48df-9340-4c0c1266ca66"
-    assert response.json()["operation_type"] == "install"
-    assert response.json()["phase"] == "control"
-
-
 def test_admin_lab_mutation_reports_retryable_pending(tmp_path: Path) -> None:
     client = make_client(tmp_path, "reset-pending")
     login(client)
@@ -788,20 +556,6 @@ def test_https_profile_keeps_host_cookie_prefix(tmp_path: Path) -> None:
     assert "__Host-aidp_lab_admin" in response.headers["set-cookie"]
 
 
-def test_agent_endpoint_requires_admin_and_active_native_module(tmp_path):
-    client = make_client(tmp_path)
-    path = "/api/admin/modules/ai_data_governance/agent-endpoint"
-    assert client.get(path).status_code == 401
-    login(client)
-    assert client.get(path).status_code == 409
-    client.app.state.test_aidp.module = {"status": "active"}
-    response = client.get(path)
-    assert response.status_code == 200
-    assert response.json() == {"url": "https://gateway.aidp.us-chicago-1.oci.oraclecloud.com/agentendpoint/agent/chat"}
-    assert response.headers["cache-control"] == "no-store"
-
-
-
 @pytest.mark.parametrize('method,path', [
     ('get', '/api/admin/modules/ai_social_network'),
     ('get', '/api/admin/modules/ai_social_network/agent-endpoint'),
@@ -815,3 +569,50 @@ def test_retired_social_routes_are_not_mounted(tmp_path, method, path):
     response = getattr(client, method)(path)
     assert response.status_code == 404
     assert not hasattr(client.app.state, 'social_factory')
+
+
+@pytest.mark.parametrize("path", [
+    "/api/admin/modules",
+    "/api/admin/modules/ai_data_governance/agent-endpoint",
+    "/api/admin/modules/ai_market_intelligence",
+    "/api/admin/modules/gods_eye_view",
+    "/api/viewer/session",
+    "/viewer/login",
+])
+def test_migrated_module_and_viewer_routes_are_absent(tmp_path, path):
+    client = make_client(tmp_path)
+    assert client.get(path).status_code == 404
+    login(client)
+    assert client.get(path).status_code == 404
+
+
+@pytest.mark.parametrize("payload", [
+    {"lab_ids": []},
+    {"lab_ids": ["ai_data_governance"]},
+    {"lab_ids": ["ai_market_intelligence"]},
+    {"lab_ids": ["gods_eye_view"]},
+    {"lab_ids": ["banking"], "gods_eye_view": True},
+])
+def test_admin_creation_rejects_module_only_and_removed_access_fields(tmp_path, payload):
+    client = make_client(tmp_path)
+    login(client)
+    response = client.post("/api/admin/users", json={
+        "name": "Ada User", "email": "ada@example.com", **payload,
+    })
+    assert response.status_code == 422
+    assert client.app.state.identity_factory().activated == []
+
+
+def test_kits_lifespan_starts_without_module_clients(tmp_path):
+    settings = Settings(local_development_mode=True, cookie_secure=False,
+                        session_secret_file=str(tmp_path / "session.key"),
+                        aidp_settings_file=str(tmp_path / "settings.json"))
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/health").status_code == 200
+        config = client.get("/api/config").json()
+        assert {kit["lab_id"] for kit in config["labs"]} == {
+            "banking", "telecommunications", "telco_lineage", "retail", "healthcare",
+        }
+        assert not {"viewer_identity", "viewer_signin_enabled"} & config.keys()
+        assert not hasattr(client.app.state, "market_factory")
+        assert not hasattr(client.app.state, "gods_eye_view_aidp_factory")

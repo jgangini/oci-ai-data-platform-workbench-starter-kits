@@ -12,22 +12,18 @@
     ],
     "default_compartment_name": "oracle-ai-data-platform",
     "requires_genai_region": false,
-    "database_profile": "new_or_existing",
     "region_selection": "subscribed_compatible",
     "regional_requirements": [
-      "aidp",
-      "autonomous_26ai_dw",
-      "genai_chat"
+      "aidp"
     ]
   },
   "presentation": {
     "title": "Oracle AI Data Platform Workbench Starter Kits",
-    "summary": "Deploys reusable Oracle AI Data Platform Workbench starter kits with governed medallion data layers, Autonomous AI Database agent memory, and native OCI governance extension support.",
+    "summary": "Deploys five laboratory starter kits with isolated Workbench notebooks, scheduled workflows and medallion data layers.",
     "tags": [
       "VM",
       "VCN",
       "AI Data Platform Workbench",
-      "Data Governance",
       "Object Storage",
       "IAM"
     ],
@@ -77,14 +73,6 @@
       "label": "Starter Kit Application VM"
     },
     {
-      "key": "database",
-      "label": "Autonomous AI Database 26ai"
-    },
-    {
-      "key": "wallet",
-      "label": "Agent memory and governance runtime"
-    },
-    {
       "key": "application",
       "label": "AIDP workspace, catalog and RBAC"
     },
@@ -125,24 +113,6 @@
         "group": "application_vm"
       },
       {
-        "name": "deployment_mode",
-        "label": "Deployment mode",
-        "type": "select",
-        "required": true,
-        "default": "laboratory",
-        "group": "application_vm",
-        "options": [
-          {
-            "value": "laboratory",
-            "label": "Laboratory"
-          },
-          {
-            "value": "production",
-            "label": "Production"
-          }
-        ]
-      },
-      {
         "name": "registration_code",
         "label": "Lab registration code",
         "type": "text",
@@ -152,93 +122,50 @@
         "min_length": 9,
         "max_length": 9,
         "transform": "uppercase_pbkdf2_sha256",
-        "visible_when": {
-          "field": "deployment_mode",
-          "equals": "laboratory"
-        },
         "group": "application_vm"
       },
       {
-        "name": "agent_model_id",
-        "label": "Agent LLM model",
-        "type": "select",
-        "required": true,
-        "options_source": "oci_genai_chat_models",
-        "group": "enterprise_ai"
-      },
-      {
-        "name": "autonomous_database_mode",
-        "label": "Database mode",
+        "name": "aidp_mode",
+        "label": "Services mode",
         "type": "select",
         "required": true,
         "default": "new",
-        "group": "database",
+        "group": "aidp_platform",
         "options": [
           {
             "value": "new",
-            "label": "Create new database"
+            "label": "Create new AIDP"
           },
           {
             "value": "existing",
-            "label": "Use existing database"
+            "label": "Use existing AIDP"
           }
         ]
       },
       {
-        "name": "autonomous_database_version",
-        "label": "Database profile",
-        "type": "select",
-        "required": true,
-        "default": "26ai:DW",
-        "transform": "database_profile",
-        "group": "database",
-        "visible_when": {
-          "field": "autonomous_database_mode",
-          "equals": "new"
-        },
-        "options": [
-          {
-            "value": "26ai:DW",
-            "label": "Oracle AI Database 26ai — Data Warehouse"
-          }
-        ]
-      },
-      {
-        "name": "existing_autonomous_database_ocid",
-        "label": "Database OCID",
+        "name": "aidp_display_name",
+        "label": "New AIDP name",
         "type": "text",
         "required": true,
-        "pattern": "^ocid1\\.autonomousdatabase\\..+$",
-        "min_length": 30,
-        "max_length": 255,
+        "default": "aidp_medallion",
+        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,99}$",
+        "group": "aidp_platform",
         "visible_when": {
-          "field": "autonomous_database_mode",
+          "field": "aidp_mode",
+          "equals": "new"
+        }
+      },
+      {
+        "name": "existing_ai_data_platform_ocid",
+        "label": "Existing AIDP",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_aidp_platforms",
+        "group": "aidp_platform",
+        "visible_when": {
+          "field": "aidp_mode",
           "equals": "existing"
-        },
-        "span": 2,
-        "group": "database"
-      },
-      {
-        "name": "autonomous_database_admin_password",
-        "label": "Database ADMIN password",
-        "type": "password",
-        "required": true,
-        "secret": true,
-        "min_length": 12,
-        "max_length": 30,
-        "pattern": "^(?!.*[Aa][Dd][Mm][Ii][Nn])(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])[^\"']{12,30}$",
-        "group": "database"
-      },
-      {
-        "name": "autonomous_database_wallet_password",
-        "label": "Database wallet password",
-        "type": "password",
-        "required": true,
-        "secret": true,
-        "min_length": 12,
-        "max_length": 30,
-        "pattern": "^(?!.*[Aa][Dd][Mm][Ii][Nn])(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])[^\"']{12,30}$",
-        "group": "database"
+        }
       },
       {
         "name": "landing_bucket_mode",
@@ -453,12 +380,9 @@
       }
     ],
     "email_access_fields": [
-      "deployment_mode",
       "admin_username",
       "admin_password",
-      "registration_code",
-      "autonomous_database_admin_password",
-      "autonomous_database_wallet_password"
+      "registration_code"
     ]
   },
   "email": {
@@ -487,28 +411,6 @@
         ]
       },
       {
-        "title": "Database: Oracle Autonomous AI Database",
-        "fields": [
-          {
-            "label": "Access URL",
-            "output": "database_actions_url",
-            "link": true
-          },
-          {
-            "label": "Username",
-            "value": "ADMIN"
-          },
-          {
-            "label": "Password",
-            "input": "autonomous_database_admin_password"
-          },
-          {
-            "label": "Wallet password",
-            "input": "autonomous_database_wallet_password"
-          }
-        ]
-      },
-      {
         "title": "Data platform: Oracle AI Data Platform Workbench",
         "fields": [
           {
@@ -528,32 +430,16 @@
       }
     ],
     "attachments": [
-      "adb_wallet.zip",
       "resource-manager-terraform-source.zip",
       "deployment.log",
       "ssh-private-key.pem"
     ]
   },
   "outputs": [
-    "portal_managed_modules",
-    "enabled_vm_modules",
     "source_commit_sha",
     "deployment_suffix",
-    "gods_eye_view_enabled",
-    "gods_eye_view_url",
-    "gods_eye_view_instance_id",
-    "gods_eye_view_principal_group",
-    "territorial_viewer_enabled",
-    "territorial_viewer_url",
-    "territorial_viewer_instance_id",
-    "territorial_viewer_principal_group",
-    "prisma_viewer_enabled",
-    "prisma_viewer_url",
-    "prisma_viewer_instance_id",
-    "prisma_viewer_principal_group",
     "application_url",
     "application_login_url",
-    "database_actions_url",
     "public_ip_tls_enabled",
     "admin_url",
     "aidp_workbench_url",
@@ -567,12 +453,6 @@
     "objectstorage_namespace",
     "medallion_prefixes",
     "ai_data_platform_id",
-    "autonomous_database_id",
-    "autonomous_database_mode",
-    "autonomous_database_version",
-    "autonomous_database_workload",
-    "autonomous_database_compute_count",
-    "agent_model_id",
     "default_workspace_name",
     "developer_group_ocid",
     "pending_group_ocid",
@@ -587,21 +467,18 @@
     "instance_id",
     "public_ip",
     "ssh_username",
-    "vm_shape"
+    "vm_shape",
+    "aidp_mode"
   ],
   "artifacts": [
     "aidp_lab_summary.json",
-    "adb_wallet.zip",
     "ssh-private-key.pem"
   ],
   "preflight": {
     "entrypoint": "terraform/m_preflight.py",
     "timeout_seconds": 300,
     "requires_oci_credentials": true,
-    "secret_inputs": [
-      "autonomous_database_admin_password",
-      "autonomous_database_wallet_password"
-    ],
+    "secret_inputs": [],
     "output_inputs": [
       "home_region",
       "operator_user_ocid",
@@ -668,29 +545,9 @@
   },
   "post_apply": {
     "entrypoint": "terraform/hooks/post_apply.py",
-    "include_paths": [
-      "apps/backend/app/modules/ai_gods_eye_view/runtime",
-      "apps/backend/app/modules/ai_gods_eye_view/package/lab.json",
-      "apps/backend/app/modules/ai_gods_eye_view/package/notebooks",
-      "apps/backend/app/modules/ai_gods_eye_view/package/source/social_networks/v1/manifest.json",
-      "apps/backend/app/modules/ai_gods_eye_view/package/source/social_networks/v2/manifest.json",
-      "apps/backend/app/modules/ai_gods_eye_view/package/source/sensors/colombia/v1/manifest.json",
-      "apps/backend/app/modules/ai_data_governance",
-      "apps/backend/app/__init__.py",
-      "apps/backend/app/services/oci/aidp.py",
-      "apps/backend/app/services/oci/contracts.py",
-      "apps/backend/app/config.py",
-      "apps/backend/app/api/viewer_identity.py",
-      "apps/backend/app/security.py",
-      "apps/backend/app/packages/catalog.py",
-      "apps/backend/app/packages/aidp.py",
-      "apps/backend/app/kits/naming.py"
-    ],
+    "include_paths": [],
     "timeout_seconds": 3600,
     "requires_oci_credentials": true,
-    "secret_inputs": [
-      "autonomous_database_admin_password",
-      "autonomous_database_wallet_password"
-    ]
+    "secret_inputs": []
   }
 }

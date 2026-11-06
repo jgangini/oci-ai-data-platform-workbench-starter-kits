@@ -229,7 +229,7 @@ def _assert_empty_legacy_catalog(api: FakeApi, reconciled: dict, events: list[st
         "AIDP_LAB_DEVELOPER",
         "AIDP_LAB_PENDING",
     }
-    assert any("zero legacy schemas; 0 approved God’s Eye View external volumes" in event for event in events)
+    assert any("zero legacy schemas; 0 external volumes" in event for event in events)
 
 
 def _assert_shared_compute(api: FakeApi, reconciled: dict) -> None:
@@ -878,11 +878,7 @@ def test_bootstrap_envelope_uses_rsa_oaep_sha256_and_aes_gcm() -> None:
             public_key,
             "[DEFAULT]\nuser=operator\n",
             "private-key",
-            b"wallet",
-            "wallet-password",
-            "AIDP_LAB_OPERATOR",
-            "operator-password",
-            "aidp_low",
+
         )
     )
 
@@ -892,7 +888,7 @@ def test_bootstrap_envelope_uses_rsa_oaep_sha256_and_aes_gcm() -> None:
         "nonce_b64",
         "ciphertext_b64",
     }
-    assert envelope["schema_version"] == 2
+    assert envelope["schema_version"] == 3
     nonce = base64.b64decode(envelope["nonce_b64"], validate=True)
     assert len(nonce) == 12
     data_key = private_key.decrypt(
@@ -911,73 +907,8 @@ def test_bootstrap_envelope_uses_rsa_oaep_sha256_and_aes_gcm() -> None:
     assert json.loads(plaintext) == {
         "config_text": "[DEFAULT]\nuser=operator\n",
         "key_text": "private-key",
-        "wallet_zip_b64": base64.b64encode(b"wallet").decode("ascii"),
-        "wallet_password": "wallet-password",
-        "operator_username": "AIDP_LAB_OPERATOR",
-        "operator_password": "operator-password",
-        "dsn": "aidp_low",
     }
 
-
-def test_autonomous_governance_bootstrap_installs_allowlisted_operator(monkeypatch) -> None:
-    statements: list[tuple[str, dict[str, str]]] = []
-    connections: list[dict[str, str]] = []
-
-    class Cursor:
-        def execute(self, statement: str, **parameters: str) -> None:
-            statements.append((statement, parameters))
-
-        @staticmethod
-        def fetchone() -> tuple[int]:
-            return (0,)
-
-    class Connection:
-        def __enter__(self) -> "Connection":
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        @staticmethod
-        def cursor() -> Cursor:
-            return Cursor()
-
-        @staticmethod
-        def commit() -> None:
-            return None
-
-    def connect(**kwargs: str) -> Connection:
-        connections.append(kwargs)
-        return Connection()
-
-    monkeypatch.setitem(sys.modules, "oracledb", SimpleNamespace(connect=connect))
-    stream = io.BytesIO()
-    with zipfile.ZipFile(stream, "w") as archive:
-        archive.writestr("tnsnames.ora", "aidp_high=(DESCRIPTION=high)\naidp_low=(DESCRIPTION=low)\n")
-        archive.writestr("sqlnet.ora", "SSL_SERVER_DN_MATCH=yes\n")
-
-    username, password, dsn = post_apply.bootstrap_autonomous_governance(
-        stream.getvalue(), "wallet-password", "admin-password"
-    )
-
-    assert username == "AIDP_LAB_OPERATOR"
-    assert len(password) == 32
-    assert dsn == "aidp_low"
-    assert connections[0]["user"] == "ADMIN"
-    assert connections[0]["password"] == "admin-password"
-    executed = [statement for statement, _parameters in statements]
-    assert post_apply.GOVERNANCE_PACKAGE_SPEC in executed
-    assert post_apply.GOVERNANCE_PACKAGE_BODY in executed
-    assert "PROCEDURE PUT_METRIC" in post_apply.GOVERNANCE_PACKAGE_SPEC
-    assert "PROCEDURE PUT_LINEAGE" in post_apply.GOVERNANCE_PACKAGE_SPEC
-    assert "MERGE INTO " in post_apply.GOVERNANCE_PACKAGE_BODY
-    assert "IF SQLCODE != -28007 THEN" in post_apply.GOVERNANCE_PACKAGE_BODY
-    assert "RAISE;" in post_apply.GOVERNANCE_PACKAGE_BODY
-    assert any("CREATE USER AIDP_LAB_OPERATOR" in statement for statement in executed)
-    assert executed[-2:] == [
-        "GRANT CREATE SESSION TO AIDP_LAB_OPERATOR",
-        "GRANT EXECUTE ON ADMIN.AIDP_LAB_GOVERNANCE TO AIDP_LAB_OPERATOR",
-    ]
 
 
 def test_runtime_oci_config_is_unencrypted_verified_and_sanitized(tmp_path: Path) -> None:
@@ -1061,11 +992,6 @@ def test_operator_credentials_are_delivered_to_exact_bootstrap_object(monkeypatc
     monkeypatch.setattr(post_apply, "fetch_bootstrap_public_key", lambda *args: "public-key")
     monkeypatch.setattr(post_apply, "encrypt_bootstrap_credentials", lambda *args: b"encrypted-envelope")
     monkeypatch.setattr(post_apply, "delete_bootstrap_object", lambda *args: None)
-    monkeypatch.setattr(
-        post_apply,
-        "bootstrap_autonomous_governance",
-        lambda *args: ("AIDP_LAB_OPERATOR", "operator-password", "aidp_low"),
-    )
     outputs = {
         "operator_user_ocid": "ocid1.user.oc1..operator",
         "compartment_ocid": "ocid1.compartment.oc1..lab",
@@ -1083,9 +1009,7 @@ def test_operator_credentials_are_delivered_to_exact_bootstrap_object(monkeypatc
         ObjectStorage(),
         "config-text",
         "key-text",
-        b"wallet",
-        "wallet-password",
-        "admin-password",
+
     ) is True
 
     assert uploaded == [
@@ -1136,9 +1060,7 @@ def test_operator_credential_delivery_is_idempotent_after_vm_ready(monkeypatch) 
         object(),
         "config-text",
         "key-text",
-        b"wallet",
-        "wallet-password",
-        "admin-password",
+
     ) is False
     assert deleted == [post_apply.BOOTSTRAP_OBJECT_NAME]
 
@@ -1160,9 +1082,7 @@ def test_operator_credential_delivery_rejects_a_different_config_user() -> None:
             object(),
             "config-text",
             "key-text",
-            b"wallet",
-            "wallet-password",
-            "admin-password",
+
         )
 
 
@@ -1347,25 +1267,20 @@ def test_application_health_verifies_public_tls_and_preserves_legacy_default(mon
     assert observed["verify"] is public_tls
 
 
-@pytest.mark.parametrize("enabled,schema,name,location,accepted", [
-    (True, "prisma_ingest", "landing", "oci://landing@namespace/01_landing/prisma/raw/", True),
-    (False, "prisma_ingest", "landing", "oci://landing@namespace/01_landing/prisma/raw/", False),
-    (True, "other", "landing", "oci://landing@namespace/01_landing/prisma/raw/", False),
-    (True, "prisma_ingest", "other", "oci://landing@namespace/01_landing/prisma/raw/", False),
-    (True, "prisma_ingest", "landing", "oci://landing@namespace/01_landing/", False),
+@pytest.mark.parametrize("schema,name,location", [
+    ("prisma_ingest", "landing", "oci://landing@namespace/01_landing/prisma/raw/"),
+    ("other", "landing", "oci://landing@namespace/01_landing/prisma/raw/"),
+    ("prisma_ingest", "other", "oci://landing@namespace/01_landing/prisma/raw/"),
+    ("prisma_ingest", "landing", "oci://landing@namespace/01_landing/"),
 ])
-def test_fresh_catalog_only_allows_exact_opted_in_prisma_landing(enabled, schema, name, location, accepted):
+def test_kits_catalog_rejects_module_external_volumes_without_deletion(schema, name, location):
     api = FakeApi()
     api.resources["/schemas"] = [{"displayName": schema, "key": "schema-key"}]
     api.resources["/volumes"] = [{"displayName": name, "key": "volume-key",
                                   "volumeType": "EXTERNAL", "storageLocation": location}]
     arguments = (api, "catalog-key", "namespace", "landing")
-    options = {"gods_eye_view_landing_bucket": "landing" if enabled else ""}
-    if accepted:
-        assert post_apply.assert_fresh_catalog(*arguments, **options) == (0, 1)
-    else:
-        with pytest.raises(post_apply.ReconcileError):
-            post_apply.assert_fresh_catalog(*arguments, **options)
+    with pytest.raises(post_apply.ReconcileError):
+        post_apply.assert_fresh_catalog(*arguments)
     assert all(method != "DELETE" for method, *_ in api.calls)
 
 
@@ -1397,132 +1312,27 @@ def test_aidp_alias_endpoint_uses_oci_region_key() -> None:
     )
 
 
-@pytest.mark.parametrize("code,suffix", [(923, " (ORA-00923)"), (1745, " (ORA-01745)"),
-    (None, ""), ("923 private-value", ""), (True, ""), (0, ""), (100000, "")])
-def test_gods_eye_view_bootstrap_reports_only_bounded_numeric_oracle_code(monkeypatch, tmp_path, code, suffix):
-    class DatabaseError(Exception):
-        def __str__(self):
-            raise AssertionError("Database error text must never enter deployment output")
-    def fail(*_args, **_kwargs):
-        raise DatabaseError(*(() if code is None else (SimpleNamespace(code=code, message="private-value"),)))
-    key = tmp_path / "test.key"
-    key.write_text("test-only-key", encoding="utf-8")
-    monkeypatch.setenv("DEPLOY_STUDIO_OUTPUT", str(tmp_path / "result.json"))
-    monkeypatch.setenv("DEPLOY_STUDIO_OCI_CONFIG", "unused-test-config")
-    monkeypatch.setenv("DEPLOY_STUDIO_OCI_KEY", str(key))
-    context = {"region": "us-chicago-1", "deployment_id": "test", "terraform_outputs": {
-        "ai_data_platform_id": "platform", "autonomous_database_id": "database",
-        "autonomous_database_mode": "ATP", "prisma_viewer_enabled": True}}
-    secrets = {"inputs": {"autonomous_database_admin_password": "test-admin-only", "autonomous_database_wallet_password": "test-wallet-only"}}
-    monkeypatch.setattr(post_apply, "read_json_env", lambda name: context if name == "DEPLOY_STUDIO_CONTEXT" else secrets)
-    monkeypatch.setitem(sys.modules, "oci", SimpleNamespace(
-        object_storage=SimpleNamespace(ObjectStorageClient=lambda *_args, **_kwargs: object()),
-        database=SimpleNamespace(DatabaseClient=lambda *_args, **_kwargs: object())))
-    monkeypatch.setitem(sys.modules, "gods_eye_view_bootstrap", SimpleNamespace(bootstrap_gods_eye_view=fail))
-    for name, result in {"load_oci_config": {}, "build_signer": object(), "AidpApi": object(),
-        "reconcile": ({}, []), "resolve_workbench_url": "https://example.test", "_wait_for_autonomous_available": None,
-        "prepare_autonomous_wallet": b"test-wallet", "ensure_ai_features": True,
-        "render_runtime_oci_config": "test-config", "deliver_operator_credentials": False}.items():
-        monkeypatch.setattr(post_apply, name, lambda *_args, _result=result, **_kwargs: _result)
-    assert post_apply.main() == 1
-    result = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
-    assert result["events"] == [{"level": "error", "message": "God’s Eye View bootstrap failed: DatabaseError" + suffix}]
-    assert result["outputs"] == {} and result["artifacts"] == []
+@pytest.mark.parametrize("path,name", [("/catalogs", post_apply.CATALOG_NAME),
+    ("/workspaces/ws-key/clusters", post_apply.SHARED_COMPUTE_NAME),
+    ("/roles", post_apply.DEVELOPER_ROLE_NAME)])
+def test_existing_platform_rejects_unowned_names_before_mutation(path, name):
+    api = FakeApi()
+    api.deployment_id = "deployment-test"
+    api.resources[path].append({"displayName": name, "key": "unrelated", "description": "Other product"})
+    with pytest.raises(post_apply.ReconcileError, match="not owned"):
+        post_apply.require_existing_platform_isolation(api, "ws-key")
+    assert not any(method != "GET" for method, *_ in api.calls)
 
 
-@pytest.fixture
-def module_installation(monkeypatch):
-    import oci
-
-    context = {"deployment_id": "deployment-1", "project_id": "project-1", "region": "us-chicago-1",
-               "source": {"commit_sha": "a" * 40}, "inputs": {"private_value": "DO_NOT_EXPORT"}}
-    buckets = {layer: "environment-" + layer for layer in (*post_apply.LAYERS, "artifacts")}
-    outputs = {"portal_managed_modules": True, "medallion_bucket_names": buckets, "compartment_ocid": "compartment",
-               "ai_data_platform_id": "platform", "objectstorage_namespace": "namespace", "agent_model_id": "model"}
-    tags = {"deployment": "deployment-1", "catalog_item": "project-1"}
-    summary = SimpleNamespace(id="stack", freeform_tags=dict(tags))
-    stack = SimpleNamespace(id="stack", compartment_id="compartment", lifecycle_state="ACTIVE", freeform_tags=dict(tags),
-                            variables={"source_commit_sha": "a" * 40, "private_value": "DO_NOT_EXPORT"})
-    state = {"summaries": [summary], "stack": stack, "archive": b"immutable terraform source", "stored": None,
-             "created": [], "reads": [], "list_calls": []}
-
-    def list_stacks(*, compartment_id, **kwargs):
-        state["list_calls"].append((compartment_id, kwargs.get("page")))
-        # The matching deployment lives on the second page.
-        return oci.response.Response(200, {} if kwargs.get("page") else {"opc-next-page": "second"},
-                                     state["summaries"] if kwargs.get("page") else [], None)
-
-    client = SimpleNamespace(list_stacks=list_stacks, get_stack=lambda _id: SimpleNamespace(data=state["stack"]),
-                             get_stack_tf_config=lambda _id: SimpleNamespace(data=SimpleNamespace(content=state["archive"])))
-    monkeypatch.setattr(oci.resource_manager, "ResourceManagerClient", lambda config, **kwargs: client)
-
-    def put_object(namespace, bucket, key, body, **kwargs):
-        assert kwargs == {"content_type": "application/json", "if_none_match": "*"}
-        if state["stored"] is not None:
-            raise oci.exceptions.ServiceError(412, "PreconditionFailed", {}, "Already exists")
-        state["stored"] = json.loads(body)
-        state["created"].append((namespace, bucket, key))
-
-    def get_object(*scope):
-        state["reads"].append(scope)
-        return SimpleNamespace(data=SimpleNamespace(content=json.dumps(state["stored"]).encode()))
-
-    storage = SimpleNamespace(put_object=put_object, get_object=get_object)
-    arguments = (oci, {"private_value": "DO_NOT_EXPORT"}, object(), storage, context, outputs,
-                 {"workspace_key": "workspace", "catalog_name": "oci_medallion"})
-    return arguments, state
-
-
-def test_module_installation_receipt_is_private_immutable_and_idempotent(module_installation):
-    arguments, state = module_installation
-    assert post_apply.write_module_installation_context(*arguments) is True
-    assert post_apply.write_module_installation_context(*arguments) is True
-    scope = ("namespace", "environment-artifacts", ".control/modules/installation.json")
-    assert state["created"] == [scope] and state["reads"] == [scope]
-    assert state["list_calls"] == [("compartment", None), ("compartment", "second")] * 2
-    assert state["stored"] == {
-        "schema_version": 1, "deployment_id": "deployment-1", "project_id": "project-1", "source_commit_sha": "a" * 40,
-        "stack_id": "stack", "terraform_config_sha256": hashlib.sha256(state["archive"]).hexdigest(),
-        "region": "us-chicago-1", "compartment_id": "compartment", "platform_id": "platform", "namespace": "namespace",
-        "buckets": arguments[5]["medallion_bucket_names"], "artifacts_bucket": "environment-artifacts",
-        "workspace_key": "workspace", "catalog_name": "oci_medallion", "agent_model_id": "model",
-    }
-    assert "DO_NOT_EXPORT" not in json.dumps(state["stored"])
-
-
-@pytest.mark.parametrize("mismatch", ["missing", "duplicate", "identity", "source", "compartment", "tags", "inactive", "archive"])
-def test_module_installation_requires_exact_stack_without_guessing(module_installation, mismatch):
-    arguments, state = module_installation
-    if mismatch == "missing":
-        state["summaries"] = []
-    elif mismatch == "duplicate":
-        state["summaries"] *= 2
-    elif mismatch == "identity":
-        state["stack"].id = "other-stack"
-    elif mismatch == "source":
-        state["stack"].variables["source_commit_sha"] = "b" * 40
-    elif mismatch == "compartment":
-        state["stack"].compartment_id = "other-compartment"
-    elif mismatch == "tags":
-        state["stack"].freeform_tags["deployment"] = "other-deployment"
-    elif mismatch == "inactive":
-        state["stack"].lifecycle_state = "DELETED"
-    else:
-        state["archive"] = b""
-    with pytest.raises(post_apply.ReconcileError, match="Module installation"):
-        post_apply.write_module_installation_context(*arguments)
-    assert not state["created"]
-
-
-@pytest.mark.parametrize("field", ["deployment_id", "source_commit_sha", "terraform_config_sha256", "buckets"])
-def test_module_installation_never_overwrites_an_existing_receipt(module_installation, field):
-    arguments, state = module_installation
-    post_apply.write_module_installation_context(*arguments)
-    state["stored"][field] = "changed"
-    with pytest.raises(post_apply.ReconcileError, match="already belongs"):
-        post_apply.write_module_installation_context(*arguments)
-    assert len(state["created"]) == 1 and state["stored"][field] == "changed"
-
-
-def test_legacy_post_apply_does_not_resolve_or_write_module_receipts():
-    assert post_apply.write_module_installation_context(None, None, None, None, {}, {}, {}) is False
+def test_existing_platform_resumes_only_its_owned_resources():
+    api = FakeApi()
+    api.deployment_id = "deployment-test"
+    api.resources["/catalogs"].append({"displayName": post_apply.CATALOG_NAME, "key": "owned",
+        "description": "Medallion catalog for participant starter-kit data [starter-kits:deployment-test]"})
+    post_apply.require_existing_platform_isolation(api, "ws-key")
+    resource, created = post_apply.ensure_resource(api, "/catalogs", "catalog", post_apply.CATALOG_NAME,
+        {"displayName": post_apply.CATALOG_NAME, "description": "Medallion catalog for participant starter-kit data"}, {})
+    assert resource["key"] == "owned" and not created
+    api.deployment_id = "other-deployment"
+    with pytest.raises(post_apply.ReconcileError, match="not owned"):
+        post_apply.require_existing_platform_isolation(api, "ws-key")

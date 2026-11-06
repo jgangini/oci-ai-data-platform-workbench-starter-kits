@@ -29,13 +29,10 @@ def test_session_rejects_tampering_and_expiry() -> None:
 
 
 def test_logins_in_same_second_are_isolated_and_legacy_cookies_are_rejected() -> None:
-    from app.modules.ai_gods_eye_view.runtime.agent_gateway import scoped_session
     key = b"k" * 32
     first, second = [issue_session(key, "admin", now=100, ttl=10) for _ in range(2)]
     assert first != second
     assert verify_session(first, key, now=109) == verify_session(second, key, now=109) == "admin"
-    conversation = {"session_id": "105dbb52-bba9-45a2-b40d-357a31db8f13"}
-    assert scoped_session(conversation, first, key) != scoped_session(conversation, second, key)
     body = base64.urlsafe_b64encode(b'{"exp":110,"sub":"admin"}').decode().rstrip("=")
     signature = base64.urlsafe_b64encode(hmac.digest(key, body.encode(), "sha256")).decode().rstrip("=")
     assert verify_session(body + "." + signature, key, now=109) is None

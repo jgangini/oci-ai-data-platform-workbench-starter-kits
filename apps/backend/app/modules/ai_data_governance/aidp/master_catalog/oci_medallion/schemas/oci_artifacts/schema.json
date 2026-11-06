@@ -1,8 +1,0 @@
-{
-  "version": 1,
-  "status": "proposed_not_deployed",
-  "namespace": "oci_medallion.oci_artifacts",
-  "engine": "Spark SQL / Delta; target runtime version pending verification",
-  "title": "AI Data Governance · Delta y operación adaptativa · Revisión 2",
-  "constraint_policy": "PK, FK and UNIQUE are logical contracts checked by writers and reconciliation; not asserted as enforced Delta constraints. NOT NULL and CHECK require runtime/protocol verification."
-}

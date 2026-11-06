@@ -21,57 +21,28 @@ def test_operator_identity_is_reused_without_gateway_control_plane_resources() -
     assert 'resource "oci_identity_domains_group" "provisioner"' not in identity
     assert 'resource "oci_identity_domains_grant"' not in identity
     assert 'resource "oci_identity_policy" "provisioner_runtime"' not in identity
-    assert re.findall(r'resource "oci_identity_domains_app" "([^"]+)"', terraform) == ["viewer"]
-    viewer = _resource(identity, "oci_identity_domains_app", "viewer")
-    assert 'value = "CustomBrowserMobileTemplateId"' in viewer
-    assert re.search(r'client_type\s*=\s*"public"', viewer)
-    assert re.search(r'allowed_grants\s*=\s*\["authorization_code"\]', viewer)
-    assert 'https://${data.oci_core_vnic.lab.public_ip_address}/api/auth/oci/callback' in viewer
-    for forbidden in ("client_secret", "client_credentials", "admin_roles", "app_roles", "allowed_operations"):
-        assert forbidden not in viewer
-    assert 'resource "oci_kms_' not in identity
-    assert 'resource "oci_vault_' not in identity
-    assert 'resource "oci_identity_policy" "vm_secret"' not in compute
-    assert "secret-bundles" not in compute
-    for resource_type in (
-        "oci_containerengine_",
-        "oci_kms_",
-        "oci_vault_",
-        "oci_apigateway_",
-        "oci_devops_",
-    ):
-        assert resource_type not in terraform
-    for filename in (
-        "i_oci_data_governance_gateway.tf",
-        "i_oci_data_governance_edge.tf",
-        "i_oci_data_governance_deployment.tf",
-    ):
-        assert not (ROOT / "terraform" / filename).exists()
+    assert re.findall(r'resource "oci_identity_domains_app" "([^"]+)"', terraform) == []
+    assert "gods_eye_view_readers" not in terraform
+
 
 
 def test_identity_groups_ignore_service_managed_schema_extensions() -> None:
     identity = (ROOT / "terraform/i_oci_identity.tf").read_text(encoding="utf-8")
 
-    for group in ("developers", "pending", "gods_eye_view_readers"):
+    for group in ("developers", "pending"):
         block = _resource(identity, "oci_identity_domains_group", group)
         assert "ignore_changes = [schemas]" in block
 
 
-def test_viewer_reader_group_and_signin_configuration_are_deployment_scoped() -> None:
-    identity = (ROOT / "terraform/i_oci_identity.tf").read_text(encoding="utf-8")
-    compute = (ROOT / "terraform/g_oci_core_instance.tf").read_text(encoding="utf-8")
-    cloud_init = (ROOT / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")
-    group = _resource(identity, "oci_identity_domains_group", "gods_eye_view_readers")
-    assert re.search(r'external_id\s*=\s*"\$\{local.name_prefix\}:gods_eye_view"', group)
-    for path in (ROOT / "terraform").glob("*.tf"):
-        source = path.read_text(encoding="utf-8")
-        for label in re.findall(r'resource "oci_identity_policy" "([^"]+)"', source):
-            # Membership grants portal reading, not OCI/AIDP administration.
-            assert "gods_eye_view_readers" not in _resource(source, "oci_identity_policy", label)
-    assert re.search(r'gods_eye_view_group_id\s*=\s*oci_identity_domains_group.gods_eye_view_readers.id', compute)
-    assert re.search(r'viewer_oidc_app_name\s*=\s*"aidp_viewer_\$\{local.suffix\}"', compute)
-    assert "IDENTITY_GODS_EYE_VIEW_GROUP_ID=${gods_eye_view_group_id}" in cloud_init
-    assert "IDENTITY_VIEWER_APP_NAME=${viewer_oidc_app_name}" in cloud_init
+def test_kits_bootstrap_does_not_publish_viewer_identity_or_private_proxy():
+    sources = "\n".join((ROOT / path).read_text(encoding="utf-8") for path in (
+        "terraform/i_oci_identity.tf", "terraform/g_oci_core_instance.tf",
+        "terraform/templatefile/user_data.sh",
+    ))
+    assert "gods_eye_view_readers" not in sources
+    assert "IDENTITY_VIEWER_APP_NAME" not in sources
+    assert "GODS_EYE_VIEW" not in sources
+    assert ":8000:8000" not in sources
 
 
 def test_vm_receives_operator_credentials_through_one_use_encrypted_bootstrap() -> None:
@@ -85,9 +56,9 @@ def test_vm_receives_operator_credentials_through_one_use_encrypted_bootstrap() 
         compute,
     )
     assert 'OCI_DIR="/opt/aidp-lab/.oci"' in cloud_init
-    assert 'AUTONOMOUS_DIR="/opt/aidp-lab/autonomous"' in cloud_init
+    assert 'AUTONOMOUS_DIR="/opt/aidp-lab/autonomous"' not in cloud_init
     assert 'BOOTSTRAP_DIR="/opt/aidp-lab/bootstrap"' in cloud_init
-    assert 'install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$UPDATE_DIR" "$UPDATE_INBOX_DIR" "$UPDATE_STATUS_DIR" "$RELEASES_DIR" "$OCI_DIR" "$AUTONOMOUS_DIR" "$BOOTSTRAP_DIR"' in cloud_init
+    assert 'install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$UPDATE_DIR" "$UPDATE_INBOX_DIR" "$UPDATE_STATUS_DIR" "$RELEASES_DIR" "$OCI_DIR" "$AUTONOMOUS_DIR" "$BOOTSTRAP_DIR"' not in cloud_init
     assert 'openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072' in cloud_init
     assert '-m app.services.oci.credential_bootstrap' in cloud_init
     assert 'OCI_EXPECTED_USER_OCID=${operator_user_ocid}' in cloud_init
@@ -96,8 +67,8 @@ def test_vm_receives_operator_credentials_through_one_use_encrypted_bootstrap() 
     assert "AGENT_RUNTIME_SECRET_FILE" not in cloud_init
     assert "AIDP_RUNTIME_SECRET_FILE" not in cloud_init
     assert "runtime-secrets.json" not in cloud_init
-    assert 'AUTONOMOUS_RUNTIME_FILE=/etc/aidp-lab/autonomous/runtime.json' in cloud_init
-    assert '"$AUTONOMOUS_DIR:/etc/aidp-lab/autonomous:ro,Z"' in cloud_init
+    assert 'AUTONOMOUS_RUNTIME_FILE=/etc/aidp-lab/autonomous/runtime.json' not in cloud_init
+    assert '"$AUTONOMOUS_DIR:/etc/aidp-lab/autonomous:ro,Z"' not in cloud_init
     assert "autonomous_database_admin_password" not in cloud_init
     assert 'rm -f "$BOOTSTRAP_DIR/key.pem" "$BOOTSTRAP_DIR/key_public.pem"' in cloud_init
     assert 'cat > /opt/aidp-lab/.env' in cloud_init
@@ -117,10 +88,10 @@ def test_run_command_returns_only_public_material_or_the_ready_sentinel() -> Non
     assert "use instance-agent-command-execution-family" in compute
     assert "target.object.name = '.bootstrap/operator-credentials.json'" in compute
     helper = cloud_init.split("cat >/usr/local/sbin/aidp-lab-bootstrap-public-key <<'EOF'", 1)[1].split("\nEOF", 1)[0]
-    assert "AIDP_LAB_CREDENTIALS_V2_READY" in helper
+    assert "AIDP_LAB_CREDENTIALS_V3_READY" in helper
     assert "[ -s /opt/aidp-lab/.oci/config ] && [ -s /opt/aidp-lab/.oci/key.pem ]" in helper
     assert "key_public.pem" in helper
-    assert "bootstrap_version" in helper
+    assert "bootstrap.json" in helper
     assert "cat /opt/aidp-lab/.oci/key.pem" not in helper
     assert "cat /opt/aidp-lab/.oci/config" not in helper
     assert "cat /opt/aidp-lab/bootstrap/key.pem" not in helper
@@ -139,7 +110,7 @@ def test_vm_bootstrap_identity_is_authorized_before_instance_launch() -> None:
     assert "use instance-agent-command-execution-family" in bootstrap_policy
     assert "target.object.name = '.bootstrap/operator-credentials.json'" in bootstrap_policy
     assert "oci_identity_policy.vm_bootstrap" in instance
-    assert "terraform_data.validate_existing_autonomous_database" in instance
+    assert "autonomous" not in instance
     assert "oci_containerengine_node_pool" not in instance
     assert '"${oci_identity_tag_namespace.vm_bootstrap.name}.${oci_identity_tag.vm_bootstrap.name}" = local.suffix' in instance
 
@@ -148,8 +119,8 @@ def test_required_aidp_policy_has_no_optional_or_search_resources() -> None:
     aidp = (ROOT / "terraform/j_oci_ai_data_platform.tf").read_text(encoding="utf-8")
 
     policy = _resource(aidp, "oci_identity_policy", "aidp_service")
-    assert policy.count('"Allow any-user') == 10
-    assert "use generative-ai-family" in policy
+    assert policy.count('"Allow any-user') == 9
+    assert "use generative-ai-family" not in policy
     assert "manage vnics" not in policy
     assert "use subnets" not in policy
     assert "use network-security-groups" not in policy

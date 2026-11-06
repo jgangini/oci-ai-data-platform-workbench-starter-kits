@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import hashlib
-import ipaddress
 import os
 import re
 import shutil
@@ -35,6 +34,8 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MANIFEST_ASSET = "aidp-release.json"
 IMAGE_ASSET = "aidp-lab-image-amd64.tar.gz"
+UPDATER_PROTOCOL = 2
+DEPLOYMENT_PROFILE = "kits-only"
 MANIFEST_LIMIT = 64 * 1024
 IMAGE_LIMIT = 4 * 1024 * 1024 * 1024
 RUNNING = frozenset(
@@ -94,6 +95,8 @@ def validated_release(payload: Any) -> dict[str, str]:
     raw_assets = payload.get("assets")
     if not isinstance(raw_assets, list):
         raise RuntimeError("release_assets_missing")
+    if len(raw_assets) != 2 or {item.get("name") for item in raw_assets if isinstance(item, dict)} != {MANIFEST_ASSET, IMAGE_ASSET}:
+        raise RuntimeError("release_assets_mismatch")
     result = {"tag": tag}
     for name, prefix in (
         (MANIFEST_ASSET, "manifest"),
@@ -177,7 +180,8 @@ def _validated_manifest(value: Any, release: dict[str, str]) -> dict[str, str]:
     commit_sha = str(value.get("commit_sha") or "")
     if (
         value.get("schema_version") != 1
-        or value.get("updater_protocol") != 1
+        or value.get("updater_protocol") != UPDATER_PROTOCOL
+        or value.get("deployment_profile") != DEPLOYMENT_PROFILE
         or value.get("release") != tag
         or value.get("repository") != REPOSITORY.removesuffix(".git")
         or SHA.fullmatch(commit_sha) is None
@@ -291,6 +295,8 @@ def _release_state(path: Path) -> tuple[str, str]:
         or repository != REPOSITORY.removesuffix(".git")
     ):
         raise RuntimeError("invalid_current_release_state")
+    if value.get("deployment_profile") != DEPLOYMENT_PROFILE or value.get("updater_protocol") != UPDATER_PROTOCOL:
+        raise RuntimeError("release_profile_migration_required")
     return release, commit_sha
 
 
@@ -371,6 +377,7 @@ def _load_image(archive: Path, tag: str, commit_sha: str) -> str:
         environment.get("APP_RELEASE_TAG") != tag
         or environment.get("APP_RELEASE_SHA") != commit_sha
         or environment.get("APP_REPOSITORY") != REPOSITORY.removesuffix(".git")
+        or environment.get("APP_DEPLOYMENT_PROFILE") != DEPLOYMENT_PROFILE
     ):
         raise RuntimeError("candidate_release_metadata_mismatch")
     platform = _run(
@@ -474,28 +481,14 @@ def _run_container(
         "-p",
         "127.0.0.1:18443:443" if candidate else "80:80",
     ]
-    if candidate:
-        # A copied local state does not isolate live capture operations.
-        arguments.extend(["-e", "GODS_EYE_VIEW_ENABLED=false"])
-    else:
+    if not candidate:
         arguments.extend(["-p", "443:443"])
-        # Keep the optional viewer bridge private when replacing the admin container.
-        environment_file = root / ".env"
-        environment = dict(line.split("=", 1) for line in environment_file.read_text().splitlines() if "=" in line) if environment_file.exists() else {}
-        address = environment.get("GODS_EYE_VIEW_ADMIN_BIND")
-        if address:
-            address = ipaddress.IPv4Address(address)
-            if not address.is_private or address.is_unspecified or address.is_loopback:
-                raise RuntimeError("invalid_gods_eye_view_admin_bind")
-            arguments.extend(["-p", f"{address}:8000:8000"])
     arguments.extend(
         [
             "-v",
             f"{root / 'tls'}:/etc/aidp-lab/tls:ro,z",
             "-v",
             f"{root / '.oci'}:/etc/aidp-lab/oci:ro,Z",
-            "-v",
-            f"{root / 'autonomous'}:/etc/aidp-lab/autonomous:ro,Z",
             "-v",
             f"{mounted_state}:/var/lib/aidp-lab:Z",
         ]
@@ -611,7 +604,17 @@ def reconcile(root: Path, operation_id: str) -> None:
     status_path = update_dir / "status/status.json"
     release_state_path = releases_dir / "current.json"
     current_state_path = release_state_path
-    current_release, current_sha = _release_state(current_state_path)
+    try:
+        current_release, current_sha = _release_state(current_state_path)
+    except RuntimeError as exc:
+        if str(exc) == "release_profile_migration_required":
+            current = _json(current_state_path)
+            _status(
+                status_path, operation_id, "failed",
+                "This installation requires an explicit migration to Starter Kits. Automatic updates cannot remove independently deployed modules.",
+                current["release"], current["commit_sha"],
+            )
+        raise
     previous = _json(status_path)
     if (
         previous.get("operation_id") == operation_id
@@ -704,6 +707,8 @@ def reconcile(root: Path, operation_id: str) -> None:
             {
                 "schema_version": 1,
                 "repository": REPOSITORY.removesuffix(".git"),
+                "deployment_profile": DEPLOYMENT_PROFILE,
+                "updater_protocol": UPDATER_PROTOCOL,
                 "release": target_release,
                 "commit_sha": target_sha,
                 "installed_at": datetime.now(timezone.utc).isoformat(),

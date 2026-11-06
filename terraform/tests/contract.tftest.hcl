@@ -16,10 +16,7 @@ mock_provider "oci" {
 mock_provider "random" {}
 
 variables {
-  agent_model_id                      = "ocid1.generativeaimodel.oc1.us-ashburn-1.test"
-  autonomous_database_admin_password  = "TestRootPassword123"
-  autonomous_database_wallet_password = "TestWalletPassword123"
-  operator_username                   = "test.operator@example.test"
+  operator_username = "test.operator@example.test"
 }
 
 override_resource {
@@ -28,7 +25,7 @@ override_resource {
 }
 
 override_resource {
-  target          = oci_ai_data_platform_ai_data_platform.lab
+  target          = oci_ai_data_platform_ai_data_platform.lab[0]
   override_during = plan
   values = {
     alias_key           = "testalias"
@@ -127,12 +124,11 @@ run "resolved_compartment_contract" {
   }
 
   assert {
-    condition     = length(oci_core_instance.gods_eye_view) == 0 && length(oci_core_nat_gateway.gods_eye_view) == 0 && oci_core_subnet.public.cidr_block == var._oci_vcn.cidr_block
+    condition     = oci_core_subnet.public.cidr_block == var._oci_vcn.cidr_block
     error_message = "Existing labs must keep their one-VM network when God’s Eye View is disabled."
   }
 
   variables {
-    portal_managed_modules  = false
     enable_public_ip_tls    = false
     tenancy_ocid            = "ocid1.tenancy.oc1..test"
     home_region             = "us-ashburn-1"
@@ -156,7 +152,7 @@ run "resolved_compartment_contract" {
   }
 
   assert {
-    condition     = oci_ai_data_platform_ai_data_platform.lab.default_workspace_name == "aidp-lab-workspace-test1234"
+    condition     = oci_ai_data_platform_ai_data_platform.lab[0].default_workspace_name == "aidp-lab-workspace-test1234"
     error_message = "The AIDP default workspace must be deterministic."
   }
 
@@ -231,8 +227,8 @@ run "resolved_compartment_contract" {
   }
 
   assert {
-    condition     = length(oci_identity_policy.aidp_service.statements) == 10
-    error_message = "The required AIDP Advanced policy plus regional Generative AI use must remain complete."
+    condition     = length(oci_identity_policy.aidp_service.statements) == 9
+    error_message = "The required AIDP policy must remain complete without unused Generative AI access."
   }
 
   assert {
@@ -483,7 +479,7 @@ run "authorized_e3_fallback_contract" {
   }
 }
 
-run "production_rejects_registration_code" {
+run "registration_code_is_required" {
   command = plan
 
   variables {
@@ -494,127 +490,113 @@ run "production_rejects_registration_code" {
     objectstorage_namespace = "testnamespace"
     deployment_suffix       = "test1234"
     admin_password_hash     = "pbkdf2_sha256$600000$salt$digest"
-    deployment_mode         = "production"
-    registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash  = ""
     source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
   }
 
-  expect_failures = [oci_core_instance.lab]
+  expect_failures = [var.registration_code_hash]
 }
 
-run "gods_eye_view_private_viewer" {
+run "existing_aidp_is_referenced_without_owning_it" {
+
   command = plan
-
-  override_resource {
-    target          = oci_core_vcn.lab
-    override_during = plan
-    values          = { id = "ocid1.vcn.test.shared" }
-  }
-
-  override_resource {
-    target          = oci_core_instance.gods_eye_view[0]
-    override_during = plan
-    values          = { private_ip = "10.10.0.130" }
-  }
-
-  override_resource {
-    target          = oci_core_network_security_group.gods_eye_view[0]
-    override_during = plan
-    values          = { id = "ocid1.networksecuritygroup.test.viewer" }
-  }
-
-  override_resource {
-    target          = oci_core_network_security_group.gods_eye_view_proxy[0]
-    override_during = plan
-    values          = { id = "ocid1.networksecuritygroup.test.admin" }
-  }
-
   variables {
-    portal_managed_modules  = false
-    tenancy_ocid            = "ocid1.tenancy.oc1..test"
-    home_region             = "us-chicago-1"
-    operator_user_ocid      = "ocid1.user.oc1..operator"
-    compartment_ocid        = "ocid1.compartment.oc1..test"
-    objectstorage_namespace = "testnamespace"
-    deployment_suffix       = "test1234"
-    admin_password_hash     = "pbkdf2_sha256$600000$salt$digest"
-    registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
-    source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
-    enabled_vm_modules      = ["gods_eye_view"]
-    enable_public_ip_tls    = true
+    tenancy_ocid                   = "ocid1.tenancy.oc1..test"
+    home_region                    = "us-ashburn-1"
+    operator_user_ocid             = "ocid1.user.oc1..operator"
+    compartment_ocid               = "ocid1.compartment.oc1..test"
+    objectstorage_namespace        = "testnamespace"
+    deployment_suffix              = "test1234"
+    admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    aidp_mode                      = "existing"
+    existing_ai_data_platform_ocid = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+  }
+
+  override_data {
+    target = data.oci_ai_data_platform_ai_data_platform.existing[0]
+    values = {
+      id                     = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+      state                  = "ACTIVE"
+      ai_data_platform_type  = "STRUCTURED"
+      compartment_id         = "ocid1.compartment.oc1..test"
+      default_workspace_name = "shared-workspace"
+      web_socket_endpoint    = "shared.datalake.oci.oraclecloud.com"
+      alias_key              = "shared"
+    }
   }
 
   assert {
-    condition     = length(oci_core_instance.gods_eye_view) == 1 && !oci_core_instance.gods_eye_view[0].create_vnic_details[0].assign_public_ip && oci_core_subnet.gods_eye_view[0].prohibit_public_ip_on_vnic
-    error_message = "God’s Eye View must create one private viewer with no public address."
+    condition     = length(oci_ai_data_platform_ai_data_platform.lab) == 0 && output.ai_data_platform_id == "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+    error_message = "Existing mode must not create or own the selected platform."
   }
-
   assert {
-    condition = oci_identity_dynamic_group.gods_eye_view[0].name == "aidp-lab-test1234-gods-eye-view" && [
-      oci_core_nat_gateway.gods_eye_view[0].display_name,
-      oci_core_security_list.gods_eye_view[0].display_name,
-      oci_core_subnet.gods_eye_view[0].display_name,
-      oci_core_network_security_group.gods_eye_view_proxy[0].display_name,
-      oci_core_network_security_group.gods_eye_view[0].display_name,
-      oci_core_instance.gods_eye_view[0].display_name,
-      oci_identity_policy.gods_eye_view[0].name,
-      oci_identity_policy.gods_eye_view_run_command[0].name,
-    ] == [for suffix in ["nat", "egress", "private", "proxy", "viewer", "viewer", "read", "update"] : "aidp-lab-test1234-gods-eye-view-${suffix}"]
-    error_message = "Current deployments use the canonical physical resource names."
-  }
-
-  assert {
-    condition     = oci_core_subnet.public.vcn_id == oci_core_vcn.lab.id && oci_core_subnet.gods_eye_view[0].vcn_id == oci_core_vcn.lab.id && oci_core_instance.lab.create_vnic_details[0].assign_public_ip
-    error_message = "VM1 and private VM2 must share the existing VCN; only the portal has a public IP."
-  }
-
-  assert {
-    condition     = strcontains(base64decode(oci_core_instance.gods_eye_view[0].metadata.user_data), "--component gods-eye-view") && !strcontains(base64decode(oci_core_instance.gods_eye_view[0].metadata.user_data), "--component aidp-lab")
-    error_message = "VM2 must run its separate pinned-upstream viewer image, never the portal image."
-  }
-
-  assert {
-    condition     = oci_core_subnet.public.cidr_block == "10.10.0.0/25" && oci_core_subnet.gods_eye_view[0].cidr_block == "10.10.0.128/25" && oci_core_instance.lab.create_vnic_details[0].private_ip == "10.10.0.10"
-    error_message = "Both subnets must be disjoint and the admin bridge must use its reserved private address."
-  }
-
-  assert {
-    condition     = oci_core_network_security_group_security_rule.gods_eye_view[0].source == oci_core_network_security_group.gods_eye_view_proxy[0].id && oci_core_network_security_group_security_rule.gods_eye_view[0].tcp_options[0].destination_port_range[0].min == 8081 && oci_core_network_security_group_security_rule.gods_eye_view_admin[0].source == oci_core_network_security_group.gods_eye_view[0].id
-    error_message = "Only VM1 may reach the viewer; only VM2 may reach the private admin bridge."
-  }
-
-  assert {
-    condition     = length(oci_identity_policy.gods_eye_view[0].statements) == 1 && strcontains(oci_identity_policy.gods_eye_view[0].statements[0], "request.permission = 'OBJECT_READ'") && strcontains(oci_identity_policy.gods_eye_view[0].statements[0], "04_gold/prisma/*") && strcontains(oci_identity_policy.gods_eye_view[0].statements[0], ".control/prisma/agent.json")
-    error_message = "Viewer principal must only read published God’s Eye View objects."
-  }
-
-  assert {
-    condition     = strcontains(base64decode(oci_core_instance.gods_eye_view[0].metadata.user_data), "GODS_EYE_VIEW_ADMIN_URL=http://10.10.0.10:8000") && output.gods_eye_view_enabled
-    error_message = "Both frozen containers must share the private authenticated bridge contract."
-  }
-
-  assert {
-    condition     = output.gods_eye_view_private_url == "http://10.10.0.130:8081" && output.public_ip_tls_enabled
-    error_message = "The admin must use the actual private viewer address and issue verified public TLS only when opted in."
+    condition     = output.default_workspace_name == "shared-workspace"
+    error_message = "The actual existing default workspace must be used."
   }
 }
 
-run "empty_module_selection_keeps_viewer_disabled" {
+run "existing_aidp_rejects_wrong_compartment" {
+
   command = plan
   variables {
-    tenancy_ocid            = "ocid1.tenancy.oc1..test"
-    home_region             = "us-ashburn-1"
-    operator_user_ocid      = "ocid1.user.oc1..operator"
-    compartment_ocid        = "ocid1.compartment.oc1..test"
-    objectstorage_namespace = "testnamespace"
-    deployment_suffix       = "test1234"
-    admin_password_hash     = "pbkdf2_sha256$600000$salt$digest"
-    registration_code_hash  = "pbkdf2_sha256$600000$salt$digest"
-    source_commit_sha       = "0123456789abcdef0123456789abcdef01234567"
-    enabled_vm_modules      = []
+    tenancy_ocid                   = "ocid1.tenancy.oc1..test"
+    home_region                    = "us-ashburn-1"
+    operator_user_ocid             = "ocid1.user.oc1..operator"
+    compartment_ocid               = "ocid1.compartment.oc1..test"
+    objectstorage_namespace        = "testnamespace"
+    deployment_suffix              = "test1234"
+    admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    aidp_mode                      = "existing"
+    existing_ai_data_platform_ocid = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
   }
-  assert {
-    condition     = !output.gods_eye_view_enabled && length(oci_core_instance.gods_eye_view) == 0
-    error_message = "An empty module selection must not create a viewer."
+
+  override_data {
+    target = data.oci_ai_data_platform_ai_data_platform.existing[0]
+    values = {
+      id                     = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+      state                  = "ACTIVE"
+      ai_data_platform_type  = "STRUCTURED"
+      compartment_id         = "ocid1.compartment.oc1..other"
+      default_workspace_name = "shared-workspace"
+      web_socket_endpoint    = "shared.datalake.oci.oraclecloud.com"
+      alias_key              = "shared"
+    }
   }
+  expect_failures = [data.oci_ai_data_platform_ai_data_platform.existing[0]]
+}
+
+run "existing_aidp_requires_an_identifier" {
+
+  command = plan
+  variables {
+    tenancy_ocid                   = "ocid1.tenancy.oc1..test"
+    home_region                    = "us-ashburn-1"
+    operator_user_ocid             = "ocid1.user.oc1..operator"
+    compartment_ocid               = "ocid1.compartment.oc1..test"
+    objectstorage_namespace        = "testnamespace"
+    deployment_suffix              = "test1234"
+    admin_password_hash            = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash         = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha              = "0123456789abcdef0123456789abcdef01234567"
+    aidp_mode                      = "existing"
+    existing_ai_data_platform_ocid = ""
+  }
+
+  override_data {
+    target = data.oci_ai_data_platform_ai_data_platform.existing[0]
+    values = {
+      id                     = "ocid1.aidataplatform.oc1.us-chicago-1.existing"
+      state                  = "ACTIVE"
+      ai_data_platform_type  = "STRUCTURED"
+      compartment_id         = "ocid1.compartment.oc1..other"
+      default_workspace_name = "shared-workspace"
+      web_socket_endpoint    = "shared.datalake.oci.oraclecloud.com"
+      alias_key              = "shared"
+    }
+  }
+  expect_failures = [data.oci_ai_data_platform_ai_data_platform.existing[0]]
 }

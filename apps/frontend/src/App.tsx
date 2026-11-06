@@ -9,31 +9,22 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { GodsEyeViewAdmin } from "./GodsEyeViewAdmin";
 import { LoadingIndicator } from "./LoadingIndicator";
 import { SearchableCombobox } from "./SearchableCombobox";
-import { GodsEyeViewModuleManager, type ModuleStatus } from "./GodsEyeViewModuleManager";
-import { LocalGodsEyeViewAccess } from "./LocalGodsEyeViewAccess";
 
 import { labAssignmentChanges } from "./labAssignments";
 
 import {
   ApiRequestError,
-  getOrCreateModuleOperation,
   getOrCreateLabOperation,
-  loadModuleOperation,
   loadLabOperation,
-  moduleOperationKind,
   parseRetryAfter,
-  persistModuleOperation,
   persistLabOperation,
   pollRegistration,
   registrationProgress,
   type RegistrationPhase,
   type RegistrationPhaseValue,
   type RegistrationResponse,
-  type ModuleOperation,
-  type ModuleOperationKind,
 } from "./registrationPoll";
 
 type ApiError = { detail?: string | { message?: string } };
@@ -45,7 +36,6 @@ type LabUser = {
   labs: AssignedLab[];
   active: boolean;
   managed?: boolean;
-  gods_eye_view_access?: boolean;
   is_aidp_admin: boolean;
   participant_code?: number | null;
 };
@@ -67,53 +57,17 @@ type CatalogLab = {
   status: "available" | "planned";
   available: boolean;
 };
-type UserDraft = { name: string; email: string; lab_ids: string[]; gods_eye_view?: boolean };
+type UserDraft = { name: string; email: string; lab_ids: string[] };
 type AdminSettingsResponse = {
   aidp_service_endpoint: string;
   aidp_url: string;
   aidp_platform_id: string;
-  deployment_mode: "laboratory" | "production";
   operator_username: string;
   registration_code_configured: boolean;
   time_zone: string;
   time_zones: string[];
 };
-type AdminModule = {
-  module_id: "ai_data_governance" | (string & {});
-  display_name: string;
-  status: "not_installed" | "installing" | "active" | "redeploying" | "deleting" | "error" | (string & {});
-  installed: boolean;
-  installed_version?: string | null;
-  bundled_version?: string | null;
-  update_available?: boolean;
-  validation_stage?: string;
-  operation_id?: string | null;
-  operation_type?: ModuleOperationKind | null;
-  administrator_id?: string;
-  phase?: string;
-  message?: string | null;
-  enabled: boolean;
-  source_bucket?: string;
-  source_prefix?: string;
-  completed_phases?: string[];
-  apify_credential_available?: boolean;
-  apify_credential_status?: 'missing' | 'configured' | 'conflict' | 'unknown';
-  apify_credential_owned_by_operation?: boolean;
-  apify_token_suffix?: string;
-  test_sessions?: { value: string; label: string }[];
-  reuse_existing?: boolean;
-};
-type AdminModuleOperationResponse = Partial<AdminModule> & {
-  status: AdminModule["status"];
-  phase?: RegistrationPhaseValue;
-  operation_id: string;
-  message?: string;
-};
 type PublicConfig = {
-  local_participant_access?: boolean;
-  viewer_signin_enabled?: boolean;
-  viewer_identity?: { name: string; description: string };
-  deployment_mode: "laboratory" | "production";
   labs: CatalogLab[];
 };
 type AdminSession = { username: string; operator_username: string };
@@ -130,7 +84,7 @@ type ApplicationReleasePackage = {
   bundled_version: string;
   updated_at?: string | null;
   kind: string;
-  scope: "participant" | "global";
+  scope: "participant";
   status: string;
 };
 type AdminApplicationRelease = {
@@ -154,34 +108,6 @@ const fallbackCatalog: CatalogLab[] = [
   { lab_id: "retail", display_name: "Retail", description: "Transform customers, products, orders and order items into sales and customer analytics.", pack_version: "2.0.0", status: "available", available: true },
   { lab_id: "healthcare", display_name: "Healthcare", description: "Prepare patients, providers, appointments and encounters for operational healthcare analysis.", pack_version: "2.0.0", status: "available", available: true },
 ];
-
-function participantLabCatalog(catalog: CatalogLab[]) {
-  return catalog.filter(({ lab_id }) => !["agent", "ai_data_governance"].includes(lab_id));
-}
-
-function moduleOperationKey(moduleId: string, kind: ModuleOperationKind) {
-  return `${moduleId}:${kind}`;
-}
-
-function readStoredModuleOperation(moduleId: string, kind: ModuleOperationKind) {
-  try {
-    return loadModuleOperation(window.localStorage, moduleId, kind);
-  } catch {
-    return undefined;
-  }
-}
-
-function writeStoredModuleOperation(
-  moduleId: string,
-  kind: ModuleOperationKind,
-  operation?: ModuleOperation,
-) {
-  try {
-    persistModuleOperation(window.localStorage, moduleId, kind, operation);
-  } catch {
-    // The server manifest and the in-memory copy remain authoritative.
-  }
-}
 
 function labLabel(catalog: CatalogLab[], labId: string) {
   return catalog.find(({ lab_id }) => lab_id === labId)?.display_name ?? labId;
@@ -470,12 +396,8 @@ function CreateUserModal({
   onDraftChange,
   onClose,
   onSubmit,
-  viewerModule,
-  viewerReady,
 }: {
   open: boolean;
-  viewerModule: ModuleStatus | null;
-  viewerReady: boolean;
   catalog: CatalogLab[];
   draft: UserDraft;
   creating: boolean;
@@ -508,11 +430,11 @@ function CreateUserModal({
             <p className="eyebrow">Participant access</p>
             <h2 id={titleId}>Add user</h2>
             <p id={descriptionId}>
-              Enter the participant details and select starter kits or shared module access.
+              Enter the participant details and select starter kits.
             </p>
           </div>
           <span className="lab-selection-count">
-            {draft.lab_ids.length + Number(Boolean(draft.gods_eye_view))} selected
+            {draft.lab_ids.length} selected
           </span>
         </header>
         <form className="create-user-form" onSubmit={onSubmit}>
@@ -585,15 +507,6 @@ function CreateUserModal({
                     </tr>
                   );
                 })}
-                <tr>
-                  <td><input className="lab-assignment-check" type="checkbox" checked={Boolean(draft.gods_eye_view)} disabled={creating || !viewerReady}
-                    aria-label="Select God’s Eye View · Custom layers access"
-                    onChange={event => onDraftChange({ ...draft, gods_eye_view: event.target.checked })} /></td>
-                  <td><strong>God’s Eye View · Custom layers</strong></td>
-                  <td>{viewerModule?.bundled_version || "—"}</td>
-                  <td className="lab-table-description">Access the shared viewer and assistant with your OCI identity.</td>
-                  <td><span className={`lab-state ${viewerReady ? "unassigned" : "planned"}`}>{viewerReady ? "Available" : "Unavailable"}</span></td>
-                </tr>
               </tbody>
             </table>
           </div>
@@ -602,7 +515,7 @@ function CreateUserModal({
             <button className="secondary" type="button" disabled={creating} onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" disabled={creating || !draft.lab_ids.length && !draft.gods_eye_view || Boolean(draft.gods_eye_view) && !viewerReady}>
+            <button type="submit" disabled={creating || !draft.lab_ids.length}>
               {creating ? "Creating..." : "Create user"}
             </button>
           </footer>
@@ -618,13 +531,9 @@ function LabManagerModal({
   user,
   catalog,
   selectedLabIds,
-  selectedViewerAccess,
-  viewerModule,
-  viewerReady,
   confirmingRemoval,
   error,
   onSelectionChange,
-  onViewerSelectionChange,
   onRedeploy,
   onClose,
   onSave,
@@ -633,13 +542,9 @@ function LabManagerModal({
   user: LabUser | null;
   catalog: CatalogLab[];
   selectedLabIds: string[];
-  selectedViewerAccess: boolean;
-  viewerModule: ModuleStatus | null;
-  viewerReady: boolean;
   confirmingRemoval: boolean;
   error: string;
   onSelectionChange: (labIds: string[]) => void;
-  onViewerSelectionChange: (enabled: boolean) => void;
   onRedeploy: (lab: AssignedLab) => void;
   onClose: () => void;
   onSave: () => void;
@@ -656,8 +561,7 @@ function LabManagerModal({
     user.labs.map((lab) => lab.lab_id),
     selectedLabIds,
   );
-  const hasChanges = Boolean(changes.add.length || changes.remove.length || selectedViewerAccess !== Boolean(user.gods_eye_view_access));
-  const viewerAvailable = viewerReady && user.active && user.status === "active";
+  const hasChanges = Boolean(changes.add.length || changes.remove.length);
   return createPortal(
     <div className="lab-manager-overlay">
       <section
@@ -676,7 +580,7 @@ function LabManagerModal({
             <p id={descriptionId}>{user.email}</p>
           </div>
           <span className="lab-selection-count">
-            {selectedLabIds.length + Number(selectedViewerAccess)} selected
+            {selectedLabIds.length} selected
           </span>
         </header>
         <div className="lab-manager-table-wrap">
@@ -749,24 +653,12 @@ function LabManagerModal({
                   </tr>
                 );
               })}
-              <tr>
-                <td><input className="lab-assignment-check" type="checkbox" checked={selectedViewerAccess}
-                  disabled={!user.gods_eye_view_access && !viewerAvailable}
-                  aria-label={`God’s Eye View · Custom layers access for ${user.email}`}
-                  onChange={event => onViewerSelectionChange(event.target.checked)} /></td>
-                <td><strong>God’s Eye View · Custom layers</strong></td>
-                <td>{viewerModule?.bundled_version || "—"}</td>
-                <td className="lab-table-description">Access the shared viewer and assistant with your OCI identity.</td>
-                <td><span className={`lab-state ${user.gods_eye_view_access ? "installed" : viewerAvailable ? "unassigned" : "planned"}`}>{user.gods_eye_view_access ? "Granted" : viewerAvailable ? "Available" : "Unavailable"}</span></td>
-                <td className="actions-column" />
-              </tr>
             </tbody>
           </table>
         </div>
         {confirmingRemoval && (
           <p className="lab-manager-warning" role="alert">
             {changes.remove.length > 0 && <>Confirm removal of {changes.remove.length} {changes.remove.length === 1 ? "starter kit" : "starter kits"}. Only their jobs, tables, objects and workspace content will be deleted. </>}
-            {user.gods_eye_view_access && !selectedViewerAccess && <>Revoke God’s Eye View access, including existing sessions. The shared module and its data are retained.</>}
           </p>
         )}
         {error && <p className="lab-manager-error" role="alert">{error}</p>}
@@ -781,353 +673,6 @@ function LabManagerModal({
       </section>
     </div>,
     document.body,
-  );
-}
-
-const governanceServices = ['AIDP Workbench', 'Object Storage', 'Spark Compute', 'Master Catalog', 'AI Compute', 'Memory', 'Workflow'];
-const marketServices = ['AIDP Workbench', 'Object Storage', 'AI Compute', 'Memory', 'MCP'];
-const governancePhases: Record<string, string> = {
-  verify: 'Object Storage', control: 'Object Storage · Spark Compute', sync: 'Spark Compute · Master Catalog',
-  agent: 'AI Compute', permissions: 'AIDP Workbench', activation: 'Spark Compute', steady: 'AIDP Workbench', cleanup: 'Removing module resources…',
-};
-
-function GovernanceModuleManager({ initialUserId = "", visible = true, moduleId = "ai_data_governance", onStatusChange, onClose, onChanged }: {
-  moduleId?: "ai_data_governance" | "ai_market_intelligence";
-  initialUserId?: string;
-  visible?: boolean;
-  onStatusChange?: (state: { module: AdminModule | null; busy: boolean; unverified: boolean }) => void;
-  onClose: () => void;
-  onChanged?: () => void;
-}) {
-  const market = moduleId === "ai_market_intelligence";
-  const moduleName = market ? "AI Market Intelligence" : "AI Data Governance";
-  const [apifyToken, setApifyToken] = useState("");
-  const [reuseExisting, setReuseExisting] = useState(true);
-  const [testSession, setTestSession] = useState("");
-  const [users, setUsers] = useState<LabUser[]>([]);
-  const [usersLoaded, setUsersLoaded] = useState(false);
-  const [usersError, setUsersError] = useState("");
-  const [modules, setModules] = useState<AdminModule[]>([]);
-  const [moduleManagerUserId, setModuleManagerUserId] = useState(initialUserId);
-  const [moduleLoadError, setModuleLoadError] = useState("");
-  const [moduleOperationError, setModuleOperationError] = useState("");
-  const [moduleOperating, setModuleOperating] = useState(false);
-  const [moduleProgress, setModuleProgress] = useState<RegistrationResponse | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [message, setMessage] = useState("");
-  const moduleAbortRef = useRef<AbortController | null>(null);
-  const loadAbortRef = useRef<AbortController | null>(null);
-  const moduleOperationsRef = useRef(new Map<string, ModuleOperation>());
-  const titleId = useId();
-  const descriptionId = useId();
-  const phaseId = useId();
-  const tokenHelpId = useId();
-  const panelRef = useRef<HTMLDivElement>(null);
-  const closeRef = useRef<HTMLButtonElement>(null);
-  useDialogFocus(visible, onClose, panelRef, closeRef);
-
-  const governanceModule = modules.find(({ module_id }) => module_id === moduleId) ?? null;
-  const moduleManagerUser = users.find(user => user.id === moduleManagerUserId && user.is_aidp_admin === true) ?? null;
-  const marketSteps: Record<string, string> = { verify: 'Verify the selected environment', credentials: 'Connect credentials', compute: 'Prepare dedicated AI Compute', files: 'Publish the reviewed runtime', agent: 'Configure the agent', permissions: 'Verify agent access', test: 'Check the paused agent in TEST', ready: 'Installed and paused' };
-  const stepLabels = marketSteps;
-  const phaseLabel = market ? stepLabels[moduleProgress?.phase || governanceModule?.phase || ''] || 'Preparing installation…' : governancePhases[moduleProgress?.phase || ''] || 'Preparing module services…';
-  const recoverableKind = governanceModule && moduleOperationKind(governanceModule.status, governanceModule.operation_type);
-  const transitioning = Boolean(governanceModule && ["installing", "redeploying", "deleting"].includes(governanceModule.status));
-  const resumable = Boolean(recoverableKind && governanceModule?.operation_id);
-  const credentialStatus = governanceModule?.apify_credential_status || 'unknown';
-  const credentialStage = !governanceModule?.installed && (!governanceModule?.phase || ['not_installed', 'verify', 'credentials'].includes(governanceModule.phase));
-  const tokenEditable = credentialStage && credentialStatus === 'missing';
-  const showSavedToken = credentialStatus === 'configured';
-  const savedTokenLabel = 'apify_api_...' + (/^[A-Za-z0-9]{4}$/.test(governanceModule?.apify_token_suffix || '') ? governanceModule?.apify_token_suffix : '••••');
-  const tokenValid = apifyToken.length >= 20 && apifyToken.length <= 512 && !/\s/.test(apifyToken);
-  const credentialBlocked = market && (credentialStatus === 'conflict' || credentialStatus === 'unknown'
-    || credentialStage && credentialStatus === 'configured' && !reuseExisting && !governanceModule?.apify_credential_owned_by_operation
-    || credentialStatus === 'missing' && (!tokenEditable || !tokenValid));
-  const credentialHelp = credentialStatus === 'configured'
-    ? 'AiMarketIntelligenceApifyBearer is saved in AIDP Credential Store. Apify access needs a separate test; the paused TEST check only verifies the agent setup.'
-    : credentialStatus === 'conflict' ? 'The existing credential needs review in AIDP Credential Store. It will not be replaced.'
-    : credentialStatus === 'unknown' ? 'Checking the saved credential before continuing…'
-    : !credentialStage ? 'The saved credential is missing. Review Credential Store before resuming this operation.'
-    : 'In Apify Console, open Settings → API & Integrations, create a token for this application and copy it here. Paste only the token; the application adds Bearer automatically.';
-  const marketNotice = moduleOperationError || (moduleOperating ? '' : governanceModule?.message || message);
-  const marketNeedsAttention = Boolean(moduleOperationError || ['error', 'awaiting_action'].includes(governanceModule?.status || ''));
-  const marketStatusLabels: Record<string, string> = { not_installed: 'Not installed', installing: 'In progress',
-    awaiting_action: 'Action required', error: 'Needs attention', active: 'Installed · Paused' };
-  const marketStatus = moduleOperating || governanceModule?.status === 'redeploying' ? 'In progress' : marketStatusLabels[governanceModule?.status || ''] || 'Status unavailable';
-  const marketStepKeys = Object.keys(stepLabels).filter(key => key !== 'ready');
-  const marketPhase = moduleProgress?.phase || governanceModule?.phase || '';
-  const marketStepIndex = marketStepKeys.indexOf(marketPhase);
-  const marketCompletedSteps = marketStepKeys.filter(key => governanceModule?.completed_phases?.includes(key)).length;
-  const marketShowProgress = market && Boolean(moduleOperating || governanceModule?.operation_id);
-  const marketCredentialIssue = market && (credentialStatus !== 'configured'
-    || governanceModule?.phase === 'test' && governanceModule?.status === 'error');
-  const observingMarket = Boolean(market && visible && governanceModule &&
-    (credentialStatus === 'unknown' || governanceModule.phase === 'test' && governanceModule.status === 'awaiting_action'));
-  const disabled = moduleOperating || !usersLoaded || !moduleManagerUser || !governanceModule || Boolean(moduleLoadError || usersError);
-  useEffect(() => { if (credentialStatus === 'configured') setApifyToken(''); }, [credentialStatus]);
-  useEffect(() => {
-    if (market && governanceModule?.operation_id && governanceModule.administrator_id) setModuleManagerUserId(governanceModule.administrator_id);
-  }, [market, governanceModule?.operation_id, governanceModule?.administrator_id]);
-  useEffect(() => {
-    onStatusChange?.({ module: governanceModule, busy: moduleOperating, unverified: Boolean(moduleLoadError) });
-  }, [governanceModule, moduleOperating, moduleLoadError, onStatusChange]);
-
-  async function loadAdministrators(signal: AbortSignal) {
-    setUsersError("");
-    setUsersLoaded(false);
-    try {
-      const result = await api<{ users: LabUser[] }>("/api/admin/users", { signal });
-      signal.throwIfAborted();
-      setUsers(result.users);
-    } catch (reason) {
-      if (!signal.aborted) setUsersError(reason instanceof Error ? reason.message : "Unable to load administrators.");
-    } finally {
-      if (!signal.aborted) setUsersLoaded(true);
-    }
-  }
-  async function loadModules(signal = loadAbortRef.current?.signal) {
-    setModuleLoadError("");
-    try {
-      const loaded = market ? [await api<AdminModule>(`/api/admin/modules/${moduleId}`, { signal })] : (await api<{ modules: AdminModule[] }>("/api/admin/modules", { signal })).modules;
-      if (market && loaded[0]?.operation_id) setReuseExisting(loaded[0].reuse_existing === true);
-      signal?.throwIfAborted();
-      if (!loaded.some(module => module.module_id === moduleId)) throw new Error(`${moduleName} is unavailable.`);
-      setModules(loaded);
-      for (const module of loaded) {
-        const recoverableKind = moduleOperationKind(module.status, module.operation_type);
-        for (const kind of ["install", "redeploy", "delete"] as const) {
-          const key = moduleOperationKey(module.module_id, kind);
-          if (recoverableKind === kind) {
-            if (module.operation_id) {
-              const operation = { moduleId: module.module_id, kind, operationId: module.operation_id };
-              moduleOperationsRef.current.set(key, operation);
-              writeStoredModuleOperation(module.module_id, kind, operation);
-            }
-            continue;
-          }
-          moduleOperationsRef.current.delete(key);
-          writeStoredModuleOperation(module.module_id, kind);
-        }
-      }
-      return loaded;
-    } catch (reason) {
-      if (signal?.aborted) return;
-      if (reason instanceof ApiRequestError && reason.status === 401)
-        window.location.assign("/admin/login");
-      else
-        setModuleLoadError(reason instanceof Error ? reason.message : "Unable to load global modules");
-    }
-  }
-
-  useEffect(() => {
-    const controller = new AbortController();
-    loadAbortRef.current = controller;
-    void loadAdministrators(controller.signal);
-    void loadModules(controller.signal);
-    return () => { controller.abort(); moduleAbortRef.current?.abort(); };
-  }, []);
-  useEffect(() => {
-    if ((!transitioning && !observingMarket) || moduleOperating) return;
-    let cancelled = false;
-    let timeout = 0;
-    const refresh = async () => {
-      await loadModules();
-      if (!cancelled) timeout = window.setTimeout(refresh, 2_000);
-    };
-    timeout = window.setTimeout(refresh, 2_000);
-    return () => { cancelled = true; window.clearTimeout(timeout); };
-  }, [transitioning, observingMarket, moduleOperating, governanceModule?.operation_id]);
-  async function runModuleAction(kind: ModuleOperationKind, fresh = false) {
-    if (disabled || moduleAbortRef.current || !governanceModule || !moduleManagerUser) return;
-    if (credentialBlocked) return;
-    const recoverableKind = fresh ? undefined : moduleOperationKind(governanceModule.status, governanceModule.operation_type);
-    if (market && kind !== 'install') return;
-    const operationKey = moduleOperationKey(governanceModule.module_id, kind);
-    let operation;
-    try {
-      operation = getOrCreateModuleOperation(
-        fresh ? undefined : moduleOperationsRef.current.get(operationKey) ??
-          readStoredModuleOperation(governanceModule.module_id, kind),
-        governanceModule.module_id,
-        kind,
-        () => crypto.randomUUID(),
-        recoverableKind === kind ? governanceModule.operation_id || undefined : undefined,
-      );
-      moduleOperationsRef.current.set(operationKey, operation);
-      writeStoredModuleOperation(governanceModule.module_id, kind, operation);
-    } catch (reason) {
-      setModuleOperationError(reason instanceof Error ? reason.message : "Unable to prepare the module operation.");
-      return;
-    }
-
-    const controller = new AbortController();
-    moduleAbortRef.current = controller;
-    setModuleOperating(true);
-    setModuleOperationError("");
-    setMessage("");
-    setModuleProgress({
-      status: "pending",
-      phase: market && governanceModule.operation_id ? governanceModule.phase || 'verify' : kind === "delete" ? "cleanup" : "verify",
-      message: `${kind === "install" ? "Installing" : kind === "redeploy" ? "Redeploying" : "Deleting"} ${governanceModule.display_name}.`,
-    });
-    let operationId = operation.operationId;
-    let submittedToken = apifyToken;
-    const moduleBase = `/api/admin/users/${encodeURIComponent(moduleManagerUser.id)}/modules/${encodeURIComponent(governanceModule.module_id)}`;
-    try {
-      const result = await pollRegistration({
-        signal: controller.signal,
-        request: async (signal) => {
-          const response = await (kind === "delete"
-            ? api<AdminModuleOperationResponse>(`${moduleBase}?operation_id=${encodeURIComponent(operationId)}`, {
-                method: "DELETE",
-                signal,
-              })
-            : api<AdminModuleOperationResponse>(kind === "redeploy" ? `${moduleBase}/redeploy` : moduleBase, {
-                method: "POST",
-                body: JSON.stringify({ operation_id: operationId, ...(market ? { reuse_existing: reuseExisting,
-                  ...(submittedToken ? { apify_token: submittedToken } : {}), ...(testSession ? { test_session_id: testSession } : {}) } : {}) }),
-                signal,
-              }));
-          signal.throwIfAborted();
-          if (market) setModules(current => current.map(module => module.module_id === moduleId ? { ...module, ...response } : module));
-          if (market && (response.phase && !["verify", "credentials"].includes(response.phase))) { submittedToken = ""; setApifyToken(""); }
-          if (response.operation_id && response.operation_id !== operationId) {
-            operationId = response.operation_id;
-            const serverOperation = {
-              moduleId: governanceModule.module_id,
-              kind,
-              operationId,
-            };
-            moduleOperationsRef.current.set(operationKey, serverOperation);
-            writeStoredModuleOperation(governanceModule.module_id, kind, serverOperation);
-          }
-          const complete = kind === "delete"
-            ? response.status === "not_installed"
-            : response.status === "active" || market && response.status === "awaiting_action";
-          const pending = ["installing", "redeploying", "deleting"].includes(response.status);
-          return {
-            status: complete ? "active" : pending ? "pending" : response.status,
-            phase: response.phase,
-            message: response.message,
-          };
-        },
-        onPending: setModuleProgress,
-      });
-      controller.signal.throwIfAborted();
-      moduleOperationsRef.current.delete(operationKey);
-      writeStoredModuleOperation(governanceModule.module_id, kind);
-      setConfirmDelete(false);
-      setMessage(result.message || `${governanceModule.display_name} ${kind === "delete" ? "deleted" : "ready"}.`);
-      await loadModules();
-      controller.signal.throwIfAborted();
-      onChanged?.();
-    } catch (reason) {
-      if (controller.signal.aborted) return;
-      await loadModules();
-      if (controller.signal.aborted) return;
-      setModuleOperationError(reason instanceof Error ? reason.message : "Unable to update the governance module.");
-    } finally {
-      if (moduleAbortRef.current === controller) {
-        moduleAbortRef.current = null;
-        if (!controller.signal.aborted) { setModuleProgress(null); setModuleOperating(false); }
-      }
-    }
-  }
-
-  if (!visible) return null;
-  return createPortal(
-    <div className="lab-manager-overlay">
-      <section className={`lab-manager-modal governance-module-modal module-manager-dialog${market ? ' market-module-modal' : ''}`} ref={panelRef} role="dialog"
-        aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} aria-busy={moduleOperating} tabIndex={-1}>
-        <header>
-          <div>
-            <p className="eyebrow">Shared global module</p>
-            <h2 id={titleId}>{moduleName}</h2>
-            <p id={descriptionId}>{market ? 'On-demand market research, managed by AI Data Platform administrators.' : 'One shared module for all AIDP developers, managed by AI Data Platform administrators.'}</p>
-          </div>
-          {governanceModule && <span className={`lab-state ${governanceModule.enabled ? "installed" : "unassigned"}`}>
-            {market ? marketStatus : moduleOperating ? "in progress" : governanceModule.validation_stage === 'TEST_PENDING' && governanceModule.status === 'active' ? 'TEST candidate' : governanceModule.status.replaceAll("_", " ")}
-          </span>}
-        </header>
-        <div className="governance-module-body">
-          {governanceModule?.validation_stage === 'TEST_PENDING' && <p className="governance-module-note" role="status">Agent behavior acceptance in AIDP TEST is pending; production access and maintenance are unavailable.</p>}
-          {(moduleOperating || marketShowProgress) && <div className={`registration-result module-install-progress${market ? ' market-install-progress' : ''}`}
-            role={market ? 'region' : 'status'} aria-label={market ? 'Installation progress' : undefined}
-            aria-live={market ? undefined : 'polite'} aria-busy={moduleOperating || market && transitioning}>
-            {!market && <span className="progress-orbit" aria-hidden="true" />}
-            <p className={market ? 'market-progress-caption' : 'eyebrow'} role={market ? 'status' : undefined}>{market
-              ? marketStepIndex >= 0 ? `${marketNeedsAttention && !moduleOperating ? 'Paused at step' : 'Step'} ${marketStepIndex + 1} of ${marketStepKeys.length}`
-                : marketPhase === 'ready' ? 'Installation complete' : 'Checking installation step…'
-              : 'Deployment progress'}</p>
-            <p className="registration-progress-phase" id={phaseId}>{phaseLabel}</p>
-            <div className={`registration-progress-track${market && !moduleOperating && !transitioning ? ' market-progress-paused' : ' gods-eye-view-reset-track'}`}
-              role="progressbar" aria-labelledby={phaseId}
-              aria-valuemin={market ? 0 : undefined} aria-valuemax={market ? marketStepKeys.length : undefined}
-              aria-valuenow={market && !moduleOperating && !transitioning ? marketCompletedSteps : undefined}
-              aria-valuetext={market ? `${marketCompletedSteps} of ${marketStepKeys.length} steps complete. ${phaseLabel}` : 'Module operation in progress'}>
-              <span style={market && !moduleOperating && !transitioning ? { width: `${marketCompletedSteps / marketStepKeys.length * 100}%` } : undefined} />
-            </div>
-            <p className="registration-progress-detail" role={market && marketNeedsAttention && !moduleOperating ? 'alert' : undefined}>
-              {market ? marketNotice || moduleProgress?.message || `${marketCompletedSteps} of ${marketStepKeys.length} steps complete.` : moduleProgress?.message || 'Updating the shared module.'}</p>
-            {market && !moduleOperating && <p className="registration-progress-detail">{governanceModule?.installed
-              ? 'Installed with research and schedules paused.'
-              : 'Resume installation continues from this saved step, keeping the same operation and resources.'}</p>}
-          </div>}
-          {!moduleOperating && (!usersLoaded || (!governanceModule && !moduleLoadError) ? <LoadingIndicator label="Loading module settings…" /> : <>
-            {marketShowProgress && (!governanceModule?.administrator_id || !moduleManagerUser) && <p className="governance-module-note">Select the administrator who started this operation to resume. Its saved resources and settings are retained.</p>}
-            {(!marketShowProgress || !governanceModule?.administrator_id || !moduleManagerUser) && <SearchableCombobox label="AI Data Platform administrator" placeholder="Select an administrator"
-              value={moduleManagerUserId} disabled={moduleOperating || confirmDelete}
-              options={users.filter(user => user.is_aidp_admin === true).map(user => ({ value: user.id, label: user.email }))}
-              onChange={value => { setModuleManagerUserId(value); setModuleOperationError(""); setMessage(""); }} />}
-            {!usersError && !users.some(user => user.is_aidp_admin) && <p role="alert" className="lab-manager-error">No AI Data Platform administrator is available.</p>}
-            {market && (!marketShowProgress || marketCredentialIssue) && <label className="market-bearer-field">Apify Bearer token
-              <input type={showSavedToken ? 'text' : 'password'} aria-label="Apify Bearer token" value={showSavedToken ? savedTokenLabel : tokenEditable ? apifyToken : ''} autoComplete="off" spellCheck={false} maxLength={512}
-                readOnly={showSavedToken} disabled={!tokenEditable && !showSavedToken} required={tokenEditable} aria-required={tokenEditable}
-                aria-describedby={tokenHelpId} aria-invalid={tokenEditable && Boolean(apifyToken) && !tokenValid}
-                placeholder={showSavedToken ? 'Saved in AIDP Credential Store' : tokenEditable ? 'Paste your Apify API token' : 'Credential requires review'}
-                onChange={event => setApifyToken(event.target.value)} />
-              <span className="market-credential-help" id={tokenHelpId}>{credentialHelp}{marketShowProgress && governanceModule?.phase === 'test' && governanceModule?.status === 'error'
-                ? ' The TEST setup check did not complete. Review the installation error above before resuming.' : ''} <a href="https://docs.apify.com/integrations/api#api-token" target="_blank" rel="noopener noreferrer">How to get an Apify API token</a></span>
-            </label>}
-            {!marketShowProgress && <p className="governance-module-note">{market ? 'Prepares dedicated AI Compute and a TEST agent. This module does not create tables or Spark workflows. OCI compute costs apply. Research and schedules remain paused; existing Governance resources are preserved.' : "Deploy or redeploy the shared Agent, dedicated AI Compute and governance workflow across the Master Catalog. Existing shared OCI credentials are retained; participants are not granted administrator access."}</p>}
-            {market && <div className="module-connection-fields">
-              {credentialStage && !reuseExisting && credentialStatus === 'configured' && !governanceModule?.apify_credential_owned_by_operation && <p className="governance-module-note">The saved installation does not permit reusing this credential. Review the operation in AIDP before continuing.</p>}
-              {governanceModule?.phase === 'test' && <SearchableCombobox label="Workbench TEST session" placeholder="Create a session in Playground; it will appear here" value={testSession} options={governanceModule.test_sessions || []} onChange={setTestSession} />}
-            </div>}
-
-            <ul className="module-service-tags" aria-label="Services">
-              {(market ? marketServices : governanceServices).map(service => <li className="badge inactive" key={service}>{service}</li>)}
-            </ul>
-          </>)}
-          {(usersError || moduleLoadError) && <>
-            <p className="lab-manager-error" role="alert">{usersError || moduleLoadError}</p>
-            <button className="secondary" type="button" onClick={() => {
-              if (loadAbortRef.current) void loadAdministrators(loadAbortRef.current.signal);
-              void loadModules();
-            }}>Retry settings</button>
-          </>}
-          {confirmDelete && !moduleOperating && <p className="lab-manager-warning" role="alert"><strong>Delete global governance module?</strong> This permanently deletes its Agent deployment, dedicated AI Compute, notebook, workflow, four Delta tables and only their prefixes in oci_artifacts. The bucket, schema, shared Spark compute and shared OCI credentials are retained.</p>}
-          {!market && (moduleOperationError || (!moduleOperating && governanceModule?.status === "error")) && <p className="lab-manager-error" role="alert">{moduleOperationError || governanceModule?.message || "The module operation failed. Resume to retry."}</p>}
-          {market && !marketShowProgress && marketNotice && <p className={marketNeedsAttention ? 'lab-manager-error' : 'governance-module-note'} role={marketNeedsAttention ? 'alert' : 'status'}>{marketNotice}</p>}
-          {!market && message && <p role="status" className="governance-module-note">{message}</p>}
-        </div>
-        <footer>
-          <button ref={closeRef} className="secondary" type="button" onClick={() => confirmDelete && !moduleOperating ? setConfirmDelete(false) : onClose()}>
-            {confirmDelete && !moduleOperating ? "Back" : moduleOperating || message || market && resumable ? "Close" : "Cancel"}
-          </button>
-          {moduleOperating ? <button type="button" disabled>Deploying…</button>
-            : confirmDelete ? <button type="button" disabled={disabled} onClick={() => void runModuleAction("delete")}>Delete module</button>
-            : resumable ? <button type="button" disabled={disabled || credentialBlocked} onClick={() => recoverableKind && void runModuleAction(recoverableKind)}>
-              Resume {recoverableKind === "install" ? "installation" : recoverableKind === "redeploy" ? "redeployment" : "deletion"}
-            </button> : <>
-              {!market && governanceModule?.validation_stage !== 'TEST_PENDING' && governanceModule?.installed && <button className="secondary destructive" type="button" disabled={disabled || transitioning} onClick={() => { setConfirmDelete(true); closeRef.current?.focus(); }}>Delete</button>}
-              {!(market && governanceModule?.installed) && !(governanceModule?.validation_stage === 'TEST_PENDING' && governanceModule?.installed) && <button type="button" disabled={disabled || transitioning || credentialBlocked} onClick={() => void runModuleAction(governanceModule?.installed ? "redeploy" : "install")}>
-                {governanceModule?.installed ? governanceModule.update_available ? "Update" : "Redeploy" : "Deploy"}
-              </button>}
-            </>}
-        </footer>
-      </section>
-    </div>, document.body,
   );
 }
 
@@ -1394,7 +939,7 @@ function Shell({
               <a
                 href="/admin/settings"
                 aria-current={
-                  currentPath === "/admin/settings" || currentPath === "/admin/gods-eye-view" ? "page" : undefined
+                  currentPath === "/admin/settings" ? "page" : undefined
                 }
               >
                 Settings
@@ -1463,14 +1008,12 @@ function Shell({
 
 function registrationAccessView(
   configLoaded: boolean,
-  production: boolean,
   adminLoginVisible: boolean,
 ) {
-  const canSwitch = configLoaded && !production;
   return {
-    showAdminLogin: !configLoaded || production || adminLoginVisible,
-    showAdminLink: canSwitch && !adminLoginVisible,
-    showHomeLink: canSwitch && adminLoginVisible,
+    showAdminLogin: !configLoaded || adminLoginVisible,
+    showAdminLink: configLoaded && !adminLoginVisible,
+    showHomeLink: configLoaded && adminLoginVisible,
   };
 }
 
@@ -1480,8 +1023,7 @@ function RegisterPage({
   initialAdminLogin?: boolean;
 }) {
   const publicConfig = usePublicConfig();
-  const catalog = participantLabCatalog(publicConfig?.labs ?? fallbackCatalog);
-  const production = publicConfig?.deployment_mode === "production";
+  const catalog = publicConfig?.labs ?? fallbackCatalog;
   const configLoaded = publicConfig !== null;
   const [adminLoginVisible, setAdminLoginVisible] = useState(initialAdminLogin);
   const [form, setForm] = useState({ name: "", email: "" });
@@ -1646,14 +1188,12 @@ function RegisterPage({
     setAdminLoginVisible(true);
   };
   const showRegistration = () => {
-    if (production) return;
     setAdminLoginVisible(false);
     if (window.location.pathname === "/admin/login")
       window.history.replaceState(null, "", "/");
   };
   const accessView = registrationAccessView(
     configLoaded,
-    production,
     adminLoginVisible,
   );
 
@@ -1898,34 +1438,7 @@ function RegisterPage({
   );
 }
 
-function ViewerLogin() {
-  const config = usePublicConfig();
-  const [administrator, setAdministrator] = useState(window.location.pathname === "/admin/login");
-  const identity = config?.viewer_identity ?? { name: "God's Eye View", description: "NO PLACE LEFT BEHIND" };
-  const signInEnabled = config?.viewer_signin_enabled === true;
-  const signInError = new URLSearchParams(window.location.search).get("error");
-  const message = signInError === "access_denied"
-    ? "Your account does not have access to this starter kit. Contact your administrator."
-    : signInError === "sign_in_failed" ? "Unable to complete OCI sign-in. Try again." : "";
-  return <Shell>
-    <section className="centered viewer-login">
-      {administrator ? <AdminLoginCard viewerIdentity={identity} onViewerSignIn={() => setAdministrator(false)} /> : <section className="card narrow" aria-labelledby="viewer-login-title">
-        <div>
-          <p className="eyebrow">Starter kit</p>
-          <h2 id="viewer-login-title">{identity.name}</h2>
-          <p>{identity.description}</p>
-        </div>
-        {message && <p className="notice error" role="alert">{message}</p>}
-        {signInEnabled
-          ? <a className="result-link viewer-signin" href="/api/auth/oci/login"><OracleMark />Sign in with OCI</a>
-          : <><button className="viewer-signin" type="button" disabled><OracleMark />Sign in with OCI</button><p>OCI sign-in is unavailable in this environment. Contact your administrator.</p></>}
-        <button className="viewer-login-switch" type="button" autoFocus onClick={() => setAdministrator(true)}>Administrator sign-in</button>
-      </section>}
-    </section>
-  </Shell>;
-}
-
-function AdminLoginCard({ viewerIdentity, onViewerSignIn }: { viewerIdentity?: PublicConfig["viewer_identity"]; onViewerSignIn?: () => void } = {}) {
+function AdminLoginCard() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -1939,22 +1452,18 @@ function AdminLoginCard({ viewerIdentity, onViewerSignIn }: { viewerIdentity?: P
         body: JSON.stringify({ username, password }),
       });
       setPassword("");
-      window.location.assign(
-        viewerIdentity || new URLSearchParams(window.location.search).get("next") === "/gods-eye-view/"
-          ? "/gods-eye-view/" + window.location.hash
-          : "/admin/users",
-      );
+      window.location.assign("/admin/users");
     } catch (reason) {
       setPassword("");
       setError(reason instanceof Error ? reason.message : "Login failed");
     }
   }
   return (
-    <form className={viewerIdentity ? "card narrow" : "card"} autoComplete="off" onSubmit={submit}>
+    <form className="card" autoComplete="off" onSubmit={submit}>
       <div>
         <p className="eyebrow">Administrator access</p>
-        <h2>{viewerIdentity?.name ?? "Sign in"}</h2>
-        <p>{viewerIdentity?.description ?? "Manage starter kit users and application settings."}</p>
+        <h2>Sign in</h2>
+        <p>Manage starter kit users and application settings.</p>
       </div>
       <label>
         Username
@@ -2009,7 +1518,6 @@ function AdminLoginCard({ viewerIdentity, onViewerSignIn }: { viewerIdentity?: P
         </p>
       )}
       <button>Sign in</button>
-      {onViewerSignIn && <button className="viewer-login-switch" type="button" onClick={onViewerSignIn}>Back to OCI sign-in</button>}
     </form>
   );
 }
@@ -2017,7 +1525,7 @@ function AdminLoginCard({ viewerIdentity, onViewerSignIn }: { viewerIdentity?: P
 function AdminUsers() {
   const adminSession = useAdminSession();
   const publicConfig = usePublicConfig();
-  const catalog = participantLabCatalog(publicConfig?.labs ?? fallbackCatalog);
+  const catalog = publicConfig?.labs ?? fallbackCatalog;
   const [users, setUsers] = useState<LabUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const usersRequestRef = useRef(0);
@@ -2034,7 +1542,6 @@ function AdminUsers() {
   const operationAbortRef = useRef<AbortController | null>(null);
   const [labManagerUserId, setLabManagerUserId] = useState<string | null>(null);
   const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
-  const [selectedViewerAccess, setSelectedViewerAccess] = useState(false);
   const [confirmingLabRemoval, setConfirmingLabRemoval] = useState(false);
   const [labManagerError, setLabManagerError] = useState("");
   const [pendingLabAction, setPendingLabAction] = useState<{
@@ -2048,37 +1555,6 @@ function AdminUsers() {
   const [pendingDelete, setPendingDelete] = useState<LabUser | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
-  const [viewerModule, setViewerModule] = useState<ModuleStatus | null>(null);
-  const [viewerModuleError, setViewerModuleError] = useState("");
-  const viewerModuleRequest = useRef<AbortController | null>(null);
-  const viewerReady = Boolean(viewerModule?.module_id === "gods_eye_view" && viewerModule.installed === true && viewerModule.enabled === true && viewerModule.status === "ready");
-  async function loadViewerModule() {
-    viewerModuleRequest.current?.abort();
-    const controller = new AbortController();
-    viewerModuleRequest.current = controller;
-    setViewerModule(null);
-    setViewerModuleError("");
-    try {
-      const loaded = await api<ModuleStatus>("/api/admin/gods-eye-view/module", { signal: controller.signal });
-      if (!controller.signal.aborted) setViewerModule(loaded);
-    } catch (reason) {
-      if (!controller.signal.aborted) setViewerModuleError(reason instanceof Error ? reason.message : "Unable to check God’s Eye View installation.");
-    }
-  }
-  async function requestViewerAccess(user: LabUser, enabled: boolean, signal: AbortSignal) {
-    setOperationProgress({ status: "pending", phase: "permissions", message: `${enabled ? "Granting" : "Revoking"} God’s Eye View access.` });
-    try {
-      const result = await api<{ enabled: boolean }>(`/api/admin/gods-eye-view/users/${encodeURIComponent(user.id)}`, {
-        method: "PUT", body: JSON.stringify({ enabled }), signal,
-      });
-      if (result?.enabled !== enabled) throw new Error("God’s Eye View access was not confirmed. Refresh and retry.");
-    } catch (reason) {
-      signal.throwIfAborted();
-      const loaded = await loadUsers();
-      if (loaded?.find(item => item.id === user.id)?.gods_eye_view_access !== enabled) throw reason;
-    }
-    signal.throwIfAborted();
-  }
   async function loadUsers() {
     const request = ++usersRequestRef.current;
     setUsersLoading(true);
@@ -2102,12 +1578,10 @@ function AdminUsers() {
   }
   useEffect(() => {
     void loadUsers();
-    void loadViewerModule();
     return () => {
       usersRequestRef.current++;
       createAbortRef.current?.abort();
       operationAbortRef.current?.abort();
-      viewerModuleRequest.current?.abort();
     };
   }, []);
   const visible = users.filter((user) =>
@@ -2124,8 +1598,8 @@ function AdminUsers() {
   async function createUser(event: FormEvent) {
     event.preventDefault();
     if (createAbortRef.current) return;
-    if (!draft.lab_ids.length && !draft.gods_eye_view || draft.gods_eye_view && !viewerReady) {
-      setError("Select a starter kit or an available shared module.");
+    if (!draft.lab_ids.length) {
+      setError("Select at least one starter kit.");
       return;
     }
     setCreating(true);
@@ -2255,7 +1729,6 @@ function AdminUsers() {
   function openLabManager(user: LabUser) {
     setLabManagerUserId(user.id);
     setSelectedLabIds(user.labs.map((lab) => lab.lab_id));
-    setSelectedViewerAccess(Boolean(user.gods_eye_view_access));
     setConfirmingLabRemoval(false);
     setLabManagerError("");
   }
@@ -2266,21 +1739,16 @@ function AdminUsers() {
       labManagerUser.labs.map((lab) => lab.lab_id),
       labManagerUser.managed === false ? labManagerUser.labs.map(lab => lab.lab_id) : selectedLabIds,
     );
-    const viewerChanged = selectedViewerAccess !== Boolean(labManagerUser.gods_eye_view_access);
     if (labManagerUser.labs.length > 0 && !selectedLabIds.length) {
       setLabManagerError("A participant must keep at least one starter kit.");
       return;
     }
-    if (viewerChanged && selectedViewerAccess && (!viewerReady || !labManagerUser.active || labManagerUser.status !== "active")) {
-      setLabManagerError("Verify the module installation and activate the user before granting access.");
-      return;
-    }
-    if ((changes.remove.length || viewerChanged && !selectedViewerAccess) && !confirmingLabRemoval) {
+    if (changes.remove.length && !confirmingLabRemoval) {
       setConfirmingLabRemoval(true);
       setLabManagerError("");
       return;
     }
-    if (!changes.add.length && !changes.remove.length && !viewerChanged) {
+    if (!changes.add.length && !changes.remove.length) {
       setLabManagerUserId(null);
       return;
     }
@@ -2290,7 +1758,6 @@ function AdminUsers() {
     setLabManagerError("");
     setMessage("");
     try {
-      if (viewerChanged && !selectedViewerAccess) await requestViewerAccess(labManagerUser, false, controller.signal);
       for (const labId of changes.add) {
         setOperationProgress({
           status: "pending",
@@ -2309,7 +1776,6 @@ function AdminUsers() {
         });
         await requestLabAction({ kind: "remove", user: labManagerUser, lab }, controller.signal);
       }
-      if (viewerChanged && selectedViewerAccess) await requestViewerAccess(labManagerUser, true, controller.signal);
       await loadUsers();
       setLabManagerUserId(null);
       setConfirmingLabRemoval(false);
@@ -2409,7 +1875,7 @@ function AdminUsers() {
                 <button
                   className="toolbar-icon"
                   type="button"
-                  onClick={() => { void loadViewerModule(); void loadUsers(); }}
+                  onClick={() => void loadUsers()}
                   aria-label="Refresh users"
                   title="Refresh users"
                 >
@@ -2417,7 +1883,6 @@ function AdminUsers() {
                 </button>
               </div>
             </div>
-            {viewerModuleError && <p className="notice error" role="alert">{viewerModuleError} Refresh to verify shared module access.</p>}
             <div className="table-wrap">
               <table aria-busy={usersLoading}>
                 <thead>
@@ -2471,7 +1936,6 @@ function AdminUsers() {
                               </small>}
                             </span>
                           )}
-                          {user.gods_eye_view_access && <span><strong>God’s Eye View · Custom layers</strong><small>Shared module access</small></span>}
                         </div>
                       </td>
                       <td>
@@ -2527,8 +1991,6 @@ function AdminUsers() {
         </section>
       </Shell>
       <CreateUserModal
-        viewerModule={viewerModule}
-        viewerReady={viewerReady}
         open={createOpen}
         catalog={catalog}
         draft={draft}
@@ -2552,18 +2014,10 @@ function AdminUsers() {
         user={labManagerUser}
         catalog={catalog}
         selectedLabIds={selectedLabIds}
-        selectedViewerAccess={selectedViewerAccess}
-        viewerModule={viewerModule}
-        viewerReady={viewerReady}
         confirmingRemoval={confirmingLabRemoval}
         error={labManagerError}
         onSelectionChange={(labIds) => {
           setSelectedLabIds(labIds);
-          setConfirmingLabRemoval(false);
-          setLabManagerError("");
-        }}
-        onViewerSelectionChange={(enabled) => {
-          setSelectedViewerAccess(enabled);
           setConfirmingLabRemoval(false);
           setLabManagerError("");
         }}
@@ -2721,22 +2175,18 @@ function SettingsRegistrationCodeField({
 }
 
 function RegistrationAccessSettings({
-  deploymentMode,
   registrationCode,
   registrationCodeConfigured,
   onRegistrationCodeChange,
   onSave,
   busy,
 }: {
-  deploymentMode: "laboratory" | "production";
   registrationCode: string;
   registrationCodeConfigured: boolean;
   onRegistrationCodeChange: (value: string) => void;
   onSave: () => void;
   busy: boolean;
 }) {
-  if (deploymentMode === "production") return null;
-
   return (
     <SettingsRegistrationCodeField
       value={registrationCode}
@@ -2782,65 +2232,18 @@ function packageVersionTimestamp(value: string | null | undefined) {
 
 const settingsUpdatePositionKey = "aidp-settings-update-position";
 
-function agentHubHome(workbenchUrl: string) {
-  try {
-    const source = new URL(workbenchUrl);
-    const host = /^([a-z0-9-]+)\.datalake\.oci\.oraclecloud\.com$/.exec(source.hostname);
-    if (source.protocol !== 'https:' || !host || host[1].endsWith('agenthub') || source.username || source.password || source.port) return '';
-    const context = new URLSearchParams(source.hash.slice(1));
-    const allowed = new URLSearchParams();
-    for (const name of ['tenant', 'domain']) {
-      const value = context.get(name);
-      if (value && /^[A-Za-z0-9_.-]{1,128}$/.test(value)) allowed.set(name, value);
-    }
-    return `https://${host[1]}agenthub.datalake.oci.oraclecloud.com/static/ah/` + (allowed.size ? '#?' + allowed.toString() : '');
-  } catch { return ''; }
-}
-
 function ApplicationReleaseSettings({
   release,
   busy,
   error,
-  onConfigureGovernance,
-  onConfigureGodsEye,
-  godsEyeReady,
-  godsEyeInstalling,
-  godsEyeAction,
-  governanceInstalling,
-  governanceAction,
-  governanceReady,
-  marketReady,
-  onCopyAgent,
-  agentLinkBusy,
-  agentLink,
   showOperationMessage = true,
   displayTimeZone = "UTC",
-  copiedAgentModule = "",
-  onConfigureMarket = () => {},
-  marketModule = null,
-  agentHubUrl = '',
 }: {
   release: AdminApplicationRelease | null;
   busy: boolean;
   error: string;
-  onConfigureGovernance: () => void;
-  onConfigureGodsEye: () => void;
-  godsEyeReady: boolean;
-  godsEyeInstalling: boolean;
-  godsEyeAction: string;
-  governanceInstalling: boolean;
-  governanceAction: string;
-  governanceReady: boolean;
-  marketReady: boolean;
-  onCopyAgent: (moduleId: string) => void;
-  agentLinkBusy: boolean;
-  agentLink: string;
   showOperationMessage?: boolean;
   displayTimeZone?: string;
-  copiedAgentModule?: string;
-  onConfigureMarket?: () => void;
-  marketModule?: AdminModule | null;
-  agentHubUrl?: string;
 }) {
   const operationRunning = Boolean(
     release?.operation && applicationUpdateStates.has(release.operation.status),
@@ -2901,7 +2304,6 @@ function ApplicationReleaseSettings({
           {!release.updater_available && (
             <p className="settings-help">In-place updates are enabled only on the deployed application VM.</p>
           )}
-          {agentLink && <label className="settings-field">Agent URL<input aria-label="Agent URL" value={agentLink} readOnly spellCheck={false} /></label>}
           <p className="settings-help release-table-hint" id="release-table-hint">Scroll horizontally to view all columns.</p>
           <div className="release-packages-wrap" role="region" aria-label="Starter kit versions" aria-describedby="release-table-hint" tabIndex={0}>
             <table className="release-packages">
@@ -2911,49 +2313,15 @@ function ApplicationReleaseSettings({
                   <th scope="col">Scope</th>
                   <th scope="col">Version</th>
                   <th scope="col">Updated</th>
-                  <th scope="col" className="release-package-actions">Configuration</th>
                 </tr>
               </thead>
               <tbody>
                 {packages.map((item) => (
                   <tr key={item.package_id}>
                     <td><strong>{item.display_name}</strong></td>
-                    <td>{item.scope === "global" ? "Global module" : "Participant"}</td>
+                    <td>Participant</td>
                     <td>{item.bundled_version}</td>
                     <td>{item.updated_at ? <time dateTime={item.updated_at} title={`Last change to this package version · ${displayTimeZone}`}>{packageVersionDate(item.updated_at, displayTimeZone)}</time> : "Not available"}</td>
-                    <td className="release-package-actions">
-                      {item.package_id === "ai_data_governance" && (
-                        <>
-                        <button type="button" className="module-configure module-agent-link" disabled={!governanceReady || agentLinkBusy}
-                          onClick={() => onCopyAgent(item.package_id)} aria-label="Copy AI Data Governance agent URL"
-                          title={governanceReady ? "Copy AI Data Governance agent URL" : "Agent URL is available after deployment"}>
-                          <CopyIcon />
-                        </button>
-                        {agentHubUrl && (governanceReady ? <a className="module-configure module-agent-link" href={agentHubUrl} target="_blank" rel="noopener noreferrer" aria-label="Open Agent Hub" title="Open Agent Hub"><img src="/icons/agent-link/lucide-bot-message-square.svg" alt="" aria-hidden="true" /></a> : <button type="button" className="module-configure module-agent-link" disabled aria-label="Open Agent Hub" title="Agent Hub is available after deployment"><img src="/icons/agent-link/lucide-bot-message-square.svg" alt="" aria-hidden="true" /></button>)}
-                        {copiedAgentModule === item.package_id && <span className="module-copy-notice" role="status">Copied</span>}
-                        <button type="button" className="module-configure module-deploy" onClick={onConfigureGovernance} aria-label={governanceAction} title={governanceAction} aria-haspopup="dialog">
-                          {governanceInstalling ? <LoadingIndicator inline label="Governance operation in progress" /> : <InstallIcon />}
-                        </button>
-                        </>
-                      )}
-                      {item.package_id === "ai_market_intelligence" && <>
-                        <button type="button" className="module-configure module-agent-link" disabled={!marketModule?.installed || agentLinkBusy} onClick={() => onCopyAgent(item.package_id)} aria-label="Copy AI Market Intelligence agent URL" title="Copy the verified native agent endpoint"><CopyIcon /></button>
-                        {agentHubUrl && (marketReady ? <a className="module-configure module-agent-link" href={agentHubUrl} target="_blank" rel="noopener noreferrer" aria-label="Open Agent Hub" title="Open Agent Hub"><img src="/icons/agent-link/lucide-bot-message-square.svg" alt="" aria-hidden="true" /></a> : <button type="button" className="module-configure module-agent-link" disabled aria-label="Open Agent Hub" title="Agent Hub is available after deployment"><img src="/icons/agent-link/lucide-bot-message-square.svg" alt="" aria-hidden="true" /></button>)}
-                        {copiedAgentModule === item.package_id && <span className="module-copy-notice" role="status">Copied</span>}
-                        <button type="button" className="module-configure module-deploy" onClick={onConfigureMarket} aria-haspopup="dialog" aria-label={marketModule?.operation_id ? 'View AI Market Intelligence installation' : 'Install AI Market Intelligence'} title={marketModule?.operation_id ? 'View installation progress' : 'Configure and install AI Market Intelligence'}><InstallIcon /></button>
-                      </>}
-
-                      {item.package_id === "gods_eye_view" && (
-                        <>
-                        <button type="button" className="module-configure module-deploy" onClick={onConfigureGodsEye} aria-label={`${godsEyeAction} ${item.display_name}`} title={`${godsEyeAction} ${item.display_name}`} aria-haspopup="dialog">
-                          {godsEyeInstalling ? <LoadingIndicator inline label="Deployment in progress" /> : <InstallIcon />}
-                        </button>
-                        {godsEyeReady && <a className="module-configure" href="/admin/gods-eye-view" aria-label={`Configure ${item.display_name}`} title={`Configure ${item.display_name}`}>
-                          <AdminLoginIcon />
-                        </a>}
-                        </>
-                      )}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2971,14 +2339,13 @@ function ApplicationReleaseSettings({
 
 function AdminSettings() {
   const adminSession = useAdminSession();
-  const configuringModule = window.location.pathname === "/admin/gods-eye-view";
   type SettingsTab = "workbench" | "application";
-  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>(configuringModule || window.location.hash === "#application" ? "application" : "workbench");
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>(window.location.hash === "#application" ? "application" : "workbench");
   useEffect(() => {
-    const syncTab = () => setActiveSettingsTab(configuringModule || window.location.hash === "#application" ? "application" : "workbench");
+    const syncTab = () => setActiveSettingsTab(window.location.hash === "#application" ? "application" : "workbench");
     window.addEventListener("hashchange", syncTab);
     return () => window.removeEventListener("hashchange", syncTab);
-  }, [configuringModule]);
+  }, []);
   const [updatePosition] = useState(() => {
     try { return JSON.parse(window.sessionStorage.getItem(settingsUpdatePositionKey) || "null"); }
     catch { return null; }
@@ -2988,7 +2355,6 @@ function AdminSettings() {
   const [aidpUrl, setAidpUrl] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [aidpPlatformId, setAidpPlatformId] = useState("");
-  const [deploymentMode, setDeploymentMode] = useState<"laboratory" | "production">("laboratory");
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeConfigured, setRegistrationCodeConfigured] = useState(false);
   const [confirmRegistrationSave, setConfirmRegistrationSave] = useState(false);
@@ -3011,46 +2377,20 @@ function AdminSettings() {
   }, [successfulReleaseOperationId]);
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [confirmReleaseUpdate, setConfirmReleaseUpdate] = useState(false);
-  const [confirmGovernance, setConfirmGovernance] = useState(false);
-  const [confirmMarket, setConfirmMarket] = useState(false);
-  const [marketState, setMarketState] = useState<{ module: AdminModule | null; busy: boolean; unverified: boolean }>({ module: null, busy: false, unverified: false });
-  const [governanceState, setGovernanceState] = useState<{ module: AdminModule | null; busy: boolean; unverified: boolean }>({ module: null, busy: false, unverified: false });
-  const [agentLink, setAgentLink] = useState("");
-  const [agentLinkBusy, setAgentLinkBusy] = useState(false);
-  const [copiedAgentModule, setCopiedAgentModule] = useState("");
-  useEffect(() => {
-    if (!copiedAgentModule) return;
-    const timer = window.setTimeout(() => setCopiedAgentModule(""), 3000);
-    return () => window.clearTimeout(timer);
-  }, [copiedAgentModule]);
-  const governanceReady = !governanceState.unverified && !governanceState.busy && governanceState.module?.status === "active" && governanceState.module?.validation_stage === 'ACCEPTED';
-  const marketReady = !marketState.unverified && !marketState.busy && marketState.module?.installed === true && marketState.module.status === 'active';
-  const [confirmGodsEye, setConfirmGodsEye] = useState(false);
-  const [godsEyeModule, setGodsEyeModule] = useState<ModuleStatus | null>(null);
-  const [moduleUnverified, setModuleUnverified] = useState(false);
-  const godsEyeReady = !moduleUnverified && godsEyeModule?.installed === true && godsEyeModule.enabled === true && godsEyeModule.status === "ready";
-  const governanceInstalling = !governanceState.unverified && (governanceState.busy || Boolean(governanceState.module && ['installing', 'redeploying', 'deleting'].includes(governanceState.module.status)));
-  const governanceAction = governanceInstalling ? 'View deployment progress for AI Data Governance' : governanceState.unverified ? 'Check installation status for AI Data Governance' : 'Deploy or redeploy AI Data Governance';
-  const godsEyeInstalling = !moduleUnverified && godsEyeModule?.status === "activating" && godsEyeModule.resumable !== true;
-  const godsEyeAction = moduleUnverified || !godsEyeModule ? "Check installation status for" : godsEyeModule.status === "activating" ? "View deployment progress for" : "Install";
   const [releaseError, setReleaseError] = useState("");
   const [releaseProgress, setReleaseProgress] = useState<RegistrationResponse | null>(null);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const releaseAbortRef = useRef<AbortController | null>(null);
-  const moduleAbortRef = useRef<AbortController | null>(null);
   const workbenchTabRef = useRef<HTMLButtonElement>(null);
   const applicationTabRef = useRef<HTMLButtonElement>(null);
   const serviceEndpointRef = useRef<HTMLInputElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const platformIdRef = useRef<HTMLInputElement>(null);
-  const viewerUrlRef = useRef<HTMLInputElement>(null);
-  const viewerUrl = new URL('/gods-eye-view/', window.location.origin).href;
   function applyAdminSettings(result: AdminSettingsResponse, section?: "registration" | "timezone") {
     setAidpServiceEndpoint(result.aidp_service_endpoint);
     setAidpUrl(result.aidp_url);
     setAidpPlatformId(result.aidp_platform_id);
-    setDeploymentMode(result.deployment_mode);
     setRegistrationCodeConfigured(result.registration_code_configured);
     if (!section || section === "timezone") setTimeZone(result.time_zone);
     setSavedTimeZone(result.time_zone);
@@ -3093,25 +2433,6 @@ function AdminSettings() {
       return () => window.clearTimeout(timer);
     } catch { /* Browser storage is optional; the URL still restores the selected tab. */ }
   }, [settingsLoading, applicationRelease?.current_release, activeSettingsTab, updatePosition]);
-  async function loadGodsEyeModule() {
-    if (moduleAbortRef.current) return;
-    const controller = new AbortController(); moduleAbortRef.current = controller;
-    try {
-      const result = await api<ModuleStatus>("/api/admin/gods-eye-view/module", { signal: controller.signal });
-      controller.signal.throwIfAborted();
-      setGodsEyeModule(result?.module_id === "gods_eye_view" ? result : null);
-      setModuleUnverified(false);
-    } catch {
-      if (!controller.signal.aborted) setModuleUnverified(true);
-    } finally {
-      if (moduleAbortRef.current === controller) moduleAbortRef.current = null;
-    }
-  }
-  useEffect(() => {
-    if (confirmGodsEye || godsEyeModule?.status !== "activating") return;
-    const timer = window.setInterval(() => void loadGodsEyeModule(), 5000);
-    return () => window.clearInterval(timer);
-  }, [confirmGodsEye, godsEyeModule?.status]);
   useEffect(() => {
     void api<AdminSettingsResponse>("/api/admin/settings")
       .then(result => applyAdminSettings(result))
@@ -3126,8 +2447,7 @@ function AdminSettings() {
           );
       }).finally(() => setSettingsLoading(false));
     void loadApplicationRelease();
-    void loadGodsEyeModule();
-    return () => { releaseAbortRef.current?.abort(); moduleAbortRef.current?.abort(); };
+    return () => { releaseAbortRef.current?.abort(); };
   }, []);
   function handleSettingsTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -3150,27 +2470,6 @@ function AdminSettings() {
     await api("/api/admin/logout", { method: "POST" });
     window.location.assign("/");
   }
-  async function copyModuleAgent(moduleId: string) {
-    if (agentLinkBusy) return;
-    setAgentLinkBusy(true);
-    setReleaseError("");
-    setAgentLink("");
-    try {
-      const result = await api<{ url: string }>(`/api/admin/modules/${encodeURIComponent(moduleId)}/agent-endpoint`);
-      setAgentLink(result.url);
-      try {
-        await navigator.clipboard.writeText(result.url);
-        setCopiedAgentModule(moduleId);
-        setToast("Agent URL copied.");
-      } catch {
-        setReleaseError("Clipboard is unavailable. Select and copy the Agent URL below.");
-      }
-    } catch (reason) {
-      setReleaseError(reason instanceof Error ? reason.message : "Unable to verify the Agent URL.");
-    } finally {
-      setAgentLinkBusy(false);
-    }
-  }
   async function copyAidpValue(
     value: string,
     inputRef: RefObject<HTMLInputElement | null>,
@@ -3189,7 +2488,7 @@ function AdminSettings() {
     setToast(`${label} copied.`);
   }
   function requestRegistrationSave() {
-    if (settingsSaveRef.current || settingsLoading || deploymentMode !== "laboratory") return;
+    if (settingsSaveRef.current || settingsLoading) return;
     if (!/^[A-Z]{4}-[0-9]{4}$/.test(registrationCode)) {
       setError("Enter four letters followed by four numbers.");
       return;
@@ -3419,7 +2718,6 @@ function AdminSettings() {
               </span>
             </label>
             <RegistrationAccessSettings
-              deploymentMode={deploymentMode}
               registrationCode={registrationCode}
               registrationCodeConfigured={registrationCodeConfigured}
               onRegistrationCodeChange={setRegistrationCode}
@@ -3440,53 +2738,26 @@ function AdminSettings() {
               </span>
               <div>
                 <strong>Application</strong>
-                <p>Manage the application release, starter kit versions and module configuration.</p>
+                <p>Manage the application release and starter kit versions.</p>
               </div>
-              {configuringModule && <a className="module-return" href="/admin/settings#application"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>Return</a>}
-              {!configuringModule && applicationRelease && (applicationRelease.update_available || (applicationRelease.operation && applicationUpdateStates.has(applicationRelease.operation.status))) &&
+              {applicationRelease && (applicationRelease.update_available || (applicationRelease.operation && applicationUpdateStates.has(applicationRelease.operation.status))) &&
                 <button type="button" className="settings-save application-update" disabled={!applicationRelease.updater_available || releaseBusy} onClick={() => setConfirmReleaseUpdate(true)}>
                   <InstallIcon />{releaseBusy ? "Updating…" : "Update"}
                 </button>}
             </div>
-            {configuringModule ? <GodsEyeViewAdmin api={api} timeZone={savedTimeZone} searchIcon={<SearchIcon />} refreshIcon={<RefreshIcon />} viewerUrlControl={
-              <label className="settings-field">
-                God’s Eye View URL
-                <span className="settings-url-control settings-url-control-actions">
-                  <input ref={viewerUrlRef} value={viewerUrl} readOnly spellCheck={false} aria-label="God’s Eye View URL" />
-                  <button type="button" className="copy-url" onClick={() => void copyAidpValue(viewerUrl, viewerUrlRef, 'God’s Eye View URL')} aria-label="Copy God’s Eye View URL" title="Copy God’s Eye View URL"><CopyIcon /></button>
-                  <a className="copy-url open-url" href={viewerUrl} target="_blank" rel="noopener noreferrer" aria-label="Open God’s Eye View" title="Open God’s Eye View"><OpenExternalIcon /></a>
-                </span>
-              </label>
-            } /> : <><ApplicationReleaseSettings
+            <ApplicationReleaseSettings
               release={applicationRelease}
               showOperationMessage={!successfulReleaseOperationId || expiredReleaseOperationId !== successfulReleaseOperationId}
               displayTimeZone={savedTimeZone || "UTC"}
-              copiedAgentModule={copiedAgentModule}
               busy={releaseBusy}
               error={releaseError}
-              onConfigureGovernance={() => { window.location.hash = "application"; setConfirmGovernance(true); }}
-              onConfigureGodsEye={() => { window.location.hash = "application"; setConfirmGodsEye(true); }}
-              godsEyeReady={godsEyeReady}
-              godsEyeInstalling={godsEyeInstalling}
-              godsEyeAction={godsEyeAction}
-              governanceInstalling={governanceInstalling}
-              governanceAction={governanceAction}
-              governanceReady={governanceReady}
-              marketReady={marketReady}
-              onCopyAgent={moduleId => void copyModuleAgent(moduleId)}
-              onConfigureMarket={() => setConfirmMarket(true)}
-              marketModule={marketState.module}
-              agentHubUrl={agentHubHome(aidpUrl) || ''}
-              agentLinkBusy={agentLinkBusy}
-              agentLink={agentLink}
             />
-              <div className="settings-time-zone-controls">
-                <SearchableCombobox className="settings-field time-zone-picker" label="Display time zone"
-                  placeholder="Search city or UTC offset" value={timeZone} options={timeZones}
-                  disabled={settingsLoading || settingsSaving} onChange={setTimeZone} />
-                <button type="button" className="settings-save" aria-haspopup="dialog" disabled={settingsLoading || settingsSaving || !selectedTimeZone || timeZone === savedTimeZone} onClick={requestTimeZoneSave}>Save time zone</button>
-              </div>
-            </>}
+            <div className="settings-time-zone-controls">
+              <SearchableCombobox className="settings-field time-zone-picker" label="Display time zone"
+                placeholder="Search city or UTC offset" value={timeZone} options={timeZones}
+                disabled={settingsLoading || settingsSaving} onChange={setTimeZone} />
+              <button type="button" className="settings-save" aria-haspopup="dialog" disabled={settingsLoading || settingsSaving || !selectedTimeZone || timeZone === savedTimeZone} onClick={requestTimeZoneSave}>Save time zone</button>
+            </div>
           </section>
           {error && (
             <p className="notice error" role="alert">
@@ -3496,9 +2767,6 @@ function AdminSettings() {
         </div>
       </section>
       <Toast message={toast} onDismiss={() => setToast("")} />
-      <GovernanceModuleManager visible={confirmGovernance} onStatusChange={setGovernanceState} onClose={() => setConfirmGovernance(false)} />
-      <GovernanceModuleManager moduleId="ai_market_intelligence" visible={confirmMarket} onStatusChange={setMarketState} onClose={() => setConfirmMarket(false)} />
-      {confirmGodsEye && <GodsEyeViewModuleManager api={api} onClose={() => { setConfirmGodsEye(false); void loadGodsEyeModule(); }} onChanged={() => void loadGodsEyeModule()} />}
       <ConfirmModal
         open={confirmRegistrationSave}
         kind="question"
@@ -3557,11 +2825,6 @@ function AdminSettings() {
 }
 
 export function App() {
-  if (window.location.pathname === "/viewer/login") return <ViewerLogin />;
-  if (window.location.pathname === "/admin/login" && new URLSearchParams(window.location.search).get("next") === "/gods-eye-view/") return <ViewerLogin />;
-  if (window.location.pathname === "/local/gods-eye-view/login") return <Shell><LocalGodsEyeViewAccess api={api} /></Shell>;
-  if (window.location.pathname === "/local/gods-eye-view/workspace") return <Shell><LocalGodsEyeViewAccess api={api} workspace /></Shell>;
-  if (window.location.pathname === "/admin/gods-eye-view") return <AdminSettings />;
   if (window.location.pathname === "/admin/settings") return <AdminSettings />;
   if (window.location.pathname === "/admin/login")
     return <RegisterPage initialAdminLogin />;

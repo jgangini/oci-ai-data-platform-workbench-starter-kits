@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import secrets
 import tempfile
 import threading
 from pathlib import Path
@@ -14,7 +13,6 @@ import httpx
 from oci._vendor import requests
 
 from app.config import Settings
-from app.security import hash_secret, verify_secret
 from .contracts import IdentityConflict, IdentityPending, IdentityRejected, IdentityRace, RegistrationResult
 
 
@@ -172,15 +170,15 @@ class IdentityClient:
         )
         response.raise_for_status()
 
-    async def prepare_registration(self, name: str, email: str, *, developer_access: bool = True) -> RegistrationResult:
+    async def prepare_registration(self, name: str, email: str) -> RegistrationResult:
         try:
-            return await self._prepare_registration(name, email, developer_access=developer_access)
+            return await self._prepare_registration(name, email)
         except (IdentityConflict, IdentityPending, IdentityRejected):
             raise
         except (httpx.HTTPError, requests.exceptions.RequestException) as exc:
             raise IdentityPending("Identity Domains is still reconciling this registration") from exc
 
-    async def _prepare_registration(self, name: str, email: str, *, developer_access: bool = True) -> RegistrationResult:
+    async def _prepare_registration(self, name: str, email: str) -> RegistrationResult:
         user = await self.find_user(email)
         created = False
         if not user:
@@ -200,14 +198,11 @@ class IdentityClient:
         user_id, user_ocid = _user_coordinates(user)
         was_developer = await self._is_member(self.settings.developer_group_id, user_id)
         was_pending = await self._is_member(self.settings.pending_group_id, user_id)
-        was_reader = not developer_access and bool(await self.gods_eye_view_user(user_id))
-        if not (was_developer or was_pending or was_reader):
+        if not (was_developer or was_pending):
             await self.ensure_activation_email(user_id)
         try:
-            if developer_access or not (was_developer or was_reader):
-                await self.add_member(self.settings.pending_group_id, user_id)
-            if developer_access:
-                await self.remove_member(self.settings.developer_group_id, user_id)
+            await self.add_member(self.settings.pending_group_id, user_id)
+            await self.remove_member(self.settings.developer_group_id, user_id)
         except Exception as exc:
             raise IdentityPending("User created; pending access reconciliation is still in progress") from exc
         return RegistrationResult(
@@ -218,10 +213,9 @@ class IdentityClient:
             was_developer,
         )
 
-    async def activate_registration(self, user_id: str, *, developer_access: bool = True) -> None:
+    async def activate_registration(self, user_id: str) -> None:
         try:
-            if developer_access:
-                await self.add_member(self.settings.developer_group_id, user_id)
+            await self.add_member(self.settings.developer_group_id, user_id)
             await self.remove_member(self.settings.pending_group_id, user_id)
         except Exception as exc:
             raise IdentityPending("Lab material is ready; developer access activation is still in progress") from exc
@@ -288,103 +282,20 @@ class IdentityClient:
     async def _users_in_group(self, group_id: str) -> list[dict[str, Any]]:
         return await self._users_matching(f"groups.value eq {_scim_literal(group_id)}")
 
-    async def _discover_gods_eye_view_group(self) -> str | None:
-        if not self.settings.managed_viewer_app_name:
-            return None
-        response = await self._request("GET", "/admin/v1/Groups", params={
-            "filter": f"externalId eq {_scim_literal(self.settings.lab_marker + ':gods_eye_view')}",
-            "count": 2, "attributes": "id,externalId"})
-        response.raise_for_status()
-        body = response.json()
-        groups = body.get("Resources", [])
-        if body.get("totalResults") == 0 and groups == []:
-            return None
-        if body.get("totalResults") != 1 or len(groups) != 1:
-            raise IdentityPending("God's Eye View reader group is unavailable or ambiguous")
-        group_id = groups[0].get("id", "")
-        if (not isinstance(group_id, str) or not group_id or "/" in group_id
-                or groups[0].get("externalId") != f"{self.settings.lab_marker}:gods_eye_view"):
-            raise IdentityPending("God's Eye View reader group does not belong to this deployment")
-        return group_id
-
-    async def _gods_eye_view_group(self) -> str | None:
-        group_id = self.settings.gods_eye_view_group_id.strip() or await self._discover_gods_eye_view_group()
-        if not group_id:
-            return None
-        if group_id in {self.settings.developer_group_id, self.settings.pending_group_id}:
-            raise IdentityPending("God's Eye View requires its own reader group")
-        response = await self._request("GET", f"/admin/v1/Groups/{group_id}",
-                                       params={"attributes": "id,externalId"})
-        if response.status_code == 404:
-            return None
-        response.raise_for_status()
-        group = response.json()
-        if (group.get("id") != group_id
-                or group.get("externalId") != f"{self.settings.lab_marker}:gods_eye_view"):
-            raise IdentityPending("God's Eye View reader group does not belong to this deployment")
-        return group_id
-
-    async def get_gods_eye_view_account(self, user_id: str) -> dict[str, Any] | None:
-        response = await self._request("GET", f"/admin/v1/Users/{user_id}")
-        if response.status_code == 404:
-            return None
-        response.raise_for_status()
-        user = response.json()
-        resolved_id, user_ocid = _user_coordinates(user)
-        if resolved_id != user_id:
-            raise IdentityPending("Identity Domains returned a different user")
-        account = _platform_role_user(user, user_ocid, self.settings.lab_marker)
-        account["active"] = user.get("active") is True
-        if await self._is_member(self.settings.pending_group_id, user_id):
-            account["status"] = "pending"
-        return account
-
-    async def gods_eye_view_user(self, user_id: str) -> dict[str, Any] | None:
-        account = await self.get_gods_eye_view_account(user_id)
-        if not account or not account["active"] or account["status"] != "active":
-            return None
-        group_id = await self._gods_eye_view_group()
-        if not group_id or not await self._is_member(group_id, user_id):
-            return None
-        return {**account, "gods_eye_view_access": True, "mode": "OCI"}
-
-    async def grant_gods_eye_view(self, user_id: str, enabled: bool) -> None:
-        if type(enabled) is not bool:
-            raise ValueError("Gods Eye View permission must be a boolean")
-        account = await self.get_gods_eye_view_account(user_id)
-        if not account:
-            raise IdentityRejected("Identity Domains user not found")
-        if enabled and (not account["active"] or account["status"] != "active"):
-            raise IdentityRejected("Only active users can receive God's Eye View access")
-        group_id = await self._gods_eye_view_group()
-        if not group_id:
-            raise IdentityPending("God's Eye View reader group is not configured yet")
-        await (self.add_member(group_id, user_id) if enabled else self.remove_member(group_id, user_id))
-        for attempt in range(SCIM_CONSISTENCY_ATTEMPTS):
-            if await self._is_member(group_id, user_id) is enabled:
-                return
-            if attempt + 1 < SCIM_CONSISTENCY_ATTEMPTS:
-                await asyncio.sleep(SCIM_CONSISTENCY_DELAY_SECONDS)
-        raise IdentityPending("Identity Domains has not confirmed God's Eye View access yet")
 
     async def list_lab_users(self) -> list[dict[str, Any]]:
         managed_users = await self._users_matching(f"externalId eq {_scim_literal(self.settings.lab_marker)}")
         active_users = await self._users_in_group(self.settings.developer_group_id)
         pending_users = await self._users_in_group(self.settings.pending_group_id)
-        reader_group = await self._gods_eye_view_group()
-        readers = await self._users_in_group(reader_group) if reader_group else []
-        reader_ids = {str(user["id"]) for user in readers if user.get("id")}
-        pending_ids = {str(user["id"]) for user in pending_users if user.get("id")}
         membership = {str(user["id"]): "pending" for user in pending_users if user.get("id")}
         membership.update({str(user["id"]): "active" for user in active_users if user.get("id")})
         users_by_id: dict[str, dict[str, Any]] = {}
-        for user in (*managed_users, *pending_users, *active_users, *readers):
+        for user in (*managed_users, *pending_users, *active_users):
             if user.get("id"):
                 users_by_id.setdefault(str(user["id"]), user)
         users: list[dict[str, Any]] = []
         for user_id, user in users_by_id.items():
             status = membership.get(user_id, "active" if user.get("active") is True else "pending")
-            enabled = user_id in reader_ids and user_id not in pending_ids and user.get("active") is True
             users.append(
                 {
                     "id": user_id,
@@ -394,7 +305,6 @@ class IdentityClient:
                     "status": status,
                     "active": bool(user.get("active", False)),
                     "managed": user.get("externalId") == self.settings.lab_marker,
-                    "gods_eye_view_access": enabled,
                 }
             )
         return sorted(users, key=lambda item: (item["status"], item["email"].lower()))
@@ -469,7 +379,6 @@ class LocalIdentityClient:
         self.settings = settings
         self.users: dict[str, dict[str, Any]] = {}
         self.group_members: dict[str, set[str]] = {}
-        self.password_hashes: dict[str, str] = {}
         directory = getattr(settings, "local_identity_artifact_dir", "")
         if directory and not settings.local_development_mode:
             raise ValueError("Local identity artifacts require LOCAL_DEVELOPMENT_MODE")
@@ -480,21 +389,20 @@ class LocalIdentityClient:
             if state_path.exists():
                 state = json.loads(state_path.read_text(encoding="utf-8"))
                 self.users = state["users"]
-                self.password_hashes = state["password_hashes"]
                 self.group_members = {key: set(value) for key, value in state["group_members"].items()}
 
     def _save(self) -> None:
         if self.artifact_dir:
             # ponytail: one backend process owns the local adapter; use a database before adding workers.
             _write_private_json(self.artifact_dir / "identity-state.json", {
-                "users": self.users, "password_hashes": self.password_hashes,
+                "users": self.users,
                 "group_members": {key: sorted(value) for key, value in self.group_members.items()},
             })
 
     @staticmethod
     def _project_user(user: dict[str, Any]) -> dict[str, Any]:
-        return {key: value for key, value in {**user, "gods_eye_view_access": bool(user.get("gods_eye_view_access", False))}.items()
-                if key not in {"territorial_access", "prisma_access"}}
+        fields = {"id", "ocid", "name", "email", "status", "active", "managed", "developer_access", "material"}
+        return {key: value for key, value in user.items() if key in fields}
 
     async def close(self) -> None:
         return None
@@ -502,13 +410,12 @@ class LocalIdentityClient:
     async def healthcheck(self) -> None:
         return None
 
-    async def prepare_registration(self, name: str, email: str, *, developer_access: bool = True) -> RegistrationResult:
+    async def prepare_registration(self, name: str, email: str) -> RegistrationResult:
         normalized_email = email.casefold()
         for user in self.users.values():
             if user["email"].casefold() == normalized_email:
                 was_developer = user.setdefault("developer_access", user["status"] == "active")
-                if developer_access:
-                    user["status"] = "pending"
+                user["status"] = "pending"
                 self._save()
                 return RegistrationResult(
                     "reconciled",
@@ -520,13 +427,10 @@ class LocalIdentityClient:
         user_id = uuid4().hex
         user_ocid = f"ocid1.user.oc1..local{uuid4().hex}"
         if self.artifact_dir:
-            password = secrets.token_urlsafe(24)
             _write_private_json(self.artifact_dir / f"welcome-{user_id}.json", {
-                "mode": "SIMULADO", "username": email, "password": password,
-                "login_url": "/local/gods-eye-view/login", "aidp_url": "/local/gods-eye-view/workspace",
+                "mode": "SIMULADO", "username": email,
                 "message": "Acceso local de demostración. No se envió correo ni se creó una cuenta OCI.",
             })
-            self.password_hashes[user_id] = hash_secret(password)
         self.users[user_id] = {
             "id": user_id,
             "ocid": user_ocid,
@@ -536,54 +440,25 @@ class LocalIdentityClient:
             "active": True,
             "managed": True,
             "developer_access": False,
-            "gods_eye_view_access": False,
         }
         self._save()
         return RegistrationResult("created", user_id, user_ocid, email)
 
-    async def activate_registration(self, user_id: str, *, developer_access: bool = True) -> None:
+    async def activate_registration(self, user_id: str) -> None:
         user = self.users.get(user_id)
         if not user:
             raise IdentityPending("Local lab user is not ready")
         user["status"] = "active"
-        user["developer_access"] = developer_access or user.get("developer_access", False)
+        user["developer_access"] = True
         self._save()
 
-    async def authenticate(self, email: str, password: str) -> str | None:
-        for user_id, user in self.users.items():
-            if (user["email"].casefold() == email.strip().casefold()
-                    and user.get("active") and user.get("status") == "active" and self._project_user(user)["gods_eye_view_access"]
-                    and verify_secret(password, self.password_hashes.get(user_id, ""))):
-                return user_id
-        return None
-
-    async def gods_eye_view_user(self, user_id: str) -> dict[str, Any] | None:
-        user = self.users.get(user_id)
-        if not user or not user.get("active") or user.get("status") != "active" or not self._project_user(user)["gods_eye_view_access"]:
-            return None
-        return {**self._project_user(user), "mode": "SIMULADO"}
-
-    async def get_gods_eye_view_account(self, user_id: str) -> dict[str, Any] | None:
-        user = self.users.get(user_id)
-        return self._project_user(user) if user else None
-
-    async def grant_gods_eye_view(self, user_id: str, enabled: bool) -> None:
-        if type(enabled) is not bool:
-            raise ValueError("Gods Eye View permission must be a boolean")
-        user = self.users.get(user_id)
-        if not user:
-            raise IdentityPending("Local lab user is not ready")
-        if enabled and (not user.get("active") or user.get("status") != "active"):
-            raise IdentityRejected("Only active users can receive God's Eye View access")
-        user["gods_eye_view_access"] = enabled
-        self._save()
 
     async def record_material(self, user_id: str, material: dict[str, Any]) -> None:
         user = self.users.get(user_id)
         if not user:
             raise IdentityPending("Local lab user is not ready")
         public = {key: material[key] for key in ("participant_key", "participant_code", "labs") if key in material}
-        public.update(mode="SIMULADO", aidp_url="/local/gods-eye-view/workspace", login_url="/local/gods-eye-view/login")
+        public.update(mode="SIMULADO")
         user["material"] = public
         self._save()
         if self.artifact_dir:
@@ -619,7 +494,6 @@ class LocalIdentityClient:
     async def delete_lab_user(self, user_id: str) -> bool:
         if self.users.pop(user_id, None) is None:
             return False
-        self.password_hashes.pop(user_id, None)
         self._save()
         if self.artifact_dir:
             (self.artifact_dir / f"welcome-{user_id}.json").unlink(missing_ok=True)

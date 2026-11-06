@@ -19,7 +19,7 @@ _STABLE_RELEASE_REF = re.compile(
 )
 _COMPARTMENT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _OCI_REGION = re.compile(r"^[a-z]{2}(?:-[a-z0-9]+)+-[1-9][0-9]*$")
-_ALLOWED_IDENTITY_DOMAIN_GROUPS = frozenset({"developers", "pending", "gods_eye_view_readers"})
+_ALLOWED_IDENTITY_DOMAIN_GROUPS = frozenset({"developers", "pending"})
 _RESOURCE_DECLARATION = re.compile(
     r'resource\s+"([^"]+)"\s+"([^"]+)"',
     re.IGNORECASE,
@@ -147,7 +147,7 @@ def _control_name_finding(value: str) -> str | None:
 
 def _forbidden_control_resource(text: str) -> str | None:
     for resource_type, name in _RESOURCE_DECLARATION.findall(text):
-        if resource_type.casefold() == "oci_identity_domains_app" and name != "viewer":
+        if resource_type.casefold() == "oci_identity_domains_app":
             return "Identity Domains OAuth client"
         finding = _control_name_finding(resource_type) or _control_name_finding(name)
         if finding:
@@ -217,11 +217,8 @@ def _planned_values(resource: dict[str, Any]) -> dict[str, Any]:
 
 def _forbidden_plan_resource(resource_type: str, address: str, values: dict[str, Any]) -> str | None:
     resource_name = address.rsplit(".", 1)[-1].split("[", 1)[0].lower()
-    if resource_type == "oci_identity_domains_app" and (
-        resource_name != "viewer"
-        or (values.get("client_type"), values.get("allowed_grants")) != ("public", ["authorization_code"])
-    ):
-        return "Identity Domains OAuth client (requires a public authorization-code viewer client)"
+    if resource_type == "oci_identity_domains_app":
+        return "Identity Domains OAuth client"
     finding = _control_name_finding(resource_type) or _control_name_finding(resource_name)
     if finding:
         return finding

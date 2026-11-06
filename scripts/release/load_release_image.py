@@ -10,12 +10,14 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from vm_release_updater import REPOSITORY, SHA, SHA256, _download, semantic_version
+from vm_release_updater import (
+    DEPLOYMENT_PROFILE, UPDATER_PROTOCOL, REPOSITORY, SHA, SHA256,
+    _download, _image_environment, semantic_version,
+)
 
 
 COMPONENTS = {
     "aidp-lab": ("aidp-lab-image-amd64.tar.gz", "aidp-release.json"),
-    "gods-eye-view": ("gods-eye-view-image-amd64.tar.gz", "gods-eye-view-release.json"),
 }
 
 
@@ -26,6 +28,9 @@ def selected_assets(release: dict, tag: str, component: str) -> dict:
             or release.get("immutable") is not True or release.get("draft")
             or release.get("prerelease")):
         raise ValueError("Selected release is not immutable and stable")
+    assets = release.get("assets")
+    if not isinstance(assets, list) or len(assets) != 2 or {item.get("name") for item in assets if isinstance(item, dict)} != set(COMPONENTS[component]):
+        raise ValueError("Release asset set does not match Starter Kits")
     selected = {}
     for name in COMPONENTS[component]:
         matches = [item for item in release.get("assets", []) if item.get("name") == name]
@@ -48,7 +53,8 @@ def validate_manifest(manifest: dict, *, tag: str, commit: str, component: str, 
     image = manifest.get("image", {})
     expected_tag = f"{component}:{commit}"
     if (not SHA.fullmatch(commit) or manifest.get("schema_version") != 1
-            or manifest.get("updater_protocol") != 1 or manifest.get("release") != tag
+            or manifest.get("updater_protocol") != UPDATER_PROTOCOL
+            or manifest.get("deployment_profile") != DEPLOYMENT_PROFILE or manifest.get("release") != tag
             or manifest.get("commit_sha") != commit
             or manifest.get("repository") != REPOSITORY.removesuffix(".git")
             or image.get("asset_name") != COMPONENTS[component][0]
@@ -82,6 +88,12 @@ def load(tag: str, commit: str, component: str) -> str:
                                       commit=commit, component=component, digest=assets[image_name][1])
         _download(assets[image_name][0], root / image_name, assets[image_name][1], 4 * 1024 ** 3)
         subprocess.run(["docker", "load", "--input", str(root / image_name)], check=True, stdout=sys.stderr)
+        environment = _image_environment(image_tag)
+        if (environment.get("APP_DEPLOYMENT_PROFILE") != DEPLOYMENT_PROFILE
+                or environment.get("APP_RELEASE_TAG") != tag
+                or environment.get("APP_RELEASE_SHA") != commit
+                or environment.get("APP_REPOSITORY") != REPOSITORY.removesuffix(".git")):
+            raise ValueError("Release image metadata does not match Starter Kits")
         platform = subprocess.check_output(
             ["docker", "image", "inspect", image_tag, "--format", "{{.Os}}/{{.Architecture}}"], text=True,
         ).strip()

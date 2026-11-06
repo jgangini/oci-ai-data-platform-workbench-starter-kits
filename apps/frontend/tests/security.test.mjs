@@ -17,7 +17,6 @@ test("browser storage is limited to non-secret operation keys", () => {
   assert.doesNotMatch(source.replace(positionWrite, ''), /(?:localStorage|sessionStorage)\.setItem/);
   assert.doesNotMatch(source, /onPreviewStep|previewStep|Restart preview|Next step/);
   assert.match(pollingSource, /aidp-lab\.operation\.\$\{kind\}\.\$\{userId\}\.\$\{labId\}/);
-  assert.match(pollingSource, /aidp-module\.operation\.\$\{kind\}\.\$\{moduleId\}/);
   assert.match(pollingSource, /JSON\.stringify\(operation\)/);
   assert.doesNotMatch(pollingSource, /password|registrationCode|email/i);
 });
@@ -42,11 +41,11 @@ test("registration has no password field while administrator login remains prote
   assert.doesNotMatch(source, /Generate password/);
 });
 
-test("deployment mode selects registration or inline administrator login", () => {
+test("laboratory registration and inline administrator login remain accessible", () => {
   assert.match(source, /function RegisterPage\(\{[\s\S]*initialAdminLogin = false/);
   assert.match(source, /const \[adminLoginVisible, setAdminLoginVisible\] = useState\(initialAdminLogin\)/);
-  assert.match(source, /const production = publicConfig\?\.deployment_mode === "production"/);
-  assert.match(source, /function registrationAccessView[\s\S]*showAdminLogin: !configLoaded \|\| production \|\| adminLoginVisible/);
+  assert.doesNotMatch(source, /deployment_mode|deploymentMode/);
+  assert.match(source, /function registrationAccessView[\s\S]*showAdminLogin: !configLoaded \|\| adminLoginVisible/);
   assert.match(source, /onAdminLogin=\{accessView\.showAdminLink \? showAdminLogin : undefined\}/);
   assert.match(source, /onHome=\{accessView\.showHomeLink \? showRegistration : undefined\}/);
   assert.match(source, /accessView\.showAdminLogin \? \([\s\S]*<AdminLoginCard \/>/);
@@ -199,7 +198,6 @@ test("application settings report releases and request only the fixed VM update 
   assert.match(source, /Installed release/);
   assert.match(source, /<th scope="col">Scope<\/th>\s*<th scope="col">Version<\/th>\s*<th scope="col">Updated<\/th>/);
   assert.match(source, /Existing participant installations remain unchanged/);
-  assert.match(source, /governanceModule\.update_available \? "Update" : "Redeploy"/);
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /deadlineMs: 30 \* 60 \* 1_000/);
   assert.match(source, /Installed \$\{installed\.pack_version\}/);
@@ -209,33 +207,6 @@ test("application settings report releases and request only the fixed VM update 
   assert.match(styles, /\.application-release \{/);
   assert.match(styles, /\.kit-version-state\.update \{/);
   assert.doesNotMatch(source, /docker\.sock|docker run/);
-});
-
-test("administrators manage one shared governance module from Settings outside participant labs", () => {
-  const manager = source.slice(source.indexOf('function GovernanceModuleManager'), source.indexOf('function usePublicConfig'));
-  assert.match(source, /is_aidp_admin: boolean/);
-  assert.match(source, /operation_type\?: ModuleOperationKind \| null/);
-  assert.equal((source.match(/<GovernanceModuleManager\b/g) ?? []).length, 2);
-  assert.match(source, /<GovernanceModuleManager moduleId="ai_market_intelligence"/);
-  assert.doesNotMatch(source, /<GovernanceModuleManager moduleId="ai_social_network"/);
-  assert.doesNotMatch(source, /function GovernanceModuleModal|window\.location\.assign\("\/admin\/users\?module=/);
-  assert.match(manager, /users\.filter\(user => user\.is_aidp_admin === true\)/);
-  assert.match(manager, /const disabled = moduleOperating \|\| !usersLoaded \|\| !moduleManagerUser \|\| !governanceModule/);
-  assert.match(manager, /user\.id === moduleManagerUserId && user\.is_aidp_admin === true/);
-  assert.match(manager, /if \(disabled \|\| moduleAbortRef\.current/);
-  assert.match(manager, /\/api\/admin\/modules/);
-  assert.match(manager, /\/modules\/\$\{encodeURIComponent\(governanceModule\.module_id\)\}/);
-  assert.match(manager, /getOrCreateModuleOperation/);
-  assert.match(manager, /governanceModule\.operation_id/);
-  assert.match(manager, /moduleOperationsRef\.current\.set/);
-  assert.match(manager, /shared OCI credentials are retained/);
-  assert.doesNotMatch(manager, /type="checkbox"|<ConfirmModal|dedicated AI Compute, credential, notebook/);
-  assert.match(manager, /reuse_existing: reuseExisting/);
-  assert.doesNotMatch(manager, /confirmReinstall|previous_operation_id|\/reinstall/);
-  assert.doesNotMatch(source, /production && user\.is_aidp_admin|lab_id: "agent"/);
-  assert.match(source, /function participantLabCatalog/);
-  assert.match(source, /\["agent", "ai_data_governance"\]\.includes\(lab_id\)/);
-  assert.ok(!labCatalog.labs.includes("agent"));
 });
 
 test("dialogs make the application shell and footer inert", () => {

@@ -231,8 +231,6 @@ def test_source_accepts_developer_pending_groups_and_ignores_docs(tmp_path: Path
             (
                 'resource "oci_identity_domains_group" "developers" {}',
                 'resource "oci_identity_domains_group" "pending" {}',
-                'resource "oci_identity_domains_group" "gods_eye_view_readers" {}',
-                'resource "oci_identity_domains_app" "viewer" {}',
             )
         ),
         encoding="utf-8",
@@ -280,25 +278,21 @@ def test_plan_rejects_technical_identity_resources_but_allows_lab_groups() -> No
         with pytest.raises(ValueError, match=message):
             release_gate.validate_plan(_plan(resource_type=resource_type, address=address))
 
-    for name in ("developers", "pending", "gods_eye_view_readers"):
+    for name in ("developers", "pending"):
         release_gate.validate_plan(
             _plan(resource_type="oci_identity_domains_group", address=f"oci_identity_domains_group.{name}")
         )
 
 
-def test_release_accepts_checked_in_viewer_sign_in_and_rejects_privileged_clients() -> None:
+def test_kits_release_rejects_viewer_oauth_clients() -> None:
     release_gate.validate_source(Path(__file__).parents[1])
     plan = _plan(resource_type="oci_identity_domains_app", address="oci_identity_domains_app.viewer")
     values = plan["resource_changes"][0]["change"]["after"]
-    values.update(client_type="public", allowed_grants=["authorization_code"])
-    release_gate.validate_plan(plan)
-    for change in ({"client_type": "confidential"}, {"allowed_grants": ["authorization_code", "client_credentials"]}):
-        previous = values.copy()
-        values.update(change)
-        with pytest.raises(ValueError, match="public authorization-code"):
+    for client_type, grants in (("public", ["authorization_code"]),
+                                ("confidential", ["client_credentials"])):
+        values.update(client_type=client_type, allowed_grants=grants)
+        with pytest.raises(ValueError, match="Identity Domains OAuth client"):
             release_gate.validate_plan(plan)
-        values.clear()
-        values.update(previous)
 
 
 def test_plan_rejects_aidp_lab_provisioner_literal() -> None:

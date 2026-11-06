@@ -11,14 +11,6 @@ from urllib.parse import urlparse
 from pytz import all_timezones_set, common_timezones
 
 from .security import hash_secret
-from app.api.viewer_identity import DEFAULT_IDENTITY, ViewerIdentity
-
-
-def _deployment_mode(value: str) -> str:
-    normalized = value.strip().lower()
-    if normalized not in {"laboratory", "production"}:
-        raise ValueError("DEPLOYMENT_MODE must be laboratory or production")
-    return normalized
 
 
 def _artifacts_bucket_name(value: str) -> str:
@@ -58,31 +50,24 @@ def _application_repository(value: str) -> str:
 class Settings:
     admin_username: str = "admin"
     admin_password_hash: str = ""
-    deployment_mode: str = "laboratory"
     registration_code_hash: str = ""
     operator_username: str = ""
     identity_domain_url: str = ""
     developer_group_id: str = ""
     pending_group_id: str = ""
-    gods_eye_view_group_id: str = ""
-    viewer_oidc_app_name: str = ""
-    viewer_oidc_redirect_uri: str = ""
     aidp_workbench_url: str = ""
     aidp_platform_id: str = ""
     aidp_workspace_name: str = ""
     aidp_region: str = ""
     compartment_id: str = ""
-    autonomous_database_id: str = ""
-    autonomous_runtime_file: str = "/etc/aidp-lab/autonomous/runtime.json"
-    agent_model_id: str = ""
     oci_config_file: str = "/etc/aidp-lab/oci/config"
     objectstorage_namespace: str = ""
     bucket_name: str = ""
-    gods_eye_control_bucket: str = ""
     artifacts_bucket_name: str = "oci_artifacts"
     aidp_settings_file: str = "/var/lib/aidp-lab/settings.json"
     lab_marker: str = "aidp-lab"
     session_secret_file: str = "/var/lib/aidp-lab/session.key"
+    application_deployment_profile: str = ""
     application_release: str = "development"
     application_commit_sha: str = "development"
     application_repository: str = _SOURCE_REPOSITORY
@@ -90,26 +75,8 @@ class Settings:
     vm_update_enabled: bool = False
     cookie_secure: bool = True
     local_development_mode: bool = False
-    gods_eye_view_mode: str | None = None
-    gods_eye_view_enabled: bool = False
-    portal_managed_modules: bool = False
-    gods_eye_oci_text_model: str = "xai.grok-4.6"
-    gods_eye_oci_voice_model: str = "google.gemini-2.5-flash-lite"
-    gods_eye_oci_voice: str = "ara"
     local_identity_artifact_dir: str = ""
 
-    def __post_init__(self):
-        if self.gods_eye_view_mode not in {None, "local", "oci"}:
-            raise ValueError("GODS_EYE_VIEW_MODE must be local or oci")
-
-    @property
-    def gods_eye_view_local_mode(self) -> bool:
-        return self.local_development_mode if self.gods_eye_view_mode is None else self.gods_eye_view_mode == "local"
-
-    @property
-    def managed_viewer_app_name(self) -> str:
-        marker = re.fullmatch(r"aidp-lab-([a-z0-9]{4,12})", self.lab_marker)
-        return f"aidp_viewer_{marker[1]}" if marker else ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -117,36 +84,26 @@ class Settings:
             admin_username=os.getenv("ADMIN_USERNAME", "admin"),
             local_identity_artifact_dir=os.getenv("LOCAL_IDENTITY_ARTIFACT_DIR", ""),
             admin_password_hash=os.getenv("ADMIN_PASSWORD_HASH", ""),
-            deployment_mode=_deployment_mode(os.getenv("DEPLOYMENT_MODE", "laboratory")),
             registration_code_hash=os.getenv("REGISTRATION_CODE_HASH", ""),
             operator_username=os.getenv("OPERATOR_USERNAME", "").strip(),
             identity_domain_url=os.getenv("IDENTITY_DOMAIN_URL", "").rstrip("/"),
             developer_group_id=os.getenv("IDENTITY_DEVELOPER_GROUP_ID", ""),
             pending_group_id=os.getenv("IDENTITY_PENDING_GROUP_ID", ""),
-            gods_eye_view_group_id=os.getenv("IDENTITY_GODS_EYE_VIEW_GROUP_ID", ""),
-            viewer_oidc_app_name=os.getenv("IDENTITY_VIEWER_APP_NAME", ""),
-            viewer_oidc_redirect_uri=os.getenv("VIEWER_OIDC_REDIRECT_URI", ""),
             aidp_workbench_url=os.getenv("AIDP_WORKBENCH_URL", ""),
             aidp_platform_id=os.getenv("AIDP_PLATFORM_ID", ""),
             aidp_workspace_name=os.getenv("AIDP_WORKSPACE_NAME", ""),
             aidp_region=os.getenv("AIDP_REGION", ""),
             compartment_id=os.getenv("COMPARTMENT_ID", ""),
-            autonomous_database_id=os.getenv("AUTONOMOUS_DATABASE_ID", ""),
-            autonomous_runtime_file=os.getenv(
-                "AUTONOMOUS_RUNTIME_FILE",
-                "/etc/aidp-lab/autonomous/runtime.json",
-            ),
-            agent_model_id=os.getenv("AGENT_MODEL_ID", ""),
             oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
             objectstorage_namespace=os.getenv("OBJECTSTORAGE_NAMESPACE", ""),
             bucket_name=os.getenv("BUCKET_NAME", ""),
-            gods_eye_control_bucket=os.getenv("GODS_EYE_CONTROL_BUCKET", ""),
             artifacts_bucket_name=_artifacts_bucket_name(
                 os.getenv("ARTIFACTS_BUCKET_NAME", "oci_artifacts")
             ),
             aidp_settings_file=os.getenv("AIDP_SETTINGS_FILE", "/var/lib/aidp-lab/settings.json"),
             lab_marker=os.getenv("LAB_MARKER", "aidp-lab"),
             session_secret_file=os.getenv("SESSION_SECRET_FILE", "/var/lib/aidp-lab/session.key"),
+            application_deployment_profile=os.getenv("APP_DEPLOYMENT_PROFILE", "").strip(),
             application_release=_application_release(
                 os.getenv("APP_RELEASE_TAG", "development")
             ),
@@ -163,12 +120,6 @@ class Settings:
             in {"1", "true", "yes"},
             cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
             local_development_mode=os.getenv("LOCAL_DEVELOPMENT_MODE", "false").lower() in {"1", "true", "yes"},
-            gods_eye_view_mode=os.getenv("GODS_EYE_VIEW_MODE"),
-            gods_eye_view_enabled=os.getenv("GODS_EYE_VIEW_ENABLED", "false").lower() in {"1", "true", "yes"},
-            portal_managed_modules=os.getenv("PORTAL_MANAGED_MODULES", "false").lower() in {"1", "true", "yes"},
-            gods_eye_oci_text_model=os.getenv("GODS_EYE_OCI_TEXT_MODEL", "xai.grok-4.6").strip(),
-            gods_eye_oci_voice_model=os.getenv("GODS_EYE_OCI_VOICE_MODEL", "google.gemini-2.5-flash-lite").strip(),
-            gods_eye_oci_voice=os.getenv("GODS_EYE_OCI_VOICE", "ara").strip().lower(),
         )
 
     def identity_ready(self) -> bool:
@@ -213,7 +164,6 @@ class SettingsStore:
             ),
             "aidp_url": values["aidp_workbench_url"],
             "aidp_platform_id": self._settings.aidp_platform_id,
-            "deployment_mode": self._settings.deployment_mode,
             "operator_username": self._settings.operator_username,
             "registration_code_configured": bool(values["registration_code_hash"]),
             "time_zone": values["time_zone"],
@@ -226,17 +176,6 @@ class SettingsStore:
     def get_workbench_url(self) -> str:
         return self._load()["aidp_workbench_url"]
 
-    def get_viewer_identity(self) -> dict[str, str]:
-        values = self._load()["viewer_identity"]
-        return {key: values[key] or default for key, default in DEFAULT_IDENTITY.items()}
-
-    def update_viewer_identity(self, identity: dict) -> dict[str, str]:
-        identity = ViewerIdentity.model_validate(identity).model_dump()
-        with self._lock:
-            values = self._load()
-            values["viewer_identity"] = identity
-            self._write(values)
-        return self.get_viewer_identity()
 
     def update(self, aidp_url: str | None, registration_code: str | None, time_zone: str | None = None) -> dict[str, object]:
         if aidp_url is None and registration_code is None and time_zone is None:
@@ -249,8 +188,6 @@ class SettingsStore:
                     raise ValueError("Enter a valid HTTPS Oracle AI Data Platform Workbench URL")
                 values["aidp_workbench_url"] = normalized
             if registration_code is not None:
-                if self._settings.deployment_mode != "laboratory":
-                    raise ValueError("Registration codes are available only in Laboratory mode")
                 values["registration_code_hash"] = hash_secret(registration_code)
             if time_zone is not None:
                 if time_zone not in all_timezones_set:
@@ -284,7 +221,6 @@ class SettingsStore:
             "next_participant_code": 101,
             "participant_codes": {},
             "time_zone": "America/Bogota",
-            "viewer_identity": {"name": "", "description": ""},
         }
         path = Path(self._settings.aidp_settings_file)
         if path.is_file():
@@ -315,8 +251,6 @@ class SettingsStore:
                         values["next_participant_code"] = max(101, next_code, minimum_next)
                     else:
                         values["next_participant_code"] = minimum_next
-                if "viewer_identity" in stored:
-                    values["viewer_identity"] = ViewerIdentity.model_validate(stored["viewer_identity"]).model_dump()
             except (OSError, ValueError, TypeError):
                 pass
 

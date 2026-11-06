@@ -6,8 +6,7 @@ resource "oci_core_vcn" "lab" {
 }
 
 resource "oci_core_subnet" "public" {
-  # Legacy unmanaged deployments retain their CIDR; new portals reserve module capacity once.
-  cidr_block                 = local.module_network_enabled ? cidrsubnet(var._oci_vcn.cidr_block, 1, 0) : var._oci_vcn.cidr_block
+  cidr_block                 = var._oci_vcn.cidr_block
   compartment_id             = local.target_compartment
   vcn_id                     = oci_core_vcn.lab.id
   display_name               = "${local.name_prefix}-public-subnet"

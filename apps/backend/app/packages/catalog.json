@@ -5,19 +5,13 @@
     "telecommunications",
     "telco_lineage",
     "retail",
-    "healthcare",
-    "ai_data_governance",
-    "gods_eye_view",
-    "ai_market_intelligence"
+    "healthcare"
   ],
   "descriptions": {
     "banking": "Explore customer accounts, branches and transactions through a governed medallion pipeline.",
     "telecommunications": "Analyze subscribers, plans, network sites and usage events for service and network insights.",
     "telco_lineage": "Test end-to-end data lineage for prepaid, postpaid and home services, from Landing through Gold with entity and column relationships.",
     "retail": "Transform customers, products, orders and order items into sales and customer analytics.",
-    "healthcare": "Prepare patients, providers, appointments and encounters for operational healthcare analysis.",
-    "ai_data_governance": "Shared governance and documentation agents with an explicit Master Catalog model and a four-task workflow.",
-    "gods_eye_view": "Deploy an independent map viewer with shared social and sensor workflows and evidence-grounded Gold queries.",
-    "ai_market_intelligence": "On-demand market research with approved sources, evidence-bound reasoning and an explicit native TEST installation."
+    "healthcare": "Prepare patients, providers, appointments and encounters for operational healthcare analysis."
   }
 }

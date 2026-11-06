@@ -76,32 +76,6 @@ variable "admin_password_hash" {
   }
 }
 
-variable "deployment_mode" {
-  description = "Application access mode: participant registration for laboratory or administrator-only production."
-  type        = string
-  default     = "laboratory"
-  validation {
-    condition     = contains(["laboratory", "production"], var.deployment_mode)
-    error_message = "deployment_mode must be laboratory or production."
-  }
-}
-
-variable "portal_managed_modules" {
-  description = "Prepare the central portal and shared private network for module installation in this same stack."
-  type        = bool
-  default     = true
-}
-
-variable "enabled_vm_modules" {
-  description = "Internal module state managed by the central portal, not a deployment form input."
-  type        = set(string)
-  default     = []
-  validation {
-    condition     = alltrue([for module in var.enabled_vm_modules : module == "gods_eye_view"])
-    error_message = "The supported VM module is gods_eye_view."
-  }
-}
-
 variable "enable_public_ip_tls" {
   description = "Obtain and automatically renew a publicly trusted Let's Encrypt certificate for the application IPv4 address."
   type        = bool
@@ -112,91 +86,9 @@ variable "registration_code_hash" {
   description = "PBKDF2 hash of the normalized registration code."
   type        = string
   sensitive   = true
-  default     = ""
   validation {
-    condition     = var.registration_code_hash == "" || startswith(var.registration_code_hash, "pbkdf2_sha256$")
-    error_message = "registration_code_hash must be empty or use the Deploy Studio PBKDF2 format."
-  }
-}
-
-variable "agent_model_id" {
-  description = "ACTIVE on-demand OCI Generative AI CHAT model for the production-only global governance Agent."
-  type        = string
-  validation {
-    condition     = length(trimspace(var.agent_model_id)) > 0
-    error_message = "agent_model_id must identify the selected regional CHAT model."
-  }
-}
-
-variable "autonomous_database_mode" {
-  description = "Whether this deployment creates or reuses its Autonomous AI Database."
-  type        = string
-  default     = "new"
-  validation {
-    condition     = contains(["new", "existing"], var.autonomous_database_mode)
-    error_message = "autonomous_database_mode must be new or existing."
-  }
-}
-
-variable "autonomous_database_version" {
-  description = "Autonomous AI Database version."
-  type        = string
-  default     = "26ai"
-}
-
-variable "autonomous_database_workload" {
-  description = "Autonomous AI Database workload."
-  type        = string
-  default     = "DW"
-}
-
-variable "autonomous_database_compute_count" {
-  description = "ECPU count for a new Autonomous AI Database; Deploy Studio starts at four."
-  type        = number
-  default     = 4
-}
-
-variable "existing_autonomous_database_ocid" {
-  description = "OCID of the existing Autonomous AI Database when database mode is existing."
-  type        = string
-  default     = ""
-}
-
-variable "autonomous_database_admin_password" {
-  description = "ADMIN password supplied to Autonomous and the idempotent post-apply hook."
-  type        = string
-  sensitive   = true
-  validation {
-    condition = (
-      length(var.autonomous_database_admin_password) >= 12 &&
-      length(var.autonomous_database_admin_password) <= 30 &&
-      can(regex("[A-Z]", var.autonomous_database_admin_password)) &&
-      can(regex("[a-z]", var.autonomous_database_admin_password)) &&
-      can(regex("[0-9]", var.autonomous_database_admin_password)) &&
-      !strcontains(lower(var.autonomous_database_admin_password), "admin") &&
-      !strcontains(var.autonomous_database_admin_password, "\"") &&
-      !strcontains(var.autonomous_database_admin_password, "'")
-    )
-    error_message = "autonomous_database_admin_password must be 12-30 characters with uppercase, lowercase and a number, without quotes or the word admin."
-  }
-}
-
-variable "autonomous_database_wallet_password" {
-  description = "Password used to create or open the Autonomous wallet."
-  type        = string
-  sensitive   = true
-  validation {
-    condition = (
-      length(var.autonomous_database_wallet_password) >= 12 &&
-      length(var.autonomous_database_wallet_password) <= 30 &&
-      can(regex("[A-Z]", var.autonomous_database_wallet_password)) &&
-      can(regex("[a-z]", var.autonomous_database_wallet_password)) &&
-      can(regex("[0-9]", var.autonomous_database_wallet_password)) &&
-      !strcontains(lower(var.autonomous_database_wallet_password), "admin") &&
-      !strcontains(var.autonomous_database_wallet_password, "\"") &&
-      !strcontains(var.autonomous_database_wallet_password, "'")
-    )
-    error_message = "autonomous_database_wallet_password must be 12-30 characters with uppercase, lowercase and a number, without quotes or the word admin."
+    condition     = startswith(var.registration_code_hash, "pbkdf2_sha256$")
+    error_message = "registration_code_hash is required and must use the Deploy Studio PBKDF2 format."
   }
 }
 
@@ -369,5 +261,32 @@ variable "source_commit_sha" {
   validation {
     condition     = can(regex("^[0-9a-f]{40}$", var.source_commit_sha))
     error_message = "source_commit_sha must be a full lowercase Git SHA."
+  }
+}
+
+variable "aidp_mode" {
+  type    = string
+  default = "new"
+  validation {
+    condition     = contains(["new", "existing"], var.aidp_mode)
+    error_message = "aidp_mode must be new or existing."
+  }
+}
+
+variable "aidp_display_name" {
+  type    = string
+  default = "aidp_medallion"
+  validation {
+    condition     = can(regex("^[A-Za-z][A-Za-z0-9_-]{0,99}$", var.aidp_display_name))
+    error_message = "Use 1-100 letters, digits, underscores or hyphens, starting with a letter."
+  }
+}
+
+variable "existing_ai_data_platform_ocid" {
+  type    = string
+  default = ""
+  validation {
+    condition     = var.existing_ai_data_platform_ocid == "" || can(regex("^ocid1\\.aidataplatform\\.[a-z0-9.-]+$", var.existing_ai_data_platform_ocid))
+    error_message = "The existing platform identifier must be an AIDP OCID."
   }
 }

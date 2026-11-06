@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.packages.catalog import package_catalog, load_package, module_catalog, public_kit_catalog
+from app.packages.catalog import package_catalog, load_package, public_kit_catalog
 from app.packages import catalog as lab_packs
 from scripts.kits.generate_telco_lineage_lab import _source_data, _validate_source_contract
 
@@ -16,10 +16,10 @@ LEGACY_LABS = ("banking", "telecommunications", "retail", "healthcare")
 ACTIVE_LABS = ("banking", "telecommunications", "telco_lineage", "retail", "healthcare")
 
 
-def test_catalog_separates_five_participant_labs_from_global_modules() -> None:
+def test_catalog_contains_only_five_participant_kits() -> None:
     packs = package_catalog()
     public = public_kit_catalog()
-    assert tuple(pack.lab_id for pack in packs) == (*ACTIVE_LABS, "ai_data_governance", "gods_eye_view", "ai_market_intelligence")
+    assert tuple(pack.lab_id for pack in packs) == ACTIVE_LABS
     assert tuple(item["lab_id"] for item in public) == ACTIVE_LABS
     assert all(pack.available for pack in packs[:5])
     assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == dict.fromkeys(
@@ -27,18 +27,6 @@ def test_catalog_separates_five_participant_labs_from_global_modules() -> None:
     )
     assert all(item["description"].strip() for item in public)
     assert "transactions" in public[0]["description"]
-    governance = load_package("ai_data_governance")
-    assert governance.status == "available"
-    assert governance.pack_version == "4.0.1"
-    assert governance.kind == "global_module"
-    assert governance.scope == "global"
-    assert governance.installation_modes == ("laboratory", "production")
-    assert governance.display_name == "AI Data Governance"
-    assert not governance.datasets and not governance.notebooks
-    assert module_catalog() == packs[5:]
-    module = load_package("ai_data_governance")
-    assert module.agent["deployment_stage"] == "TEST"
-    assert module.agent["native_acceptance"] == "pending"
 
 
 @pytest.mark.parametrize("lab_id", LEGACY_LABS)
@@ -199,48 +187,17 @@ def test_canonical_assets_are_identical_for_every_participant() -> None:
     assert b"canonical-namespace" not in rendered
 
 
-def test_global_runtime_sources_are_declared_and_not_participant_kits():
-    modules = module_catalog()
-    assert {pack.lab_id for pack in modules} == {"ai_data_governance", "gods_eye_view", "ai_market_intelligence"}
-    assert len(next(pack for pack in modules if pack.lab_id == "gods_eye_view").runtime_files) == 3
-    assert all(pack.runtime_files for pack in modules)
-    for pack in modules:
-        assert pack.lab_id not in lab_packs.available_kit_ids()
-        for asset in pack.runtime_files:
-            assert lab_packs.module_runtime_source(pack.lab_id, asset.name, require_available=pack.available) == asset.read_bytes()
 
 
-def test_deploy_bundle_needs_runtime_only_and_rejects_source_drift(tmp_path, monkeypatch):
-    package = "gods_eye_view"
-    origin = lab_packs.package_root(package)
-    target = tmp_path / package
-    target.mkdir()
-    shutil.copyfile(origin / "lab.json", target / "lab.json")
-    shutil.copytree(origin / "notebooks", target / "notebooks")
-    monkeypatch.setitem(lab_packs.MODULE_PACKAGE_ROOTS, package, target)
-    filename = "notebooks/10_bronze/sensor_stream.py"
-    expected = (target / filename).read_bytes()
-    assert lab_packs.module_runtime_source(package, filename) == expected
-    (target / filename).write_bytes(expected + b"\n# unexpected change\n")
-    with pytest.raises(lab_packs.PackageError, match="SHA-256 mismatch"):
-        lab_packs.module_runtime_source(package, filename)
 
 
-@pytest.mark.parametrize("filename", [
-    "notebooks/../../outside.py", "notebooks//agent.py", "notebooks/C:/agent.py",
-    "../outside.py", "/outside.py", "nested/file.py", "C:/outside.py", "nested\\file.py", "..",
-])
-def test_module_assets_reject_unsafe_paths(tmp_path, filename):
-    with pytest.raises(lab_packs.PackageError, match="asset path"):
-        lab_packs._module_assets(tmp_path, [{"file": filename, "sha256": "0" * 64}], "notebooks")
 
 
-def test_package_registry_separates_participant_kits_from_shared_modules():
+def test_package_registry_contains_only_participant_kits():
     assert set(lab_packs.available_kit_ids()) == {'banking', 'telecommunications', 'telco_lineage', 'retail', 'healthcare'}
     for pack in lab_packs.package_catalog():
         root = lab_packs.package_root(pack.lab_id)
-        assert root.is_relative_to(lab_packs.KITS_ROOT if pack.scope == 'participant' else lab_packs.APP_ROOT / 'modules')
+        assert root.is_relative_to(lab_packs.KITS_ROOT)
         assert lab_packs.package_metadata_path(pack.lab_id).is_file()
-    assert lab_packs.package_root('gods_eye_view').parent.name == 'ai_gods_eye_view'
     with pytest.raises(lab_packs.PackageError):
         lab_packs.package_root('../outside')

@@ -4,7 +4,6 @@
 .venv
 node_modules
 **/node_modules/
-modules/ai-gods-eye-view/.upstream/
 **/dist/
 dist
 *.tsbuildinfo
@@ -29,7 +28,3 @@ graphify-out
 *.key
 *.crt
 *.p12
-# Ground truth and corpus-generation metadata are offline tooling inputs, never runtime data.
-apps/backend/app/modules/ai_gods_eye_view/package/source/**/evaluation/
-apps/backend/app/modules/ai_gods_eye_view/package/source/**/generation.json
-apps/backend/app/modules/ai_gods_eye_view/package/source/**/README.md
