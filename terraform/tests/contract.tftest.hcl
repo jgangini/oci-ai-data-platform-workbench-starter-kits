@@ -112,6 +112,49 @@ run "ssh_reject_worldwide_source" {
 
 run "resolved_compartment_contract" {
   command = plan
+  assert {
+    condition = (
+      !issensitive(output.deploy_studio_resource_labels) &&
+      toset(keys(output.deploy_studio_resource_labels)) == toset([
+        "random_string.suffix",
+        "terraform_data.validate_medallion_buckets",
+        "oci_objectstorage_bucket.data",
+        "terraform_data.validate_resolved_medallion_buckets",
+        "oci_core_vcn.lab",
+        "oci_core_subnet.public",
+        "oci_core_security_list.web",
+        "oci_core_internet_gateway.lab",
+        "oci_core_route_table.public",
+        "data.oci_identity_domains.default",
+        "oci_identity_domains_group.developers",
+        "oci_identity_domains_group.pending",
+        "oci_identity_policy.developer_console",
+        "oci_identity_policy.aidp_service",
+        "time_sleep.aidp_iam_propagation",
+        "data.oci_identity_tenancy.current",
+        "data.oci_identity_availability_domains.lab",
+        "tls_private_key.instance_ssh",
+        "terraform_data.vm_release",
+        "data.oci_core_images.oracle_linux",
+        "oci_identity_tag_namespace.vm_bootstrap",
+        "oci_identity_tag.vm_bootstrap",
+        "oci_identity_dynamic_group.vm",
+        "oci_identity_policy.vm_bootstrap",
+        "oci_core_instance.lab",
+        "oci_identity_policy.vm_run_command",
+        "data.oci_core_vnic_attachments.lab",
+        "data.oci_core_vnic.lab",
+        "oci_ai_data_platform_ai_data_platform.lab[0]",
+        "oci_objectstorage_bucket.medallion[\"landing\"]",
+        "oci_objectstorage_bucket.medallion[\"bronze\"]",
+        "oci_objectstorage_bucket.medallion[\"silver\"]",
+        "oci_objectstorage_bucket.medallion[\"gold\"]",
+      ]) &&
+      alltrue([for label in values(output.deploy_studio_resource_labels) : length(label) > 0 && length(label) <= 80])
+    )
+    error_message = "Display labels must be available during PLAN, nonsensitive, and cover exactly the selected resource and data instances."
+  }
+
 
   assert {
     condition     = oci_core_instance.lab.metadata["ssh_authorized_keys"] == "ssh-rsa deployment-public-key-fixture" && output.ssh_username == "opc"
@@ -400,6 +443,49 @@ run "registration_code_is_required" {
 run "existing_aidp_is_referenced_without_owning_it" {
 
   command = plan
+  assert {
+    condition = (
+      !issensitive(output.deploy_studio_resource_labels) &&
+      toset(keys(output.deploy_studio_resource_labels)) == toset([
+        "random_string.suffix",
+        "terraform_data.validate_medallion_buckets",
+        "oci_objectstorage_bucket.data",
+        "terraform_data.validate_resolved_medallion_buckets",
+        "oci_core_vcn.lab",
+        "oci_core_subnet.public",
+        "oci_core_security_list.web",
+        "oci_core_internet_gateway.lab",
+        "oci_core_route_table.public",
+        "data.oci_identity_domains.default",
+        "oci_identity_domains_group.developers",
+        "oci_identity_domains_group.pending",
+        "oci_identity_policy.developer_console",
+        "oci_identity_policy.aidp_service",
+        "time_sleep.aidp_iam_propagation",
+        "data.oci_identity_tenancy.current",
+        "data.oci_identity_availability_domains.lab",
+        "tls_private_key.instance_ssh",
+        "terraform_data.vm_release",
+        "data.oci_core_images.oracle_linux",
+        "oci_identity_tag_namespace.vm_bootstrap",
+        "oci_identity_tag.vm_bootstrap",
+        "oci_identity_dynamic_group.vm",
+        "oci_identity_policy.vm_bootstrap",
+        "oci_core_instance.lab",
+        "oci_identity_policy.vm_run_command",
+        "data.oci_core_vnic_attachments.lab",
+        "data.oci_core_vnic.lab",
+        "data.oci_ai_data_platform_ai_data_platform.existing[0]",
+        "oci_objectstorage_bucket.medallion[\"landing\"]",
+        "oci_objectstorage_bucket.medallion[\"bronze\"]",
+        "oci_objectstorage_bucket.medallion[\"silver\"]",
+        "oci_objectstorage_bucket.medallion[\"gold\"]",
+      ]) &&
+      alltrue([for label in values(output.deploy_studio_resource_labels) : length(label) > 0 && length(label) <= 80])
+    )
+    error_message = "Display labels must be available during PLAN, nonsensitive, and cover exactly the selected resource and data instances."
+  }
+
   variables {
     tenancy_ocid                   = "ocid1.tenancy.oc1..test"
     home_region                    = "us-ashburn-1"
@@ -505,4 +591,39 @@ run "existing_aidp_requires_an_identifier" {
     }
   }
   expect_failures = [data.oci_ai_data_platform_ai_data_platform.existing[0]]
+}
+
+run "mixed_bucket_resource_labels_are_known_during_plan" {
+  command = plan
+  variables {
+    enable_public_ip_tls         = false
+    tenancy_ocid                 = "ocid1.tenancy.oc1..test"
+    home_region                  = "us-ashburn-1"
+    operator_user_ocid           = "ocid1.user.oc1..operator"
+    compartment_ocid             = "ocid1.compartment.oc1..test"
+    objectstorage_namespace      = "testnamespace"
+    deployment_suffix            = "test1234"
+    admin_password_hash          = "pbkdf2_sha256$600000$salt$digest"
+    registration_code_hash       = "pbkdf2_sha256$600000$salt$digest"
+    source_commit_sha            = "0123456789abcdef0123456789abcdef01234567"
+    landing_bucket_mode          = "existing"
+    landing_existing_bucket_name = "shared-landing"
+  }
+  override_data {
+    target = data.oci_objectstorage_bucket.medallion["landing"]
+    values = {
+      name           = "shared-landing"
+      namespace      = "testnamespace"
+      compartment_id = "ocid1.compartment.oc1..test"
+    }
+  }
+  assert {
+    condition = (
+      !issensitive(output.deploy_studio_resource_labels) &&
+      output.deploy_studio_resource_labels["data.oci_objectstorage_bucket.medallion[\"landing\"]"] == "Existing landing bucket" &&
+      !contains(keys(output.deploy_studio_resource_labels), "oci_objectstorage_bucket.medallion[\"landing\"]") &&
+      output.deploy_studio_resource_labels["oci_objectstorage_bucket.medallion[\"bronze\"]"] == "Bronze bucket"
+    )
+    error_message = "Mixed bucket selections need exact quoted instance addresses and must label the existing read without claiming a new bucket."
+  }
 }

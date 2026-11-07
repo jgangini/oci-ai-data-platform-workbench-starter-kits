@@ -57,3 +57,7 @@ La configuración mantiene compatibilidad con Terraform 1.5.7: las validaciones 
 ## Formulario declarativo de Deploy Studio
 
 `terraform/deploy-studio.json` utiliza `schema_version: 2`. `form.groups` declara los títulos y el orden de los grupos; cada lista `items` fija el orden de campos, archivos y controles comunes, y `span` su ancho en columnas. Los campos declaran valores predeterminados y condiciones de visibilidad. CloudTechNext valida las referencias y requiere este contrato; no reconstruye formularios antiguos. Las credenciales se cargan en el grupo `credentials`; los demás controles se habilitan tras validarlas. Las releases publicadas conservan sus manifiestos inmutables: este contrato requiere una nueva release y un motor compatible.
+
+## Etiquetas de recursos en Deploy Studio
+
+El output no sensible `deploy_studio_resource_labels` relaciona cada dirección exacta de instancia Terraform con una etiqueta breve en inglés. Se resuelve durante PLAN, incluye las instancias seleccionadas de recursos y consultas de datos y omite las que tienen `count = 0`. Las claves de `for_each` conservan su representación JSON entre corchetes. Las etiquetas no contienen OCID, credenciales ni atributos calculados. CloudTechNext puede mostrar estos nombres y conservar la dirección en los detalles técnicos; el inventario, las acciones, el progreso y las dependencias proceden del PLAN y los logs de OCI Resource Manager, no de este mapa ni del orden de los archivos `.tf`.
