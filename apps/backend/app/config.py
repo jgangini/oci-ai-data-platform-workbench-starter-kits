@@ -1,0 +1,270 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+import threading
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlparse
+
+from pytz import all_timezones_set, common_timezones
+
+from .security import hash_secret
+
+
+_RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+_RELEASE_SHA = re.compile(r"^[0-9a-f]{40}$")
+_SOURCE_REPOSITORY = "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
+
+
+def _application_release(value: str) -> str:
+    normalized = value.strip()
+    if normalized != "development" and _RELEASE_TAG.fullmatch(normalized) is None:
+        raise ValueError("APP_RELEASE_TAG must be development or a stable semantic release tag")
+    return normalized
+
+
+def _application_commit_sha(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized != "development" and _RELEASE_SHA.fullmatch(normalized) is None:
+        raise ValueError("APP_RELEASE_SHA must be development or a full lowercase Git SHA")
+    return normalized
+
+
+def _application_repository(value: str) -> str:
+    normalized = value.strip().removesuffix(".git")
+    if normalized != _SOURCE_REPOSITORY:
+        raise ValueError("APP_REPOSITORY must be the trusted Starter Kits repository")
+    return normalized
+
+
+@dataclass(frozen=True, slots=True)
+class Settings:
+    admin_username: str = "admin"
+    admin_password_hash: str = ""
+    registration_code_hash: str = ""
+    operator_username: str = ""
+    identity_domain_url: str = ""
+    developer_group_id: str = ""
+    pending_group_id: str = ""
+    aidp_workbench_url: str = ""
+    aidp_platform_id: str = ""
+    aidp_workspace_name: str = ""
+    aidp_workspace_key: str = ""
+    aidp_region: str = ""
+    compartment_id: str = ""
+    oci_config_file: str = "/etc/aidp-lab/oci/config"
+    objectstorage_namespace: str = ""
+    bucket_name: str = ""
+    aidp_settings_file: str = "/var/lib/aidp-lab/settings.json"
+    lab_marker: str = "aidp-lab"
+    session_secret_file: str = "/var/lib/aidp-lab/session.key"
+    application_deployment_profile: str = ""
+    application_release: str = "development"
+    application_commit_sha: str = "development"
+    application_repository: str = _SOURCE_REPOSITORY
+    application_update_dir: str = "/var/lib/aidp-lab/update"
+    vm_update_enabled: bool = False
+    cookie_secure: bool = True
+    local_development_mode: bool = False
+    local_identity_artifact_dir: str = ""
+
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        return cls(
+            admin_username=os.getenv("ADMIN_USERNAME", "admin"),
+            local_identity_artifact_dir=os.getenv("LOCAL_IDENTITY_ARTIFACT_DIR", ""),
+            admin_password_hash=os.getenv("ADMIN_PASSWORD_HASH", ""),
+            registration_code_hash=os.getenv("REGISTRATION_CODE_HASH", ""),
+            operator_username=os.getenv("OPERATOR_USERNAME", "").strip(),
+            identity_domain_url=os.getenv("IDENTITY_DOMAIN_URL", "").rstrip("/"),
+            developer_group_id=os.getenv("IDENTITY_DEVELOPER_GROUP_ID", ""),
+            pending_group_id=os.getenv("IDENTITY_PENDING_GROUP_ID", ""),
+            aidp_workbench_url=os.getenv("AIDP_WORKBENCH_URL", ""),
+            aidp_platform_id=os.getenv("AIDP_PLATFORM_ID", ""),
+            aidp_workspace_name=os.getenv("AIDP_WORKSPACE_NAME", ""),
+            aidp_workspace_key=os.getenv("AIDP_WORKSPACE_KEY", ""),
+            aidp_region=os.getenv("AIDP_REGION", ""),
+            compartment_id=os.getenv("COMPARTMENT_ID", ""),
+            oci_config_file=os.getenv("OCI_CONFIG_FILE", "/etc/aidp-lab/oci/config"),
+            objectstorage_namespace=os.getenv("OBJECTSTORAGE_NAMESPACE", ""),
+            bucket_name=os.getenv("BUCKET_NAME", ""),
+            aidp_settings_file=os.getenv("AIDP_SETTINGS_FILE", "/var/lib/aidp-lab/settings.json"),
+            lab_marker=os.getenv("LAB_MARKER", "aidp-lab"),
+            session_secret_file=os.getenv("SESSION_SECRET_FILE", "/var/lib/aidp-lab/session.key"),
+            application_deployment_profile=os.getenv("APP_DEPLOYMENT_PROFILE", "").strip(),
+            application_release=_application_release(
+                os.getenv("APP_RELEASE_TAG", "development")
+            ),
+            application_commit_sha=_application_commit_sha(
+                os.getenv("APP_RELEASE_SHA", "development")
+            ),
+            application_repository=_application_repository(
+                os.getenv("APP_REPOSITORY", _SOURCE_REPOSITORY)
+            ),
+            application_update_dir=os.getenv(
+                "AIDP_UPDATE_DIR", "/var/lib/aidp-lab/update"
+            ),
+            vm_update_enabled=os.getenv("VM_UPDATE_ENABLED", "false").lower()
+            in {"1", "true", "yes"},
+            cookie_secure=os.getenv("COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
+            local_development_mode=os.getenv("LOCAL_DEVELOPMENT_MODE", "false").lower() in {"1", "true", "yes"},
+        )
+
+    def identity_ready(self) -> bool:
+        if self.local_development_mode:
+            return True
+        return all(
+            (
+                self.identity_domain_url,
+                self.developer_group_id,
+                self.pending_group_id,
+                self.oci_config_file,
+            )
+        )
+
+    def aidp_ready(self) -> bool:
+        return self.local_development_mode or all(
+            (
+                self.aidp_platform_id,
+                self.aidp_workspace_name,
+                self.aidp_region,
+                self.oci_config_file,
+                self.objectstorage_namespace,
+                self.bucket_name,
+            )
+        )
+
+
+class SettingsStore:
+    """Persists administrator-edited settings; registration codes remain PBKDF2 verifiers."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._lock = threading.Lock()
+
+    def get_admin_settings(self) -> dict[str, object]:
+        values = self._load()
+        return {
+            "aidp_service_endpoint": (
+                f"https://aidp.{self._settings.aidp_region}.oci.oraclecloud.com"
+                if self._settings.aidp_region
+                else ""
+            ),
+            "aidp_url": values["aidp_workbench_url"],
+            "aidp_platform_id": self._settings.aidp_platform_id,
+            "operator_username": self._settings.operator_username,
+            "registration_code_configured": bool(values["registration_code_hash"]),
+            "time_zone": values["time_zone"],
+            "time_zones": list(common_timezones),
+        }
+
+    def get_registration_code_hash(self) -> str:
+        return self._load()["registration_code_hash"]
+
+    def get_workbench_url(self) -> str:
+        return self._load()["aidp_workbench_url"]
+
+
+    def update(self, aidp_url: str | None, registration_code: str | None, time_zone: str | None = None) -> dict[str, object]:
+        if aidp_url is None and registration_code is None and time_zone is None:
+            raise ValueError("Update the AI Data Platform URL, lab registration code or time zone")
+        with self._lock:
+            values = self._load()
+            if aidp_url is not None:
+                normalized = aidp_url.strip()
+                if not _valid_workbench_url(normalized):
+                    raise ValueError("Enter a valid HTTPS Oracle AI Data Platform Workbench URL")
+                values["aidp_workbench_url"] = normalized
+            if registration_code is not None:
+                values["registration_code_hash"] = hash_secret(registration_code)
+            if time_zone is not None:
+                if time_zone not in all_timezones_set:
+                    raise ValueError("Select a valid IANA time zone")
+                values["time_zone"] = time_zone
+            self._write(values)
+        return self.get_admin_settings()
+
+    def participant_code(self, email: str) -> int:
+        normalized = email.strip().casefold()
+        if normalized.count("@") != 1 or any(character.isspace() for character in normalized):
+            raise ValueError("A valid participant email is required")
+        with self._lock:
+            values = self._load()
+            codes = values["participant_codes"]
+            existing = codes.get(normalized)
+            if isinstance(existing, int) and existing >= 101:
+                return existing
+            code = values["next_participant_code"]
+            codes[normalized] = code
+            values["next_participant_code"] = code + 1
+            self._write(values)
+            return code
+
+    def _load(self) -> dict[str, object]:
+        values = {
+            "aidp_workbench_url": self._settings.aidp_workbench_url
+            if _valid_workbench_url(self._settings.aidp_workbench_url)
+            else "",
+            "registration_code_hash": self._settings.registration_code_hash,
+            "next_participant_code": 101,
+            "participant_codes": {},
+            "time_zone": "America/Bogota",
+        }
+        path = Path(self._settings.aidp_settings_file)
+        if path.is_file():
+            try:
+                stored = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(stored.get("time_zone"), str) and stored["time_zone"] in all_timezones_set:
+                    values["time_zone"] = stored["time_zone"]
+                aidp_url = stored.get("aidp_workbench_url", "")
+                registration_code_hash = stored.get("registration_code_hash", "")
+                if isinstance(aidp_url, str) and _valid_workbench_url(aidp_url):
+                    values["aidp_workbench_url"] = aidp_url
+                if isinstance(registration_code_hash, str) and registration_code_hash:
+                    values["registration_code_hash"] = registration_code_hash
+                next_code = stored.get("next_participant_code")
+                participant_codes = stored.get("participant_codes")
+                if isinstance(participant_codes, dict):
+                    valid_codes = {
+                        str(email).casefold(): code
+                        for email, code in participant_codes.items()
+                        if isinstance(email, str)
+                        and isinstance(code, int)
+                        and not isinstance(code, bool)
+                        and code >= 101
+                    }
+                    values["participant_codes"] = valid_codes
+                    minimum_next = max(valid_codes.values(), default=100) + 1
+                    if isinstance(next_code, int) and not isinstance(next_code, bool):
+                        values["next_participant_code"] = max(101, next_code, minimum_next)
+                    else:
+                        values["next_participant_code"] = minimum_next
+            except (OSError, ValueError, TypeError):
+                pass
+
+        return values
+
+    def _write(self, values: dict[str, object]) -> None:
+        path = Path(self._settings.aidp_settings_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(values) + "\n", encoding="utf-8")
+        try:
+            temporary.chmod(0o600)
+        except OSError:
+            pass
+        temporary.replace(path)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+
+
+def _valid_workbench_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme == "https" and bool(parsed.netloc) and parsed.hostname is not None and (
+        parsed.hostname.endswith(".datalake.oci.oraclecloud.com") or parsed.hostname.endswith(".example.invalid")
+    )

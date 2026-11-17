@@ -1,0 +1,21 @@
+source_row_id,branch_id,branch_type,region,opened_date,status,updated_at
+branches-000001,BR-001,suburban,east,2026-01-01,active,2026-01-01T00:00:00Z
+branches-000002,BR-002,suburban,west,2026-01-02,active,2026-01-01T00:17:00Z
+branches-000003,BR-003,digital,east,2026-01-03,active,2026-01-01T00:34:00Z
+branches-000004,BR-004,suburban, NORTH ,2026-01-04,active,2026-01-01T00:51:00Z
+branches-000005,BR-005,digital,south,2026-01-05,active,2026-01-01T01:08:00Z
+branches-000006,BR-006,suburban,east,2026-01-06,active,2026-01-01T01:25:00Z
+branches-000007,BR-007,urban,south,2026-01-07,active,2026-01-01T01:42:00Z
+branches-000008,BR-008,urban,north,2026-01-08,active,2026-01-01T01:59:00Z
+branches-000009,BR-009,urban,north,2026-01-09,active,2026-01-01T02:16:00Z
+branches-000010,BR-010,urban,west,2026-01-10,active,2026-01-01T02:33:00Z
+branches-000011,BR-011,urban,south,2026-01-11,active,2026-01-01T02:50:00Z
+branches-000012,BR-012,digital,south,2026-01-12,active,2026-01-01T03:07:00Z
+branches-000013,BR-013,suburban,north,2026-01-13,active,2026-01-01T03:24:00Z
+branches-000014,BR-014,urban,south,2026-01-14,active,2026-01-01T03:41:00Z
+branches-000015,BR-015,suburban,north,2026-01-15,active,2026-01-01T03:58:00Z
+branches-000016,BR-016,urban,east,2026-01-16,active,2026-01-01T04:15:00Z
+branches-000017,BR-017,suburban,north,2026-01-17,active,2026-01-01T04:32:00Z
+branches-000018,BR-018,urban,east,2026-01-18,active,2026-01-01T04:49:00Z
+branches-000019,BR-019,urban,west,2026-01-19,active,2026-01-01T05:06:00Z
+branches-000020,BR-019,suburban,south,2026-01-20,active,2026-01-01T05:23:00Z

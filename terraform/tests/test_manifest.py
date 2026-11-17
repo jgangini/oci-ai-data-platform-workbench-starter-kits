@@ -1,0 +1,453 @@
+import base64
+import importlib.util
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def test_manifest_packages_only_self_contained_kits_hook(tmp_path) -> None:
+    root = Path(__file__).parents[2]
+    manifest = json.loads((root / "terraform/deploy-studio.json").read_text(encoding="utf-8"))
+    assert manifest["post_apply"]["include_paths"] == []
+    hooks = root / "terraform/hooks"
+    assert {path.name for path in hooks.glob("*.py")} == {"post_apply.py"}
+    shutil.copytree(hooks, tmp_path / "hooks", ignore=shutil.ignore_patterns("__pycache__"))
+    result = subprocess.run([sys.executable, "-I", "-c",
+        "import sys; sys.path.insert(0, 'hooks'); import post_apply; "
+        "assert callable(post_apply.reconcile); "
+        "assert not any(name.startswith('app.modules') for name in sys.modules)"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+
+
+def test_deploy_studio_manifest_contract() -> None:
+    root = Path(__file__).parents[2]
+    manifest = json.loads((root / "terraform" / "deploy-studio.json").read_text(encoding="utf-8"))
+    variables = (root / "terraform" / "b_variables.tf").read_text(encoding="utf-8")
+    storage = (root / "terraform" / "f_oci_objectstorage_bucket.tf").read_text(encoding="utf-8")
+    assert manifest["schema_version"] == 2
+    assert manifest["execution_source"] == "oci_resource_manager"
+    assert manifest["project_id"] == "oci-aidp-cloud-migration-lab"
+    assert manifest["terraform"] == {"path": "terraform", "package_oci_credentials": False}
+    assert manifest["capabilities"] == {
+        "compartment_modes": ["new", "existing"],
+        "default_compartment_name": "oracle-ai-data-platform",
+        "requires_genai_region": False,
+        "region_selection": "subscribed_compatible",
+        "regional_requirements": ["aidp"],
+    }
+    assert manifest["post_apply"]["requires_oci_credentials"] is True
+    assert manifest["post_apply"]["entrypoint"] == "terraform/hooks/post_apply.py"
+    assert manifest["post_apply"]["timeout_seconds"] == 3600
+    assert (root / manifest["post_apply"]["entrypoint"]).is_file()
+    fields = {field["name"]: field for field in manifest["form"]["fields"]}
+    assert not {"enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer", "enable_public_ip_tls", "enabled_vm_modules", "portal_managed_modules"} & fields.keys()
+    assert re.search(r'variable\s+"enable_public_ip_tls"\s*\{.*?default\s*=\s*true', variables, re.DOTALL)
+    assert "home_region" not in fields
+    assert "preferred_vm_shape" not in fields
+    assert "vm_ocpus" not in fields
+    assert "vm_memory_gbs" not in fields
+    assert "ssh_allowed_cidr" not in fields
+    assert "aidp_runtime_mode" not in fields
+    assert re.search(r'variable\s+"ssh_allowed_cidr"\s*\{.*?default\s*=\s*""', variables, re.DOTALL)
+    assert "ssh-private-key.pem" in manifest["artifacts"]
+    assert "ssh-private-key.pem" in manifest["email"]["attachments"]
+    assert fields["admin_password"]["transform"] == "pbkdf2_sha256"
+    assert fields["registration_code"]["pattern"] == "^[A-Z]{4}-[0-9]{4}$"
+    assert fields["registration_code"]["transform"] == "uppercase_pbkdf2_sha256"
+    assert not any(name.startswith(("autonomous_", "existing_autonomous_", "agent_model")) for name in fields)
+    assert fields["aidp_mode"]["group"] == "aidp_platform"
+    assert fields["aidp_display_name"]["default"] == "aidp_medallion"
+    assert fields["existing_ai_data_platform_ocid"]["options_source"] == "oci_aidp_platforms"
+    groups = [item["group"] for item in manifest["form"]["fields"]]
+    assert groups.index("aidp_platform") < groups.index("medallion")
+    for layer in ("landing", "bronze", "silver", "gold"):
+        assert fields[f"{layer}_bucket_mode"]["group"] == "medallion"
+        assert fields[f"{layer}_new_bucket_name"]["default"] == f"oci_{layer}"
+        assert fields[f"{layer}_existing_bucket_name"]["options_source"] == "oci_active_buckets"
+        assert fields[f"{layer}_existing_bucket_name"]["default"] == f"oci_{layer}"
+    assert not any(name.startswith("artifacts_") for name in fields)
+    assert '"artifacts"' not in storage
+    assert "artifacts_bucket" not in variables
+    assert 'resource "oci_objectstorage_bucket" "data"' in storage
+    assert 'bootstrap_bucket_name' in storage
+    assert "enable_ai_data_governance" not in fields
+    assert "optional_addons" not in {field["group"] for field in fields.values()}
+    assert "enable_medallion_architecture" not in fields
+    assert not any(name.startswith("governance_gateway_") for name in fields)
+    assert fields["admin_username"]["group"] == "application_vm"
+    assert manifest["post_apply"]["secret_inputs"] == [
+    ]
+    assert "deployment_mode" not in fields
+    assert "visible_when" not in fields["registration_code"]
+    assert fields["registration_code"]["required"] is True
+    assert fields["registration_code"]["transform"] == "uppercase_pbkdf2_sha256"
+    assert 'variable "deployment_mode"' not in variables
+    assert manifest["form"]["email_access_fields"] == [
+        "admin_username",
+        "admin_password",
+        "registration_code",
+    ]
+    assert manifest["presentation"]["title"] == "Oracle AI Data Platform Workbench Starter Kits"
+    assert manifest["presentation"]["summary"].startswith("Deploys five laboratory starter kits")
+    assert manifest["presentation"]["href"] == "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
+    assert manifest["presentation"]["tags"] == ["VM", "VCN", "AI Data Platform Workbench", "Object Storage", "IAM"]
+    assert manifest["presentation"]["image"] == "/assets/oci-aidp-cloud-migration-lab.png"
+    assert [step["key"] for step in manifest["run_steps"]] == [
+        "queue",
+        "credentials",
+        "compartment",
+        "policies",
+        "stack",
+        "plan",
+        "apply",
+        "application",
+        "artifacts",
+        "email",
+        "complete",
+    ]
+    assert not {"network", "bucket", "compute", "database", "wallet"} & {step["key"] for step in manifest["run_steps"]}
+    assert [field["name"] for field in manifest["preflight"]["runtime_fields"]] == [
+        "home_region",
+        "operator_user_ocid",
+        "operator_username",
+        "preferred_vm_shape",
+        "availability_domain_index",
+        "existing_workspace_name",
+    ]
+    assert manifest["preflight"]["output_inputs"] == [
+        "home_region",
+        "operator_user_ocid",
+        "operator_username",
+        "preferred_vm_shape",
+        "availability_domain_index",
+        "existing_workspace_name",
+    ]
+    runtime_fields = {
+        field["name"]: field for field in manifest["preflight"]["runtime_fields"]
+    }
+    assert re.fullmatch(
+        runtime_fields["operator_user_ocid"]["pattern"],
+        "ocid1.user.oc1..operator",
+    )
+    assert (root / manifest["preflight"]["entrypoint"]).is_file()
+    assert "aidp_workbench_url" in manifest["outputs"]
+    assert "aidp_alias_key" in manifest["outputs"]
+    assert {
+        "aidp_catalog_name",
+        "aidp_shared_compute_name",
+        "aidp_external_volume_count",
+        "aidp_runtime_ready",
+        "operator_user_ocid",
+        "home_region",
+    }.issubset(manifest["outputs"])
+    assert "aidp_console_url" not in manifest["outputs"]
+
+
+def test_hook_result_matches_runner_and_manifest_contract() -> None:
+    root = Path(__file__).parents[2]
+    manifest = json.loads((root / "terraform" / "deploy-studio.json").read_text(encoding="utf-8"))
+    module_path = root / manifest["post_apply"]["entrypoint"]
+    spec = importlib.util.spec_from_file_location("post_apply_manifest_contract", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    assert module.POST_APPLY_BUDGET_SECONDS < manifest["post_apply"]["timeout_seconds"]
+    context = {
+        "deployment_id": "deployment-test",
+        "source": {"repository": "owner/repo", "ref": "v2.0.0-rc.1", "commit_sha": "0" * 40},
+    }
+    resources = {
+        "catalog_key": "catalog",
+        "catalog_name": "oci_medallion",
+        "shared_compute_name": "aidp_cluster_shared_compute",
+        "external_volume_count": 0,
+        "runtime_ready": True,
+    }
+    result = module.build_success_result(
+        context, resources, ["ready"], "https://aidp.example.test"
+    )
+    assert set(result) == {"events", "artifacts", "outputs"}
+    assert result["outputs"] == {
+        "aidp_workbench_url": "https://aidp.example.test",
+        "aidp_catalog_name": "oci_medallion",
+        "aidp_shared_compute_name": "aidp_cluster_shared_compute",
+        "aidp_runtime_ready": True,
+        "aidp_external_volume_count": 0,
+    }
+    # Resource Manager collects only the sensitive SSH key from state.
+    assert {item["name"] for item in result["artifacts"]} == set(manifest["artifacts"]) - {
+        "ssh-private-key.pem"
+    }
+    assert set(result["outputs"]).issubset(manifest["outputs"])
+    artifact = json.loads(base64.b64decode(result["artifacts"][0]["content_b64"]))
+    assert artifact["schema_version"] == 2
+    assert artifact["resources"] == {
+        **resources,
+        "aidp_workbench_url": "https://aidp.example.test",
+    }
+
+
+def test_release_workflow_builds_frozen_amd64_assets_before_publish() -> None:
+    root = Path(__file__).parents[2]
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    gate = 'python terraform/release_gate.py --source-root terraform --release-ref "$GITHUB_REF_NAME"'
+    build = "docker build --platform linux/amd64"
+    manifest = '(root / os.environ["RELEASE_MANIFEST_ASSET"]).write_text'
+    draft = 'gh release create "$GITHUB_REF_NAME" --draft --verify-tag'
+    upload = 'gh release upload "$GITHUB_REF_NAME"'
+    publish = 'gh release edit "$GITHUB_REF_NAME" --draft=false'
+    immutable = "- name: Verify published release is immutable"
+    platform_check = '''test "$(docker image inspect "$image_tag" --format '{{.Os}}/{{.Architecture}}')" = "linux/amd64"'''
+    assert 'tags: ["v*.*.*"]' in workflow
+    assert 'tags: ["v2.2.0"]' not in workflow
+    assert 'RELEASE_IMAGE_ASSET=aidp-lab-image-amd64.tar.gz' in workflow
+    assert 'RELEASE_MANIFEST_ASSET=aidp-release.json' in workflow
+    assert "RELEASE_REPOSITORY=https://github.com/$GITHUB_REPOSITORY" in workflow
+    assert "docker save \"$image_tag\" | gzip -n -9" in workflow
+    assert platform_check in workflow
+    assert '"schema_version": 1' in workflow
+    assert '"updater_protocol": 2' in workflow
+    assert '"release": os.environ["GITHUB_REF_NAME"]' in workflow
+    assert '"commit_sha": os.environ["RELEASE_COMMIT_SHA"]' in workflow
+    assert '"repository": os.environ["RELEASE_REPOSITORY"]' in workflow
+    assert '"image": {' in workflow
+    assert '"asset_name": os.environ["RELEASE_IMAGE_ASSET"]' in workflow
+    assert '"sha256": digest.hexdigest()' in workflow
+    assert '"platform": "linux/amd64"' in workflow
+    assert 'f\'aidp-lab:{os.environ["RELEASE_COMMIT_SHA"]}\'' in workflow
+    assert "ghcr.io" not in workflow
+    assert "docker push" not in workflow
+    assert (
+        0
+        <= workflow.index(gate)
+        < workflow.index(build)
+        < workflow.index(manifest)
+        < workflow.index(draft)
+        < workflow.index(upload)
+        < workflow.index(publish)
+        < workflow.index(immutable)
+    )
+
+
+def test_release_workflow_reruns_only_mutate_drafts() -> None:
+    root = Path(__file__).parents[2]
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "group: release-${{ github.ref }}" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert 'gh release view "$GITHUB_REF_NAME"' in workflow
+    assert 'grep -Fxq "release not found" "$lookup_error"' in workflow
+    assert "--json isDraft,isImmutable,isPrerelease" in workflow
+    assert 'echo "mode=create"' in workflow
+    assert 'echo "mode=draft"' in workflow
+    assert 'echo "mode=immutable"' in workflow
+    assert "Existing published release is mutable; refusing to edit or republish it." in workflow
+    assert "if: steps.release.outputs.mode == 'immutable'" in workflow
+    assert "immutable release asset manifest mismatch" in workflow
+    assets = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET"
+    assert workflow.count(f'test "$asset_names" = "{assets}"') == 2
+    assert re.findall(r'^\s*test "\$asset_names" = "([^"]+)"\s*$', workflow, re.MULTILINE) == [assets, assets]
+    assert not any(name in workflow for name in ("prisma-release.json", "prisma-viewer-image-amd64.tar.gz", "territorial-release.json", "territorial-viewer-image-amd64.tar.gz"))
+    immutable_start = workflow.index("- name: Verify existing immutable release assets")
+    immutable_end = workflow.index("- uses: hashicorp/setup-terraform@v3")
+    immutable_verification = workflow[immutable_start:immutable_end]
+    assert 'gh release download "$GITHUB_REF_NAME"' in immutable_verification
+    assert "gh release edit" not in immutable_verification
+    assert "gh release upload" not in immutable_verification
+    assert workflow.count('gh release create "$GITHUB_REF_NAME"') == 1
+    assert "--draft --verify-tag" in workflow
+    assert "--clobber" in workflow
+    assert 'cmp "$RELEASE_DIST/$RELEASE_IMAGE_ASSET"' in workflow
+    assert "$'true\\tfalse\\tfalse'" in workflow
+    assert "$'false\\ttrue\\tfalse'" in workflow
+    for step in (
+        "Create or reuse draft GitHub release",
+        "Upload frozen assets to draft",
+        "Publish GitHub release",
+    ):
+        guarded_step = workflow[workflow.index(f"- name: {step}") :]
+        assert "if: steps.release.outputs.mode != 'immutable'" in guarded_step.split(
+            "run:", 1
+        )[0]
+
+
+def test_release_workflow_can_find_drafts_by_pending_tag() -> None:
+    workflow = (Path(__file__).parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    # REST releases/tags excludes drafts, so both retry lookup and pre-publish
+    # asset verification must use the CLI's draft-aware release lookup.
+    for name, fields in (("Inspect existing release", "isDraft,isImmutable,isPrerelease"),
+                         ("Verify uploaded draft assets", "assets")):
+        step = workflow.split(f"- name: {name}", 1)[1].split("\n      - ", 1)[0]
+        assert f'gh release view "$GITHUB_REF_NAME" --json {fields}' in step
+        assert "/releases/tags/" not in step
+
+
+def test_runtime_security_contracts() -> None:
+    root = Path(__file__).parents[2]
+    attributes = (root / ".gitattributes").read_text(encoding="utf-8")
+    nginx = (root / "docker/nginx.conf").read_text(encoding="utf-8")
+    local_nginx = (root / "docker/nginx.oci-local.conf").read_text(encoding="utf-8")
+    backend_requirements = (root / "apps/backend/requirements.txt").read_text(encoding="utf-8")
+    entrypoint = (root / "docker/entrypoint.sh").read_text(encoding="utf-8")
+    cloud_init = (root / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")
+    variables = (root / "terraform/b_variables.tf").read_text(encoding="utf-8")
+    providers = (root / "terraform/d_main.tf").read_text(encoding="utf-8")
+    compute = (root / "terraform/g_oci_core_instance.tf").read_text(encoding="utf-8")
+    identity = (root / "terraform/i_oci_identity.tf").read_text(encoding="utf-8")
+    aidp = (root / "terraform/j_oci_ai_data_platform.tf").read_text(encoding="utf-8")
+    storage = (root / "terraform/f_oci_objectstorage_bucket.tf").read_text(encoding="utf-8")
+    backend_main = (root / "apps/backend/app/main.py").read_text(encoding="utf-8")
+    assert "$proxy_add_x_forwarded_for" not in nginx
+    assert "*.sh text eol=lf" in attributes
+    assert nginx.count("X-Forwarded-For $remote_addr") == 1
+    for proxy in (nginx, local_nginx):
+        assert "/api/admin/aidp/jdbc-driver" not in proxy
+        assert "client_max_body_size 1m;" in proxy
+        assert "proxy_read_timeout 300s;" in proxy
+        assert "proxy_send_timeout 300s;" in proxy
+    assert "fastapi==0.141.1" in backend_requirements
+    assert "starlette==0.49.1" in backend_requirements
+    assert "limit_req" not in nginx
+    assert "opaque_rate_limit_key" in backend_main
+    assert 'headers={"Retry-After": str(' in backend_main
+    assert 'chmod 0600 "$TLS_DIR/tls.key" 2>/dev/null || true' in entrypoint
+    assert "firewall-offline-cmd --zone=public --add-service=http" in cloud_init
+    assert "firewall-offline-cmd --zone=public --add-service=https" in cloud_init
+    assert "firewall-cmd" not in cloud_init
+    assert "download.docker.com/linux/centos/docker-ce.repo" in cloud_init
+    assert 'retry 5 python3 "$SOURCE_DIR/scripts/release/load_release_image.py"' in cloud_init
+    assert "--component aidp-lab" in cloud_init
+    assert "docker build" not in cloud_init
+    assert "tee -a /var/log/aidp-lab-bootstrap.log /dev/console" in cloud_init
+    assert 'AIDP bootstrap failed with exit $status' in cloud_init
+    assert 'if [ "$HEALTH_STATUS" = "200" ]; then' in cloud_init
+    assert '|| [ "$HEALTH_STATUS" = "503" ]' not in cloud_init
+    assert "PUBLIC_IP=$(oci-public-ip -g" in cloud_init
+    assert "grep -Eo '([0-9]{1,3}\\.){3}[0-9]{1,3}'" in cloud_init
+    assert "tr -cd 'A-Za-z0-9.-'" in cloud_init
+    assert "IP.1 = $PUBLIC_IP" in cloud_init
+    assert "DNS.1 = $FQDN" in cloud_init
+    assert "-addext" not in cloud_init
+    assert "touch /var/local/userdata.done" in cloud_init
+    assert '"$TLS_DIR:/etc/aidp-lab/tls:ro,z"' in cloud_init
+    assert '"$STATE_DIR:/var/lib/aidp-lab:Z"' in cloud_init
+    assert re.search(r'^\s*alias\s*=\s*"home"\s*$', providers, re.MULTILINE)
+    assert re.search(r'^\s*region\s*=\s*var\.home_region\s*$', providers, re.MULTILINE)
+    assert "shape_candidates" not in compute
+    assert "oci_core_shapes" not in compute
+    assert compute.count("var.preferred_vm_shape") == 2
+    assert 'operating_system_version = "9"' in compute
+    assert "var._oci_instance.shape.ocpus" in compute
+    assert "var._oci_instance.shape.memory_in_gbs" in compute
+    assert 'name          = "Compute Instance Run Command"' in compute
+    assert 'desired_state = "ENABLED"' in compute
+    assert 'variable "vm_ocpus"' not in variables
+    assert 'variable "vm_memory_gbs"' not in variables
+    assert 'resource "oci_identity_domains_user"' not in identity
+    assert 'resource "oci_identity_domains_group" "provisioner"' not in identity
+    assert 'resource "oci_identity_domains_grant"' not in identity
+    assert "API Key Administrator" not in identity
+    assert aidp.count("oci.home") == 1
+    assert re.findall(r'resource "oci_identity_domains_app" "([^"]+)"', identity) == []
+    assert 'resource "oci_kms_' not in identity
+    assert 'resource "oci_vault_' not in identity
+    assert 'resource "time_sleep"' not in identity
+    assert 'resource "oci_objectstorage_object"' not in storage
+    assert 'web_socket_endpoint == null ? "" : local.selected_aidp.web_socket_endpoint' in aidp
+    assert 'alias_key == null ? "" : local.selected_aidp.alias_key' in aidp
+    assert 'timeouts {' in aidp
+    assert 'create = "120m"' in aidp
+    assert 'depends_on = [time_sleep.aidp_iam_propagation]' in aidp
+    assert 'sha256(jsonencode(oci_identity_policy.aidp_service.statements))' in aidp
+    assert 'create_duration = "5m"' in aidp
+    network = (root / "terraform/e_oci_core_vcn.tf").read_text(encoding="utf-8")
+    assert 'resource "oci_core_security_list" "web"' in network
+    assert "security_list_ids          = [oci_core_security_list.web.id]" in network
+    assert 'dns_label      = "aidplab"' in network
+    assert 'dns_label                  = "public"' in network
+    assert 'ingress_tcp_ports = [80, 443]' in variables
+    assert "oci_core_network_security_group" not in network
+    source_sha_block = variables.split('variable "source_commit_sha"', 1)[1]
+    assert 'default     = "main"' not in source_sha_block
+    assert 'regex("^[0-9a-f]{40}$"' in source_sha_block
+    assert "force_destroy" in storage
+    assert "prevent_destroy" not in storage
+    assert "manage datalake" not in compute
+    assert "manage ai-data-platforms" not in compute
+    assert 'resource "oci_identity_policy" "vm_bootstrap"' in compute
+    assert 'resource "oci_identity_policy" "vm_run_command"' in compute
+    assert "manage instance-agent-command-family" in compute
+    assert "use instance-agent-command-execution-family" in compute
+    credential_bootstrap = (root / "apps/backend/app/services/oci/credential_bootstrap.py").read_text(encoding="utf-8")
+    assert 'temporary.chmod(0o600)' in credential_bootstrap
+    assert 'path.chmod(0o600)' in credential_bootstrap
+    assert "database_admin_password" not in credential_bootstrap
+    assert "wallet_password" not in credential_bootstrap
+    assert "runtime_secrets" not in credential_bootstrap
+    post_apply = (root / "terraform/hooks/post_apply.py").read_text(encoding="utf-8")
+    assert '"admin_password": admin_password' not in post_apply
+    assert '"database_admin_password"' not in post_apply
+    assert "wallet_zip_b64" not in post_apply
+    assert '"$OCI_DIR:/etc/aidp-lab/oci:ro,Z"' in cloud_init
+    assert "ocarun ALL=(root) NOPASSWD: /usr/local/sbin/aidp-lab-bootstrap-public-key" in cloud_init
+    assert "AIDP_LAB_CREDENTIALS_V3_READY" in cloud_init
+    assert "cat /opt/aidp-lab/bootstrap/key_public.pem" in cloud_init
+    assert "cat /opt/aidp-lab/bootstrap/key.pem" not in cloud_init
+    assert "cat /opt/aidp-lab/.oci/config" not in cloud_init
+    assert "cat /opt/aidp-lab/.oci/key.pem" not in cloud_init
+    assert "AIDP_WORKBENCH_URL=${aidp_workbench_url}" in cloud_init
+    assert "AIDP_CONSOLE_URL" not in cloud_init
+
+
+def test_terraform_files_preserve_resource_layout_without_modules() -> None:
+    root = Path(__file__).parents[2] / "terraform"
+    assert 'required_version = ">= 1.5.7"' in (root / "a_versions.tf").read_text(encoding="utf-8")
+    expected = {
+        "a_versions.tf",
+        "b_variables.tf",
+        "c_naming.tf",
+        "d_main.tf",
+        "e_oci_core_vcn.tf",
+        "f_oci_objectstorage_bucket.tf",
+        "g_oci_core_instance.tf",
+        "i_oci_identity.tf",
+        "j_oci_ai_data_platform.tf",
+        "l_outputs.tf",
+    }
+    assert expected == {path.name for path in root.glob("*.tf")}
+    assert [path.name[0] for path in sorted(root.glob("*.tf"))] == list("abcdefgijl")
+    manifest = json.loads((root / "deploy-studio.json").read_text(encoding="utf-8"))
+    assert manifest["preflight"]["entrypoint"] == "terraform/m_preflight.py"
+    assert (root / "m_preflight.py").is_file()
+    assert not {"main.tf", "network.tf", "compute.tf", "storage.tf", "identity.tf", "aidp.tf", "outputs.tf", "providers.tf"} & {
+        path.name for path in root.glob("*.tf")
+    }
+
+
+def test_existing_workspace_form_and_runtime_contract():
+    root = Path(__file__).parents[2]
+    manifest = json.loads((root / "terraform/deploy-studio.json").read_text(encoding="utf-8"))
+    fields = {field["name"]: field for field in manifest["form"]["fields"]}
+    workspace = fields["existing_workspace_key"]
+    assert workspace["options_source"] == "oci_aidp_workspaces"
+    assert workspace["required"] is True
+    assert workspace["visible_when"] == {"field": "aidp_mode", "equals": "existing"}
+    assert "existing_workspace_name" in manifest["preflight"]["output_inputs"]
+    runtime = {field["name"] for field in manifest["preflight"]["runtime_fields"]}
+    assert "existing_workspace_name" in runtime
+    name_field = next(field for field in manifest["preflight"]["runtime_fields"] if field["name"] == "existing_workspace_name")
+    assert name_field["type"] == "text"
+    assert name_field["required"] is False
+    assert re.fullmatch(name_field["pattern"], "Shared workspace-01")
+    assert not re.fullmatch(name_field["pattern"], "workspace\nINJECTED=value")
+    assert manifest["email"]["services"][1]["fields"][1]["output"] == "workspace_name"
+    template = (root / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")
+    assert "AIDP_WORKSPACE_KEY=${aidp_workspace_key}" in template

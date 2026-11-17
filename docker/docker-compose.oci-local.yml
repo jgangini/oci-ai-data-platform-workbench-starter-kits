@@ -1,0 +1,40 @@
+name: ${AIDP_LOCAL_PROJECT_NAME:-aidp-lab-oci-local}
+
+services:
+  aidp-lab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ${AIDP_LOCAL_ENV_FILE:-../.env}
+    ports:
+      - "127.0.0.1:${AIDP_LOCAL_HOST_PORT:-18082}:80"
+    environment:
+      COOKIE_SECURE: "false"
+      OCI_CONFIG_FILE: /etc/aidp-lab/oci/config
+      OCI_CONFIG_HOST_PATH: ""
+      OCI_KEY_HOST_PATH: ""
+    volumes:
+      - aidp-session-oci-local:/var/lib/aidp-lab
+      - ./nginx.oci-local.conf:/etc/nginx/nginx.conf:ro
+      - type: bind
+        source: ${OCI_CONFIG_HOST_PATH:?run bootstrap_local_oci_env.py first}
+        target: /etc/aidp-lab/oci/config
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${OCI_KEY_HOST_PATH:?run bootstrap_local_oci_env.py first}
+        target: /etc/aidp-lab/oci/key.pem
+        read_only: true
+        bind:
+          create_host_path: false
+    restart: "no"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+
+volumes:
+  aidp-session-oci-local:

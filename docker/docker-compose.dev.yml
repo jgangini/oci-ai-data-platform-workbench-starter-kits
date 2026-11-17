@@ -1,0 +1,27 @@
+name: aidp-lab-dev
+
+services:
+  aidp-lab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        APP_RELEASE_SHA: ${APP_RELEASE_SHA:-development}
+    env_file: ../.env.dev
+    environment:
+      COOKIE_SECURE: "false"
+      LOCAL_IDENTITY_ARTIFACT_DIR: /var/lib/aidp-lab/local-artifacts
+    ports:
+      - "127.0.0.1:18081:80"
+    volumes:
+      - aidp-session-dev:/var/lib/aidp-lab
+      - ./nginx.oci-local.conf:/etc/nginx/nginx.conf:ro
+      - local-identity-artifacts-dev:/var/lib/aidp-lab/local-artifacts
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1/api/health"]
+    restart: unless-stopped
+
+
+volumes:
+  local-identity-artifacts-dev:
+  aidp-session-dev:

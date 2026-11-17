@@ -1,0 +1,158 @@
+{
+  "datasets": [
+    {
+      "file": "customers.csv",
+      "name": "customers",
+      "row_count": 300,
+      "sha256": "6e612d1c35a6d170fd5ba98d4fdc74bc3951d75c2abf5626436776e5ad0f2d79"
+    },
+    {
+      "file": "products.csv",
+      "name": "products",
+      "row_count": 150,
+      "sha256": "8a7faac98018f2779a9542e10909b2d7ff0a11499019951ab1e3d853f6a41f74"
+    },
+    {
+      "file": "orders.csv",
+      "name": "orders",
+      "row_count": 1200,
+      "sha256": "8286189b60c2959c99f2ae21d32a258d6d40553c848793556224efe2a9624e19"
+    },
+    {
+      "file": "order_items.csv",
+      "name": "order_items",
+      "row_count": 3000,
+      "sha256": "170e0c32cc9e9ac246137612ccfca6ebfc9c8999dc3f980cce23ba7652704134"
+    }
+  ],
+  "display_name": "Retail",
+  "expected_results": {
+    "business_aggregates": {
+      "order_items.quantity.sum": "7487"
+    },
+    "lineage": {
+      "direction": "BOTH",
+      "expected_column_edges": [
+        "landing.customers.customer_id->bronze.customers.customer_id->silver.customers.customer_id->gold.retail_customer_value.customer_id",
+        "landing.order_items.quantity->bronze.order_items.quantity->silver.order_items.quantity->gold.retail_product_daily.units"
+      ],
+      "expected_entity_edges": [
+        "landing.customers->bronze.customers->silver.customers->gold.retail_customer_value",
+        "landing.orders->bronze.orders->silver.orders->gold.retail_customer_value",
+        "landing.order_items->bronze.order_items->silver.order_items->gold.retail_product_daily",
+        "landing.products->bronze.products->silver.products->gold.retail_product_daily"
+      ],
+      "forbidden_table_suffixes": [
+        "lineage_demo"
+      ],
+      "levels": [
+        "ENTITY",
+        "COLUMN"
+      ],
+      "max_depth": 8,
+      "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{table_name}",
+      "required_schema_paths": [
+        "{participant_key}_aidp.oci_landing.",
+        "{participant_key}_aidp.oci_bronze.",
+        "{participant_key}_aidp.oci_silver.",
+        "{participant_key}_aidp.oci_gold."
+      ],
+      "should_include_edges": true,
+      "target_tables": [
+        "retail_customer_value",
+        "retail_product_daily"
+      ]
+    },
+    "quality": {
+      "minimum_quarantined_rows": 1
+    },
+    "source_row_counts": {
+      "customers": 300,
+      "order_items": 3000,
+      "orders": 1200,
+      "products": 150
+    }
+  },
+  "formats": {
+    "bronze": "DELTA",
+    "gold": "DELTA",
+    "landing": "DELTA",
+    "silver": "DELTA"
+  },
+  "lab_id": "retail",
+  "notebooks": [
+    {
+      "depends_on": [],
+      "file": "01_landing_retail.ipynb",
+      "sha256": "76e425355094ceeb1f4f8a1d5eda6d763d5bfa84f4ad9e8eee8c6d457ff32860",
+      "task_key": "01_landing_retail"
+    },
+    {
+      "depends_on": [
+        "01_landing_retail"
+      ],
+      "file": "02_bronze_retail.ipynb",
+      "sha256": "87925fc4d6d4d9006e16b895f97c9539c371aeb96d62ac8112dc50ab8616c102",
+      "task_key": "02_bronze_retail"
+    },
+    {
+      "depends_on": [
+        "02_bronze_retail"
+      ],
+      "file": "03_silver_retail.ipynb",
+      "sha256": "7be677d1beebd081992c35321ceac54661e2df4e0c8554732934436b749a5d50",
+      "task_key": "03_silver_retail"
+    },
+    {
+      "depends_on": [
+        "03_silver_retail"
+      ],
+      "file": "04_gold_retail.ipynb",
+      "sha256": "9afd56add480b91e2473da7c6a2b017be4f7bd9832bb822e1cd7a9d0036aa9dc",
+      "task_key": "04_gold_retail"
+    },
+    {
+      "depends_on": [
+        "04_gold_retail"
+      ],
+      "file": "05_lineage_retail.ipynb",
+      "sha256": "e9b596ec7db27042b8c3b827a6f34c5b4b142b75c3fa11cdb77fc2317a63743b",
+      "task_key": "05_lineage_retail"
+    }
+  ],
+  "pack_sha256": "458d46c52fc43f2826d07a358ca1331ca60761446710a2d390ba0a4884eea5fa",
+  "pack_version": "2.0.0",
+  "schema_version": 1,
+  "status": "available",
+  "table_storage": {
+    "bronze": "MANAGED",
+    "gold": "MANAGED",
+    "landing": "MANAGED",
+    "silver": "MANAGED"
+  },
+  "tables": {
+    "bronze": [
+      "customers",
+      "products",
+      "orders",
+      "order_items"
+    ],
+    "gold": [
+      "retail_customer_value",
+      "retail_product_daily"
+    ],
+    "landing": [
+      "customers",
+      "products",
+      "orders",
+      "order_items"
+    ],
+    "silver": [
+      "customers",
+      "products",
+      "orders",
+      "order_items",
+      "quality_issues"
+    ]
+  }
+}

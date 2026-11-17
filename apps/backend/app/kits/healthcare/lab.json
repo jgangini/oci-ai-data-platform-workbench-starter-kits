@@ -1,0 +1,158 @@
+{
+  "datasets": [
+    {
+      "file": "patients.csv",
+      "name": "patients",
+      "row_count": 240,
+      "sha256": "82f32f1abf1c953d74ca65dfb288c16505127631b8bdac73176285572333d80c"
+    },
+    {
+      "file": "providers.csv",
+      "name": "providers",
+      "row_count": 48,
+      "sha256": "700a58fecd9526fe2f9e15a1d00dc43f540df796101200dd70cf0f74366c0f75"
+    },
+    {
+      "file": "appointments.csv",
+      "name": "appointments",
+      "row_count": 900,
+      "sha256": "3be8fb83f6053c0cc53779e99c4cb6bc9f206f1acc48fe095f513e821479835a"
+    },
+    {
+      "file": "encounters.csv",
+      "name": "encounters",
+      "row_count": 700,
+      "sha256": "8995881602037b8c54af9cd6d30e47a526304fe4894dd90311e76a5affe1af3d"
+    }
+  ],
+  "display_name": "Healthcare",
+  "expected_results": {
+    "business_aggregates": {
+      "encounters.cost_amount.sum": "557597.00"
+    },
+    "lineage": {
+      "direction": "BOTH",
+      "expected_column_edges": [
+        "landing.patients.patient_id->bronze.patients.patient_id->silver.patients.patient_id->gold.healthcare_patient_utilization.patient_id",
+        "landing.encounters.cost_amount->bronze.encounters.cost_amount->silver.encounters.cost_amount->gold.healthcare_provider_daily.total_cost"
+      ],
+      "expected_entity_edges": [
+        "landing.patients->bronze.patients->silver.patients->gold.healthcare_patient_utilization",
+        "landing.appointments->bronze.appointments->silver.appointments->gold.healthcare_provider_daily",
+        "landing.encounters->bronze.encounters->silver.encounters->gold.healthcare_patient_utilization",
+        "landing.providers->bronze.providers->silver.providers->gold.healthcare_provider_daily"
+      ],
+      "forbidden_table_suffixes": [
+        "lineage_demo"
+      ],
+      "levels": [
+        "ENTITY",
+        "COLUMN"
+      ],
+      "max_depth": 8,
+      "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{table_name}",
+      "required_schema_paths": [
+        "{participant_key}_aidp.oci_landing.",
+        "{participant_key}_aidp.oci_bronze.",
+        "{participant_key}_aidp.oci_silver.",
+        "{participant_key}_aidp.oci_gold."
+      ],
+      "should_include_edges": true,
+      "target_tables": [
+        "healthcare_patient_utilization",
+        "healthcare_provider_daily"
+      ]
+    },
+    "quality": {
+      "minimum_quarantined_rows": 1
+    },
+    "source_row_counts": {
+      "appointments": 900,
+      "encounters": 700,
+      "patients": 240,
+      "providers": 48
+    }
+  },
+  "formats": {
+    "bronze": "DELTA",
+    "gold": "DELTA",
+    "landing": "DELTA",
+    "silver": "DELTA"
+  },
+  "lab_id": "healthcare",
+  "notebooks": [
+    {
+      "depends_on": [],
+      "file": "01_landing_healthcare.ipynb",
+      "sha256": "63387ee0d3d7a7cb97d13e99aa9fab2e20dab28199300a0fbc1979cfa4844111",
+      "task_key": "01_landing_healthcare"
+    },
+    {
+      "depends_on": [
+        "01_landing_healthcare"
+      ],
+      "file": "02_bronze_healthcare.ipynb",
+      "sha256": "aa90296c4b20a93cb4566be991b89e294a3c2417241dfd66c904ec7a85abb0a2",
+      "task_key": "02_bronze_healthcare"
+    },
+    {
+      "depends_on": [
+        "02_bronze_healthcare"
+      ],
+      "file": "03_silver_healthcare.ipynb",
+      "sha256": "e84dd5ff92966b4b73d4c6481c1e235ef02aca32eb49803f6f8ac7021e0a4705",
+      "task_key": "03_silver_healthcare"
+    },
+    {
+      "depends_on": [
+        "03_silver_healthcare"
+      ],
+      "file": "04_gold_healthcare.ipynb",
+      "sha256": "405b397dc724c07287e14373a2605ace3a1f616ed2bb5b86b36ac64379cb209e",
+      "task_key": "04_gold_healthcare"
+    },
+    {
+      "depends_on": [
+        "04_gold_healthcare"
+      ],
+      "file": "05_lineage_healthcare.ipynb",
+      "sha256": "c611fb68ec12ded83305906d92c4323d66d16c1907a933eac0e438182a6edc76",
+      "task_key": "05_lineage_healthcare"
+    }
+  ],
+  "pack_sha256": "a998886376a85234b7eac44b66cd7c7ddfa46a6759716084dd8e647be173589a",
+  "pack_version": "2.0.0",
+  "schema_version": 1,
+  "status": "available",
+  "table_storage": {
+    "bronze": "MANAGED",
+    "gold": "MANAGED",
+    "landing": "MANAGED",
+    "silver": "MANAGED"
+  },
+  "tables": {
+    "bronze": [
+      "patients",
+      "providers",
+      "appointments",
+      "encounters"
+    ],
+    "gold": [
+      "healthcare_patient_utilization",
+      "healthcare_provider_daily"
+    ],
+    "landing": [
+      "patients",
+      "providers",
+      "appointments",
+      "encounters"
+    ],
+    "silver": [
+      "patients",
+      "providers",
+      "appointments",
+      "encounters",
+      "quality_issues"
+    ]
+  }
+}
