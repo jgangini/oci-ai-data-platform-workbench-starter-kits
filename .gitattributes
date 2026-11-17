@@ -1,0 +1,5 @@
+*.sh text eol=lf
+.sentrux/**/*.json text eol=lf
+.sentrux/history/*.json -text whitespace=cr-at-eol
+apps/backend/app/kits/** text eol=lf
+apps/frontend/public/brand-icons/** text eol=lf

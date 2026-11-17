@@ -1,0 +1,332 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any, Callable
+
+import oci
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+from release_gate import compartment_target, validate_context, validate_source
+
+
+E5_SHAPE = "VM.Standard.E5.Flex"
+E4_SHAPE = "VM.Standard.E4.Flex"
+E3_SHAPE = "VM.Standard.E3.Flex"
+SUPPORTED_SHAPES = (E5_SHAPE, E4_SHAPE, E3_SHAPE)
+ACTIVE_WORK_REQUEST_STATES = {"ACCEPTED", "IN_PROGRESS", "WAITING", "NEEDS_ATTENTION", "CANCELING"}
+
+
+def _require_automatic_tag_defaults(identity: Any, compartment_id: str) -> str:
+    defaults = _list_all(identity.assemble_effective_tag_set, compartment_id=compartment_id, lifecycle_state="ACTIVE")
+    if any(item.is_required for item in defaults):
+        raise RuntimeError(
+            "AIDP creates internal buckets without user-supplied tag values. "
+            "Configure automatic values for inherited required tag defaults before deployment."
+        )
+    return f"{len(defaults)} inherited tag defaults have automatic values; tenancy defaults will be preserved"
+
+
+def _safe_error_message(exc: Exception) -> str:
+    if isinstance(exc, oci.exceptions.ServiceError):
+        return f"OCI {exc.status} {exc.code}"
+    if isinstance(exc, (RuntimeError, ValueError)):
+        return str(exc)[:256]
+    return type(exc).__name__
+
+
+def _home_region(identity: Any, tenancy_id: str) -> str:
+    tenancy = identity.get_tenancy(tenancy_id).data
+    home_key = str(tenancy.home_region_key).upper()
+    subscriptions = identity.list_region_subscriptions(tenancy_id).data
+    matches = [item for item in subscriptions if str(item.region_key).upper() == home_key]
+    if len(matches) != 1 or not matches[0].region_name:
+        raise RuntimeError("OCI did not return one unambiguous tenancy home region")
+    return str(matches[0].region_name)
+
+
+def _operator_username(identity: Any, user_ocid: str) -> str:
+    user = identity.get_user(user_ocid).data
+    value = str(getattr(user, "email", "") or getattr(user, "name", "") or "").strip()
+    if not value:
+        raise RuntimeError("OCI did not return a display name for the deployment operator")
+    return value
+
+
+def _require_ready_region(identity: Any, tenancy_id: str, region: str) -> None:
+    subscriptions = identity.list_region_subscriptions(tenancy_id).data
+    match = next(
+        (item for item in subscriptions if str(getattr(item, "region_name", "")) == region),
+        None,
+    )
+    if match is None:
+        raise RuntimeError(f"region {region} is not subscribed by this tenancy")
+    status = str(getattr(match, "status", "READY") or "READY").upper()
+    if status != "READY":
+        raise RuntimeError(f"region {region} subscription is {status}, not READY")
+
+
+
+
+
+
+def _require_aidp(aidp: Any, inputs: dict[str, Any], region: str, compartment: str, compartment_mode: str) -> str:
+    mode = str(inputs.get("aidp_mode") or "new")
+    if mode == "new":
+        name = str(inputs.get("aidp_display_name") or "aidp_medallion")
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,99}", name):
+            raise ValueError("Invalid new AIDP display name")
+        return f"A new AIDP {name} will be created"
+    if mode != "existing":
+        raise ValueError("aidp_mode must be new or existing")
+    platform_id = str(inputs.get("existing_ai_data_platform_ocid") or "")
+    if not re.fullmatch(r"ocid1\.aidataplatform\.[a-z0-9.-]+", platform_id):
+        raise ValueError("An existing AIDP OCID is required")
+    if compartment_mode != "existing":
+        raise ValueError("Existing AIDP requires its existing compartment")
+    platform = aidp.get_ai_data_platform(platform_id).data
+    if getattr(platform, "lifecycle_state", "") != "ACTIVE" or getattr(platform, "ai_data_platform_type", "") != "STRUCTURED":
+        raise ValueError("Existing AIDP must be ACTIVE and STRUCTURED")
+    if getattr(platform, "compartment_id", "") != compartment:
+        raise ValueError("Existing AIDP must belong to the selected compartment")
+    if platform_id.split(".")[3] != region:
+        raise ValueError("Existing AIDP must belong to the selected region")
+    return "Existing AIDP validated; this stack will not own or delete the platform"
+
+
+def _workspace_inputs(inputs: dict[str, Any], config: dict[str, Any]) -> dict[str, str]:
+    if inputs.get("aidp_mode") != "existing":
+        return {}
+    from hooks.post_apply import AidpApi, assert_operator_platform_admin, build_signer, selected_existing_workspace
+
+    api = AidpApi(config["region"], inputs["existing_ai_data_platform_ocid"], build_signer(config), "preflight")
+    assert_operator_platform_admin(api, config["user"], attempts=1)
+    workspace = selected_existing_workspace(api, str(inputs.get("existing_workspace_key") or ""))
+    return {"existing_workspace_name": str(workspace["displayName"])}
+
+
+def _candidate_shapes(preferred: str) -> list[str]:
+    if preferred not in SUPPORTED_SHAPES:
+        raise ValueError("preferred_vm_shape must be E5 Flex, E4 Flex, or E3 Flex")
+    return list(SUPPORTED_SHAPES[SUPPORTED_SHAPES.index(preferred) :])
+
+
+def _available_shape(report: Any, candidates: list[str], required_count: int = 1) -> str | None:
+    available = oci.core.models.CapacityReportShapeAvailability.AVAILABILITY_STATUS_AVAILABLE
+    for shape in candidates:
+        if any(
+            str(item.instance_shape) == shape
+            and item.availability_status == available
+            and ((item.available_count is None)
+                 or (item.available_count is not None and int(item.available_count) >= required_count))
+            for item in report.shape_availabilities
+        ):
+            return shape
+    return None
+
+
+def _list_all(call: Callable[..., Any], **kwargs: Any) -> list[Any]:
+    items: list[Any] = []
+    while True:
+        response = call(**kwargs)
+        data = response.data
+        items.extend(data if isinstance(data, list) else (getattr(data, "items", None) or []))
+        page = (getattr(response, "headers", None) or {}).get("opc-next-page")
+        if not page:
+            return items
+        kwargs["page"] = page
+
+
+def _has_active_aidp_work_request(aidp: Any, compartment_ids: set[str]) -> bool:
+    return any(
+        str(getattr(item, "compartment_id", "")) in compartment_ids
+        and str(getattr(item, "status", "")).upper() in ACTIVE_WORK_REQUEST_STATES
+        for item in _list_all(aidp.list_work_requests)
+    )
+
+
+def _require_compartment_target(identity: Any, aidp: Any, tenancy_id: str, target: str, mode: str) -> str:
+    target_is_ocid = target.startswith("ocid1.compartment.")
+    if mode == "new" and target_is_ocid:
+        raise ValueError("new compartment must use a name, not an OCID")
+    compartments = _list_all(
+        identity.list_compartments,
+        compartment_id=tenancy_id,
+        compartment_id_in_subtree=True,
+        access_level="ANY",
+    )
+    matches = [
+        item
+        for item in compartments
+        if (
+            str(getattr(item, "id", "")) == target
+            if target_is_ocid
+            else str(getattr(item, "name", "")).casefold() == target.casefold()
+        )
+    ]
+    active = [item for item in matches if str(getattr(item, "lifecycle_state", "")).upper() == "ACTIVE"]
+    if mode == "existing":
+        if len(active) != 1:
+            raise RuntimeError(f"existing compartment {target} was not found or is ambiguous")
+        return f"{target if not target_is_ocid else 'selected compartment'} exists and is ACTIVE"
+    occupied = [item for item in matches if str(getattr(item, "lifecycle_state", "")).upper() != "DELETED"]
+    if occupied:
+        raise RuntimeError(f"compartment {target} is not available to create")
+    deleted_ids = {str(item.id) for item in matches if getattr(item, "id", None)}
+    if deleted_ids and _has_active_aidp_work_request(aidp, deleted_ids):
+        raise RuntimeError(f"a previous AIDP work request is still active for {target}")
+    return f"{target} is available to create"
+
+
+def select_inputs(
+    context: dict[str, Any],
+    sdk_config: dict[str, Any],
+    identity_factory: Callable[[dict[str, Any]], Any] = oci.identity.IdentityClient,
+    compute_factory: Callable[[dict[str, Any]], Any] = oci.core.ComputeClient,
+    aidp_factory: Callable[[dict[str, Any]], Any] = oci.ai_data_platform.AiDataPlatformClient,
+) -> dict[str, Any]:
+    target, mode = compartment_target(context)
+    region = str(context.get("region") or sdk_config.get("region") or "").strip()
+    tenancy_id = str(sdk_config.get("tenancy") or "").strip()
+    operator_user_ocid = str(sdk_config.get("user") or "").strip()
+    if not region or not tenancy_id or not operator_user_ocid.startswith("ocid1.user."):
+        raise ValueError("preflight requires deployment region, tenancy OCID, and operator user OCID")
+
+    inputs = context.get("inputs") if isinstance(context.get("inputs"), dict) else {}
+    if {"enable_gods_eye_view", "enable_territorial_viewer", "enable_prisma_viewer",
+        "enabled_vm_modules", "portal_managed_modules"} & inputs.keys():
+        raise ValueError("Module deployment inputs are not supported by the kits-only project")
+
+    candidates = _candidate_shapes(E5_SHAPE)
+    ocpus = 2.0
+    memory = 16.0
+    regional_config = dict(sdk_config)
+    regional_config["region"] = region
+    identity = identity_factory(regional_config)
+    _require_ready_region(identity, tenancy_id, region)
+    operator_username = _operator_username(identity, operator_user_ocid)
+    aidp_message = _require_aidp(aidp_factory(regional_config), inputs, region, target, mode)
+    workspace_inputs = _workspace_inputs(inputs, regional_config)
+    compartment_message = _require_compartment_target(
+        identity,
+        aidp_factory(regional_config),
+        tenancy_id,
+        target,
+        mode,
+    )
+    tags_message = _require_automatic_tag_defaults(identity, tenancy_id if mode == "new" else target)
+    home_region = _home_region(identity, tenancy_id)
+    availability_domains = identity.list_availability_domains(tenancy_id).data
+    compute = compute_factory(regional_config)
+    for availability_domain_index, domain in enumerate(availability_domains):
+        availability_domain = str(domain.name)
+        details = oci.core.models.CreateComputeCapacityReportDetails(
+            compartment_id=tenancy_id,
+            availability_domain=availability_domain,
+            shape_availabilities=[
+                oci.core.models.CreateCapacityReportShapeAvailabilityDetails(
+                    instance_shape=shape,
+                    instance_shape_config=oci.core.models.CapacityReportInstanceShapeConfig(
+                        ocpus=ocpus,
+                        memory_in_gbs=memory,
+                    ),
+                )
+                for shape in SUPPORTED_SHAPES
+            ],
+        )
+        report = compute.create_compute_capacity_report(details).data
+        required_count = 1
+        selected = _available_shape(report, candidates, required_count)
+        if selected:
+            return {
+                "inputs": {
+                    **workspace_inputs,
+                    "home_region": home_region,
+                    "operator_user_ocid": operator_user_ocid,
+                    "operator_username": operator_username,
+                    "preferred_vm_shape": selected,
+                    "availability_domain_index": availability_domain_index,
+                },
+                "events": [
+                    {
+                        "name": "Immutable release source",
+                        "status": "passed",
+                        "message": "Release context and deployment source passed",
+                    },
+                    {
+                        "name": "Compartment availability",
+                        "status": "passed",
+                        "message": compartment_message,
+                    },
+                    {"name": "OCI tenancy home region", "status": "passed", "message": home_region},
+                    {"name": "Inherited tag defaults", "status": "passed", "message": tags_message},
+                    {"name": "AI Data Platform Workbench", "status": "passed", "message": aidp_message},
+                    {
+                        "name": "Compute capacity preflight",
+                        "status": "passed",
+                        "message": f"{selected} is AVAILABLE in {availability_domain}; requesting {required_count} VMs; OCI may omit available_count and capacity is not reserved",
+                    },
+                ],
+            }
+    raise RuntimeError("OCI reports no capacity for the supported E5/E4/E3 Flex shapes in any Availability Domain")
+
+
+def _read_json_env(name: str) -> dict[str, Any]:
+    return json.loads(Path(os.environ[name]).read_text(encoding="utf-8"))
+
+
+def _write_result(payload: dict[str, Any]) -> None:
+    path = Path(os.environ["DEPLOY_STUDIO_RESULT"])
+    path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    path.chmod(0o600)
+
+
+def _require_unencrypted_private_key(config: dict[str, Any], key_path: str) -> None:
+    if config.get("pass_phrase"):
+        raise ValueError("Deploy Studio requires an unencrypted OCI API private key")
+    try:
+        private_key = serialization.load_pem_private_key(Path(key_path).read_bytes(), password=None)
+    except TypeError as exc:
+        raise ValueError("Deploy Studio requires an unencrypted OCI API private key") from exc
+    except (OSError, ValueError) as exc:
+        raise ValueError("OCI API private key is unreadable or invalid") from exc
+    if not isinstance(private_key, rsa.RSAPrivateKey):
+        raise ValueError("OCI API private key must be RSA")
+
+
+def _load_sdk_config() -> dict[str, Any]:
+    config = oci.config.from_file(os.environ["DEPLOY_STUDIO_OCI_CONFIG"], "DEFAULT")
+    config["key_file"] = os.environ["DEPLOY_STUDIO_OCI_KEY"]
+    _require_unencrypted_private_key(config, config["key_file"])
+    oci.config.validate_config(config)
+    return config
+
+
+def main() -> int:
+    try:
+        context = _read_json_env("DEPLOY_STUDIO_CONTEXT")
+        validate_context(context)
+        validate_source(Path(__file__).parent)
+        _write_result(select_inputs(context, _load_sdk_config()))
+        return 0
+    except Exception as exc:  # The runner receives a bounded, secret-free failure event.
+        _write_result(
+            {
+                "inputs": {},
+                "events": [
+                    {
+                        "name": "OCI deployment preflight",
+                        "status": "failed",
+                        "message": _safe_error_message(exc),
+                    }
+                ],
+            }
+        )
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

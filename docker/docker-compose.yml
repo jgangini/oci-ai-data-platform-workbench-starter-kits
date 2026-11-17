@@ -1,0 +1,15 @@
+services:
+  aidp-lab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file: ../.env
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - aidp-session:/var/lib/aidp-lab
+    restart: unless-stopped
+
+volumes:
+  aidp-session:

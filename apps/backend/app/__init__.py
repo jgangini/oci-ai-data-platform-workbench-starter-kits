@@ -1,0 +1,1 @@
+"""AIDP lab registration service."""

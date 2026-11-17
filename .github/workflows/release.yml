@@ -1,0 +1,240 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify the release tag and source contract
+        run: |
+          set -euo pipefail
+          tag_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          git fetch origin main
+          git merge-base --is-ancestor "$tag_commit" origin/main || {
+            echo "Release tags must point to commits already reachable from main."
+            exit 1
+          }
+          python terraform/release_gate.py --source-root terraform --release-ref "$GITHUB_REF_NAME"
+          echo "RELEASE_COMMIT_SHA=$tag_commit" >> "$GITHUB_ENV"
+          echo "RELEASE_REPOSITORY=https://github.com/$GITHUB_REPOSITORY" >> "$GITHUB_ENV"
+          echo "RELEASE_IMAGE_ASSET=aidp-lab-image-amd64.tar.gz" >> "$GITHUB_ENV"
+          echo "RELEASE_MANIFEST_ASSET=aidp-release.json" >> "$GITHUB_ENV"
+          echo "RELEASE_DIST=$RUNNER_TEMP/aidp-release" >> "$GITHUB_ENV"
+      - name: Inspect existing release
+        id: release
+        run: |
+          set -euo pipefail
+          lookup_error="$RUNNER_TEMP/release-lookup.err"
+          if state="$(gh release view "$GITHUB_REF_NAME" --json isDraft,isImmutable,isPrerelease --jq '[.isDraft, .isImmutable, .isPrerelease] | @tsv' 2>"$lookup_error")"; then
+            true
+          elif grep -Fxq "release not found" "$lookup_error"; then
+            echo "mode=create" >> "$GITHUB_OUTPUT"
+            exit 0
+          else
+            cat "$lookup_error" >&2
+            exit 1
+          fi
+          if [[ "$state" == $'false\ttrue\tfalse' ]]; then
+            echo "mode=immutable" >> "$GITHUB_OUTPUT"
+          elif [[ "$state" == $'true\tfalse\tfalse' ]]; then
+            echo "mode=draft" >> "$GITHUB_OUTPUT"
+          elif [[ "$state" == $'false\tfalse\tfalse' ]]; then
+            echo "Existing published release is mutable; refusing to edit or republish it." >&2
+            exit 1
+          else
+            echo "Existing release has an invalid draft/immutable state: $state" >&2
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Verify existing immutable release assets
+        if: steps.release.outputs.mode == 'immutable'
+        run: |
+          set -euo pipefail
+          verify_dir="$RUNNER_TEMP/immutable-release"
+          mkdir -p "$verify_dir"
+          asset_names="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name] | sort | join(",")')"
+          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET"
+          gh release download "$GITHUB_REF_NAME" \
+            --dir "$verify_dir" \
+            --pattern "$RELEASE_IMAGE_ASSET" \
+            --pattern "$RELEASE_MANIFEST_ASSET"
+          gzip -t "$verify_dir/$RELEASE_IMAGE_ASSET"
+          RELEASE_VERIFY_DIR="$verify_dir" python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RELEASE_VERIFY_DIR"])
+          for image_name, manifest_name, component in (
+              (os.environ["RELEASE_IMAGE_ASSET"], os.environ["RELEASE_MANIFEST_ASSET"], "aidp-lab"),
+          ):
+              with (root / image_name).open("rb") as stream:
+                  digest = hashlib.file_digest(stream, "sha256").hexdigest()
+              expected = {
+                  "schema_version": 1,
+                  "updater_protocol": 2,
+                  "deployment_profile": "kits-only",
+                  "release": os.environ["GITHUB_REF_NAME"],
+                  "commit_sha": os.environ["RELEASE_COMMIT_SHA"],
+                  "repository": os.environ["RELEASE_REPOSITORY"],
+                  "image": {
+                      "asset_name": image_name,
+                      "sha256": digest,
+                      "platform": "linux/amd64",
+                      "image_tag": f'{component}:{os.environ["RELEASE_COMMIT_SHA"]}',
+                  },
+              }
+              if json.loads((root / manifest_name).read_text(encoding="utf-8")) != expected:
+                  raise SystemExit("immutable release asset manifest mismatch")
+          PY
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.release.outputs.mode != 'immutable'
+        with:
+          terraform_version: 1.15.7
+      - uses: actions/setup-node@v4
+        if: steps.release.outputs.mode != 'immutable'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+      - if: steps.release.outputs.mode != 'immutable'
+        run: pip install -r apps/backend/requirements-dev.txt
+      - if: steps.release.outputs.mode != 'immutable'
+        run: python -m pytest apps/backend/tests terraform/tests
+        env:
+          SESSION_SECRET_FILE: ${{ runner.temp }}/aidp-lab/session.key
+      - if: steps.release.outputs.mode != 'immutable'
+        run: npm ci
+        working-directory: apps/frontend
+      - if: steps.release.outputs.mode != 'immutable'
+        run: npm test && npm run build
+        working-directory: apps/frontend
+      - if: steps.release.outputs.mode != 'immutable'
+        run: terraform fmt -check -recursive
+        working-directory: terraform
+      - if: steps.release.outputs.mode != 'immutable'
+        run: terraform init -backend=false && terraform validate && terraform test
+        working-directory: terraform
+      - name: Build frozen linux/amd64 Docker release assets
+        if: steps.release.outputs.mode != 'immutable'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RELEASE_DIST"
+          image_tag="aidp-lab:$RELEASE_COMMIT_SHA"
+          python scripts/release/write_package_versions.py
+          docker build --platform linux/amd64 \
+            --build-arg APP_RELEASE_TAG="$GITHUB_REF_NAME" \
+            --build-arg APP_RELEASE_SHA="$RELEASE_COMMIT_SHA" \
+            --build-arg APP_REPOSITORY="$RELEASE_REPOSITORY" \
+            --file docker/Dockerfile \
+            --tag "$image_tag" .
+          test "$(docker image inspect "$image_tag" --format '{{.Os}}/{{.Architecture}}')" = "linux/amd64"
+          docker save "$image_tag" | gzip -n -9 > "$RELEASE_DIST/$RELEASE_IMAGE_ASSET"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RELEASE_DIST"])
+          image_path = root / os.environ["RELEASE_IMAGE_ASSET"]
+          digest = hashlib.sha256()
+          with image_path.open("rb") as stream:
+              for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                  digest.update(chunk)
+          manifest = {
+              "schema_version": 1,
+              "updater_protocol": 2,
+              "deployment_profile": "kits-only",
+              "release": os.environ["GITHUB_REF_NAME"],
+              "commit_sha": os.environ["RELEASE_COMMIT_SHA"],
+              "repository": os.environ["RELEASE_REPOSITORY"],
+              "image": {
+                  "asset_name": os.environ["RELEASE_IMAGE_ASSET"],
+                  "sha256": digest.hexdigest(),
+                  "platform": "linux/amd64",
+                  "image_tag": f'aidp-lab:{os.environ["RELEASE_COMMIT_SHA"]}',
+              },
+          }
+          (root / os.environ["RELEASE_MANIFEST_ASSET"]).write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+      - name: Create or reuse draft GitHub release
+        if: steps.release.outputs.mode != 'immutable'
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.release.outputs.mode }}" == "create" ]]; then
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+          else
+            test "$(gh release view "$GITHUB_REF_NAME" --json isDraft,isImmutable,isPrerelease --jq '[.isDraft, .isImmutable, .isPrerelease] | @tsv')" = $'true\tfalse\tfalse'
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Upload frozen assets to draft
+        if: steps.release.outputs.mode != 'immutable'
+        run: |
+          set -euo pipefail
+          test "$(gh release view "$GITHUB_REF_NAME" --json isDraft,isImmutable,isPrerelease --jq '[.isDraft, .isImmutable, .isPrerelease] | @tsv')" = $'true\tfalse\tfalse'
+          gh release upload "$GITHUB_REF_NAME" \
+            "$RELEASE_DIST/$RELEASE_IMAGE_ASSET" \
+            "$RELEASE_DIST/$RELEASE_MANIFEST_ASSET" \
+            --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Verify uploaded draft assets
+        if: steps.release.outputs.mode != 'immutable'
+        run: |
+          set -euo pipefail
+          verify_dir="$RUNNER_TEMP/uploaded-release"
+          mkdir -p "$verify_dir"
+          asset_names="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '[.assets[].name] | sort | join(",")')"
+          test "$asset_names" = "$RELEASE_IMAGE_ASSET,$RELEASE_MANIFEST_ASSET"
+          gh release download "$GITHUB_REF_NAME" \
+            --dir "$verify_dir" \
+            --pattern "$RELEASE_IMAGE_ASSET" \
+            --pattern "$RELEASE_MANIFEST_ASSET"
+          cmp "$RELEASE_DIST/$RELEASE_IMAGE_ASSET" "$verify_dir/$RELEASE_IMAGE_ASSET"
+          cmp "$RELEASE_DIST/$RELEASE_MANIFEST_ASSET" "$verify_dir/$RELEASE_MANIFEST_ASSET"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Publish GitHub release
+        if: steps.release.outputs.mode != 'immutable'
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Verify published release is immutable
+        if: steps.release.outputs.mode != 'immutable'
+        run: |
+          for attempt in $(seq 1 12); do
+            state="$(gh release view "$GITHUB_REF_NAME" --json isDraft,isImmutable,isPrerelease --jq '[.isDraft, .isImmutable, .isPrerelease] | @tsv')"
+            if [[ "$state" == $'false\ttrue\tfalse' ]]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Release did not become immutable after publication." >&2
+          exit 1
+        env:
+          GH_TOKEN: ${{ github.token }}

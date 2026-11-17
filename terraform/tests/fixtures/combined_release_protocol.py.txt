@@ -1,0 +1,59 @@
+# Frozen test-only protocol boundary from 3c82617fd298933995e954955841007253cc0985
+# Source: scripts/release/vm_release_updater.py. Never imported by application code.
+
+def _validated_manifest(value: Any, release: dict[str, str]) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise RuntimeError("invalid_release_manifest")
+    image = value.get("image")
+    tag = release["tag"]
+    commit_sha = str(value.get("commit_sha") or "")
+    if (
+        value.get("schema_version") != 1
+        or value.get("updater_protocol") != 1
+        or value.get("release") != tag
+        or value.get("repository") != REPOSITORY.removesuffix(".git")
+        or SHA.fullmatch(commit_sha) is None
+        or not isinstance(image, dict)
+        or image.get("asset_name") != IMAGE_ASSET
+        or image.get("sha256") != release["image_sha256"]
+        or image.get("platform") != "linux/amd64"
+        or image.get("image_tag") != f"aidp-lab:{commit_sha}"
+    ):
+        raise RuntimeError("invalid_release_manifest")
+    return {
+        "release": tag,
+        "commit_sha": commit_sha,
+        "image_sha256": release["image_sha256"],
+        "image_tag": f"aidp-lab:{commit_sha}",
+    }
+
+def _prepare_artifact(
+    releases_dir: Path,
+    operation_id: str,
+    release: dict[str, str],
+) -> tuple[Path, dict[str, str], Path]:
+    stage = releases_dir / f"update-{operation_id}"
+    _safe_rmtree(stage, releases_dir)
+    stage.mkdir(mode=0o700)
+    try:
+        manifest_path = stage / MANIFEST_ASSET
+        _download(
+            release["manifest_url"],
+            manifest_path,
+            release["manifest_sha256"],
+            MANIFEST_LIMIT,
+        )
+        manifest = _validated_manifest(_json(manifest_path), release)
+        if resolved_tag_sha(manifest["release"]) != manifest["commit_sha"]:
+            raise RuntimeError("release_commit_mismatch")
+        image_path = stage / IMAGE_ASSET
+        _download(
+            release["image_url"],
+            image_path,
+            manifest["image_sha256"],
+            IMAGE_LIMIT,
+        )
+        return stage, manifest, image_path
+    except Exception:
+        _safe_rmtree(stage, releases_dir)
+        raise

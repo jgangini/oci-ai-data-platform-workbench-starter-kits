@@ -1,0 +1,14 @@
+.tmp/
+.local/
+.source/
+.aidp/
+.aidp-local/
+aidp-agent.toml
+.oci/
+.codex/
+.venv/
+node_modules/
+dist/
+modules/ai-gods-eye-view/.upstream/
+openwiki/
+graphify-out/

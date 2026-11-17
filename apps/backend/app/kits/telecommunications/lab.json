@@ -1,0 +1,157 @@
+{
+  "datasets": [
+    {
+      "file": "plans.csv",
+      "name": "plans",
+      "row_count": 12,
+      "sha256": "5645342cd3fbd92aaed5990cb9a63e599269382bbed36ddc672e60858dc15629"
+    },
+    {
+      "file": "network_sites.csv",
+      "name": "network_sites",
+      "row_count": 30,
+      "sha256": "06162671bf5028fef01c73142be8bb7ca396916088b55fa97ebb0692012ca4b9"
+    },
+    {
+      "file": "subscribers.csv",
+      "name": "subscribers",
+      "row_count": 250,
+      "sha256": "b47dbbb7f46f86ec17b9bd41c917b2d50f1b151eb14f59fd10cab7350b9dff98"
+    },
+    {
+      "file": "usage_events.csv",
+      "name": "usage_events",
+      "row_count": 6000,
+      "sha256": "ddd569d9502cd165e687fd5cefe197e56c34656830c42277e6b6312f3ec770a4"
+    }
+  ],
+  "display_name": "Telecommunications",
+  "expected_results": {
+    "business_aggregates": {
+      "usage_events.charge_amount.sum": "15026.56"
+    },
+    "lineage": {
+      "direction": "BOTH",
+      "expected_column_edges": [
+        "landing.subscribers.subscriber_id->bronze.subscribers.subscriber_id->silver.subscribers.subscriber_id->gold.telecommunications_subscriber_monthly.subscriber_id",
+        "landing.usage_events.usage_value->bronze.usage_events.usage_value->silver.usage_events.usage_value->gold.telecommunications_site_daily.data_mb"
+      ],
+      "expected_entity_edges": [
+        "landing.subscribers->bronze.subscribers->silver.subscribers->gold.telecommunications_subscriber_monthly",
+        "landing.usage_events->bronze.usage_events->silver.usage_events->gold.telecommunications_subscriber_monthly",
+        "landing.network_sites->bronze.network_sites->silver.network_sites->gold.telecommunications_site_daily"
+      ],
+      "forbidden_table_suffixes": [
+        "lineage_demo"
+      ],
+      "levels": [
+        "ENTITY",
+        "COLUMN"
+      ],
+      "max_depth": 8,
+      "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{table_name}",
+      "required_schema_paths": [
+        "{participant_key}_aidp.oci_landing.",
+        "{participant_key}_aidp.oci_bronze.",
+        "{participant_key}_aidp.oci_silver.",
+        "{participant_key}_aidp.oci_gold."
+      ],
+      "should_include_edges": true,
+      "target_tables": [
+        "telecommunications_subscriber_monthly",
+        "telecommunications_site_daily"
+      ]
+    },
+    "quality": {
+      "minimum_quarantined_rows": 1
+    },
+    "source_row_counts": {
+      "network_sites": 30,
+      "plans": 12,
+      "subscribers": 250,
+      "usage_events": 6000
+    }
+  },
+  "formats": {
+    "bronze": "DELTA",
+    "gold": "DELTA",
+    "landing": "DELTA",
+    "silver": "DELTA"
+  },
+  "lab_id": "telecommunications",
+  "notebooks": [
+    {
+      "depends_on": [],
+      "file": "01_landing_telecommunications.ipynb",
+      "sha256": "fb838d1550e63d4441f0675da8303fa29b976212070d456e4fa5951561411579",
+      "task_key": "01_landing_telecommunications"
+    },
+    {
+      "depends_on": [
+        "01_landing_telecommunications"
+      ],
+      "file": "02_bronze_telecommunications.ipynb",
+      "sha256": "dbeafb1dd2f3c6aadf9d84745cb566a48aa98bc25d5f3fee9063ea433cf832a5",
+      "task_key": "02_bronze_telecommunications"
+    },
+    {
+      "depends_on": [
+        "02_bronze_telecommunications"
+      ],
+      "file": "03_silver_telecommunications.ipynb",
+      "sha256": "a0d9550da8719de8dc6b6245a306d3614339f6bd3863256c949c926e1c35c4e3",
+      "task_key": "03_silver_telecommunications"
+    },
+    {
+      "depends_on": [
+        "03_silver_telecommunications"
+      ],
+      "file": "04_gold_telecommunications.ipynb",
+      "sha256": "88e963b000c31a4057128712304ba9a42d08988508b9d8d58285c54e3cb1819a",
+      "task_key": "04_gold_telecommunications"
+    },
+    {
+      "depends_on": [
+        "04_gold_telecommunications"
+      ],
+      "file": "05_lineage_telecommunications.ipynb",
+      "sha256": "40d3900f845742b2cbd61dfca017465ee8279b16693372225014ee9cb16250f1",
+      "task_key": "05_lineage_telecommunications"
+    }
+  ],
+  "pack_sha256": "63475dd9ed60c565d1f049a4bdb64d3f7cec2a3dda58a6a4a30269bd582a2938",
+  "pack_version": "2.0.0",
+  "schema_version": 1,
+  "status": "available",
+  "table_storage": {
+    "bronze": "MANAGED",
+    "gold": "MANAGED",
+    "landing": "MANAGED",
+    "silver": "MANAGED"
+  },
+  "tables": {
+    "bronze": [
+      "plans",
+      "network_sites",
+      "subscribers",
+      "usage_events"
+    ],
+    "gold": [
+      "telecommunications_subscriber_monthly",
+      "telecommunications_site_daily"
+    ],
+    "landing": [
+      "plans",
+      "network_sites",
+      "subscribers",
+      "usage_events"
+    ],
+    "silver": [
+      "plans",
+      "network_sites",
+      "subscribers",
+      "usage_events",
+      "quality_issues"
+    ]
+  }
+}

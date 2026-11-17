@@ -1,0 +1,696 @@
+{
+  "schema_version": 2,
+  "execution_source": "oci_resource_manager",
+  "project_id": "oci-aidp-cloud-migration-lab",
+  "terraform": {
+    "path": "terraform",
+    "package_oci_credentials": false
+  },
+  "capabilities": {
+    "compartment_modes": [
+      "new",
+      "existing"
+    ],
+    "default_compartment_name": "oracle-ai-data-platform",
+    "requires_genai_region": false,
+    "region_selection": "subscribed_compatible",
+    "regional_requirements": [
+      "aidp"
+    ]
+  },
+  "presentation": {
+    "title": "Oracle AI Data Platform Workbench Starter Kits",
+    "summary": "Deploys five laboratory starter kits for Banking, Telecommunications, Telco Customer 360 Lineage, Retail and Healthcare on Oracle AI Data Platform Workbench. Participants use isolated notebooks, scheduled Spark workflows and Landing, Bronze, Silver and Gold layers with Master Catalog lineage. An HTTPS portal lets instructors manage registration, assign kits and control participant access.",
+    "tags": [
+      "VM",
+      "VCN",
+      "AI Data Platform Workbench",
+      "Object Storage",
+      "IAM"
+    ],
+    "image": "/assets/oci-aidp-cloud-migration-lab.png",
+    "image_alt": "Oracle AI Data Platform Workbench Starter Kits architecture",
+    "href": "https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits"
+  },
+  "run_steps": [
+    {
+      "key": "queue",
+      "label": "Queue"
+    },
+    {
+      "key": "credentials",
+      "label": "OCI credentials"
+    },
+    {
+      "key": "compartment",
+      "label": "Starter kit compartment"
+    },
+    {
+      "key": "policies",
+      "label": "Identity and IAM"
+    },
+    {
+      "key": "stack",
+      "label": "Resource Manager stack"
+    },
+    {
+      "key": "plan",
+      "label": "Terraform plan"
+    },
+    {
+      "key": "apply",
+      "label": "Terraform apply"
+    },
+    {
+      "key": "application",
+      "label": "AIDP workspace, catalog and RBAC"
+    },
+    {
+      "key": "artifacts",
+      "label": "Starter kit access summary"
+    },
+    {
+      "key": "email",
+      "label": "Access email"
+    },
+    {
+      "key": "complete",
+      "label": "Starter kit ready"
+    }
+  ],
+  "form": {
+    "fields": [
+      {
+        "name": "admin_username",
+        "label": "Username",
+        "type": "text",
+        "required": true,
+        "default": "admin",
+        "min_length": 3,
+        "max_length": 64,
+        "group": "application_vm"
+      },
+      {
+        "name": "admin_password",
+        "label": "Password",
+        "type": "password",
+        "required": true,
+        "secret": true,
+        "min_length": 12,
+        "max_length": 128,
+        "transform": "pbkdf2_sha256",
+        "group": "application_vm",
+        "generate_password": true
+      },
+      {
+        "name": "registration_code",
+        "label": "Lab registration code",
+        "type": "text",
+        "required": true,
+        "secret": true,
+        "pattern": "^[A-Z]{4}-[0-9]{4}$",
+        "min_length": 9,
+        "max_length": 9,
+        "transform": "uppercase_pbkdf2_sha256",
+        "group": "application_vm"
+      },
+      {
+        "name": "aidp_mode",
+        "label": "Services mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "aidp_platform",
+        "options": [
+          {
+            "value": "new",
+            "label": "Create new AIDP"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing AIDP"
+          }
+        ]
+      },
+      {
+        "name": "aidp_display_name",
+        "label": "New AIDP name",
+        "type": "text",
+        "required": true,
+        "default": "aidp_medallion",
+        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,99}$",
+        "group": "aidp_platform",
+        "visible_when": {
+          "field": "aidp_mode",
+          "equals": "new"
+        }
+      },
+      {
+        "name": "existing_ai_data_platform_ocid",
+        "label": "Existing AIDP",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_aidp_platforms",
+        "group": "aidp_platform",
+        "visible_when": {
+          "field": "aidp_mode",
+          "equals": "existing"
+        }
+      },
+      {
+        "name": "existing_workspace_key",
+        "label": "Existing workspace",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_aidp_workspaces",
+        "group": "aidp_platform",
+        "visible_when": {
+          "field": "aidp_mode",
+          "equals": "existing"
+        }
+      },
+      {
+        "name": "landing_bucket_mode",
+        "label": "Landing bucket mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "medallion",
+        "options": [
+          {
+            "value": "new",
+            "label": "Create new bucket"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing bucket"
+          }
+        ]
+      },
+      {
+        "name": "landing_new_bucket_name",
+        "label": "Landing bucket name",
+        "type": "text",
+        "required": true,
+        "default": "oci_landing",
+        "group": "medallion",
+        "visible_when": {
+          "field": "landing_bucket_mode",
+          "equals": "new"
+        }
+      },
+      {
+        "name": "landing_existing_bucket_name",
+        "label": "Existing landing bucket",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_active_buckets",
+        "group": "medallion",
+        "visible_when": {
+          "field": "landing_bucket_mode",
+          "equals": "existing"
+        },
+        "default": "oci_landing"
+      },
+      {
+        "name": "bronze_bucket_mode",
+        "label": "Bronze bucket mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "medallion",
+        "options": [
+          {
+            "value": "new",
+            "label": "Create new bucket"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing bucket"
+          }
+        ]
+      },
+      {
+        "name": "bronze_new_bucket_name",
+        "label": "Bronze bucket name",
+        "type": "text",
+        "required": true,
+        "default": "oci_bronze",
+        "group": "medallion",
+        "visible_when": {
+          "field": "bronze_bucket_mode",
+          "equals": "new"
+        }
+      },
+      {
+        "name": "bronze_existing_bucket_name",
+        "label": "Existing bronze bucket",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_active_buckets",
+        "group": "medallion",
+        "visible_when": {
+          "field": "bronze_bucket_mode",
+          "equals": "existing"
+        },
+        "default": "oci_bronze"
+      },
+      {
+        "name": "silver_bucket_mode",
+        "label": "Silver bucket mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "medallion",
+        "options": [
+          {
+            "value": "new",
+            "label": "Create new bucket"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing bucket"
+          }
+        ]
+      },
+      {
+        "name": "silver_new_bucket_name",
+        "label": "Silver bucket name",
+        "type": "text",
+        "required": true,
+        "default": "oci_silver",
+        "group": "medallion",
+        "visible_when": {
+          "field": "silver_bucket_mode",
+          "equals": "new"
+        }
+      },
+      {
+        "name": "silver_existing_bucket_name",
+        "label": "Existing silver bucket",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_active_buckets",
+        "group": "medallion",
+        "visible_when": {
+          "field": "silver_bucket_mode",
+          "equals": "existing"
+        },
+        "default": "oci_silver"
+      },
+      {
+        "name": "gold_bucket_mode",
+        "label": "Gold bucket mode",
+        "type": "select",
+        "required": true,
+        "default": "new",
+        "group": "medallion",
+        "options": [
+          {
+            "value": "new",
+            "label": "Create new bucket"
+          },
+          {
+            "value": "existing",
+            "label": "Use existing bucket"
+          }
+        ]
+      },
+      {
+        "name": "gold_new_bucket_name",
+        "label": "Gold bucket name",
+        "type": "text",
+        "required": true,
+        "default": "oci_gold",
+        "group": "medallion",
+        "visible_when": {
+          "field": "gold_bucket_mode",
+          "equals": "new"
+        }
+      },
+      {
+        "name": "gold_existing_bucket_name",
+        "label": "Existing gold bucket",
+        "type": "select",
+        "required": true,
+        "options_source": "oci_active_buckets",
+        "group": "medallion",
+        "visible_when": {
+          "field": "gold_bucket_mode",
+          "equals": "existing"
+        },
+        "default": "oci_gold"
+      }
+    ],
+    "email_access_fields": [
+      "admin_username",
+      "admin_password",
+      "registration_code"
+    ],
+    "groups": [
+      {
+        "id": "credentials",
+        "title": "OCI credentials",
+        "items": [
+          {
+            "kind": "control",
+            "name": "oci_config",
+            "label": "OCI config"
+          },
+          {
+            "kind": "control",
+            "name": "oci_key",
+            "label": "API private key"
+          }
+        ]
+      },
+      {
+        "id": "services",
+        "title": "Services to deploy",
+        "items": [
+          {
+            "kind": "control",
+            "name": "oci_region",
+            "label": "OCI Region",
+            "span": 2
+          },
+          {
+            "kind": "control",
+            "name": "compartment_mode",
+            "label": "Compartment mode",
+            "options": [
+              {
+                "value": "new",
+                "label": "New compartment"
+              },
+              {
+                "value": "existing",
+                "label": "Existing compartment"
+              }
+            ]
+          },
+          {
+            "kind": "control",
+            "name": "new_compartment",
+            "label": "New compartment name"
+          },
+          {
+            "kind": "control",
+            "name": "existing_compartment",
+            "label": "Existing compartment"
+          }
+        ]
+      },
+      {
+        "id": "aidp_platform",
+        "title": "AI Data Platform Workbench",
+        "items": [
+          {
+            "kind": "field",
+            "name": "aidp_mode",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "aidp_display_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "existing_ai_data_platform_ocid",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "existing_workspace_key",
+            "span": 1
+          }
+        ]
+      },
+      {
+        "id": "medallion",
+        "title": "Medallion Architecture",
+        "items": [
+          {
+            "kind": "field",
+            "name": "landing_bucket_mode",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "landing_new_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "landing_existing_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "bronze_bucket_mode",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "bronze_new_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "bronze_existing_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "silver_bucket_mode",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "silver_new_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "silver_existing_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "gold_bucket_mode",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "gold_new_bucket_name",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "gold_existing_bucket_name",
+            "span": 1
+          }
+        ]
+      },
+      {
+        "id": "application_vm",
+        "title": "Application VM",
+        "items": [
+          {
+            "kind": "field",
+            "name": "admin_username",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "admin_password",
+            "span": 1
+          },
+          {
+            "kind": "field",
+            "name": "registration_code",
+            "span": 1
+          }
+        ]
+      }
+    ]
+  },
+  "email": {
+    "services": [
+      {
+        "title": "Application: Starter Kits Portal",
+        "fields": [
+          {
+            "label": "Access URL",
+            "output": "application_login_url",
+            "link": true
+          },
+          {
+            "label": "Username",
+            "input": "admin_username"
+          },
+          {
+            "label": "Password",
+            "input": "admin_password"
+          },
+          {
+            "label": "Registration code",
+            "input": "registration_code",
+            "required": false
+          }
+        ]
+      },
+      {
+        "title": "Data platform: Oracle AI Data Platform Workbench",
+        "fields": [
+          {
+            "label": "Access URL",
+            "output": "aidp_workbench_url",
+            "link": true
+          },
+          {
+            "label": "Workspace",
+            "output": "workspace_name"
+          },
+          {
+            "label": "Authentication",
+            "value": "Sign in through the configured identity domain."
+          }
+        ]
+      }
+    ],
+    "attachments": [
+      "resource-manager-terraform-source.zip",
+      "deployment.log",
+      "ssh-private-key.pem"
+    ]
+  },
+  "outputs": [
+    "source_commit_sha",
+    "deployment_suffix",
+    "application_url",
+    "application_login_url",
+    "public_ip_tls_enabled",
+    "admin_url",
+    "aidp_workbench_url",
+    "aidp_web_socket_endpoint",
+    "aidp_alias_key",
+    "tenancy_name",
+    "identity_domain_name",
+    "compartment_ocid",
+    "bucket_name",
+    "medallion_bucket_names",
+    "objectstorage_namespace",
+    "medallion_prefixes",
+    "ai_data_platform_id",
+    "default_workspace_name",
+    "developer_group_ocid",
+    "pending_group_ocid",
+    "operator_user_ocid",
+    "operator_username",
+    "home_region",
+    "aidp_catalog_name",
+    "aidp_shared_compute_name",
+    "aidp_external_volume_count",
+    "aidp_runtime_ready",
+    "identity_domain_url",
+    "instance_id",
+    "public_ip",
+    "ssh_username",
+    "vm_shape",
+    "aidp_mode",
+    "existing_workspace_key",
+    "existing_workspace_name",
+    "workspace_name"
+  ],
+  "artifacts": [
+    "aidp_lab_summary.json",
+    "ssh-private-key.pem"
+  ],
+  "preflight": {
+    "entrypoint": "terraform/m_preflight.py",
+    "timeout_seconds": 300,
+    "requires_oci_credentials": true,
+    "secret_inputs": [],
+    "output_inputs": [
+      "home_region",
+      "operator_user_ocid",
+      "operator_username",
+      "preferred_vm_shape",
+      "availability_domain_index",
+      "existing_workspace_name"
+    ],
+    "runtime_fields": [
+      {
+        "name": "home_region",
+        "label": "OCI tenancy home region",
+        "type": "text",
+        "required": true,
+        "pattern": "^[a-z]{2}-[a-z0-9-]+-[0-9]+$",
+        "min_length": 8,
+        "max_length": 64
+      },
+      {
+        "name": "operator_user_ocid",
+        "label": "OCI deployment operator",
+        "type": "text",
+        "required": true,
+        "pattern": "^ocid1\\.user\\..+$",
+        "min_length": 20,
+        "max_length": 255
+      },
+      {
+        "name": "operator_username",
+        "label": "OCI deployment operator name",
+        "type": "text",
+        "required": true,
+        "min_length": 1,
+        "max_length": 255
+      },
+      {
+        "name": "preferred_vm_shape",
+        "label": "Selected VM shape",
+        "type": "select",
+        "required": true,
+        "options": [
+          {
+            "value": "VM.Standard.E5.Flex",
+            "label": "E5 Flex"
+          },
+          {
+            "value": "VM.Standard.E4.Flex",
+            "label": "E4 Flex"
+          },
+          {
+            "value": "VM.Standard.E3.Flex",
+            "label": "E3 Flex (authorized fallback)"
+          }
+        ]
+      },
+      {
+        "name": "availability_domain_index",
+        "label": "Selected Availability Domain",
+        "type": "number",
+        "required": true,
+        "min_length": 1,
+        "max_length": 2
+      },
+      {
+        "name": "existing_workspace_name",
+        "label": "Verified workspace name",
+        "type": "text",
+        "required": false,
+        "pattern": "^[A-Za-z0-9 _.-]{1,128}$",
+        "max_length": 128
+      }
+    ]
+  },
+  "post_apply": {
+    "entrypoint": "terraform/hooks/post_apply.py",
+    "include_paths": [],
+    "timeout_seconds": 3600,
+    "requires_oci_credentials": true,
+    "secret_inputs": []
+  }
+}

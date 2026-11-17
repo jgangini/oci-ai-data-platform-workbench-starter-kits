@@ -1,0 +1,157 @@
+{
+  "datasets": [
+    {
+      "file": "branches.csv",
+      "name": "branches",
+      "row_count": 20,
+      "sha256": "82db37c4b377b5bdbc8c7d2b3a75f91b63890550fa999bd921b1d68cb06e2809"
+    },
+    {
+      "file": "customers.csv",
+      "name": "customers",
+      "row_count": 200,
+      "sha256": "6c7757a8be5e7859b58d84031d5fde5242dc8dfd21ff1b13499e2220a3f3fad8"
+    },
+    {
+      "file": "accounts.csv",
+      "name": "accounts",
+      "row_count": 320,
+      "sha256": "59eb8b7057efe2525d9091ebe5234dbea311a2ee28e9ae444a5d600d50f827d6"
+    },
+    {
+      "file": "transactions.csv",
+      "name": "transactions",
+      "row_count": 4000,
+      "sha256": "a35cec80650fcdba532127d87c1144e9d20957e83329e5db6326383d5a90c3a2"
+    }
+  ],
+  "display_name": "Banking",
+  "expected_results": {
+    "business_aggregates": {
+      "transactions.amount.sum": "600066.50"
+    },
+    "lineage": {
+      "direction": "BOTH",
+      "expected_column_edges": [
+        "landing.customers.customer_id->bronze.customers.customer_id->silver.customers.customer_id->gold.banking_customer_value.customer_id",
+        "landing.transactions.amount->bronze.transactions.amount->silver.transactions.amount->gold.banking_branch_daily.transaction_amount"
+      ],
+      "expected_entity_edges": [
+        "landing.customers->bronze.customers->silver.customers->gold.banking_customer_value",
+        "landing.accounts->bronze.accounts->silver.accounts->gold.banking_customer_value",
+        "landing.transactions->bronze.transactions->silver.transactions->gold.banking_branch_daily"
+      ],
+      "forbidden_table_suffixes": [
+        "lineage_demo"
+      ],
+      "levels": [
+        "ENTITY",
+        "COLUMN"
+      ],
+      "max_depth": 8,
+      "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{table_name}",
+      "required_schema_paths": [
+        "{participant_key}_aidp.oci_landing.",
+        "{participant_key}_aidp.oci_bronze.",
+        "{participant_key}_aidp.oci_silver.",
+        "{participant_key}_aidp.oci_gold."
+      ],
+      "should_include_edges": true,
+      "target_tables": [
+        "banking_customer_value",
+        "banking_branch_daily"
+      ]
+    },
+    "quality": {
+      "minimum_quarantined_rows": 1
+    },
+    "source_row_counts": {
+      "accounts": 320,
+      "branches": 20,
+      "customers": 200,
+      "transactions": 4000
+    }
+  },
+  "formats": {
+    "bronze": "DELTA",
+    "gold": "DELTA",
+    "landing": "DELTA",
+    "silver": "DELTA"
+  },
+  "lab_id": "banking",
+  "notebooks": [
+    {
+      "depends_on": [],
+      "file": "01_landing_banking.ipynb",
+      "sha256": "2de18b8517cb6c98dbec0f2dfa43c2de31f6766613953aabca0a99279821ad94",
+      "task_key": "01_landing_banking"
+    },
+    {
+      "depends_on": [
+        "01_landing_banking"
+      ],
+      "file": "02_bronze_banking.ipynb",
+      "sha256": "5e7cb6b1c362df9cc982474a4466ae31a27e4562205d54c3b10932f30a8b2d50",
+      "task_key": "02_bronze_banking"
+    },
+    {
+      "depends_on": [
+        "02_bronze_banking"
+      ],
+      "file": "03_silver_banking.ipynb",
+      "sha256": "231dae57fa93cc87d91807100652d1836def78c06f7d0bd2d77e1521754aa427",
+      "task_key": "03_silver_banking"
+    },
+    {
+      "depends_on": [
+        "03_silver_banking"
+      ],
+      "file": "04_gold_banking.ipynb",
+      "sha256": "373121a7e4f6434d4da57cdfb593e7c6924986345f23ab552c9fd911bbaf9bae",
+      "task_key": "04_gold_banking"
+    },
+    {
+      "depends_on": [
+        "04_gold_banking"
+      ],
+      "file": "05_lineage_banking.ipynb",
+      "sha256": "6def9ed81caa6ace7a354cf30689610bdd62f44347fa10057e00980624a52244",
+      "task_key": "05_lineage_banking"
+    }
+  ],
+  "pack_sha256": "2cee69154f19f323efd252e1ac686276f912509e0a0134a595264a8534ac26d3",
+  "pack_version": "2.0.0",
+  "schema_version": 1,
+  "status": "available",
+  "table_storage": {
+    "bronze": "MANAGED",
+    "gold": "MANAGED",
+    "landing": "MANAGED",
+    "silver": "MANAGED"
+  },
+  "tables": {
+    "bronze": [
+      "branches",
+      "customers",
+      "accounts",
+      "transactions"
+    ],
+    "gold": [
+      "banking_customer_value",
+      "banking_branch_daily"
+    ],
+    "landing": [
+      "branches",
+      "customers",
+      "accounts",
+      "transactions"
+    ],
+    "silver": [
+      "branches",
+      "customers",
+      "accounts",
+      "transactions",
+      "quality_issues"
+    ]
+  }
+}

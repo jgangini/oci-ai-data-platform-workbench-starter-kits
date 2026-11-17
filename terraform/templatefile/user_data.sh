@@ -1,0 +1,335 @@
+#!/bin/bash
+set -euo pipefail
+
+exec > >(tee -a /var/log/aidp-lab-bootstrap.log /dev/console) 2>&1
+trap 'status=$?; echo "AIDP bootstrap failed with exit $status"; exit "$status"' ERR
+
+APP_NAME="aidp-lab"
+SOURCE_REPO_URL="${source_repo_url}"
+SOURCE_COMMIT_SHA="${source_commit_sha}"
+SOURCE_DIR="/opt/aidp-lab/source"
+STATE_DIR="/opt/aidp-lab/state"
+UPDATE_DIR="$STATE_DIR/update"
+UPDATE_INBOX_DIR="$UPDATE_DIR/inbox"
+UPDATE_STATUS_DIR="$UPDATE_DIR/status"
+RELEASES_DIR="/opt/aidp-lab/releases"
+TLS_DIR="/opt/aidp-lab/tls"
+OCI_DIR="/opt/aidp-lab/.oci"
+BOOTSTRAP_DIR="/opt/aidp-lab/bootstrap"
+BOOTSTRAP_OBJECT=".bootstrap/operator-credentials.json"
+LOCAL_IMAGE="aidp-lab:${source_commit_sha}"
+
+retry() {
+  local attempts="$1"
+  shift
+  local delay=10
+  local attempt
+  for attempt in $(seq 1 "$attempts"); do
+    if "$@"; then
+      return 0
+    fi
+    if [ "$attempt" -eq "$attempts" ]; then
+      return 1
+    fi
+    echo "Command failed on attempt $attempt/$attempts: $*"
+    echo "Retrying in $delay seconds..."
+    sleep "$delay"
+    if [ "$delay" -lt 60 ]; then
+      delay=$((delay * 2))
+    fi
+  done
+}
+
+dnf -y makecache
+dnf -y install dnf-plugins-core firewalld curl git openssl python3 sudo
+
+install -d -m 0700 "$TLS_DIR" "$STATE_DIR" "$UPDATE_DIR" "$UPDATE_INBOX_DIR" "$UPDATE_STATUS_DIR" "$RELEASES_DIR" "$OCI_DIR" "$BOOTSTRAP_DIR"
+%{ if enable_public_ip_tls ~}
+install -d -m 0755 /var/lib/letsencrypt
+%{ endif ~}
+umask 077
+if [ ! -s "$BOOTSTRAP_DIR/key.pem" ]; then
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$BOOTSTRAP_DIR/key.pem"
+fi
+openssl pkey -in "$BOOTSTRAP_DIR/key.pem" -pubout -out "$BOOTSTRAP_DIR/key_public.pem"
+chmod 0600 "$BOOTSTRAP_DIR/key.pem"
+chmod 0644 "$BOOTSTRAP_DIR/key_public.pem"
+
+cat >/usr/local/sbin/aidp-lab-bootstrap-public-key <<'EOF'
+#!/bin/bash
+set -euo pipefail
+if [ -s /opt/aidp-lab/.oci/config ] && [ -s /opt/aidp-lab/.oci/key.pem ] && \
+  python3 -c 'import json; assert json.load(open("/opt/aidp-lab/.oci/bootstrap.json"))["schema_version"] == 3' 2>/dev/null; then
+  printf '%s\n' AIDP_LAB_CREDENTIALS_V3_READY
+else
+  cat /opt/aidp-lab/bootstrap/key_public.pem
+fi
+EOF
+chown root:root /usr/local/sbin/aidp-lab-bootstrap-public-key
+chmod 0755 /usr/local/sbin/aidp-lab-bootstrap-public-key
+cat >/etc/sudoers.d/101-aidp-lab-bootstrap-public-key <<'EOF'
+ocarun ALL=(root) NOPASSWD: /usr/local/sbin/aidp-lab-bootstrap-public-key
+EOF
+chmod 0440 /etc/sudoers.d/101-aidp-lab-bootstrap-public-key
+visudo -cf /etc/sudoers.d/101-aidp-lab-bootstrap-public-key
+
+systemctl stop firewalld >/dev/null 2>&1 || true
+firewall-offline-cmd --zone=public --add-service=http
+firewall-offline-cmd --zone=public --add-service=https
+systemctl enable --now firewalld
+
+dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+systemctl enable --now docker
+docker info >/dev/null
+
+PUBLIC_IP=""
+for attempt in $(seq 1 12); do
+  PUBLIC_IP=$(oci-public-ip -g 2>/dev/null \
+    | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+    | tail -n 1) || PUBLIC_IP=""
+  if [ -n "$PUBLIC_IP" ]; then
+    break
+  fi
+  sleep 5
+done
+test -n "$PUBLIC_IP"
+FQDN=$(hostname -f 2>/dev/null | head -n 1 | tr -cd 'A-Za-z0-9.-')
+if [ -z "$FQDN" ]; then
+  FQDN=$(hostname | head -n 1 | tr -cd 'A-Za-z0-9.-')
+fi
+test -n "$FQDN"
+cat >"$TLS_DIR/openssl.cnf" <<EOF
+[req]
+prompt = no
+distinguished_name = distinguished_name
+x509_extensions = v3_req
+
+[distinguished_name]
+CN = $PUBLIC_IP
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+IP.1 = $PUBLIC_IP
+DNS.1 = $FQDN
+EOF
+chmod 0600 "$TLS_DIR/openssl.cnf"
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
+  -config "$TLS_DIR/openssl.cnf" \
+  -extensions v3_req \
+  -keyout "$TLS_DIR/tls.key" \
+  -out "$TLS_DIR/tls.crt"
+chmod 0600 "$TLS_DIR/tls.key"
+
+rm -rf "$SOURCE_DIR"
+mkdir -p "$(dirname "$SOURCE_DIR")"
+retry 5 git clone --filter=blob:none "$SOURCE_REPO_URL" "$SOURCE_DIR"
+git -C "$SOURCE_DIR" checkout --detach "$SOURCE_COMMIT_SHA"
+test "$(git -C "$SOURCE_DIR" rev-parse HEAD)" = "$SOURCE_COMMIT_SHA"
+SOURCE_RELEASE_TAG=$(git -C "$SOURCE_DIR" describe --tags --exact-match "$SOURCE_COMMIT_SHA")
+printf '%s' "$SOURCE_RELEASE_TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+retry 5 python3 "$SOURCE_DIR/scripts/release/load_release_image.py" \
+  --release "$SOURCE_RELEASE_TAG" --commit "$SOURCE_COMMIT_SHA" --component aidp-lab
+
+cat > /opt/aidp-lab/.env <<'EOF'
+ADMIN_USERNAME=${admin_username}
+ADMIN_PASSWORD_HASH=${admin_password_hash}
+REGISTRATION_CODE_HASH=${registration_code_hash}
+OPERATOR_USERNAME=${operator_username}
+IDENTITY_DOMAIN_URL=${identity_domain_url}
+IDENTITY_DEVELOPER_GROUP_ID=${developer_group_id}
+IDENTITY_PENDING_GROUP_ID=${pending_group_id}
+AIDP_WORKBENCH_URL=${aidp_workbench_url}
+AIDP_PLATFORM_ID=${aidp_platform_id}
+AIDP_WORKSPACE_NAME=${aidp_workspace_name}
+AIDP_WORKSPACE_KEY=${aidp_workspace_key}
+AIDP_REGION=${aidp_region}
+COMPARTMENT_ID=${compartment_id}
+OCI_CONFIG_FILE=/etc/aidp-lab/oci/config
+OBJECTSTORAGE_NAMESPACE=${objectstorage_namespace}
+BUCKET_NAME=${bucket_name}
+AIDP_SETTINGS_FILE=/var/lib/aidp-lab/settings.json
+LAB_MARKER=${lab_marker}
+SESSION_SECRET_FILE=/var/lib/aidp-lab/session.key
+VM_UPDATE_ENABLED=true
+APP_DEPLOYMENT_PROFILE=kits-only
+AIDP_UPDATE_DIR=/var/lib/aidp-lab/update
+COOKIE_SECURE=true
+EOF
+chmod 0600 /opt/aidp-lab/.env
+
+install -o root -g root -m 0755 "$SOURCE_DIR/scripts/release/vm_release_updater.py" /usr/local/sbin/aidp-lab-release-update
+cat >/etc/systemd/system/aidp-lab-update.service <<'EOF'
+[Unit]
+Description=Update AIDP Starter Kits from an immutable GitHub release
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=AIDP_APP_ROOT=/opt/aidp-lab
+Environment=HOME=/run/aidp-lab-update
+ExecStart=/usr/local/sbin/aidp-lab-release-update
+RuntimeDirectory=aidp-lab-update
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/aidp-lab/state /opt/aidp-lab/releases /run/aidp-lab-update
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
+EOF
+cat >/etc/systemd/system/aidp-lab-update.path <<'EOF'
+[Unit]
+Description=Watch for AIDP Starter Kits update requests
+
+[Path]
+PathChanged=/opt/aidp-lab/state/update/inbox/request.json
+Unit=aidp-lab-update.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+python3 - "/opt/aidp-lab/releases/current.json" "$SOURCE_REPO_URL" "$SOURCE_RELEASE_TAG" "$SOURCE_COMMIT_SHA" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+path = Path(sys.argv[1])
+temporary = path.with_suffix(".tmp")
+temporary.write_text(json.dumps({
+    "schema_version": 1,
+    "updater_protocol": 2,
+    "deployment_profile": "kits-only",
+    "repository": sys.argv[2].removesuffix(".git"),
+    "release": sys.argv[3],
+    "commit_sha": sys.argv[4],
+    "installed_at": datetime.now(timezone.utc).isoformat(),
+}, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+os.chmod(temporary, 0o600)
+os.replace(temporary, path)
+PY
+systemctl daemon-reload
+systemctl enable aidp-lab-update.service
+systemctl enable --now aidp-lab-update.path
+
+retry 60 docker run --rm \
+  --network host \
+  --security-opt no-new-privileges:true \
+  --cap-drop ALL \
+  --entrypoint python \
+  -e OCI_BOOTSTRAP_NAMESPACE=${objectstorage_namespace} \
+  -e OCI_BOOTSTRAP_BUCKET=${bucket_name} \
+  -e OCI_BOOTSTRAP_OBJECT="$BOOTSTRAP_OBJECT" \
+  -e OCI_BOOTSTRAP_PRIVATE_KEY=/etc/aidp-lab/bootstrap/key.pem \
+  -e OCI_EXPECTED_USER_OCID=${operator_user_ocid} \
+  -e OCI_CONFIG_DIR=/etc/aidp-lab/oci \
+  -e OCI_REGION=${aidp_region} \
+  -v "$BOOTSTRAP_DIR:/etc/aidp-lab/bootstrap:ro,Z" \
+  -v "$OCI_DIR:/etc/aidp-lab/oci:rw,Z" \
+  "$LOCAL_IMAGE" -m app.services.oci.credential_bootstrap
+rm -f "$BOOTSTRAP_DIR/key.pem" "$BOOTSTRAP_DIR/key_public.pem"
+docker rm -f "$APP_NAME" >/dev/null 2>&1 || true
+docker run -d \
+  --name "$APP_NAME" \
+  --restart unless-stopped \
+  --security-opt no-new-privileges:true \
+  --cap-drop ALL \
+  --cap-add CHOWN \
+  --cap-add NET_BIND_SERVICE \
+  --cap-add SETGID \
+  --cap-add SETUID \
+  --read-only \
+  --tmpfs /run:rw,noexec,nosuid,nodev,size=16m \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+  --tmpfs /var/lib/nginx:rw,noexec,nosuid,nodev,size=64m \
+  --tmpfs /var/log/nginx:rw,noexec,nosuid,nodev,size=16m \
+  --env-file /opt/aidp-lab/.env \
+  -p 80:80 \
+  -p 443:443 \
+  -v "$TLS_DIR:/etc/aidp-lab/tls:ro,z" \
+%{ if enable_public_ip_tls ~}
+  -v /var/lib/letsencrypt:/var/lib/letsencrypt:ro,z \
+%{ endif ~}
+  -v "$OCI_DIR:/etc/aidp-lab/oci:ro,Z" \
+  -v "$STATE_DIR:/var/lib/aidp-lab:Z" \
+  -v "$UPDATE_DIR:/var/lib/aidp-lab/update:ro,Z" \
+  -v "$UPDATE_INBOX_DIR:/var/lib/aidp-lab/update/inbox:rw,Z" \
+  "$LOCAL_IMAGE"
+
+%{ if enable_public_ip_tls ~}
+install -m 0755 "$SOURCE_DIR/scripts/deployment/ensure_public_ip_tls.sh" /usr/local/sbin/aidp-lab-public-tls
+printf '%s\n' "$PUBLIC_IP" >/etc/aidp-lab-public-ip
+chmod 0600 /etc/aidp-lab-public-ip
+retry 6 /usr/local/sbin/aidp-lab-public-tls issue
+cat >/etc/systemd/system/aidp-lab-public-tls.service <<'EOF'
+[Unit]
+Description=Renew the public application IP certificate
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aidp-lab-public-tls renew
+UMask=0077
+EOF
+cat >/etc/systemd/system/aidp-lab-public-tls.timer <<'EOF'
+[Unit]
+Description=Check the six-day application certificate twice daily
+
+[Timer]
+OnCalendar=*-*-* 00,12:00:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now aidp-lab-public-tls.timer
+%{ endif ~}
+
+for attempt in $(seq 1 120); do
+%{ if enable_public_ip_tls ~}
+  HEALTH_STATUS=$(curl --silent --output /dev/null --write-out '%%{http_code}' "https://$PUBLIC_IP/api/health") || HEALTH_STATUS=""
+%{ else ~}
+  HEALTH_STATUS=$(curl --silent --insecure --output /dev/null --write-out '%%{http_code}' https://127.0.0.1/api/health) || HEALTH_STATUS=""
+%{ endif ~}
+  if [ "$HEALTH_STATUS" = "200" ]; then
+    break
+  fi
+  if [ "$attempt" -eq 120 ]; then
+    docker logs "$APP_NAME" >/home/opc/aidp-lab-container.log 2>&1 || true
+    exit 1
+  fi
+  sleep 5
+done
+
+cat >/home/opc/startup_info.txt <<'EOF'
+Oracle AI Data Platform Workbench Starter Kits is ready.
+
+Application URL: https://[PUBLIC-IP]
+Admin URL: https://[PUBLIC-IP]/admin/users
+Container: aidp-lab
+Source: https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits
+
+Useful commands:
+  sudo docker ps
+  sudo docker logs aidp-lab
+  sudo journalctl -u docker --no-pager
+EOF
+sed -i "s/\[PUBLIC-IP\]/$PUBLIC_IP/g" /home/opc/startup_info.txt
+chown opc:opc /home/opc/startup_info.txt
+mkdir -p /var/local
+touch /var/local/userdata.done
+cat /home/opc/startup_info.txt
