@@ -1,0 +1,5 @@
+OCI architecture artwork. Rights remain with the provider.
+Official source and usage guidance: https://docs.oracle.com/en-us/iaas/Content/General/Reference/graphicsfordiagrams.htm
+Only static vector files are bundled. Background removals and source hashes are recorded per asset.
+Prepared derivatives are not claimed to be byte-identical official originals or an endorsement.
+User-supplied OCI supplements retain their original Oracle rights notice; their release date is unverified. A local filename alone does not prove official origin.

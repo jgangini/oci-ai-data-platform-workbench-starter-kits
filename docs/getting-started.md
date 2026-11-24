@@ -9,7 +9,7 @@ Esta guía describe el despliegue compartido y el acceso de participantes. Para 
 
 | Área | Comportamiento del código y limitación |
 | --- | --- |
-| Rutas de participantes | El aprovisionador entrega `/Workspace/<lab_id>/<participant_key>_<email>` y el catálogo `oci_medallion`. Los notebooks incluidos en los paquetes `2.0.0` aún validan `/Workspace/medallon/` y `<participant_key>_aidp`. Las ejecuciones nuevas pueden fallar en esas comprobaciones antes de ingerir datos. Es necesario reconciliar y aceptar este contrato antes de considerar listos los trabajos de participantes. |
+| Rutas de participantes | El aprovisionador entrega `/Workspace/<lab_id>/<participant_key>_<email>` y el catálogo `oci_medallion`. Los notebooks incluidos en los paquetes `2.0.0` aún validan `/Workspace/medallon/` y `<participant_key>_aidp`. El primer notebook de Banking 2.0.0 rechaza esos valores antes de ingerir datos. Es necesario reconciliar y aceptar este contrato antes de considerar listos los trabajos de participantes. |
 | Telco Customer 360 | La aceptación del paquete `2.0.0` requiere ejecutar las aserciones de sus notebooks y comprobar sus resultados en la instalación del participante. No se certifica mediante pruebas de otra versión. |
 
 La discrepancia de rutas puede comprobarse en las [funciones de nombres](../apps/backend/app/kits/naming.py), el [aprovisionamiento de trabajos](../apps/backend/app/services/oci/aidp.py) y el [notebook de Banking](../apps/backend/app/kits/banking/notebooks/01_landing_banking.ipynb). No omita las comprobaciones del notebook ni use el catálogo de otro participante para aparentar una ejecución correcta.
@@ -18,24 +18,35 @@ La discrepancia de rutas puede comprobarse en las [funciones de nombres](../apps
 
 Use el [paquete de Deploy Studio](../terraform/deploy-studio.json) de una [versión inmutable](https://github.com/jgangini/oci-ai-data-platform-workbench-starter-kits/releases) validada. Necesita un perfil de operador OCI, una clave API RSA, un compartimento de destino y permisos para los recursos declarados en Terraform. Entregue las credenciales por la carga protegida de Deploy Studio; no las añada al repositorio ni a las fuentes o al estado de Terraform. Seleccione una región suscrita compatible con AIDP.
 
-1. Seleccione un compartimento nuevo o existente e indique las credenciales del administrador y el código de registro del laboratorio.
-2. Seleccione o cree los cuatro buckets de medallón: Landing, Bronze, Silver y Gold. Deben ser distintos; los existentes deben pertenecer al compartimento seleccionado. Al reutilizar, se propone el bucket `oci_<capa>` si está disponible o el primero de la lista; confirme la selección antes de desplegar.
-3. En **AI Data Platform Workbench**, elija **Services mode**. Para crear, el nombre inicial es `aidp_medallion`; para reutilizar, seleccione una plataforma ACTIVE y STRUCTURED del compartimento y región elegidos. No se solicita Autonomous ni un modelo de Agent Flow.
+1. Abra [Deploy Studio](https://cloudtechnext.net/#deploy), seleccione la release de Starter Kits, adjunte el perfil OCI y su clave API y elija un compartimento.
+2. En **AI Data Platform Workbench**, elija **Services mode**. Para crear, el nombre inicial es `aidp_medallion`. Para reutilizar, seleccione una plataforma ACTIVE y STRUCTURED y su **Existing workspace**.
+3. En **Medallion Architecture**, seleccione o cree cuatro buckets distintos para Landing, Bronze, Silver y Gold. Confirme las sugerencias del formulario. En **Application VM**, configure el administrador y el código de registro.
 4. Despliegue el portal de kits con HTTPS automático. Los módulos se instalan desde Deploy Studio usando sus repositorios independientes.
 5. Revise las fases de comprobación previa, plan, aplicación y comprobación posterior. Un `terraform apply` correcto no certifica espacios de trabajo, flujos ni participantes.
-6. Conserve el resumen protegido de acceso y las salidas `application_url`, `admin_url` y `aidp_workbench_url`.
+6. Consulte el correo de acceso o el resumen protegido de Deploy Studio. Conserve en privado las salidas de acceso.
 
 Starter Kits funciona exclusivamente como laboratorio. No hay selector de modo de despliegue. El código de registro es obligatorio y Deploy Studio entrega a Terraform únicamente su verificador PBKDF2. El administrador puede cambiarlo en Settings sin exponer el código guardado.
 
 El [manifiesto de despliegue](../terraform/deploy-studio.json) define el formulario y el contrato de descubrimiento; [`l_outputs.tf`](../terraform/l_outputs.tf) define los endpoints y nombres de buckets resueltos.
 
 
+## Correo y accesos del despliegue
+
+El correo de éxito se dirige al operador y reúne dos secciones de acceso.
+
+| Servicio | Contenido |
+| --- | --- |
+| Starter Kits Portal | URL de inicio de sesión, usuario y contraseña del administrador. Incluye el código de registro cuando está disponible para el correo. |
+| Oracle AI Data Platform Workbench | URL, nombre del workspace y autenticación mediante el dominio de identidad configurado. |
+
+El correo adjunta `terraform-source.zip`, `deployment.log` con secretos redactados y `vm-ssh-access.zip` con la clave de la VM y su guía. El paquete Terraform excluye los archivos de credenciales OCI. Trata el correo y el ZIP de SSH como material privado. Los participantes activan su identidad OCI mediante un correo de bienvenida separado.
+
 ## Registrar y activar un participante
 
-1. Abra la URL de la aplicación e indique nombre, correo, código de registro y uno o más kits. El administrador también puede usar **Users → Add user**.
+1. Abra la URL de la aplicación, indique nombre, correo, código de registro y uno o más kits, y pulse **Create account**. El administrador también puede usar **Users → Add user**.
 2. Espere las fases de identidad, espacio de trabajo, contenido y permisos. Si se ofrece un reintento, continúe la misma operación.
-3. Active la cuenta OCI Identity Domains desde su correo de bienvenida estándar.
-4. Acceda a AIDP Workbench con ese correo y la URL suministrada.
+3. Si OCI Identity Domains solicita activar la cuenta, siga el enlace de su correo de bienvenida.
+4. Al aparecer **Your starter kit account is ready**, seleccione **Open AI Data Platform Workbench** e inicie sesión con su identidad OCI.
 
 ```mermaid
 sequenceDiagram
@@ -86,4 +97,4 @@ Al reutilizar AIDP, use su compartimento existente. Si ya contiene recursos con 
 
 ## Workspace de una plataforma existente
 
-Al elegir **Use existing AIDP**, seleccione la plataforma y luego **Workspace**. La lista depende de esa plataforma y de los permisos del operador OCI. La selección debe estar ACTIVE; se comprueba de nuevo al desplegar. El portal identifica el workspace por su clave y mantiene carpetas y permisos separados por participante y kit dentro de ese workspace compartido. No crea un workspace AIDP por participante. Con **Create new AIDP**, se usa automáticamente el workspace predeterminado de la plataforma nueva.
+Al elegir **Use existing AIDP**, seleccione la plataforma y luego **Existing workspace**. La lista depende de esa plataforma y de los permisos del operador OCI. La selección debe estar ACTIVE; se comprueba de nuevo al desplegar. El portal identifica el workspace por su clave y mantiene carpetas y permisos separados por participante y kit dentro de ese workspace compartido. No crea un workspace AIDP por participante. Con **Create new AIDP**, se usa automáticamente el workspace predeterminado de la plataforma nueva.

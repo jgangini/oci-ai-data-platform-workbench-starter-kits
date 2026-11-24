@@ -33,7 +33,7 @@ class Identity:
         return SimpleNamespace(data=[], headers={})
 
     def get_user(self, _user_ocid: str) -> Any:
-        return SimpleNamespace(data=SimpleNamespace(name="joel.ganggini@oracle.com"))
+        return SimpleNamespace(data=SimpleNamespace(name="operator@example.test"))
 
     def get_tenancy(self, _tenancy_id: str) -> Any:
         return SimpleNamespace(data=SimpleNamespace(home_region_key="IAD"))
@@ -130,7 +130,7 @@ def test_preflight_selects_e5_and_discovers_home_region() -> None:
     assert result["inputs"] == {
         "home_region": "us-ashburn-1",
         "operator_user_ocid": "ocid1.user.oc1..operator",
-        "operator_username": "joel.ganggini@oracle.com",
+        "operator_username": "operator@example.test",
         "preferred_vm_shape": preflight.E5_SHAPE,
         "availability_domain_index": 0,
     }
