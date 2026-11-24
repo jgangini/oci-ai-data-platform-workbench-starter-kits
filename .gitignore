@@ -23,7 +23,7 @@ dist/
 modules/ai-gods-eye-view/.upstream/
 coverage/
 .DS_Store
-.codex/AGENTS.md
+/.codex/
 openwiki/
 graphify-out/
 .aidp-local/
@@ -37,3 +37,8 @@ aidp-agent.toml
 # Active evaluation policy and case map refer to private local evidence.
 /node-progress.json
 /test-campaign.json
+
+# Local documentation and historical architecture artifacts.
+/.archify/
+/.sentrux/history/
+/.sentrux/reference.json

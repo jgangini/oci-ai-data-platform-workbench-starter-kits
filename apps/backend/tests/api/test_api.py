@@ -180,7 +180,7 @@ def make_client(
         admin_password_hash=hash_secret("long-admin-password", iterations=1_000, salt=b"admin-test-salt"),
         registration_code_hash=(hash_secret("ABCD-1234", iterations=1_000, salt=b"code-test-salt")
                                 if registration_code_hash is None else registration_code_hash),
-        operator_username="joel.ganggini@oracle.com",
+        operator_username="operator@example.test",
         identity_domain_url="https://identity.example.test",
         developer_group_id="developers", pending_group_id="pending",
         aidp_workbench_url="https://example.datalake.oci.oraclecloud.com#?tenant=test&domain=Default",
@@ -216,11 +216,11 @@ def register_payload(**updates):
 def test_participant_codes_start_at_101_and_are_stable_by_email(tmp_path: Path) -> None:
     settings = Settings(aidp_settings_file=str(tmp_path / "settings.json"))
     store = SettingsStore(settings)
-    assert store.participant_code("Nadia.Cloud.AI@gmail.com") == 101
-    assert store.participant_code("nadia.cloud.ai@gmail.com") == 101
+    assert store.participant_code("PARTICIPANT@example.test") == 101
+    assert store.participant_code("participant@example.test") == 101
     assert store.participant_code("next@example.com") == 102
     reloaded = SettingsStore(settings)
-    assert reloaded.participant_code("nadia.cloud.ai@gmail.com") == 101
+    assert reloaded.participant_code("participant@example.test") == 101
     assert reloaded.participant_code("third@example.com") == 103
 
 
@@ -253,7 +253,7 @@ def test_registration_requires_a_code_and_administrator_can_configure_it(tmp_pat
     login(client)
     assert client.get("/api/admin/session").json() == {
         "username": "lab-admin",
-        "operator_username": "joel.ganggini@oracle.com",
+        "operator_username": "operator@example.test",
     }
     configured = client.put("/api/admin/settings", json={"registration_code": "ABCD-1234"})
     assert configured.status_code == 200
@@ -294,7 +294,7 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     assert response.json()["aidp_service_endpoint"] == "https://aidp.us-chicago-1.oci.oraclecloud.com"
     assert response.json()["aidp_platform_id"] == "ocid1.aidataplatform.oc1..test"
     assert "deployment_mode" not in response.json()
-    assert response.json()["operator_username"] == "joel.ganggini@oracle.com"
+    assert response.json()["operator_username"] == "operator@example.test"
 
 
 def test_admin_time_zone_is_validated_persisted_and_shared(tmp_path: Path) -> None:

@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "icons": [
+    {
+      "file": "oci-ai-data-platform.svg",
+      "label": "OCI AI Data Platform (AIDP)",
+      "category": "Analytics and AI",
+      "aliases": [
+        "aidp",
+        "oci aidp",
+        "ai data platform workbench"
+      ],
+      "status": "current",
+      "source": "https://docs.oracle.com/en/solutions/ai-data-platform-data-science-workloads/img/aidp-ml-workloads-architecture-oracle.zip",
+      "source_page": "https://docs.oracle.com/en/solutions/ai-data-platform-data-science-workloads/",
+      "archive_member": "aidp-ml-workloads-architecture-oracle/aidp-ml-workloads-architecture.svg",
+      "archive_sha256": "2738aaf56a2bfbde2fbec4093451601c38e197d798e499b9c0cdb6a3cc540776",
+      "source_svg_sha256": "444e4b871add2cc582fc082b55ae1dab5ad1679594763ee909920e57037a73e7",
+      "sha256": "58b4fa7752679f7939ec3546625cde99ef97956c039755da645dcf0a7abd6099",
+      "preparation": {
+        "profile": "oci-outline",
+        "removed": [
+          {
+            "kind": "oci-white-underlay",
+            "tag": "path",
+            "fill": "white"
+          }
+        ],
+        "metadata_removed": 0,
+        "rights_notices": [],
+        "styles_inlined": 0,
+        "viewbox_from_dimensions": false,
+        "contrast": "review-on-both",
+        "source_sha256": "837e269811d74b99605fa9c43e219ac7351108ea39688dbd9b3117d186413cf8",
+        "conversion": [
+          "Extract vector component from Oracle Architecture Center SVG",
+          "Exclude separate workflow label paths",
+          "Fit viewport to component: 412 237 64 64"
+        ]
+      },
+      "derivation": "extracted-vector",
+      "retrieved_date": "2026-10-27",
+      "terms_url": "https://www.oracle.com/legal/terms/",
+      "source_group": "SVG root child 50, first subgroup; 18 source paths",
+      "source_context": "Spark Workflow and Agent Flow within AI Data Platform; same symbol used by the existing OCI architecture catalog for AIDP Workbench",
+      "approval": {
+        "status": "approved",
+        "date": "2026-10-27",
+        "sha256": "299724b4fba76f4c045fd5895f7e890e453187fe9b869e245cce69b45bf8fe61",
+        "confirmation": "Aprobar y guardar"
+      },
+      "library": "oci",
+      "name": "ai-data-platform",
+      "theme": "default",
+      "bundled_sha256": "299724b4fba76f4c045fd5895f7e890e453187fe9b869e245cce69b45bf8fe61",
+      "color": null
+    }
+  ]
+}

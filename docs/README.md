@@ -2,7 +2,10 @@
 
 El portal administra cinco kits de participantes. Su [catálogo](../apps/backend/app/packages/catalog.json) y [backend](../apps/backend/app/main.py) son la fuente del comportamiento implementado.
 
-- [Primeros pasos](getting-started.md): instalación y ejecución.
+- [Primeros pasos](getting-started.md) para desplegar el entorno y recuperar los accesos.
+- [Tutorial de Banking](tutorial.md) para seguir un ejercicio completo desde Workbench.
+- [Arquitectura](architecture.md) para entender el portal, el aprovisionamiento y las capas de datos.
+- [Pruebas](testing.md) para comprobar el contrato y aceptar una instalación.
 - [Operación](operations.md): usuarios, reintentos y actualización.
 - [Desarrollo](development.md): estructura y comprobaciones.
 - [Contratos](contracts.md): paquetes, permisos e imágenes.
