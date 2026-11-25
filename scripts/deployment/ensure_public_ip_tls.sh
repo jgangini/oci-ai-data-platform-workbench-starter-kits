@@ -23,6 +23,7 @@ docker run --rm --network host --security-opt no-new-privileges:true --cap-drop 
 
 CERT=/etc/letsencrypt/live/aidp-lab-ip
 TLS=/opt/aidp-lab/tls
+NGINX_CONFIG=/etc/nginx/nginx.conf
 # Keep the previous files if issuance/renewal or certificate validation fails.
 openssl verify -CAfile /etc/pki/tls/certs/ca-bundle.crt -untrusted "$CERT/chain.pem" "$CERT/cert.pem"
 openssl x509 -in "$CERT/cert.pem" -noout -checkip "$PUBLIC_IP"
@@ -34,5 +35,5 @@ install -m 0600 "$CERT/privkey.pem" "$TLS/tls.key.next"
 chcon --reference="$TLS" "$TLS/tls.crt.next" "$TLS/tls.key.next"
 mv -f "$TLS/tls.crt.next" "$TLS/tls.crt"
 mv -f "$TLS/tls.key.next" "$TLS/tls.key"
-docker exec aidp-lab nginx -t -c /run/nginx.conf
-docker exec aidp-lab nginx -s reload -c /run/nginx.conf
+docker exec aidp-lab nginx -t -c "$NGINX_CONFIG"
+docker exec aidp-lab nginx -s reload -c "$NGINX_CONFIG"

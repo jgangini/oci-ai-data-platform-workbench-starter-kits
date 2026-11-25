@@ -16,6 +16,12 @@ El [updater](../scripts/release/vm_release_updater.py) exige una release inmutab
 
 Actualizar el portal no reprovisiona todos los kits de participantes. Las acciones individuales deben conservar identidad, permisos y versiones exactas.
 
+## Certificado HTTPS
+
+Al aprovisionar una VM con `v6.0.6` o posterior, el instalador verifica el certificado público para la IP y recarga Nginx con `/etc/nginx/nginx.conf`, la ruta que usa el contenedor. El temporizador `aidp-lab-public-tls.timer` usa el mismo instalador para renovar el certificado y recargar Nginx. Compruebe el temporizador con `systemctl status aidp-lab-public-tls.timer` y la salud del portal con `curl --fail https://IP_PUBLICA/api/health`.
+
+La actualización de la imagen desde Settings conserva el instalador del host. Una VM anterior que registre un error con `/run/nginx.conf` requiere corregir ese instalador en el host.
+
 ## Diagnóstico
 
 - Revise fase y error del servidor antes de reintentar.
