@@ -49,12 +49,12 @@
         "COLUMN"
       ],
       "max_depth": 8,
-      "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{table_name}",
+      "qualified_node_template": "oci_medallion_{participant_key}.oci_{layer}.{table_name}",
       "required_schema_paths": [
-        "{participant_key}_aidp.oci_landing.",
-        "{participant_key}_aidp.oci_bronze.",
-        "{participant_key}_aidp.oci_silver.",
-        "{participant_key}_aidp.oci_gold."
+        "oci_medallion_{participant_key}.oci_landing.",
+        "oci_medallion_{participant_key}.oci_bronze.",
+        "oci_medallion_{participant_key}.oci_silver.",
+        "oci_medallion_{participant_key}.oci_gold."
       ],
       "should_include_edges": true,
       "target_tables": [
@@ -83,7 +83,7 @@
     {
       "depends_on": [],
       "file": "01_landing_telecommunications.ipynb",
-      "sha256": "fb838d1550e63d4441f0675da8303fa29b976212070d456e4fa5951561411579",
+      "sha256": "8e8b80a9314f6ee4d8fa095aefb1a53eda869ec0098ad19c969b1dff80c6dad6",
       "task_key": "01_landing_telecommunications"
     },
     {
@@ -91,7 +91,7 @@
         "01_landing_telecommunications"
       ],
       "file": "02_bronze_telecommunications.ipynb",
-      "sha256": "dbeafb1dd2f3c6aadf9d84745cb566a48aa98bc25d5f3fee9063ea433cf832a5",
+      "sha256": "ab1c76757d4dda588b733255bc8dbde40df25a0ac3706cb2c21e6f2b2d13dbb4",
       "task_key": "02_bronze_telecommunications"
     },
     {
@@ -99,7 +99,7 @@
         "02_bronze_telecommunications"
       ],
       "file": "03_silver_telecommunications.ipynb",
-      "sha256": "a0d9550da8719de8dc6b6245a306d3614339f6bd3863256c949c926e1c35c4e3",
+      "sha256": "e925c715a23c3f53cee4236009d61ea72f6b4e834c192125b118baa4d26238da",
       "task_key": "03_silver_telecommunications"
     },
     {
@@ -107,7 +107,7 @@
         "03_silver_telecommunications"
       ],
       "file": "04_gold_telecommunications.ipynb",
-      "sha256": "88e963b000c31a4057128712304ba9a42d08988508b9d8d58285c54e3cb1819a",
+      "sha256": "4306e7b31e536e5cc436dee6896efec426ff5ad52f4aef5f8565a0e98c6afb2e",
       "task_key": "04_gold_telecommunications"
     },
     {
@@ -115,12 +115,12 @@
         "04_gold_telecommunications"
       ],
       "file": "05_lineage_telecommunications.ipynb",
-      "sha256": "40d3900f845742b2cbd61dfca017465ee8279b16693372225014ee9cb16250f1",
+      "sha256": "20221a8048858237d47f4b2a0e049d9f7a3be12187987753d4b2922be8a004c0",
       "task_key": "05_lineage_telecommunications"
     }
   ],
-  "pack_sha256": "63475dd9ed60c565d1f049a4bdb64d3f7cec2a3dda58a6a4a30269bd582a2938",
-  "pack_version": "2.0.0",
+  "pack_sha256": "5bbdcf4768e170442390bb02642da0da06dfca42fe1ea92af01cb8a2226dffa9",
+  "pack_version": "2.0.1",
   "schema_version": 1,
   "status": "available",
   "table_storage": {

@@ -23,7 +23,7 @@ def test_catalog_contains_only_five_participant_kits() -> None:
     assert tuple(item["lab_id"] for item in public) == ACTIVE_LABS
     assert all(pack.available for pack in packs[:5])
     assert {pack.lab_id: pack.pack_version for pack in packs[:5]} == dict.fromkeys(
-        ACTIVE_LABS, "2.0.0"
+        ACTIVE_LABS, "2.0.1"
     )
     assert all(item["description"].strip() for item in public)
     assert "transactions" in public[0]["description"]
@@ -95,7 +95,7 @@ def test_telco_lineage_pack_has_variable_dag_delta_lineage_and_tutorials() -> No
     assert len(pack.datasets) == 10
     assert sum(asset.row_count or 0 for asset in pack.datasets) == 7405
     assert len(pack.notebooks) == 14
-    assert sum(len(names) for names in pack.tables.values()) == 31
+    assert sum(len(names) for names in pack.tables.values()) == 35
     assert pack.formats == {
         "landing": "DELTA", "bronze": "DELTA", "silver": "DELTA", "gold": "DELTA",
     }
@@ -103,6 +103,7 @@ def test_telco_lineage_pack_has_variable_dag_delta_lineage_and_tutorials() -> No
         "customer_master", "customer_addresses", "product_catalog",
         "prepaid_service", "postpaid_service", "home_service",
         "service_ownership", "quality_issues",
+        "quality_customer", "quality_prepaid", "quality_postpaid", "quality_home",
     )
     assert pack.tables["gold"] == (
         "customer_360", "customer_service_portfolio", "geographic_service_summary",
@@ -158,12 +159,12 @@ def test_telco_lineage_pack_has_variable_dag_delta_lineage_and_tutorials() -> No
     )
     lineage = metadata["expected_results"]["lineage"]
     assert lineage["required_schema_paths"] == [
-        "{participant_key}_aidp.oci_landing.", "{participant_key}_aidp.oci_bronze.",
-        "{participant_key}_aidp.oci_silver.", "{participant_key}_aidp.oci_gold.",
+        "oci_medallion_{participant_key}.oci_landing.", "oci_medallion_{participant_key}.oci_bronze.",
+        "oci_medallion_{participant_key}.oci_silver.", "oci_medallion_{participant_key}.oci_gold.",
     ]
     assert lineage["forbidden_schema_paths"] == ["aidp_lab.telco_lineage."]
     assert lineage["qualified_node_template"] == (
-        "{participant_key}_aidp.oci_{layer}.{participant_key}_telco_lineage_{table}"
+        "oci_medallion_{participant_key}.oci_{layer}.{participant_key}_telco_lineage_{table}"
     )
 
 

@@ -26,7 +26,8 @@ test("registration has no password field while administrator login remains prote
   assert.match(source, /Registration code/);
   assert.match(source, /function AdminLogin/);
   assert.match(source, /Starter kits/);
-  assert.match(source, /lab_id: "banking"/);
+  assert.ok(labCatalog.labs.includes("banking"));
+  assert.match(source, /useState<string\[\]>\(\["banking"\]\)/);
   assert.match(source, /Planned/);
   assert.match(source, /role="combobox"/);
   assert.match(source, /aria-multiselectable="true"/);

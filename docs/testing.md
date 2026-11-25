@@ -8,7 +8,7 @@
 | Pruebas Python | Los contratos de kits y despliegue, el registro, las reglas de arquitectura y el aprovisionamiento simulado respetan el comportamiento esperado. |
 | Pruebas de React y compilación | Los flujos del portal pasan las pruebas del frontend y el paquete compila. |
 | Terraform e imagen | Los proveedores, formatos, configuración y planes simulados pasan sus comprobaciones, y la imagen compila. |
-| Ejecución en Workbench | Un participante real del laboratorio puede ejecutar el workflow asignado y verificar tablas y linaje de ese paquete. |
+| Ejecución en Workbench | Dos participantes reales completan sus cinco workflows, verifican sus tablas y reciben una denegación de permisos cuando consultan las del otro. |
 
 ## Verificación local
 
@@ -27,8 +27,11 @@ En un entorno con las dependencias del backend de CloudTechNext, ejecuta el coma
 
 ## Aceptación en Workbench
 
-1. Comprueba que el aprovisionamiento terminó, que las rutas coinciden con el paquete instalado y que los permisos funcionan con la cuenta del participante.
-2. Ejecuta cada workflow con sus parámetros asignados. Revisa las aserciones de sus notebooks, el contenido de las tablas Gold y el linaje nativo en Master Catalog.
-3. Registra release, versión y hash del kit, tarea, estado y resultado esperado. Guarda los logs y recibos con datos de la tenancy fuera de Git.
+1. Aprovisiona los cinco kits para dos participantes de prueba sin privilegios administrativos. Comprueba el catálogo asignado a cada participante.
+2. Ejecuta cada workflow desde su cuenta. En el historial verifica la identidad efectiva de `Run As`, el resultado de todas las tareas y las tablas Gold de los cinco kits para ambos participantes. Reejecuta los workflows para comprobar la actualización de sus tablas.
+3. Desde cada cuenta, consulta una tabla Gold propia y luego intenta consultar esa misma tabla en el catálogo del otro participante. Usa una tabla que exista en el otro catálogo y comprueba que OCI indique una denegación de permisos. Repite la comprobación en ambos sentidos para los cinco kits.
+4. Registra release, versión y hash del kit, ejecución, identidad efectiva y resultados. Guarda los logs y recibos con datos de la tenancy fuera de Git.
 
-El estado activo del portal o un Apply correcto solo acredita su fase. La [incompatibilidad de rutas de los notebooks 2.0.0](getting-started.md#current-implementation-limits) sigue siendo un requisito de aceptación en OCI.
+La primera ejecución requiere que la identidad del job pueda crear sus tablas. Oracle aplica los permisos del esquema a los objetos que contiene. Conceder permisos de creación a participantes sobre un esquema compartido expone tablas de otros participantes. [Identidad de ejecución](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aidug/run-identity.html) · [Permisos de esquema](https://docs.oracle.com/en/cloud/paas/ai-data-platform/aidug/permissions-model.html#schema-permissions)
+
+La prueba local ejecuta las validaciones iniciales de los 34 notebooks con los parámetros que genera el backend y comprueba que rechacen rutas y catálogos ajenos. La aceptación nativa exige los resultados de Spark y el linaje del paquete instalado.

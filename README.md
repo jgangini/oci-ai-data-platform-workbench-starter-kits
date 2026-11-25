@@ -27,7 +27,7 @@ El instructor configura el portal y habilita el registro. Cada participante elig
 | [Retail](docs/kits/retail.md) | Ventas, productos y clientes. |
 | [Healthcare](docs/kits/healthcare.md) | Actividad asistencial con datos de demostración. |
 
-El [tutorial de Banking](docs/tutorial.md) recorre un caso desde el CSV de transacciones hasta el resumen diario por sucursal. Para ejecutar el ejercicio en OCI, verifica primero la compatibilidad de rutas del paquete instalado. [Límite de los notebooks 2.0.0](docs/getting-started.md#current-implementation-limits)
+El [tutorial de Banking](docs/tutorial.md) recorre un caso desde el CSV de transacciones hasta el resumen diario por sucursal. Para ejecutar el ejercicio en OCI, comprueba la versión del paquete asignado y su aceptación en Workbench. [Versiones y aceptación](docs/getting-started.md#current-implementation-limits)
 
 ## Documentación
 

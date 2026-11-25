@@ -8,7 +8,7 @@ Sigue el kit **Banking** desde los archivos de muestra hasta el resumen diario d
 
 Necesitas un portal de laboratorio disponible, un código de registro del instructor y acceso al correo con el que activarás tu cuenta OCI. Si administras el laboratorio, usa la guía de [despliegue y acceso](getting-started.md).
 
-Para ejecutar el workflow, comprueba que la instalación ya superó la aceptación de rutas y catálogo. Los notebooks empaquetados en la versión 2.0.0 tienen una incompatibilidad conocida. Con el aprovisionador actual, el primer notebook de Banking 2.0.0 rechaza la ruta y el catálogo asignados. Puedes completar el registro y revisar el contenido aprovisionado mientras se resuelve esa incompatibilidad. [Límite documentado](getting-started.md#current-implementation-limits)
+Comprueba que la asignación usa Banking `2.0.1` y ejecuta el workflow con los parámetros que configuró el aprovisionador. Si el portal muestra una versión anterior, el instructor puede actualizar ese kit desde Users. [Versiones y aceptación](getting-started.md#current-implementation-limits)
 
 ## Como participante
 

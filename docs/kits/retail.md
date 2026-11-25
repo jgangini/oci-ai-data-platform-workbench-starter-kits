@@ -2,7 +2,7 @@
 
 [Documentación](../README.md) · [Primeros pasos](../getting-started.md)
 
-El [paquete `2.0.0`](../../apps/backend/app/kits/retail/lab.json) transforma clientes, productos y pedidos en resúmenes de valor y actividad diaria. Usa CSV deterministas de entrenamiento con problemas controlados de calidad; no es un conector comercial real. Antes de ejecutarlo, revise la [incompatibilidad actual entre notebooks y aprovisionador](../getting-started.md#current-implementation-limits).
+El [paquete `2.0.1`](../../apps/backend/app/kits/retail/lab.json) transforma clientes, productos y pedidos en resúmenes de valor y actividad diaria. Usa CSV deterministas de entrenamiento con problemas controlados de calidad; no es un conector comercial real. Antes de ejecutarlo, revise la [aceptación en Workbench](../testing.md#aceptación-en-workbench).
 
 ## Entradas y flujo
 

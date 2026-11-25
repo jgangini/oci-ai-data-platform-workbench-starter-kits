@@ -104,6 +104,7 @@ TABLES = {
         "customer_master", "customer_addresses", "product_catalog",
         "prepaid_service", "postpaid_service", "home_service",
         "service_ownership", "quality_issues",
+        "quality_customer", "quality_prepaid", "quality_postpaid", "quality_home",
     ],
     "gold": [
         "customer_360", "customer_service_portfolio",
@@ -411,21 +412,18 @@ if participant_match is None or int(participant_match.group(1)) < 101:
     raise ValueError("Invalid participant_key")
 if lab_id != "telco_lineage":
     raise ValueError("This notebook belongs to a different lab")
-if not workspace_root.startswith("/Workspace/medallon/"):
+workspace_prefix = f"/Workspace/{lab_id}/{participant_key}_"
+encoded_email_part = r"(?:[a-z0-9._+~-]|%[0-9A-F]{2})+"
+if not re.fullmatch(re.escape(workspace_prefix) + rf"{encoded_email_part}@{encoded_email_part}", workspace_root):
     raise ValueError("Invalid workspace_root")
-if catalog_name != f"{participant_key}_aidp":
+if catalog_name != f"oci_medallion_{participant_key}":
     raise ValueError("Invalid participant catalog")
 spark.conf.set("spark.aidp.lineage.enabled", "true")
-
-layer_prefixes = {"landing": "01_landing", "bronze": "02_bronze", "silver": "03_silver", "gold": "04_gold"}
 
 def table(layer, logical_name):
     return f"{catalog_name}.oci_{layer}.{participant_key}_{lab_id}_{logical_name}"
 
-def location(layer, logical_name):
-    return f"oci://{bucket_name}@{objectstorage_namespace}/{layer_prefixes[layer]}/users/{participant_key}/{lab_id}/{logical_name}/"
-
-def write_delta(frame, layer, logical_name, _ddl):
+def write_delta(frame, layer, logical_name, _ddl=None):
     target = table(layer, logical_name)
     (frame.write.format("delta").mode("overwrite")
         .option("overwriteSchema", "true")
@@ -514,7 +512,7 @@ product_catalog = products.select(
 write_delta(customer_master, "silver", "customer_master", "participant_key STRING, customer_id STRING, full_name STRING, document_number STRING, segment STRING, status STRING, updated_at TIMESTAMP")
 write_delta(customer_addresses, "silver", "customer_addresses", "participant_key STRING, address_id STRING, customer_id STRING, address_type STRING, address_line STRING, city STRING, province STRING, region STRING, is_primary BOOLEAN, updated_at TIMESTAMP")
 write_delta(product_catalog, "silver", "product_catalog", "participant_key STRING, product_id STRING, service_type STRING, product_name STRING, product_family STRING, monthly_fee DECIMAL(12,2), status STRING, updated_at TIMESTAMP")
-customer_issues.unionByName(address_issues).write.format("delta").mode("overwrite").save(location("silver", "_quality/customer"))
+write_delta(customer_issues.unionByName(address_issues), "silver", "quality_customer")
 assert customer_master.count() == 493 and customer_addresses.count() == 617 and product_catalog.count() == 15
 '''
 
@@ -549,7 +547,7 @@ prepaid_service = (valid_lines.join(recharge_value, "line_id", "left")
         F.lit("PREPAID").alias("service_type"), "customer_id", "product_id",
         F.lower("status").alias("status"), F.coalesce("monthly_value", F.lit(0)).cast("decimal(14,2)").alias("monthly_value")))
 write_delta(prepaid_service, "silver", "prepaid_service", "participant_key STRING, service_id STRING, service_number STRING, service_type STRING, customer_id STRING, product_id STRING, status STRING, monthly_value DECIMAL(14,2)")
-line_issues.unionByName(recharge_issues).write.format("delta").mode("overwrite").save(location("silver", "_quality/prepaid"))
+write_delta(line_issues.unionByName(recharge_issues), "silver", "quality_prepaid")
 assert prepaid_service.count() == 645
 '''
 
@@ -595,7 +593,7 @@ postpaid_service = (valid_lines.join(account_value, "account_id", "left").join(l
         F.lower("status").alias("status"),
         (F.coalesce("account_value", F.lit(0)) / F.col("line_count")).cast("decimal(14,2)").alias("monthly_value")))
 write_delta(postpaid_service, "silver", "postpaid_service", "participant_key STRING, service_id STRING, service_number STRING, service_type STRING, customer_id STRING, product_id STRING, status STRING, monthly_value DECIMAL(14,2)")
-reduce(lambda left, right: left.unionByName(right), [account_issues, line_issues, invoice_issues]).write.format("delta").mode("overwrite").save(location("silver", "_quality/postpaid"))
+write_delta(reduce(lambda left, right: left.unionByName(right), [account_issues, line_issues, invoice_issues]), "silver", "quality_postpaid")
 assert postpaid_service.count() == 398
 '''
 
@@ -632,7 +630,7 @@ home_service = (valid_services.join(valid_installations, "service_id", "left")
         "customer_id", "product_id", F.lower("status").alias("status"),
         F.col("monthly_fee").cast("decimal(14,2)").alias("monthly_value"), "address_id", "technology"))
 write_delta(home_service, "silver", "home_service", "participant_key STRING, service_id STRING, service_number STRING, service_type STRING, customer_id STRING, product_id STRING, status STRING, monthly_value DECIMAL(14,2), address_id STRING, technology STRING")
-service_issues.unionByName(installation_issues).write.format("delta").mode("overwrite").save(location("silver", "_quality/home"))
+write_delta(service_issues.unionByName(installation_issues), "silver", "quality_home")
 assert home_service.count() == 218
 '''
 
@@ -643,10 +641,10 @@ columns = ["participant_key", "service_id", "service_number", "service_type", "c
 service_ownership = reduce(lambda left, right: left.unionByName(right), [prepaid.select(*columns), postpaid.select(*columns), home.select(*columns)])
 write_delta(service_ownership, "silver", "service_ownership", "participant_key STRING, service_id STRING, service_number STRING, service_type STRING, customer_id STRING, product_id STRING, status STRING, monthly_value DECIMAL(14,2), address_id STRING, technology STRING")
 quality = reduce(lambda left, right: left.unionByName(right), [
-    spark.read.format("delta").load(location("silver", "_quality/customer")),
-    spark.read.format("delta").load(location("silver", "_quality/prepaid")),
-    spark.read.format("delta").load(location("silver", "_quality/postpaid")),
-    spark.read.format("delta").load(location("silver", "_quality/home")),
+    spark.table(table("silver", "quality_customer")),
+    spark.table(table("silver", "quality_prepaid")),
+    spark.table(table("silver", "quality_postpaid")),
+    spark.table(table("silver", "quality_home")),
 ])
 write_delta(quality, "silver", "quality_issues", "participant_key STRING, dataset STRING, source_row_id STRING, record_key STRING, reason_code STRING, quarantined_at TIMESTAMP")
 assert service_ownership.count() == 1261 and quality.count() == 30
@@ -737,7 +735,7 @@ geographic_total = spark.table(table("gold", "geographic_service_summary")).agg(
 assert abs(float(customer_total) - float(portfolio_total)) < 0.01
 assert abs(float(customer_total) - float(geographic_total)) < 0.01
 assert spark.conf.get("spark.aidp.lineage.enabled", "true").lower() == "true"
-print("Telco Customer 360 validated: 31 managed tables, 30 quality issues, governed medallion lineage")
+print("Telco Customer 360 validated: 35 managed tables, 30 quality issues, governed medallion lineage")
 '''
 
     return {
@@ -865,7 +863,7 @@ def generate(*, check: bool = False) -> bool:
         "schema_version": 1,
         "lab_id": LAB_ID,
         "display_name": "Telco Customer 360 Lineage",
-        "pack_version": "2.0.0",
+        "pack_version": "2.0.1",
         "status": "available",
         "datasets": datasets,
         "notebooks": notebooks,
@@ -881,10 +879,10 @@ def generate(*, check: bool = False) -> bool:
                 "expected_table_rows": EXPECTED_TABLE_COUNTS,
                 "expected_entity_edges": expected_entity_edges,
                 "expected_column_edges": expected_column_edges,
-                "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{participant_key}_telco_lineage_{table}",
+                "qualified_node_template": "oci_medallion_{participant_key}.oci_{layer}.{participant_key}_telco_lineage_{table}",
                 "required_schema_paths": [
-                    "{participant_key}_aidp.oci_landing.", "{participant_key}_aidp.oci_bronze.",
-                    "{participant_key}_aidp.oci_silver.", "{participant_key}_aidp.oci_gold.",
+                    "oci_medallion_{participant_key}.oci_landing.", "oci_medallion_{participant_key}.oci_bronze.",
+                    "oci_medallion_{participant_key}.oci_silver.", "oci_medallion_{participant_key}.oci_gold.",
                 ],
                 "forbidden_schema_paths": ["aidp_lab.telco_lineage."],
                 "levels": ["ENTITY", "COLUMN"], "direction": "BOTH", "max_depth": 8,

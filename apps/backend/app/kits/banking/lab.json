@@ -49,12 +49,12 @@
         "COLUMN"
       ],
       "max_depth": 8,
-      "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{table_name}",
+      "qualified_node_template": "oci_medallion_{participant_key}.oci_{layer}.{table_name}",
       "required_schema_paths": [
-        "{participant_key}_aidp.oci_landing.",
-        "{participant_key}_aidp.oci_bronze.",
-        "{participant_key}_aidp.oci_silver.",
-        "{participant_key}_aidp.oci_gold."
+        "oci_medallion_{participant_key}.oci_landing.",
+        "oci_medallion_{participant_key}.oci_bronze.",
+        "oci_medallion_{participant_key}.oci_silver.",
+        "oci_medallion_{participant_key}.oci_gold."
       ],
       "should_include_edges": true,
       "target_tables": [
@@ -83,7 +83,7 @@
     {
       "depends_on": [],
       "file": "01_landing_banking.ipynb",
-      "sha256": "2de18b8517cb6c98dbec0f2dfa43c2de31f6766613953aabca0a99279821ad94",
+      "sha256": "f10871177c21df39738c19a4f375c7ab10339c8a83bf31000fef9f9920b1c3f6",
       "task_key": "01_landing_banking"
     },
     {
@@ -91,7 +91,7 @@
         "01_landing_banking"
       ],
       "file": "02_bronze_banking.ipynb",
-      "sha256": "5e7cb6b1c362df9cc982474a4466ae31a27e4562205d54c3b10932f30a8b2d50",
+      "sha256": "54b6972bedd330f7eb4ff4c9b454caa9a380d2731a5b846bd91ab28b2344f754",
       "task_key": "02_bronze_banking"
     },
     {
@@ -99,7 +99,7 @@
         "02_bronze_banking"
       ],
       "file": "03_silver_banking.ipynb",
-      "sha256": "231dae57fa93cc87d91807100652d1836def78c06f7d0bd2d77e1521754aa427",
+      "sha256": "7e41215f46e8da5b58a520e8957440e1fbee199a5db6ee78fea0b7347c87603e",
       "task_key": "03_silver_banking"
     },
     {
@@ -107,7 +107,7 @@
         "03_silver_banking"
       ],
       "file": "04_gold_banking.ipynb",
-      "sha256": "373121a7e4f6434d4da57cdfb593e7c6924986345f23ab552c9fd911bbaf9bae",
+      "sha256": "fe0c091ae74196f7b64ccc915ace3daec75de2a3c3c0247d13460645362d43d2",
       "task_key": "04_gold_banking"
     },
     {
@@ -115,12 +115,12 @@
         "04_gold_banking"
       ],
       "file": "05_lineage_banking.ipynb",
-      "sha256": "6def9ed81caa6ace7a354cf30689610bdd62f44347fa10057e00980624a52244",
+      "sha256": "dcc7ae69d9ddfbd593992711e3275c90aebd4570ed50908241387b35363ea222",
       "task_key": "05_lineage_banking"
     }
   ],
-  "pack_sha256": "2cee69154f19f323efd252e1ac686276f912509e0a0134a595264a8534ac26d3",
-  "pack_version": "2.0.0",
+  "pack_sha256": "ef3622fae31801f93ad7c884c6a468c879316aa28f6734c1d5f9729465b1e1e6",
+  "pack_version": "2.0.1",
   "schema_version": 1,
   "status": "available",
   "table_storage": {

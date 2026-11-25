@@ -6,7 +6,7 @@
 
 El [catálogo](../apps/backend/app/packages/catalog.json) contiene exclusivamente banking, telecommunications, telco_lineage, retail y healthcare. El [loader](../apps/backend/app/packages/catalog.py) resuelve rutas explícitas bajo app/kits y verifica hashes, versiones, ámbito y dependencias. No descubre módulos externos.
 
-Los nombres lab.json, lab_id y labs siguen siendo campos del contrato actual de kits. Cambiar carpetas no cambia identidades nativas. Consulte el [límite pendiente de notebooks](getting-started.md#current-implementation-limits).
+Los nombres lab.json, lab_id y labs siguen siendo campos del contrato actual de kits. Cambiar carpetas no cambia identidades nativas. Consulte la [aceptación de los notebooks en Workbench](testing.md#aceptación-en-workbench).
 
 ## Identidad
 
@@ -48,11 +48,17 @@ Los buckets de instalaciones previas permanecen en su stack. Un Terraform reduci
 
 `aidp_mode=existing` consulta la plataforma mediante un data source: no la importa al estado y no la elimina al destruir el stack. Debe ser ACTIVE, STRUCTURED y pertenecer a la región y al compartimento seleccionados. Deploy Studio lista sus workspaces accesibles. Debe seleccionarse un workspace ACTIVE: la comprobación previa verifica la clave dentro de la plataforma usando la identidad del operador, resuelve su nombre y entrega ambos al portal. El hook vuelve a comprobar la selección antes de escribir contenido. Un AIDP nuevo conserva su workspace predeterminado. El operador necesita administración efectiva de AIDP; el hook la verifica antes de crear recursos.
 
-Los nombres de Kits (`oci_medallion`, `aidp_cluster_shared_compute`, roles y `/Workspace/medallon`) no se adoptan de otro producto ni de un stack combinado. Antes de escribir, el hook rechaza colisiones sin la marca de propiedad del despliegue. Los recursos parciales de la misma operación conservan su marca y se reanudan. La autorización de usar una plataforma compartida no permite reasignar sus roles o datos existentes.
+Los nombres de Kits (`oci_medallion`, `aidp_cluster_shared_compute`, roles y `/Workspace/<lab_id>/<participant_key>_<email_codificado>`) no se adoptan de otro producto ni de un stack combinado. Antes de escribir, el hook rechaza colisiones sin la marca de propiedad del despliegue. Los recursos parciales de la misma operación conservan su marca y se reanudan. La autorización de usar una plataforma compartida no permite reasignar sus roles o datos existentes.
 
 El gate fresh-only sigue rechazando planes que actualicen o destruyan recursos existentes. Cambiar el selector de una instalación ya aplicada no es un mecanismo de migración. La plataforma y bases de datos de instalaciones anteriores se conservan hasta una transición expresamente autorizada.
 
 La configuración mantiene compatibilidad con Terraform 1.5.7: las validaciones de variables solo inspeccionan su propia variable. La obligatoriedad del OCID en modo existente se comprueba mediante una precondición del data source, antes de consultarlo.
+
+## Aislamiento de los participantes
+
+Cada participante recibe un catálogo interno con cuatro esquemas medallón. El aprovisionador verifica la marca de propiedad y la clave registrada antes de conceder `CREATE_TABLE` directamente al usuario en esos cuatro esquemas. Los cinco workflows se configuran para ejecutarse con su identidad. Las entradas se leen del workspace y las tablas Delta se administran en AIDP. La política de los participantes concede acceso a AIDP en el compartimento del laboratorio.
+
+Las asignaciones existentes conservan el alcance de su registro. La actualización explícita de un kit limpia sus tablas declaradas en el alcance anterior y vuelve a aprovisionarlo en el catálogo del participante. La limpieza conserva el catálogo para preservar objetos que el kit desconoce. El administrador puede revisar esos objetos antes de retirar un catálogo completo.
 
 ## Formulario declarativo de Deploy Studio
 

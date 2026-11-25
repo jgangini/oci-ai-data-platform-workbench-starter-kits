@@ -50,12 +50,12 @@
         "COLUMN"
       ],
       "max_depth": 8,
-      "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{table_name}",
+      "qualified_node_template": "oci_medallion_{participant_key}.oci_{layer}.{table_name}",
       "required_schema_paths": [
-        "{participant_key}_aidp.oci_landing.",
-        "{participant_key}_aidp.oci_bronze.",
-        "{participant_key}_aidp.oci_silver.",
-        "{participant_key}_aidp.oci_gold."
+        "oci_medallion_{participant_key}.oci_landing.",
+        "oci_medallion_{participant_key}.oci_bronze.",
+        "oci_medallion_{participant_key}.oci_silver.",
+        "oci_medallion_{participant_key}.oci_gold."
       ],
       "should_include_edges": true,
       "target_tables": [
@@ -84,7 +84,7 @@
     {
       "depends_on": [],
       "file": "01_landing_retail.ipynb",
-      "sha256": "76e425355094ceeb1f4f8a1d5eda6d763d5bfa84f4ad9e8eee8c6d457ff32860",
+      "sha256": "9edc0f7e00e0e679d2edfdaba7e93fe02b41609ab674ee3c5a38c589db33c92e",
       "task_key": "01_landing_retail"
     },
     {
@@ -92,7 +92,7 @@
         "01_landing_retail"
       ],
       "file": "02_bronze_retail.ipynb",
-      "sha256": "87925fc4d6d4d9006e16b895f97c9539c371aeb96d62ac8112dc50ab8616c102",
+      "sha256": "2d96982e8b60c83d013bce339bbe1453441b715b2db954c6b85e49ab9d1dc267",
       "task_key": "02_bronze_retail"
     },
     {
@@ -100,7 +100,7 @@
         "02_bronze_retail"
       ],
       "file": "03_silver_retail.ipynb",
-      "sha256": "7be677d1beebd081992c35321ceac54661e2df4e0c8554732934436b749a5d50",
+      "sha256": "9f793ed94d529be4fa82855ff7c5787cfcfaff8c91ffbe69a2ecc27137b8bc23",
       "task_key": "03_silver_retail"
     },
     {
@@ -108,7 +108,7 @@
         "03_silver_retail"
       ],
       "file": "04_gold_retail.ipynb",
-      "sha256": "9afd56add480b91e2473da7c6a2b017be4f7bd9832bb822e1cd7a9d0036aa9dc",
+      "sha256": "d7c25eef02d6e5336ba87d92b332d552f5b6707797c8a8406f51edc045ae9c21",
       "task_key": "04_gold_retail"
     },
     {
@@ -116,12 +116,12 @@
         "04_gold_retail"
       ],
       "file": "05_lineage_retail.ipynb",
-      "sha256": "e9b596ec7db27042b8c3b827a6f34c5b4b142b75c3fa11cdb77fc2317a63743b",
+      "sha256": "1dc8ca18bc96fc7fe469aff555bc9ce2b8c23dba99eb0a8154c08aa9f0e69881",
       "task_key": "05_lineage_retail"
     }
   ],
-  "pack_sha256": "458d46c52fc43f2826d07a358ca1331ca60761446710a2d390ba0a4884eea5fa",
-  "pack_version": "2.0.0",
+  "pack_sha256": "88466ce9d2d38b04c6d9893a92473b959a6c268f3e58b14f344c3d7058caf847",
+  "pack_version": "2.0.1",
   "schema_version": 1,
   "status": "available",
   "table_storage": {

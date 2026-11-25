@@ -2,7 +2,7 @@
 
 [Documentación](../README.md) · [Primeros pasos](../getting-started.md)
 
-El [paquete `2.0.0`](../../apps/backend/app/kits/banking/lab.json) construye resúmenes de clientes y sucursales con CSV de entrenamiento deterministas. No consume operaciones de un banco real. Antes de ejecutarlo, revise la [incompatibilidad actual entre notebooks y aprovisionador](../getting-started.md#current-implementation-limits).
+El [paquete `2.0.1`](../../apps/backend/app/kits/banking/lab.json) construye resúmenes de clientes y sucursales con CSV de entrenamiento deterministas. No consume operaciones de un banco real. Antes de ejecutarlo, revise la [aceptación en Workbench](../testing.md#aceptación-en-workbench).
 
 ## Entradas y flujo
 

@@ -16,7 +16,7 @@ mock_provider "oci" {
 mock_provider "random" {}
 
 variables {
-  operator_username = "test.operator@example.test"
+  operator_username = "test.operator"
 }
 
 override_resource {
@@ -215,19 +215,11 @@ run "resolved_compartment_contract" {
   }
 
   assert {
-    condition = anytrue([
+    condition = length(oci_identity_policy.developer_console.statements) == 2 && anytrue([
       for statement in oci_identity_policy.developer_console.statements :
-      strcontains(statement, "manage objects") && strcontains(statement, "target.bucket.name = 'aidp-data-test1234'")
+      strcontains(statement, "to use ai-data-platforms in compartment id")
     ])
-    error_message = "Developer object access must be limited to the single lab bucket."
-  }
-
-  assert {
-    condition = anytrue([
-      for statement in oci_identity_policy.developer_console.statements :
-      strcontains(statement, "read buckets") && strcontains(statement, "target.bucket.name = 'aidp-data-test1234'")
-    ])
-    error_message = "Developer bucket metadata access must be limited to the single lab bucket."
+    error_message = "Developer IAM policy may open AIDP but must not grant direct access to Object Storage."
   }
 
   assert {
