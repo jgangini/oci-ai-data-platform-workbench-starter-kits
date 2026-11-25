@@ -55,5 +55,15 @@
       "bundled_sha256": "299724b4fba76f4c045fd5895f7e890e453187fe9b869e245cce69b45bf8fe61",
       "color": null
     }
+  ],
+  "derived_assets": [
+    {
+      "file": "oci-ai-data-platform-white.svg",
+      "derived_from": "oci-ai-data-platform.svg",
+      "source_sha256": "58b4fa7752679f7939ec3546625cde99ef97956c039755da645dcf0a7abd6099",
+      "sha256": "73c626307cc9480b8f37f3a6a87084b449d7287a68d979baaf62c024a11b1699",
+      "transformation": "Change colored path fill to white. Preserve the viewport and path geometry.",
+      "use": "../starter-kits-cover-aidp-white.png"
+    }
   ]
 }
