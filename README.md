@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/starter-kits-cover.png" width="224" alt="Un castor ensambla cuatro capas de datos con el icono de OCI AI Data Platform en la ficha superior">
+  <img src="docs/assets/starter-kits-cover-aidp-white.png" width="224" alt="Un castor ensambla cuatro capas de datos con el icono blanco de OCI AI Data Platform en la ficha superior">
 </p>
 <h3 align="center">Oracle AI Data Platform Workbench Starter Kits</h3>
 <p align="center">Cinco laboratorios con datos de muestra para procesar, validar y rastrear datos en Oracle AI Data Platform Workbench.</p>
