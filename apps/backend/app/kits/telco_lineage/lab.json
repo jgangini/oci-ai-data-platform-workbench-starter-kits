@@ -114,12 +114,12 @@
         "COLUMN"
       ],
       "max_depth": 8,
-      "qualified_node_template": "{participant_key}_aidp.oci_{layer}.{participant_key}_telco_lineage_{table}",
+      "qualified_node_template": "oci_medallion_{participant_key}.oci_{layer}.{participant_key}_telco_lineage_{table}",
       "required_schema_paths": [
-        "{participant_key}_aidp.oci_landing.",
-        "{participant_key}_aidp.oci_bronze.",
-        "{participant_key}_aidp.oci_silver.",
-        "{participant_key}_aidp.oci_gold."
+        "oci_medallion_{participant_key}.oci_landing.",
+        "oci_medallion_{participant_key}.oci_bronze.",
+        "oci_medallion_{participant_key}.oci_silver.",
+        "oci_medallion_{participant_key}.oci_gold."
       ],
       "should_include_edges": true,
       "target_tables": [
@@ -156,7 +156,7 @@
     {
       "depends_on": [],
       "file": "01_landing_telco_lineage.ipynb",
-      "sha256": "1e878b84630f2159cc3cac9254d1b16219274cf114263341fdd0e452eb73496e",
+      "sha256": "a845ebf9431b6eef1b1fe959b42749007ed904c5c044f5f621d9cbab21d99d85",
       "task_key": "01_landing_telco_lineage"
     },
     {
@@ -164,7 +164,7 @@
         "01_landing_telco_lineage"
       ],
       "file": "02_bronze_crm_products.ipynb",
-      "sha256": "98e8b04272e22041751567f597c6508293d9e7751328854b0d1ccad4d6f6770f",
+      "sha256": "5235a35926add9f799285184b967662a754e4141fa3e257df8c854a5baa9da1c",
       "task_key": "02_bronze_crm_products"
     },
     {
@@ -172,7 +172,7 @@
         "01_landing_telco_lineage"
       ],
       "file": "03_bronze_prepaid.ipynb",
-      "sha256": "aa42bc7242c29ef84e5fc43f0257cee1527b570378085853450e3f1a05e1c573",
+      "sha256": "e6190e4e0381d1d74d5648b014ce8dc8cb8ca4b61b1ef84c6877cc22c7d0e133",
       "task_key": "03_bronze_prepaid"
     },
     {
@@ -180,7 +180,7 @@
         "01_landing_telco_lineage"
       ],
       "file": "04_bronze_postpaid.ipynb",
-      "sha256": "01727143927963303e77e83e681ad451519cffd00c1a5dab61d4c9db59b6d0a2",
+      "sha256": "ad76d0ad7f4017e9097c1e49e5dda09255f9926628fab89bb07bf4ac8dd1c5cd",
       "task_key": "04_bronze_postpaid"
     },
     {
@@ -188,7 +188,7 @@
         "01_landing_telco_lineage"
       ],
       "file": "05_bronze_home.ipynb",
-      "sha256": "42b09434e81cb715cd1a69510fc521d12570f354f157f3248bf297cab30b2af3",
+      "sha256": "f04928998afb32495aeb23ad1a87c0b01b41c96f45efa4eb81f49d4106474ef1",
       "task_key": "05_bronze_home"
     },
     {
@@ -196,7 +196,7 @@
         "02_bronze_crm_products"
       ],
       "file": "06_silver_customer.ipynb",
-      "sha256": "8a08fe4c2615a5af520038dcbdd3e3c62b246a0cfc9af1b08015f3692195597a",
+      "sha256": "27d67888dc981818a04733651e17d92cf90b2efa9319ab1dfd2b078b07b0fa43",
       "task_key": "06_silver_customer"
     },
     {
@@ -205,7 +205,7 @@
         "06_silver_customer"
       ],
       "file": "07_silver_prepaid.ipynb",
-      "sha256": "c9928de4833a00d028015f0114f1497068a59ee49c2a079213583bc7ee718b52",
+      "sha256": "88aafe9fc428a7e2858278e3ad322f02388badb1c200561b708780f5e823f5d5",
       "task_key": "07_silver_prepaid"
     },
     {
@@ -214,7 +214,7 @@
         "06_silver_customer"
       ],
       "file": "08_silver_postpaid.ipynb",
-      "sha256": "6ed4ccdbaada8caa4896e236aeda43b2f5404d572d7f2d18e5170f1b0bca3b6e",
+      "sha256": "96c2debcc7090a9d00a25df55e5943cf4fc562218c468b4866a948815859984a",
       "task_key": "08_silver_postpaid"
     },
     {
@@ -223,7 +223,7 @@
         "06_silver_customer"
       ],
       "file": "09_silver_home.ipynb",
-      "sha256": "018e4eeb9cc2b0c4e8830788c811d804b9a11eb4b7e75314e5d5aded3f97798f",
+      "sha256": "8070040079400e5bbd467f84e78940e02f20638bbe137bae0eaa1bb7d5919f95",
       "task_key": "09_silver_home"
     },
     {
@@ -234,7 +234,7 @@
         "09_silver_home"
       ],
       "file": "10_silver_ownership_quality.ipynb",
-      "sha256": "19696100cbc4383245c0bf4f537f541325a3788f73fd8d4ad1a779febf7b28c6",
+      "sha256": "58f0d69af2ce1fd201020ac1f3e1b91572f1e6dffa4fae71003a81870aa9d60c",
       "task_key": "10_silver_ownership_quality"
     },
     {
@@ -242,7 +242,7 @@
         "10_silver_ownership_quality"
       ],
       "file": "11_gold_customer_360.ipynb",
-      "sha256": "7a39a65d1443499751a412ad886f7c1321fe1eb6a7c36300704e7ada2ddd5828",
+      "sha256": "15122c458f73b3a8f646d820f28cfb1ed769107af3f8d865dd241399981fb61a",
       "task_key": "11_gold_customer_360"
     },
     {
@@ -250,7 +250,7 @@
         "10_silver_ownership_quality"
       ],
       "file": "12_gold_service_portfolio.ipynb",
-      "sha256": "491c32557ce79a7a0150413404721a9178ec8952d3b9e5a5a114fb9b817e30b4",
+      "sha256": "01b993d14e9fbacbc32ecff8cd33130a02916680946c4b8d4d4107188133cf0f",
       "task_key": "12_gold_service_portfolio"
     },
     {
@@ -259,7 +259,7 @@
         "12_gold_service_portfolio"
       ],
       "file": "13_gold_geographic_summary.ipynb",
-      "sha256": "57d3d5cb5e4c49f5f3580ab7884ecdbd46de09c76dd442d7f3c581825243691d",
+      "sha256": "a11a18d9f5b1d6b49d6efa7f89f4ac6c4051c807e457d5c7f22459fb006077c8",
       "task_key": "13_gold_geographic_summary"
     },
     {
@@ -267,12 +267,12 @@
         "13_gold_geographic_summary"
       ],
       "file": "14_validate_lineage.ipynb",
-      "sha256": "656718caa1f9ec47dbd75f6d685d9da3bf1a07b000c6045368b4c4f1300d4a36",
+      "sha256": "522d3d548ec86c8da0d3824b592e9740d7aef3bf255e69ebadf6c172322f431d",
       "task_key": "14_validate_lineage"
     }
   ],
-  "pack_sha256": "6b2be3f538fcb6df28d3989958262db5d275849a0017b951e265226707552d00",
-  "pack_version": "2.0.0",
+  "pack_sha256": "7344ad7e082cce57686b9616e0527dfe8685e8be72bb7b2a954bfa50e549d71e",
+  "pack_version": "2.0.1",
   "schema_version": 1,
   "status": "available",
   "table_storage": {
@@ -319,7 +319,11 @@
       "postpaid_service",
       "home_service",
       "service_ownership",
-      "quality_issues"
+      "quality_issues",
+      "quality_customer",
+      "quality_prepaid",
+      "quality_postpaid",
+      "quality_home"
     ]
   }
 }

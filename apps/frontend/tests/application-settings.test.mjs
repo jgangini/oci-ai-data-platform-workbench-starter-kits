@@ -9,6 +9,11 @@ const poll = {};
 new Function('exports', ts.transpileModule(readFileSync(new URL('../src/registrationPoll.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(poll);
 const assignments = {};
 new Function('exports', ts.transpileModule(readFileSync(new URL('../src/labAssignments.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(assignments);
+const testMailDomain = 'example.test';
+const studentEmail = `student@${testMailDomain}`;
+const operatorEmail = `operator@${testMailDomain}`;
+const newUserEmail = `new@${testMailDomain}`;
+
 const settings = { aidp_service_endpoint: 'https://example.test/api', aidp_url: 'https://example.test/workbench', aidp_platform_id: 'platform', registration_code_configured: true, time_zone: 'America/Bogota', time_zones: ['America/Bogota', 'UTC'] };
 const release = { current_release: 'v2.3.9', current_commit_sha: 'abc123', latest_release: 'v2.4.0', update_available: true, updater_available: true, operation: null, packages: [] };
 async function harness(t, currentRelease = release, route = '/admin/settings', initial = {}, sessionState = new Map(), loginProps = null) {
@@ -209,18 +214,18 @@ test('application updates require confirmation, preserve the warning and cancel 
 });
 
 const administrators = [
-  { id: 'participant', email: 'student@example.test', name: 'Student', is_aidp_admin: false, active: true, labs: [] },
-  { id: 'operator', email: 'operator@example.test', name: 'Operator', is_aidp_admin: true, active: true, managed: false, labs: [] },
+  { id: 'participant', email: studentEmail, name: 'Student', is_aidp_admin: false, active: true, labs: [] },
+  { id: 'operator', email: operatorEmail, name: 'Operator', is_aidp_admin: true, active: true, managed: false, labs: [] },
 ];
 const text = value => Array.isArray(value) ? value.map(text).join('') : value == null || typeof value === 'boolean' ? '' : typeof value === 'object' ? text(value.props?.children) : String(value);
 const action = (h, label) => h.find('button', props => text(props.children) === label);
 test('Users keeps participant actions and OCI administrator restrictions without module requests', async t => {
   const h = await harness(t, release, '/admin/users', { '/api/admin/users': { users: administrators }, '/api/config': { labs: [] } });
   assert.equal(h.nodes().filter(node => node?.props?.className === 'table-action table-module').length, 0);
-  assert.ok(h.find('button', props => props['aria-label'] === 'Manage starter kits for student@example.test'));
-  assert.ok(h.find('button', props => props['aria-label'] === 'Manage starter kits for operator@example.test'));
+  assert.ok(h.find('button', props => props['aria-label'] === `Manage starter kits for ${studentEmail}`));
+  assert.ok(h.find('button', props => props['aria-label'] === `Manage starter kits for ${operatorEmail}`));
   assert.match(text(h.nodes()[0]), /AIDP administrator/);
-  assert.ok(!h.nodes().some(node => node?.props?.['aria-label'] === 'Delete operator@example.test'));
+  assert.ok(!h.nodes().some(node => node?.props?.['aria-label'] === `Delete ${operatorEmail}`));
   assert.ok(!h.nodes().some(node => node?.props?.className === 'table-action table-access' || node?.props?.children === 'Shared modules'));
   assert.ok(!h.requests.some(request => request.path === '/api/admin/modules'));
   assert.equal(h.mutations().length, 0); assert.deepEqual(h.navigations, []);
@@ -238,7 +243,7 @@ for (const outcome of ['populated', 'empty', 'error']) test(`Users spinner ends 
   assert.ok(!h.nodes().some(node => node?.props?.label === 'Loading users…'));
   assert.equal(h.find('table').props['aria-busy'], false);
   assert.equal(text(h.nodes()[0]).includes('No matching lab users.'), outcome === 'empty');
-  if (outcome === 'populated') assert.ok(text(h.find('tbody')).includes('operator@example.test'));
+  if (outcome === 'populated') assert.ok(text(h.find('tbody')).includes(operatorEmail));
   if (outcome === 'error') {
     assert.match(text(h.find('td', props => props.role === 'alert')), /Users unavailable/);
     h.act(() => h.find('button', props => props['aria-label'] === 'Refresh users').props.onClick());
@@ -260,7 +265,7 @@ for (const oldFirst of [true, false]) test(`Users ignores an older request resol
   h.requests.at(-1).resolve({ users: administrators }); await h.settle();
   if (!oldFirst) { previous.resolve({ detail: 'Old failure' }, 500); await h.settle(); }
   assert.equal(h.find('table').props['aria-busy'], false);
-  assert.ok(text(h.find('tbody')).includes('operator@example.test'));
+  assert.ok(text(h.find('tbody')).includes(operatorEmail));
   assert.ok(!text(h.nodes()[0]).includes('Old failure'));
 });
 
@@ -532,7 +537,7 @@ const kitCatalog = [
   ['banking', 'Banking'], ['telecommunications', 'Telecommunications'],
   ['telco_lineage', 'Telco Customer 360 Lineage'], ['retail', 'Retail'], ['healthcare', 'Healthcare'],
 ].map(([lab_id, display_name]) => ({ lab_id, display_name, pack_version: '2.0.0', available: true, status: 'available' }));
-const participant = { id: 'participant', name: 'Student', email: 'student@example.test', active: true, status: 'active', managed: true,
+const participant = { id: 'participant', name: 'Student', email: studentEmail, active: true, status: 'active', managed: true,
   is_aidp_admin: false, labs: [{ lab_id: 'banking', pack_version: '2.0.0', phase: 'permissions' }] };
 const kitInitial = (user = participant) => ({ '/api/config': { labs: kitCatalog }, '/api/admin/users': { users: [user] } });
 const create = h => h.find('CreateUserModal');
@@ -543,7 +548,7 @@ const modalControl = (h, component, type, match) => {
   assert.ok(result, `Missing ${component} ${type}`); return result;
 };
 const openCreate = h => h.act(() => h.find('button', props => props.className === 'create-user').props.onClick());
-const openManager = h => h.act(() => h.find('button', props => props['aria-label'] === 'Manage starter kits for student@example.test').props.onClick());
+const openManager = h => h.act(() => h.find('button', props => props['aria-label'] === `Manage starter kits for ${studentEmail}`).props.onClick());
 
 test('Settings loads only settings, session and kit releases without module managers or endpoints', async t => {
   const packages = kitCatalog.map(kit => ({ package_id: kit.lab_id, display_name: kit.display_name, scope: 'participant', bundled_version: kit.pack_version }));
@@ -567,17 +572,54 @@ test('Add user presents five kits, requires an assignment, and sends only the pa
   h.act(() => create(h).props.onSubmit({ preventDefault() {} }));
   assert.equal(h.mutations().length, 0);
   assert.equal(create(h).props.error, 'Select at least one starter kit.');
-  h.act(() => create(h).props.onDraftChange({ name: 'New User', email: 'new@example.test', lab_ids: ['banking', 'retail'] }));
+  h.act(() => create(h).props.onDraftChange({ name: 'New User', email: newUserEmail, lab_ids: ['banking', 'retail'] }));
   assert.equal(modalControl(h, 'CreateUserModal', 'button', props => props.type === 'submit').props.disabled, false);
   const submit = create(h).props.onSubmit;
   h.act(() => { submit({ preventDefault() {} }); submit({ preventDefault() {} }); });
   assert.equal(h.mutations().length, 1);
   assert.equal(h.mutations()[0].path, '/api/admin/users');
-  assert.deepEqual(JSON.parse(h.mutations()[0].options.body), { name: 'New User', email: 'new@example.test', lab_ids: ['banking', 'retail'] });
+  assert.deepEqual(JSON.parse(h.mutations()[0].options.body), { name: 'New User', email: newUserEmail, lab_ids: ['banking', 'retail'] });
   h.mutations()[0].resolve({ status: 'active', message: 'Created' }); await h.settle();
   h.requests.filter(request => request.path === '/api/admin/users' && request.options.method !== 'POST').at(-1).resolve({ users: [participant] }); await h.settle();
   assert.deepEqual(create(h).props.draft, { name: '', email: '', lab_ids: [] });
   assert.ok(!h.requests.some(request => /modules|gods-eye|viewer/.test(request.path)));
+});
+
+test('Users waits for the server catalog and confirms the installed kit upgrade', async t => {
+  const h = await harness(t, release, '/admin/users', { ...kitInitial(), '/api/config': null });
+  const addButton = () => h.find('button', props => props.className === 'create-user');
+  const manageButton = () => h.find('button', props => props['aria-label'] === `Manage starter kits for ${studentEmail}`);
+  const catalogRequests = () => h.requests.filter(request => request.path === '/api/config');
+
+  assert.ok(h.find('LoadingIndicator', props => props.label === 'Loading starter kit catalog…'));
+  assert.equal(addButton().props.disabled, true);
+  assert.equal(manageButton().props.disabled, true);
+  catalogRequests()[0].resolve({ detail: 'Catalog unavailable' }, 503);
+  await h.settle();
+
+  assert.match(text(h.find('p', props => props.role === 'alert')), /Unable to load the starter kit catalog/);
+  assert.equal(addButton().props.disabled, true);
+  assert.equal(manageButton().props.disabled, true);
+  const retry = h.find('button', props => props.children === 'Retry starter kit catalog');
+  h.act(() => retry.props.onClick());
+  assert.equal(catalogRequests().length, 2);
+  catalogRequests()[1].resolve({ labs: kitCatalog.map(kit => ({ ...kit, pack_version: '2.0.1' })) });
+  await h.settle();
+
+  assert.equal(addButton().props.disabled, false);
+  assert.equal(manageButton().props.disabled, false);
+  openManager(h);
+  const update = modalControl(h, 'LabManagerModal', 'button', props =>
+    props['aria-label'] === `Update Banking from 2.0.0 to 2.0.1 for ${studentEmail}`);
+  h.act(() => update.props.onClick());
+  const dialog = h.find('ConfirmModal', props => props.title === 'Update starter kit?');
+  assert.equal(dialog.props.open, true);
+  assert.match(dialog.props.description, /deletes the kit.s workflow, generated tables and objects/);
+  assert.match(dialog.props.description, /replaces the bundled notebooks and source files/);
+  assert.equal(h.mutations().length, 0);
+  h.act(() => dialog.props.onConfirm());
+  assert.match(h.find('ProvisioningOverlay').props.message, /^Updating /);
+  assert.equal(h.mutations()[0].path, '/api/admin/users/participant/labs/banking/redeploy');
 });
 
 test('Manage keeps at least one participant kit and confirms removal before its API call', async t => {
@@ -604,7 +646,7 @@ test('Manage exposes kit inventory but blocks all mutations for unmanaged OCI us
   assert.equal(nodes.filter(node => node?.type === 'input' && node.props.type === 'checkbox').length, 5);
   assert.ok(nodes.filter(node => node?.type === 'input' && node.props.type === 'checkbox').every(node => node.props.disabled));
   assert.ok(!nodes.some(node => node?.props?.className === 'table-action table-reset'));
-  assert.ok(!h.nodes().some(node => node?.props?.['aria-label'] === 'Delete student@example.test'));
+  assert.ok(!h.nodes().some(node => node?.props?.['aria-label'] === `Delete ${studentEmail}`));
   assert.equal(h.mutations().length, 0);
 });
 

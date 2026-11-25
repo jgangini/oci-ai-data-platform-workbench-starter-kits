@@ -101,14 +101,6 @@ type AdminApplicationRelease = {
   operation: ApplicationReleaseOperation | null;
   packages: ApplicationReleasePackage[];
 };
-const fallbackCatalog: CatalogLab[] = [
-  { lab_id: "banking", display_name: "Banking", description: "Explore customer accounts, branches and transactions through a governed medallion pipeline.", pack_version: "2.0.0", status: "available", available: true },
-  { lab_id: "telecommunications", display_name: "Telecommunications", description: "Analyze subscribers, plans, network sites and usage events for service and network insights.", pack_version: "2.0.0", status: "available", available: true },
-  { lab_id: "telco_lineage", display_name: "Telco Customer 360 Lineage", description: "Test end-to-end data lineage for prepaid, postpaid and home services, from Landing through Gold with entity and column relationships.", pack_version: "2.0.0", status: "available", available: true },
-  { lab_id: "retail", display_name: "Retail", description: "Transform customers, products, orders and order items into sales and customer analytics.", pack_version: "2.0.0", status: "available", available: true },
-  { lab_id: "healthcare", display_name: "Healthcare", description: "Prepare patients, providers, appointments and encounters for operational healthcare analysis.", pack_version: "2.0.0", status: "available", available: true },
-];
-
 function labLabel(catalog: CatalogLab[], labId: string) {
   return catalog.find(({ lab_id }) => lab_id === labId)?.display_name ?? labId;
 }
@@ -678,12 +670,27 @@ function LabManagerModal({
 
 function usePublicConfig() {
   const [config, setConfig] = useState<PublicConfig | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
-    void api<PublicConfig>("/api/config")
-      .then(setConfig)
-      .catch(() => undefined);
-  }, []);
-  return config;
+    const controller = new AbortController();
+    void api<PublicConfig>("/api/config", { signal: controller.signal })
+      .then((value) => {
+        if (!controller.signal.aborted) setConfig(value);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setFailed(true);
+      });
+    return () => controller.abort();
+  }, [attempt]);
+
+  function retry() {
+    setFailed(false);
+    setAttempt((current) => current + 1);
+  }
+
+  return { config, failed, retry };
 }
 
 function useAdminSession() {
@@ -1022,8 +1029,8 @@ function RegisterPage({
 }: {
   initialAdminLogin?: boolean;
 }) {
-  const publicConfig = usePublicConfig();
-  const catalog = publicConfig?.labs ?? fallbackCatalog;
+  const { config: publicConfig } = usePublicConfig();
+  const catalog = publicConfig?.labs ?? [];
   const configLoaded = publicConfig !== null;
   const [adminLoginVisible, setAdminLoginVisible] = useState(initialAdminLogin);
   const [form, setForm] = useState({ name: "", email: "" });
@@ -1524,8 +1531,8 @@ function AdminLoginCard() {
 
 function AdminUsers() {
   const adminSession = useAdminSession();
-  const publicConfig = usePublicConfig();
-  const catalog = publicConfig?.labs ?? fallbackCatalog;
+  const { config: publicConfig, failed: catalogFailed, retry: retryCatalog } = usePublicConfig();
+  const catalog = publicConfig?.labs ?? [];
   const [users, setUsers] = useState<LabUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const usersRequestRef = useRef(0);
@@ -1588,9 +1595,10 @@ function AdminUsers() {
     `${user.name} ${user.email}`.toLowerCase().includes(query.toLowerCase()),
   );
   const labManagerUser = users.find((user) => user.id === labManagerUserId) ?? null;
-  const pendingLabUpdate = Boolean(
-    pendingLabAction?.kind === "redeploy" && pendingLabAction.lab.update_available,
-  );
+  const pendingLabUpdate = pendingLabAction?.kind === "redeploy" &&
+    catalog.some((lab) =>
+      lab.lab_id === pendingLabAction.lab.lab_id && lab.pack_version !== pendingLabAction.lab.pack_version,
+    );
   async function logout() {
     await api("/api/admin/logout", { method: "POST" });
     window.location.assign("/");
@@ -1804,7 +1812,7 @@ function AdminUsers() {
     setOperationProgress({
       status: "pending",
       phase: "cleanup",
-      message: `${action.kind === "redeploy" ? action.lab.update_available ? "Updating" : "Reinstalling" : "Removing"} the selected lab resources.`,
+      message: `${action.kind === "redeploy" ? pendingLabUpdate ? "Updating" : "Reinstalling" : "Removing"} the selected lab resources.`,
     });
     try {
       const result = await requestLabAction(action, controller.signal);
@@ -1834,6 +1842,7 @@ function AdminUsers() {
               <button
                 className="create-user"
                 type="button"
+                disabled={!publicConfig}
                 aria-haspopup="dialog"
                 aria-expanded={createOpen}
                 onClick={() => {
@@ -1845,6 +1854,14 @@ function AdminUsers() {
                 <span>Users</span>
               </button>
             </div>
+            {!publicConfig && (catalogFailed ? (
+              <div>
+                <p role="alert">Unable to load the starter kit catalog.</p>
+                <button className="secondary" type="button" onClick={retryCatalog}>Retry starter kit catalog</button>
+              </div>
+            ) : (
+              <LoadingIndicator label="Loading starter kit catalog…" inline />
+            ))}
             <div className="admin-toolbar">
               <form
                 className="search"
@@ -1950,6 +1967,7 @@ function AdminUsers() {
                               <button
                                 className="table-action table-edit"
                                 type="button"
+                                disabled={!publicConfig}
                                 aria-haspopup="dialog"
                                 aria-expanded={labManagerUserId === user.id}
                                 onClick={() => openLabManager(user)}
@@ -2041,7 +2059,7 @@ function AdminUsers() {
         open={Boolean(pendingLabAction) && !operating}
         kind={pendingLabAction?.kind === "remove" ? "delete" : "reset"}
         title={pendingLabAction?.kind === "remove" ? "Remove starter kit?" : pendingLabUpdate ? "Update starter kit?" : "Redeploy starter kit?"}
-        description={`${pendingLabAction?.kind === "remove" ? "Remove" : pendingLabUpdate ? "Update" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this starter kit"} for ${pendingLabAction?.user.email ?? "this participant"}. Other starter kits and Identity access are preserved.`}
+        description={`${pendingLabAction?.kind === "remove" ? "Remove" : pendingLabUpdate ? "Update" : "Reinstall"} only ${pendingLabAction ? labLabel(catalog, pendingLabAction.lab.lab_id) : "this starter kit"} for ${pendingLabAction?.user.email ?? "this participant"}. This deletes the kit’s workflow, generated tables and objects. Updating or reinstalling also replaces the bundled notebooks and source files. Other starter kits and Identity access are preserved.`}
         error={operationError}
         confirmLabel={pendingLabAction?.kind === "remove" ? "Remove lab" : pendingLabUpdate ? "Update kit" : "Redeploy lab"}
         onClose={() => {

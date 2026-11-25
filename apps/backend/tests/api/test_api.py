@@ -12,6 +12,11 @@ from app.main import LOCAL_COOKIE_NAME, create_app
 from app.security import RateLimiter, hash_secret
 
 
+TEST_MAIL_DOMAIN = "example.test"
+ADA_EMAIL = f"ada@{TEST_MAIL_DOMAIN}"
+OPERATOR_EMAIL = f"operator@{TEST_MAIL_DOMAIN}"
+
+
 class FakeIdentity:
     def __init__(self, mode: str = "active") -> None:
         self.mode = mode
@@ -45,7 +50,7 @@ class FakeIdentity:
             return []
         return [{
             "id": "user-id", "ocid": "ocid1.user.oc1..ada", "name": "Ada",
-            "email": "ada@example.com", "status": "active", "active": True,
+            "email": ADA_EMAIL, "status": "active", "active": True,
             "managed": True,
         }]
 
@@ -64,7 +69,7 @@ class FakeIdentity:
         if self.mode == "unmanaged-admin":
             return [{
                 "id": "user-id", "ocid": "ocid1.user.oc1..ada", "name": "Ada",
-                "email": "ada@example.com", "status": "active", "active": True,
+                "email": ADA_EMAIL, "status": "active", "active": True,
                 "managed": False,
             }]
         return await self.list_lab_users()
@@ -73,7 +78,7 @@ class FakeIdentity:
         if self.mode == "foreign-delete":
             raise IdentityConflict("Only users created by this lab can be changed")
         return {
-            "id": user_id, "ocid": "ocid1.user.oc1..ada", "email": "ada@example.com"
+            "id": user_id, "ocid": "ocid1.user.oc1..ada", "email": ADA_EMAIL
         } if user_id == "user-id" else None
 
     async def delete_lab_user(self, user_id: str) -> bool:
@@ -106,7 +111,7 @@ class FakeAidp:
     def material(email: str, lab_id: str) -> UserMaterial:
         return UserMaterial(
             email, lab_id, "u101",
-            f"/Workspace/{lab_id}/u101_ada@example.com",
+            f"/Workspace/{lab_id}/u101_{ADA_EMAIL}",
             f"wf_u101_{lab_id}", "1.0.0", "active", 101,
         )
 
@@ -180,7 +185,7 @@ def make_client(
         admin_password_hash=hash_secret("long-admin-password", iterations=1_000, salt=b"admin-test-salt"),
         registration_code_hash=(hash_secret("ABCD-1234", iterations=1_000, salt=b"code-test-salt")
                                 if registration_code_hash is None else registration_code_hash),
-        operator_username="operator@example.test",
+        operator_username=OPERATOR_EMAIL,
         identity_domain_url="https://identity.example.test",
         developer_group_id="developers", pending_group_id="pending",
         aidp_workbench_url="https://example.datalake.oci.oraclecloud.com#?tenant=test&domain=Default",
@@ -208,7 +213,7 @@ def make_client(
 
 def register_payload(**updates):
     return {
-        "name": "Ada Lovelace", "email": "ada@example.com",
+        "name": "Ada Lovelace", "email": ADA_EMAIL,
         "lab_ids": ["banking", "retail"], "code": "ABCD-1234", **updates,
     }
 
@@ -216,12 +221,12 @@ def register_payload(**updates):
 def test_participant_codes_start_at_101_and_are_stable_by_email(tmp_path: Path) -> None:
     settings = Settings(aidp_settings_file=str(tmp_path / "settings.json"))
     store = SettingsStore(settings)
-    assert store.participant_code("PARTICIPANT@example.test") == 101
-    assert store.participant_code("participant@example.test") == 101
-    assert store.participant_code("next@example.com") == 102
+    assert store.participant_code(f"PARTICIPANT@{TEST_MAIL_DOMAIN}") == 101
+    assert store.participant_code(f"participant@{TEST_MAIL_DOMAIN}") == 101
+    assert store.participant_code(f"next@{TEST_MAIL_DOMAIN}") == 102
     reloaded = SettingsStore(settings)
-    assert reloaded.participant_code("participant@example.test") == 101
-    assert reloaded.participant_code("third@example.com") == 103
+    assert reloaded.participant_code(f"participant@{TEST_MAIL_DOMAIN}") == 101
+    assert reloaded.participant_code(f"third@{TEST_MAIL_DOMAIN}") == 103
 
 
 def login(client: TestClient) -> None:
@@ -241,7 +246,7 @@ def test_public_catalog_exposes_only_five_participant_labs(tmp_path: Path) -> No
     assert all(lab["available"] for lab in payload["labs"])
     assert all(lab["description"].strip() for lab in payload["labs"])
     assert payload["labs"][-1]["status"] == "available"
-    assert payload["labs"][-1]["pack_version"] == "2.0.0"
+    assert payload["labs"][-1]["pack_version"] == "2.0.1"
     assert "deployment_mode" not in payload
     assert "industries" not in payload
 
@@ -253,7 +258,7 @@ def test_registration_requires_a_code_and_administrator_can_configure_it(tmp_pat
     login(client)
     assert client.get("/api/admin/session").json() == {
         "username": "lab-admin",
-        "operator_username": "operator@example.test",
+        "operator_username": OPERATOR_EMAIL,
     }
     configured = client.put("/api/admin/settings", json={"registration_code": "ABCD-1234"})
     assert configured.status_code == 200
@@ -294,7 +299,7 @@ def test_admin_settings_exposes_the_aidp_platform_ocid(tmp_path: Path) -> None:
     assert response.json()["aidp_service_endpoint"] == "https://aidp.us-chicago-1.oci.oraclecloud.com"
     assert response.json()["aidp_platform_id"] == "ocid1.aidataplatform.oc1..test"
     assert "deployment_mode" not in response.json()
-    assert response.json()["operator_username"] == "operator@example.test"
+    assert response.json()["operator_username"] == OPERATOR_EMAIL
 
 
 def test_admin_time_zone_is_validated_persisted_and_shared(tmp_path: Path) -> None:
@@ -420,7 +425,7 @@ def test_registration_rejects_duplicates_unknown_empty_and_legacy_industry(tmp_p
         register_payload(lab_ids=[]),
         register_payload(lab_ids=["banking", "banking"]),
         register_payload(lab_ids=["unknown"]),
-        {"name": "Ada", "email": "ada@example.com", "industry": "banking", "code": "ABCD-1234"},
+        {"name": "Ada", "email": ADA_EMAIL, "industry": "banking", "code": "ABCD-1234"},
         register_payload(password="must-not-be-accepted"),
     ]
     assert all(client.post("/api/register", json=payload).status_code == 422 for payload in cases)
@@ -520,7 +525,7 @@ def test_local_development_mode_runs_multi_lab_lifecycle_without_oci(tmp_path: P
         ).status_code == 204
         created = client.post(
             "/api/admin/users",
-            json={"name": "Ada Lovelace", "email": "ada@example.com", "lab_ids": ["healthcare", "retail"]},
+            json={"name": "Ada Lovelace", "email": ADA_EMAIL, "lab_ids": ["healthcare", "retail"]},
         )
         assert created.status_code == 201
         user = client.get("/api/admin/users").json()["users"][0]
@@ -582,7 +587,7 @@ def test_admin_creation_rejects_module_only_and_removed_access_fields(tmp_path, 
     client = make_client(tmp_path)
     login(client)
     response = client.post("/api/admin/users", json={
-        "name": "Ada User", "email": "ada@example.com", **payload,
+        "name": "Ada User", "email": ADA_EMAIL, **payload,
     })
     assert response.status_code == 422
     assert client.app.state.identity_factory().activated == []

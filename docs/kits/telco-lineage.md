@@ -2,7 +2,7 @@
 
 [Documentación](../README.md) · [Primeros pasos](../getting-started.md)
 
-El [paquete `2.0.0`](../../apps/backend/app/kits/telco_lineage/lab.json) unifica identidad y titularidad de servicios prepago, pospago y hogar con un flujo ramificado y validaciones exactas de calidad y linaje. Es distinto del [laboratorio de consumo Telecommunications](telecommunications.md). Antes de ejecutarlo, revise la [incompatibilidad actual entre notebooks y aprovisionador](../getting-started.md#current-implementation-limits).
+El [paquete `2.0.1`](../../apps/backend/app/kits/telco_lineage/lab.json) unifica identidad y titularidad de servicios prepago, pospago y hogar con un flujo ramificado y validaciones exactas de calidad y linaje. Es distinto del [laboratorio de consumo Telecommunications](telecommunications.md). Antes de ejecutarlo, revise la [aceptación en Workbench](../testing.md#aceptación-en-workbench).
 
 ## Entradas y flujo
 
@@ -49,7 +49,7 @@ flowchart TD
     G3 --> V["14_validate_lineage"]
 ```
 
-Landing y Bronze preservan cada origen; Silver resuelve identidad, direcciones, productos y titularidad antes de Gold. El contrato declara **31 tablas Delta administradas**: 10 Landing, 10 Bronze, 8 Silver y 3 Gold. `quality_issues` recibe los rechazos de validación.
+Landing y Bronze preservan cada origen; Silver resuelve identidad, direcciones, productos y titularidad antes de Gold. El contrato declara **35 tablas Delta administradas**, con 10 en Landing, 10 en Bronze, 12 en Silver y 3 en Gold. Cuatro tablas de Silver guardan los rechazos por origen. `quality_issues` los consolida para verificar los 30 registros esperados.
 
 ## Resultados y aceptación
 
@@ -69,4 +69,4 @@ Revise el linaje de entidad y columna en ambas direcciones con profundidad 8. Si
 
 Siga [Primeros pasos](../getting-started.md), conserve los parámetros de su flujo y ejecute el grafo completo respetando las dependencias. Revise los conteos exactos y el linaje de cada ancla Gold. Repita con entradas idénticas y confirme los conteos y la conciliación mensual. Use el catálogo desplegado y su prefijo de participante.
 
-El [informe histórico de validación](../../apps/backend/app/kits/telco_lineage/VALIDATION.md) corresponde a `1.1.2` y explica la relevancia de las tablas administradas. Sus conteos de grafo y formato Landing no certifican `2.0.0`; la aceptación actual requiere el manifiesto, las aserciones ejecutables y una ejecución nativa verificada.
+El [informe histórico de validación](../../apps/backend/app/kits/telco_lineage/VALIDATION.md) corresponde a `1.1.2` y explica la relevancia de las tablas administradas. Sus conteos de grafo y formato Landing no certifican `2.0.1`; la aceptación actual requiere el manifiesto, las aserciones ejecutables y una ejecución nativa verificada.

@@ -29,11 +29,7 @@ CONTROL_ROOT = f"{WORKSPACE_ROOT}/.control"
 def participant_catalog_name(key: str) -> str:
     if re.fullmatch(r"u[1-9][0-9]*", key) is None or int(key[1:]) < 101:
         raise ValueError("A participant key starting at u101 is required")
-    return CATALOG_NAME
-
-
-def catalog_name_for(key: str) -> str:
-    return participant_catalog_name(key)
+    return f"{CATALOG_NAME}_{key}"
 
 
 def _validated_lab_ids(lab_ids: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
@@ -406,7 +402,7 @@ class AidpClient:
     ) -> dict[str, Any] | None:
         catalogs = [
             item
-            for item in self._list("/catalogs", phase="schemas")
+            for item in self._list("/catalogs", params={"displayName": name}, phase="schemas")
             if (item.get("displayName") or item.get("name")) == name
         ]
         if not catalogs and allow_missing:
@@ -419,16 +415,33 @@ class AidpClient:
             return catalog
         return self._require_operational_state(catalog, {"ACTIVE"}, "catalog", "schemas")
 
-    def _ensure_catalog(self, name: str) -> tuple[dict[str, Any], bool]:
+    @staticmethod
+    def _verify_participant_catalog(
+        catalog: dict[str, Any], owner_key: str, expected_key: str = ""
+    ) -> None:
+        if (
+            catalog.get("description") != f"Starter Kits participant {owner_key}"
+            or catalog.get("catalogType") != "INTERNAL"
+            or not catalog.get("key")
+            or (expected_key and catalog["key"] != expected_key)
+        ):
+            raise AidpProvisionConflict("AIDP participant catalog ownership could not be verified.")
+
+    def _ensure_catalog(
+        self, name: str, owner_key: str, expected_key: str
+    ) -> tuple[dict[str, Any], bool]:
         current = self._catalog(name, allow_missing=True)
         if current is not None:
+            self._verify_participant_catalog(current, owner_key, expected_key)
             return current, False
+        if expected_key:
+            raise AidpProvisionPending(f"The recorded AIDP catalog {name} is not visible.", "schemas")
         self._request(
             "POST",
             "/catalogs",
             payload={
                 "displayName": name,
-                "description": f"Private participant medallion catalog {name}",
+                "description": f"Starter Kits participant {owner_key}",
                 "catalogType": "INTERNAL",
             },
             phase="schemas",
@@ -436,6 +449,7 @@ class AidpClient:
         published = self._catalog(name, allow_missing=True)
         if published is None:
             raise AidpProvisionPending(f"AIDP has not published catalog {name} yet.", "schemas")
+        self._verify_participant_catalog(published, owner_key)
         return published, True
 
     def _shared_compute(self, workspace_key: str) -> dict[str, Any]:
@@ -781,6 +795,10 @@ class AidpClient:
         for lab_id, state in labs.items():
             if not isinstance(state, dict) or lab_id not in available_kit_ids():
                 raise AidpProvisionError("The participant kit journal is invalid; cleanup stopped.")
+            if state.get("catalog_name") not in {None, CATALOG_NAME, participant_catalog_name(participant)}:
+                raise AidpProvisionError("The participant kit journal names a different catalog.")
+            if state.get("job_name") not in {None, f"wf_{participant}_{lab_id}"}:
+                raise AidpProvisionError("The participant kit journal names a different workflow.")
             if not cls._lab_workspace_path_is_exact(state, participant, lab_id, email):
                 raise AidpProvisionError("The participant control manifest does not contain an exact kit workspace path; cleanup stopped.")
         return labs
@@ -937,7 +955,7 @@ class AidpClient:
             "/schemas",
             payload={
                 "displayName": name,
-                "description": f"Shared collaborative {layer.title()} schema for the AIDP lab",
+                "description": f"Participant {layer.title()} schema for Starter Kits",
                 "catalogName": catalog_name,
             },
             phase="schemas",
@@ -1052,6 +1070,7 @@ class AidpClient:
             self._resource_name(details) == payload["name"]
             and details.get("path") == payload["path"]
             and details.get("maxConcurrentRuns") == payload["maxConcurrentRuns"]
+            and ("runAs" not in payload or details.get("runAs") == payload["runAs"])
             and self._job_tasks_match(details.get("tasks"), payload["tasks"], compute_key)
             and self._job_compute_matches(details.get("jobClusters"), compute_key)
             and (
@@ -1079,7 +1098,7 @@ class AidpClient:
     def _create_job(self, workspace_key: str, payload: dict[str, Any]) -> str:
         creation = {
             name: payload[name]
-            for name in ("name", "path", "description", "maxConcurrentRuns", "continuous", "schedule", "queue")
+            for name in ("name", "path", "description", "maxConcurrentRuns", "continuous", "schedule", "queue", "runAs")
             if name in payload
         }
         if isinstance(creation.get("schedule"), dict):
@@ -1130,6 +1149,7 @@ class AidpClient:
         pack: Package,
         root: str,
         catalog_name: str,
+        user_ocid: str,
         *,
         repair_drift: bool = True,
     ) -> tuple[str, str, bool]:
@@ -1148,6 +1168,7 @@ class AidpClient:
             "path": root,
             "description": f"{pack.display_name} medallion tutorial for {key}",
             "maxConcurrentRuns": 1,
+            "runAs": user_ocid,
             "jobClusters": [{"clusterKey": compute_key}],
             "tasks": tasks,
         }
@@ -1282,21 +1303,20 @@ class AidpClient:
             raise AidpProvisionPending("AIDP has not applied the participant permission yet.", "permissions")
         return True
 
-    def _assert_permission_absent(
+    def _assert_no_catalog_grant(
         self,
         resource_path: str,
         user_ocid: str,
-        permission: str,
     ) -> None:
         current = self._list(f"{resource_path}/permissions", phase="permissions")
         if any(
             self._permission_grantee(item) == (user_ocid, "USER")
-            and permission in self._permission_values(item)
+            and self._permission_values(item)
             for item in current
         ):
             raise AidpProvisionError(
-                "This participant still has direct catalog SELECT. An AI_DATA_PLATFORM_ADMIN "
-                "must revoke that permission before table-level isolation can be enforced."
+                "This participant still has a direct catalog grant. An AI_DATA_PLATFORM_ADMIN "
+                "must revoke it before schema isolation can be enforced."
             )
 
     def _ensure_lab_table_permissions(
@@ -1329,6 +1349,22 @@ class AidpClient:
                     ) or changed
         return changed
 
+    def _ensure_participant_schema_permissions(
+        self, schemas: dict[str, dict[str, Any]], user_ocid: str
+    ) -> bool:
+        changed = False
+        for layer in LAYER_PREFIXES:
+            schema_key = str(schemas[layer].get("key") or "")
+            if not schema_key:
+                raise AidpProvisionPending("An AIDP participant schema is not ready yet.", "permissions")
+            changed = self._ensure_permission(
+                f"/schemas/{quote(schema_key, safe='')}",
+                "assignSchemaPermissionDetails",
+                user_ocid,
+                "CREATE_TABLE",
+            ) or changed
+        return changed
+
     def _ensure_permissions(
         self,
         workspace_key: str,
@@ -1336,9 +1372,13 @@ class AidpClient:
         participant_root: str,
         job_key: str,
         catalog_key: str,
-        participant_key: str,
-        lab_id: str,
+        schemas: dict[str, dict[str, Any]],
     ) -> bool:
+        self._assert_no_catalog_grant(f"/catalogs/{catalog_key}", user_ocid)
+        for layer, schema in schemas.items():
+            if schema.get("key") != f"{catalog_key}.{schema_name(layer)}":
+                raise AidpProvisionConflict("AIDP returned a schema from outside the participant catalog.")
+        changed = self._ensure_participant_schema_permissions(schemas, user_ocid)
         root_key = self._workspace_object_key(workspace_key, WORKSPACE_ROOT)
         participant_object_key = self._workspace_object_key(workspace_key, participant_root)
         changed = self._ensure_permission(
@@ -1347,18 +1387,13 @@ class AidpClient:
             user_ocid,
             "READ",
             inheritable=False,
-        )
+        ) or changed
         changed = self._ensure_permission(
             f"/workspaces/{workspace_key}/objects/{quote(participant_object_key, safe='')}",
             "assignWorkspaceObjectPermissionDetails",
             user_ocid,
             "ADMIN",
             inheritable=True,
-        ) or changed
-        catalog_path = f"/catalogs/{catalog_key}"
-        self._assert_permission_absent(catalog_path, user_ocid, "SELECT")
-        changed = self._ensure_lab_table_permissions(
-            catalog_key, participant_key, lab_id, user_ocid
         ) or changed
         changed = self._ensure_permission(
             f"/workspaces/{workspace_key}/jobs/{job_key}",
@@ -1402,6 +1437,7 @@ class AidpClient:
         pack: Package,
         root: str,
         catalog_name: str,
+        user_ocid: str,
         repair_drift: bool,
     ) -> tuple[str, str, bool]:
         content_changed = self._upload_file(
@@ -1441,6 +1477,7 @@ class AidpClient:
             pack,
             root,
             catalog_name,
+            user_ocid,
             repair_drift=repair_drift,
         )
         return job_name, job_key, content_changed or job_changed
@@ -1456,8 +1493,15 @@ class AidpClient:
     ) -> UserMaterial | None:
         if str(state.get("phase") or "workspace") != "active":
             return None
-        catalog_name = str(state.get("catalog_name") or catalog_name_for(key))
-        if catalog_name == CATALOG_NAME:
+        catalog_name = str(state.get("catalog_name") or CATALOG_NAME)
+        if catalog_name != CATALOG_NAME:
+            catalog = self._catalog(catalog_name)
+            catalog_key = str(state.get("catalog_key") or "")
+            if not catalog_key:
+                raise AidpProvisionConflict("The active kit is missing its participant catalog key.")
+            self._verify_participant_catalog(catalog, participant_owner_key(user_ocid), catalog_key)
+            self._assert_no_catalog_grant(f"/catalogs/{catalog_key}", user_ocid)
+        else:
             catalog = self._catalog(catalog_name, allow_missing=True)
             if catalog and self._ensure_lab_table_permissions(
                 str(catalog.get("key") or ""), key, lab_id, user_ocid
@@ -1520,13 +1564,17 @@ class AidpClient:
             "Participant workspace is ready; schemas are next.",
         )
 
-        catalog_name = str(state.get("catalog_name") or catalog_name_for(key))
-        catalog, catalog_changed = self._ensure_catalog(catalog_name)
+        catalog_name = str(state.get("catalog_name") or CATALOG_NAME)
+        if catalog_name == CATALOG_NAME:
+            raise AidpProvisionConflict("This kit used shared schemas. Update the kit to provision its private catalog.")
+        catalog, catalog_changed = self._ensure_catalog(
+            catalog_name, owner_key, str(state.get("catalog_key") or "")
+        )
         catalog_key = str(catalog["key"])
         if state.get("catalog_key") != catalog_key:
             state["catalog_key"] = catalog_key
             self._write_manifest(workspace_key, owner_key, manifest)
-        _schemas, schemas_changed = self._ensure_catalog_contract(catalog_key, catalog_name)
+        schemas, schemas_changed = self._ensure_catalog_contract(catalog_key, catalog_name)
         self._pending_after_change(
             catalog_changed or schemas_changed,
             False,
@@ -1538,8 +1586,11 @@ class AidpClient:
         )
 
         job_name, job_key, content_changed = self._ensure_participant_content(
-            workspace_key, compute_key, key, pack, root, catalog_name, repair_drift
+            workspace_key, compute_key, key, pack, root, catalog_name, user_ocid, repair_drift
         )
+        if (state["pack_version"], state.get("pack_hash")) != (pack.pack_version, pack.pack_sha256):
+            state.update(pack_version=pack.pack_version, pack_hash=pack.pack_sha256)
+            self._write_manifest(workspace_key, owner_key, manifest)
         self._pending_after_change(
             content_changed,
             False,
@@ -1556,8 +1607,7 @@ class AidpClient:
             participant_root,
             job_key,
             catalog_key,
-            key,
-            lab_id,
+            schemas,
         )
         self._advance_lab_manifest(workspace_key, manifest, lab_id, "active")
         return UserMaterial(
@@ -1676,7 +1726,7 @@ class AidpClient:
 
         if operation.get("phase") == "cleanup":
             self._cleanup_lab(
-                workspace_key, key, lab_id, state, preserve_workspace=True
+                workspace_key, key, lab_id, state, owner_key=owner_key, preserve_workspace=True
             )
             pack = load_package(lab_id)
             state.update(
@@ -1728,7 +1778,7 @@ class AidpClient:
             raise AidpProvisionConflict("Another operation is already in progress for this lab")
         state["operation"] = {"operation_id": operation_id, "type": "delete", "phase": "cleanup"}
         self._write_manifest(workspace_key, owner_key, manifest)
-        self._cleanup_lab(workspace_key, key, lab_id, state)
+        self._cleanup_lab(workspace_key, key, lab_id, state, owner_key=owner_key)
         labs.pop(lab_id)
         self._write_manifest(workspace_key, owner_key, manifest)
 
@@ -1926,14 +1976,22 @@ class AidpClient:
         lab_id: str,
         state: dict[str, Any],
         *,
+        owner_key: str = "",
         preserve_workspace: bool = False,
     ) -> None:
         workspace_path = str(state.get("workspace_path") or "")
         if lab_id not in available_kit_ids() or not self._lab_workspace_path_is_exact(state, key, lab_id):
             raise AidpProvisionError("The participant control manifest does not contain an exact kit workspace path; cleanup stopped.")
-        self._cleanup_lab_job(workspace_key, str(state.get("job_name") or f"wf_{key}_{lab_id}"))
-        catalog_name = str(state.get("catalog_name") or catalog_name_for(key))
+        job_name = f"wf_{key}_{lab_id}"
+        if state.get("job_name") not in {None, job_name}:
+            raise AidpProvisionError("The participant kit journal names a different workflow.")
+        catalog_name = str(state.get("catalog_name") or CATALOG_NAME)
+        if catalog_name not in {CATALOG_NAME, participant_catalog_name(key)}:
+            raise AidpProvisionError("The participant kit journal names a different catalog.")
         catalog = self._catalog(catalog_name, allow_missing=True)
+        if catalog is not None and catalog_name != CATALOG_NAME:
+            self._verify_participant_catalog(catalog, owner_key, str(state.get("catalog_key") or ""))
+        self._cleanup_lab_job(workspace_key, job_name)
         if catalog is not None:
             self._cleanup_lab_tables(str(catalog["key"]), key, lab_id)
         self._cleanup_lab_object_storage(key, lab_id)
@@ -1951,7 +2009,7 @@ class AidpClient:
             return
         key = self._manifest_participant_key(manifest, owner_key)
         for lab_id, state in self._manifest_labs(manifest, owner_key).items():
-            self._cleanup_lab(workspace_key, key, lab_id, state)
+            self._cleanup_lab(workspace_key, key, lab_id, state, owner_key=owner_key)
         self._cleanup_participant_object_storage(key)
         if not preserve_manifest:
             self._delete_workspace_path(workspace_key, self._control_manifest_path(owner_key),

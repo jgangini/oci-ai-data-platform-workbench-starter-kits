@@ -9,10 +9,10 @@ Esta guía describe el despliegue compartido y el acceso de participantes. Para 
 
 | Área | Comportamiento del código y limitación |
 | --- | --- |
-| Rutas de participantes | El aprovisionador entrega `/Workspace/<lab_id>/<participant_key>_<email>` y el catálogo `oci_medallion`. Los notebooks incluidos en los paquetes `2.0.0` aún validan `/Workspace/medallon/` y `<participant_key>_aidp`. El primer notebook de Banking 2.0.0 rechaza esos valores antes de ingerir datos. Es necesario reconciliar y aceptar este contrato antes de considerar listos los trabajos de participantes. |
-| Telco Customer 360 | La aceptación del paquete `2.0.0` requiere ejecutar las aserciones de sus notebooks y comprobar sus resultados en la instalación del participante. No se certifica mediante pruebas de otra versión. |
+| Rutas de participantes | Los cinco paquetes `2.0.1` aceptan la ruta `/Workspace/<lab_id>/<participant_key>_<email_codificado>` y el catálogo privado `oci_medallion_<participant_key>` que entrega el aprovisionador. La prueba local verifica esos parámetros en cada notebook. La ejecución de Spark y los permisos se comprueban en Workbench. |
+| Telco Customer 360 | La aceptación del paquete `2.0.1` requiere ejecutar las aserciones y comprobar el linaje en la instalación del participante. |
 
-La discrepancia de rutas puede comprobarse en las [funciones de nombres](../apps/backend/app/kits/naming.py), el [aprovisionamiento de trabajos](../apps/backend/app/services/oci/aidp.py) y el [notebook de Banking](../apps/backend/app/kits/banking/notebooks/01_landing_banking.ipynb). No omita las comprobaciones del notebook ni use el catálogo de otro participante para aparentar una ejecución correcta.
+Para actualizar una asignación activa de `2.0.0`, el instructor usa **Users → Manage starter kits → Update kit**. La operación vuelve a crear el workflow, elimina las tablas y los objetos generados y reemplaza los notebooks y los archivos fuente incluidos en ese kit. Conserva los demás kits y el acceso de Identity Domains. Verifique cada ejecución según la [aceptación en Workbench](testing.md#aceptación-en-workbench).
 
 ## Desplegar un entorno compartido
 
@@ -79,10 +79,10 @@ Cuando el contrato de rutas de la versión haya superado su aceptación:
 | Espacio de trabajo | `/Workspace/<lab_id>/<participant_key>_<normalized_email>` |
 | Archivos de entrada | `<workspace>/source/` |
 | Flujo | `wf_<participant_key>_<lab_id>` |
-| Catálogo y esquemas | `oci_medallion.oci_landing`, `oci_bronze`, `oci_silver`, `oci_gold` |
+| Catálogo y esquemas | `oci_medallion_<participant_key>.oci_landing`, `oci_bronze`, `oci_silver`, `oci_gold` |
 | Tabla | `<participant_key>_<lab_id>_<logical_table>`; no se duplica un prefijo de kit ya presente |
 
-El flujo suministra `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, `objectstorage_namespace` y `catalog_name`. No edite los CSV para incorporar valores personales. El catálogo determina las ubicaciones de tablas administradas; una función de rutas del notebook no demuestra por sí sola dónde se escriben los datos.
+El flujo suministra `participant_key`, `lab_id`, `workspace_root`, `bucket_name`, `objectstorage_namespace` y `catalog_name`. No edite los CSV para incorporar valores personales. El catálogo determina la ubicación de las tablas administradas. El workflow se configura con el participante como identidad de ejecución. En Workbench, verifica que tu usuario figure en **Run As** y consulta tus resultados dentro de tu catálogo.
 
 ## Elegir el siguiente ejercicio
 

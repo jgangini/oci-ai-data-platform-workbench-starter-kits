@@ -75,11 +75,11 @@ def test_release_snapshot_uses_image_metadata_and_pack_manifests(tmp_path: Path)
     assert snapshot["latest_release_immutable"] is True
     assert snapshot["update_available"] is True
     assert {(item["package_id"], item["bundled_version"]) for item in snapshot["packages"]} == {
-        ("banking", "2.0.0"),
-        ("telecommunications", "2.0.0"),
-        ("telco_lineage", "2.0.0"),
-        ("retail", "2.0.0"),
-        ("healthcare", "2.0.0"),
+        ("banking", "2.0.1"),
+        ("telecommunications", "2.0.1"),
+        ("telco_lineage", "2.0.1"),
+        ("retail", "2.0.1"),
+        ("healthcare", "2.0.1"),
     }
 
 

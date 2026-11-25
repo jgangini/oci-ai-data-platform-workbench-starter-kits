@@ -1,20 +1,24 @@
+import ast
 import asyncio
 import hashlib
 import json
+import re
 import threading
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
-from app.services.oci.aidp import API_VERSION, AidpClient, AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, LocalAidpClient, UserMaterial, participant_owner_key
+from app.services.oci.aidp import API_VERSION, AidpClient, AidpProvisionConflict, AidpProvisionError, AidpProvisionPending, LocalAidpClient, UserMaterial, participant_catalog_name, participant_owner_key
 from app.config import Settings
 from app.packages.catalog import PackageAsset, load_package
-from app.kits.naming import participant_folder, participant_key, table_name, workspace_participant_root, workspace_root
+from app.kits.naming import LAYER_PREFIXES, participant_folder, participant_key, table_name, workspace_participant_root, workspace_root
 
 
 USER_OCID = "ocid1.user.oc1..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-EMAIL = "ada@example.com"
+TEST_MAIL_DOMAIN = "example.test"
+EMAIL = f"ada@{TEST_MAIL_DOMAIN}"
+ALIAS_EMAIL = f"student+alias@{TEST_MAIL_DOMAIN}"
 
 
 def test_aidp_api_version_matches_current_platform() -> None:
@@ -83,7 +87,7 @@ def test_participant_code_names_technical_resources_and_email_names_workspace() 
     assert workspace_participant_root("u101", "banking", EMAIL) == f"/Workspace/banking/u101_{EMAIL}"
     assert workspace_root("u101", "banking", EMAIL) == f"/Workspace/banking/u101_{EMAIL}"
     assert table_name("u101", "banking", "accounts") == "u101_banking_accounts"
-    assert participant_folder("student/lab@example.com") == "student%2Flab@example.com"
+    assert participant_folder(f"student/lab@{TEST_MAIL_DOMAIN}") == f"student%2Flab@{TEST_MAIL_DOMAIN}"
     with pytest.raises(ValueError, match="valid OCI user OCID"):
         participant_owner_key(EMAIL)
     with pytest.raises(ValueError, match="starting at 101"):
@@ -92,25 +96,94 @@ def test_participant_code_names_technical_resources_and_email_names_workspace() 
         workspace_participant_root(EMAIL, "banking", EMAIL)
 
 
-def test_governed_access_fails_closed_when_direct_catalog_select_remains() -> None:
+@pytest.mark.parametrize("privilege", ["SELECT", "CREATE_SCHEMA", "ADMIN"])
+def test_governed_access_fails_closed_when_direct_catalog_grant_remains(privilege) -> None:
     client = bare_client()
     client._list = lambda *_args, **_kwargs: [{
-        "grantee": USER_OCID, "granteeType": "USER", "granteePermissions": ["SELECT"],
+        "grantee": USER_OCID, "granteeType": "USER", "granteePermissions": [privilege],
     }]
-    with pytest.raises(AidpProvisionError, match="revoke that permission"):
-        client._assert_permission_absent("/catalogs/aidp-lab", USER_OCID, "SELECT")
+    with pytest.raises(AidpProvisionError, match="must revoke it"):
+        client._assert_no_catalog_grant("/catalogs/aidp-lab", USER_OCID)
 
 
-def test_governed_access_accepts_catalog_without_direct_select() -> None:
+def test_governed_access_accepts_catalog_without_direct_grant() -> None:
     client = bare_client()
     client._list = lambda *_args, **_kwargs: []
-    client._assert_permission_absent("/catalogs/aidp-lab", USER_OCID, "SELECT")
+    client._assert_no_catalog_grant("/catalogs/aidp-lab", USER_OCID)
 
 
 
 
 
 
+
+
+def test_each_participant_receives_create_table_only_on_own_schemas() -> None:
+    client = bare_client()
+    calls = []
+    client._list = lambda *_args, **_kwargs: []
+    client._workspace_object_key = lambda _, path: path
+    client._ensure_permission = lambda path, assignment, user, permission, **kwargs: (
+        calls.append((path, assignment, user, permission)) or True
+    )
+
+    users = {
+        USER_OCID: "u101",
+        "ocid1.user.oc1.." + "b" * 32: "u102",
+    }
+    for user, key in users.items():
+        catalog = participant_catalog_name(key)
+        schemas = {layer: {"key": f"{catalog}.oci_{layer}"} for layer in LAYER_PREFIXES}
+        client._ensure_permissions(
+            "workspace", user, workspace_root(key, "banking", EMAIL), f"job-{key}", catalog, schemas
+        )
+
+    assert {call for call in calls if call[0].startswith("/schemas/")} == {
+        (f"/schemas/{participant_catalog_name(key)}.oci_{layer}",
+         "assignSchemaPermissionDetails", user, "CREATE_TABLE")
+        for user, key in users.items()
+        for layer in LAYER_PREFIXES
+    }
+    assert all(not path.startswith(("/catalogs/", "/tables/")) for path, *_ in calls)
+    assert [(path, user, perm) for path, _, user, perm in calls if "/jobs/" in path] == [
+        (f"/workspaces/workspace/jobs/job-{key}", user, "MANAGE") for user, key in users.items()
+    ]
+
+
+def test_permission_verification_blocks_foreign_schema_before_granting_access() -> None:
+    client = bare_client()
+    client._list = lambda *_args, **_kwargs: []
+    client._ensure_permission = lambda *_args, **_kwargs: pytest.fail("No grants on foreign schema input")
+    catalog = participant_catalog_name("u101")
+    schemas = {layer: {"key": f"{catalog}.oci_{layer}"} for layer in LAYER_PREFIXES}
+    schemas["gold"] = {"key": f"{participant_catalog_name('u102')}.oci_gold"}
+
+    with pytest.raises(AidpProvisionConflict, match="outside the participant catalog"):
+        client._ensure_permissions(
+            "workspace", USER_OCID, workspace_root("u101", "banking", EMAIL), "owned-job", catalog, schemas
+        )
+
+
+@pytest.mark.parametrize("wrong_field", ["description", "catalogType", "key"])
+def test_unowned_catalog_is_never_reused_or_cleaned(wrong_field) -> None:
+    client = bare_client()
+    key = "u101"
+    owner = participant_owner_key(USER_OCID)
+    catalog_name = participant_catalog_name(key)
+    catalog = {"description": f"Starter Kits participant {owner}", "catalogType": "INTERNAL", "key": catalog_name}
+    catalog[wrong_field] = "different"
+    client._catalog = lambda *_args, **_kwargs: catalog
+    client._request = lambda *_args, **_kwargs: pytest.fail("Must not mutate an unowned catalog")
+    client._cleanup_lab_job = lambda *_args: pytest.fail("Must verify ownership before cleanup")
+
+    with pytest.raises(AidpProvisionConflict, match="ownership"):
+        client._ensure_catalog(catalog_name, owner, catalog_name)
+    with pytest.raises(AidpProvisionConflict, match="ownership"):
+        client._cleanup_lab("workspace", key, "banking", {
+            "workspace_path": workspace_root(key, "banking", EMAIL),
+            "catalog_name": catalog_name,
+            "catalog_key": catalog_name,
+        }, owner_key=owner)
 
 
 def test_participant_receives_select_only_on_owned_lab_tables() -> None:
@@ -170,7 +243,7 @@ def test_request_error_identifies_safe_operation_without_disclosing_secrets() ->
                 {
                     "code": "InvalidParameter",
                     "message": (
-                        "student+alias@example.com sent token=do-not-leak and "
+                        f"{ALIAS_EMAIL} sent token=do-not-leak and "
                         "https://objectstorage.example/par-secret for "
                         "ocid1.user.oc1..secret"
                     ),
@@ -197,7 +270,7 @@ def test_request_error_identifies_safe_operation_without_disclosing_secrets() ->
     assert "400" in detail and "InvalidParameter" in detail
     assert "private-content" not in detail
     assert "private-workspace" not in detail
-    assert "student+alias@example.com" not in detail
+    assert ALIAS_EMAIL not in detail
     assert "do-not-leak" not in detail
     assert "par-secret" not in detail
     assert "ocid1.user" not in detail
@@ -257,6 +330,116 @@ def test_job_contract_is_derived_from_pack_and_accepts_a_sixth_notebook() -> Non
     assert client._job_tasks_match(tasks, tasks, "compute")
 
 
+@pytest.mark.parametrize("lab_id", ["banking", "telecommunications", "telco_lineage", "retail", "healthcare"])
+def test_notebook_guards_accept_provisioned_job_parameters_and_reject_mismatches(lab_id: str) -> None:
+    client = bare_client()
+    pack = load_package(lab_id)
+    key = participant_key(101)
+    email = f"student/lab+training@{TEST_MAIL_DOMAIN}"
+    root = workspace_root(key, lab_id, email)
+    published = []
+    client._job_key = lambda *_: None
+    client._create_job = lambda *_: "job"
+    client._publish_job = lambda _workspace, _job, payload, _compute: published.append(payload)
+    client._ensure_job("workspace", "compute", key, pack, root, participant_catalog_name(key), USER_OCID)
+    assert published[0]["runAs"] == USER_OCID
+
+    for asset, task in zip(pack.notebooks, published[0]["tasks"], strict=True):
+        assert task["taskKey"] == asset.task_key
+        parameters = {entry["name"]: entry["value"] for entry in task["parameters"]}
+        cells = json.loads(asset.read_bytes())["cells"]
+        source = next(
+            "".join(cell["source"]) for cell in cells
+            if cell["cell_type"] == "code" and "def required_parameter(" in "".join(cell["source"])
+        )
+        start = source.index("def required_parameter(")
+        end = source.index("spark.conf.set(", start)
+        guard = compile(source[start:end], asset.name, "exec")
+
+        def check(values: dict[str, str]) -> dict:
+            parameters_api = SimpleNamespace(getParameter=values.get)
+            scope = {"re": re, "oidlUtils": SimpleNamespace(parameters=parameters_api)}
+            exec(guard, scope)
+            return scope
+
+        scope = check(parameters)
+        table_function = next(
+            node for node in ast.parse(source).body
+            if isinstance(node, ast.FunctionDef) and node.name == "table"
+        )
+        exec(compile(ast.Module(body=[table_function], type_ignores=[]), asset.name, "exec"), scope)
+        assert scope["table"]("landing", "demo").startswith("oci_medallion_u101.oci_landing.u101_")
+        invalid_values = (
+            ({"workspace_root": f"/Workspace/medallon/{key}_{email}"}, "Invalid workspace_root"),
+            ({"workspace_root": workspace_root("u102", lab_id, email)}, "Invalid workspace_root"),
+            ({"workspace_root": root + "/nested"}, "Invalid workspace_root"),
+            ({"workspace_root": f"/Workspace/{lab_id}/{key}_broken%"}, "Invalid workspace_root"),
+            ({"lab_id": "another_kit"}, "different lab"),
+            ({"catalog_name": "oci_medallion"}, "Invalid participant catalog"),
+            ({"catalog_name": participant_catalog_name("u102")}, "Invalid participant catalog"),
+        )
+        for overrides, expected in invalid_values:
+            with pytest.raises(ValueError, match=expected):
+                check(parameters | overrides)
+
+
+@pytest.mark.parametrize("content_visible", [False, True])
+def test_resumed_provisioning_records_only_verified_bundle_version(content_visible: bool) -> None:
+    client = bare_client()
+    lab_id = "banking"
+    pack = load_package(lab_id)
+    key = participant_key(101)
+    state = {
+        "workspace_path": workspace_root(key, lab_id, EMAIL),
+        "job_name": f"wf_{key}_{lab_id}",
+        "catalog_name": participant_catalog_name(key),
+        "catalog_key": "catalog",
+        "pack_version": "2.0.0",
+        "pack_hash": "b" * 64,
+        "phase": "permissions",
+    }
+    manifest = {
+        "layout_version": 5,
+        "owner_key": participant_owner_key(USER_OCID),
+        "participant_code": 101,
+        "participant_key": key,
+        "participant_email": EMAIL,
+        "labs": {lab_id: state},
+    }
+    writes = []
+    client._workspace = lambda: {"key": "workspace"}
+    client._ensure_workspace_layout = lambda *_: False
+    client._shared_compute = lambda *_: {"key": "compute"}
+    client._ensure_catalog = lambda *_: ({"key": "catalog"}, False)
+    client._ensure_catalog_contract = lambda *_: ({}, False)
+    client._ensure_permissions = lambda *_: None
+    client._write_manifest = lambda *_: writes.append(
+        (state["pack_version"], state["pack_hash"], state["phase"])
+    )
+
+    def content(_workspace, _compute, _key, offered, *_rest):
+        assert offered == pack
+        if not content_visible:
+            raise AidpProvisionPending("Notebook still uploading", "content")
+        return state["job_name"], "job", False
+
+    client._ensure_participant_content = content
+    if not content_visible:
+        with pytest.raises(AidpProvisionPending):
+            client._provision_lab(USER_OCID, EMAIL, lab_id, manifest)
+        assert state["pack_version"] == "2.0.0"
+        assert state["pack_hash"] == "b" * 64
+        assert writes == []
+        return
+
+    material = client._provision_lab(USER_OCID, EMAIL, lab_id, manifest)
+    assert material.pack_version == pack.pack_version
+    assert writes == [
+        (pack.pack_version, pack.pack_sha256, "permissions"),
+        (pack.pack_version, pack.pack_sha256, "active"),
+    ]
+
+
 def test_two_participants_upload_identical_pack_assets_with_isolated_job_identity() -> None:
     client = bare_client()
     pack = load_package("banking")
@@ -275,11 +458,11 @@ def test_two_participants_upload_identical_pack_assets_with_isolated_job_identit
             )
             or False
         )
-        client._ensure_job = lambda _workspace, _compute, participant, _pack, job_root, _catalog, **_kwargs: (
+        client._ensure_job = lambda _workspace, _compute, participant, _pack, job_root, _catalog, _user_ocid, **_kwargs: (
             jobs.append((participant, job_root)) or (f"wf_{participant}_banking", "job", False)
         )
         client._ensure_participant_content(
-            "workspace", "compute", key, pack, root, f"{key}_aidp", True
+            "workspace", "compute", key, pack, root, f"{key}_aidp", USER_OCID, True
         )
         files.pop("/lab-manifest.json")
         return files, notebooks, jobs
@@ -314,7 +497,7 @@ def test_new_v5_manifest_uses_code_and_email_workspace_paths() -> None:
     )
 
     manifest = client._ensure_manifest(
-        "workspace", owner_key, "student+alias@example.com", 101, ("banking", "retail")
+        "workspace", owner_key, ALIAS_EMAIL, 101, ("banking", "retail")
     )
 
     assert writes == [manifest]
@@ -322,14 +505,14 @@ def test_new_v5_manifest_uses_code_and_email_workspace_paths() -> None:
         lab_id: state["workspace_path"]
         for lab_id, state in manifest["labs"].items()
     } == {
-        "banking": workspace_root(key, "banking", "student+alias@example.com"),
-        "retail": workspace_root(key, "retail", "student+alias@example.com"),
+        "banking": workspace_root(key, "banking", ALIAS_EMAIL),
+        "retail": workspace_root(key, "retail", ALIAS_EMAIL),
     }
     assert manifest["owner_key"] == owner_key
     assert manifest["participant_code"] == 101
-    assert manifest["participant_email"] == "student+alias@example.com"
+    assert manifest["participant_email"] == ALIAS_EMAIL
     assert manifest["layout_version"] == 5
-    assert manifest["catalog"]["name"] == "oci_medallion"
+    assert manifest["catalog"]["name"] == "oci_medallion_u101"
 
 
 def test_local_multi_lab_lifecycle_is_idempotent_and_protects_last_lab() -> None:
@@ -458,7 +641,7 @@ def test_redeploy_uses_in_place_cleanup_before_provisioning() -> None:
     client._workspace = lambda: {"key": "workspace"}
     client._manifest = lambda *_args: manifest
     client._write_manifest = lambda *_args: None
-    client._cleanup_lab = lambda _workspace, _key, lab, _state, *, preserve_workspace=False: (
+    client._cleanup_lab = lambda _workspace, _key, lab, _state, *, owner_key, preserve_workspace=False: (
         calls.append((lab, preserve_workspace))
     )
     client._provision_lab = lambda *_args: UserMaterial(
@@ -475,6 +658,7 @@ def test_redeploy_uses_in_place_cleanup_before_provisioning() -> None:
     )
 
     assert calls == [("banking", True)]
+    assert state["catalog_name"] == participant_catalog_name(key)
 
 
 def test_full_cleanup_delegates_to_each_lab_without_cross_lab_discovery() -> None:
@@ -498,7 +682,7 @@ def test_full_cleanup_delegates_to_each_lab_without_cross_lab_discovery() -> Non
         "labs": roots,
     }
     calls: list[tuple[str, str]] = []
-    client._cleanup_lab = lambda _workspace, _key, lab_id, state: calls.append(
+    client._cleanup_lab = lambda _workspace, _key, lab_id, state, *, owner_key: calls.append(
         (lab_id, state["workspace_path"])
     )
     client._catalog = lambda _name, **_kwargs: {"key": "catalog"}
@@ -546,7 +730,7 @@ def test_current_manifest_rejects_workspace_for_a_different_email() -> None:
                 "labs": {
                     "banking": {
                         "pack_version": "1.0.0",
-                        "workspace_path": workspace_root(key, "banking", "other@example.com"),
+                        "workspace_path": workspace_root(key, "banking", f"other@{TEST_MAIL_DOMAIN}"),
                     }
                 },
             },
