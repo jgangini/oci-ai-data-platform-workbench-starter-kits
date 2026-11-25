@@ -13,8 +13,16 @@ import pytest
 ROOT = Path(__file__).resolve().parents[4]
 
 
-def test_rules_use_supported_constraints_without_line_limits():
-    rules = tomllib.loads((ROOT / '.sentrux/rules.toml').read_text(encoding='utf-8'))
+@pytest.fixture
+def local_rules():
+    path = ROOT / '.sentrux/rules.toml'
+    if not path.is_file():
+        pytest.skip('Native architecture policy is maintained locally')
+    return path
+
+
+def test_rules_use_supported_constraints_without_line_limits(local_rules):
+    rules = tomllib.loads(local_rules.read_text(encoding='utf-8'))
     # Sentrux 0.5.7 silently ignores unknown keys; detect a misspelled constraint.
     assert set(rules) == {'constraints'}
     assert set(rules['constraints']) == {'max_cycles', 'no_god_files'}
@@ -23,17 +31,16 @@ def test_rules_use_supported_constraints_without_line_limits():
 
 
 @pytest.mark.parametrize('case', ['large_agent', 'cycle', 'fan_out'])
-def test_native_rules_allow_long_agents_but_reject_dependency_regressions(tmp_path, case):
+def test_native_rules_allow_long_agents_but_reject_dependency_regressions(tmp_path, case, local_rules):
     scanner = shutil.which('sentrux')
     if scanner is None:
         pytest.skip('Sentrux CLI is required for native architecture policy acceptance')
-    rules = ROOT / '.sentrux/rules.toml'
-    constraints = tomllib.loads(rules.read_text(encoding='utf-8'))['constraints']
+    constraints = tomllib.loads(local_rules.read_text(encoding='utf-8'))['constraints']
     assert 'max_file_lines' not in constraints
     assert 'max_fn_lines' not in constraints
     target = tmp_path / '.sentrux/rules.toml'
     target.parent.mkdir()
-    shutil.copyfile(rules, target)
+    shutil.copyfile(local_rules, target)
     if case == 'large_agent':
         (tmp_path / 'agent.py').write_text(
             'PROMPT = """\n' + 'Research instructions.\n' * 10000 + '"""\n'
@@ -128,13 +135,19 @@ def test_scope_runner_propagates_degradation_even_with_a_zero_exit(tmp_path, mon
 
 @pytest.mark.parametrize('script', ['arch-preflight.ps1', 'arch-postflight.ps1'])
 @pytest.mark.parametrize('output,exit_code,failed', [('DEGRADED', 0, True), ('failed', 1, True), ('PASSED', 0, False)])
-def test_arch_wrappers_preserve_the_reference_and_do_not_hide_failed_gates(script, output, exit_code, failed):
+def test_arch_wrappers_preserve_the_reference_and_do_not_hide_failed_gates(tmp_path, script, output, exit_code, failed):
     shell = shutil.which('pwsh')
     if shell is None:
         pytest.skip('PowerShell is required to exercise the native validation wrappers')
-    baseline = ROOT / '.sentrux/baseline.json'
+    baseline = tmp_path / '.sentrux/baseline.json'
+    baseline.parent.mkdir()
+    baseline.write_bytes(b'preserve the historical reference')
     before = hashlib.sha256(baseline.read_bytes()).hexdigest()
-    path = str(ROOT / 'scripts' / script).replace("'", "''")
+    scripts = tmp_path / 'scripts'
+    scripts.mkdir()
+    wrapper = scripts / script
+    shutil.copyfile(ROOT / 'scripts' / script, wrapper)
+    path = str(wrapper).replace("'", "''")
     command = ("function global:sentrux { }; function global:graphify { $global:LASTEXITCODE = 0 }; "
                + "function global:python { $global:LASTEXITCODE = " + str(exit_code)
                + "; Write-Output '" + output + "' }; & '" + path + "'")

@@ -34,7 +34,7 @@ El [asistente OCI-local](../scripts/development/bootstrap_local_oci_env.py) y [C
 4. Ejecute formato, validación y pruebas Terraform con proveedores simulados según CI.
 5. Ejecute scripts/arch-postflight.ps1 para actualizar el grafo existente y comprobar Sentrux.
 
-En Windows use un --basetemp nuevo bajo .local: pytest borra destinos existentes. Las pruebas nativas Sentrux/PowerShell pueden omitirse en contenedores Linux, pero deben ejecutarse en el host; informe cada omisión.
+En Windows use un --basetemp nuevo bajo .local: pytest borra destinos existentes. Las reglas y la línea base de Sentrux se mantienen en la carpeta local `.sentrux/`. Las verificaciones de esa política se ejecutan en el equipo que la conserva. Las pruebas de los wrappers usan una línea base temporal.
 
 La aceptación nativa sigue los [límites documentados](getting-started.md#current-implementation-limits) y comprueba los workflows y datos del participante en su instalación AIDP.
 

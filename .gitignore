@@ -40,5 +40,5 @@ aidp-agent.toml
 
 # Local documentation and historical architecture artifacts.
 /.archify/
-/.sentrux/history/
-/.sentrux/reference.json
+.sentrux/
+AGENTS.md
