@@ -316,7 +316,7 @@ Este chat mantiene una lista de consumidores verificados, con estos pasos:
 4. Retirar pruebas exclusivas ya transferidas; conservar pruebas de contratos, permisos y
    aprovisionamiento de kits. Cada eliminación tiene sustituto/destino o motivo de obsolescencia,
    no se decide por cantidad de tests o por el nombre antiguo `lab` de un contrato vigente.
-5. Actualizar documentación y AGENTS.md al comportamiento real kits-only en el mismo cambio.
+5. Actualizar la documentación y la guía local de desarrollo al comportamiento real de kits-only.
    Hoy sus reglas describen el producto combinado; no cambiarlas anticipadamente como si
    la migración estuviera terminada.
 6. Publicar una release de cambio de alcance explícito. El updater de una instalación
