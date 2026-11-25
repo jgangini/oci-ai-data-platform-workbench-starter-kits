@@ -118,6 +118,19 @@ def test_active_updater_preserves_acme_webroot_and_shared_certificates(monkeypat
     assert 'https://$PUBLIC_IP/api/health' in cloud_init
 
 
+def test_tls_issuance_and_renewal_reload_the_configuration_used_by_the_container():
+    entrypoint = (ROOT / "docker/entrypoint.sh").read_text(encoding="utf-8")
+    start = next(line.split() for line in entrypoint.splitlines() if line.startswith("exec nginx "))
+    config_path = start[start.index("-c") + 1]
+    installer = (ROOT / "scripts/deployment/ensure_public_ip_tls.sh").read_text(encoding="utf-8")
+
+    assert f"NGINX_CONFIG={config_path}" in installer
+    assert installer.index('nginx -t -c "$NGINX_CONFIG"') < installer.index('nginx -s reload -c "$NGINX_CONFIG"')
+    cloud_init = (ROOT / "terraform/templatefile/user_data.sh").read_text(encoding="utf-8")
+    assert "ExecStart=/usr/local/sbin/aidp-lab-public-tls renew" in cloud_init
+    assert "systemctl enable --now aidp-lab-public-tls.timer" in cloud_init
+
+
 @pytest.mark.parametrize("component", ["gods-eye-view", "territorial-viewer", "prisma-viewer", "ai_data_governance", "ai_market_intelligence"])
 def test_other_release_components_are_rejected_before_network(monkeypatch, component):
     monkeypatch.setattr(bootstrap.urllib.request, "urlopen", lambda *_args, **_kwargs: pytest.fail("No network for another product"))
